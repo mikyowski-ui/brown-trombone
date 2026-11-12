@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use synthie_trombone::speech::{Prosody, Utterance};
 use synthie_trombone::{
-    Constriction, Engine, N, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
+    Constriction, Engine, N, Persona, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
 };
 use synthie_ui::{Key, KeyCode, KeyKind};
 
@@ -33,6 +33,22 @@ const NOSE_FLOOR: f32 = 2.65;
 /// Width of a meter in the glottis panel, and the column it starts at.
 pub const BAR_WIDTH: u16 = 22;
 const BAR_START: u16 = 9;
+/// The persona dials, in panel order: name and range.
+pub const DIALS: [(&str, f32, f32); 4] = [
+    ("size", 0.6, 1.4),
+    ("effort", 0.0, 1.0),
+    ("breath", 0.0, 1.0),
+    ("clarity", 0.0, 1.0),
+];
+/// Openings (touch-diameter units) a finger leaves on the row of the
+/// midline, on the row beside it, and at least on the rows beyond: a
+/// closure, a gap that hisses, and shapings that do not. Terminal rows are
+/// too coarse to find a fricative by its exact width, so the row itself
+/// says which is meant; the physical engine's hiss regulator sees to the
+/// rest.
+const FINGER_SHUT: f32 = 0.0;
+const FINGER_HISS: f32 = 0.5;
+const FINGER_OPEN: f32 = 0.9;
 /// Range of the `loud` control, cmH2O of lung pressure.
 pub const LOUD_RANGE: (f32, f32) = (2.0, 20.0);
 
@@ -62,6 +78,8 @@ pub enum Control {
     Vibrato,
     Reverb,
     Loud,
+    /// A persona dial (index into [`DIALS`]).
+    Dial(usize),
     OctaveDown,
     OctaveUp,
     Mode,
@@ -81,6 +99,7 @@ impl Control {
                 | Control::Vibrato
                 | Control::Reverb
                 | Control::Loud
+                | Control::Dial(_)
         )
     }
 }
@@ -140,6 +159,13 @@ pub struct App {
     pub reverb: f32,
     pub rate: f32,
     pub preset: Preset,
+    /// The voice before the persona dials: a preset, or a profile laid
+    /// over one.
+    base: VoiceSettings,
+    /// The persona dials, and the one the keys work.
+    pub persona: Persona,
+    pub dial: usize,
+    /// The voice in use: `base` as the persona reshapes it.
     pub settings: VoiceSettings,
     pub engine: Engine,
 
@@ -190,6 +216,9 @@ impl App {
             reverb: 0.18,
             rate: 1.0,
             preset: Preset::Deep,
+            base: Preset::Deep.settings().with_engine(engine),
+            persona: Persona::NEUTRAL,
+            dial: 0,
             settings: Preset::Deep.settings().with_engine(engine),
             engine,
             text: String::new(),
@@ -216,6 +245,68 @@ impl App {
 
     pub fn sample_rate(&self) -> f32 {
         self.link.sample_rate
+    }
+
+    /// Start from a voice other than the first preset's, with the persona
+    /// dials set (as given on the command line).
+    pub fn set_voice(&mut self, preset: Preset, base: VoiceSettings, persona: Persona) {
+        self.preset = preset;
+        self.base = base.with_engine(self.engine);
+        self.persona = persona;
+        self.voice_changed();
+    }
+
+    /// The persona dials as numbers, in [`DIALS`] order.
+    #[must_use]
+    pub fn dials(&self) -> [f32; 4] {
+        let p = &self.persona;
+        [p.size, p.effort, p.breathiness, p.clarity]
+    }
+
+    /// Hand the keys the next persona dial.
+    fn next_dial(&mut self) {
+        self.dial = (self.dial + 1) % DIALS.len();
+        self.status = format!(
+            "persona dial: {} (PgUp/PgDn to turn, Del for neutral)",
+            DIALS[self.dial].0
+        );
+    }
+
+    /// Set persona dial `k` and reshape the voice.
+    fn set_dial(&mut self, k: usize, value: f32) {
+        let Some(&(name, lo, hi)) = DIALS.get(k) else {
+            return;
+        };
+        let value = value.clamp(lo, hi);
+        let p = &mut self.persona;
+        match k {
+            0 => p.size = value,
+            1 => p.effort = value,
+            2 => p.breathiness = value,
+            _ => p.clarity = value,
+        }
+        self.dial = k;
+        self.voice_changed();
+        self.status = format!("{name}: {value:.2}");
+    }
+
+    /// The base voice or the persona changed: rebuild the voice in use,
+    /// bring the meters that show it up to date, and move to the note
+    /// nearest its speaking pitch.
+    fn voice_changed(&mut self) {
+        self.settings = self
+            .base
+            .with_engine(self.engine)
+            .with_persona(&self.persona);
+        self.tenseness = self.settings.tenseness;
+        self.vibrato = self.settings.vibrato;
+        self.loud = self.settings.tuning.lung_pressure;
+        #[allow(clippy::cast_possible_truncation)]
+        let note = (69.0 + 12.0 * (self.settings.pitch / 440.0).log2()).round() as i32;
+        self.note = note;
+        self.octave = (note / 12 - 1).clamp(1, 6);
+        self.send(Cmd::Voice(self.settings));
+        self.send(Cmd::Note(self.note_f32()));
     }
 
     fn send(&self, cmd: Cmd) {
@@ -351,6 +442,7 @@ impl App {
                 self.send(Cmd::Reverb(self.reverb));
             }
             '\\' => self.toggle_engine(),
+            '\'' => self.next_dial(),
             '[' => self.set_tenseness(self.tenseness - 0.05),
             ']' => self.set_tenseness(self.tenseness + 0.05),
             '-' => self.set_vibrato(self.vibrato - 0.005),
@@ -378,6 +470,18 @@ impl App {
             }
             KeyCode::Esc => {
                 self.silence();
+                return;
+            }
+            KeyCode::PageUp | KeyCode::PageDown => {
+                let (_, lo, hi) = DIALS[self.dial];
+                let step = if code == KeyCode::PageUp { 0.05 } else { -0.05 };
+                self.set_dial(self.dial, self.dials()[self.dial] + step * (hi - lo));
+                return;
+            }
+            KeyCode::Delete => {
+                self.persona = Persona::NEUTRAL;
+                self.voice_changed();
+                self.status = "persona: neutral".into();
                 return;
             }
             KeyCode::Left => i -= 0.5,
@@ -445,6 +549,7 @@ impl App {
             Engine::Physical => Engine::Classic,
         };
         self.settings.engine = self.engine;
+        self.base.engine = self.engine;
         self.send(Cmd::Model(self.engine));
         if let Some(v) = self.last_vowel {
             self.send(Cmd::Vowel(v));
@@ -459,16 +564,8 @@ impl App {
         #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         let next = (i as isize + dir).rem_euclid(all.len() as isize) as usize;
         self.preset = all[next];
-        self.settings = self.preset.settings().with_engine(self.engine);
-        self.tenseness = self.settings.tenseness;
-        self.vibrato = self.settings.vibrato;
-        // Play at the note nearest the voice's speaking pitch.
-        #[allow(clippy::cast_possible_truncation)]
-        let note = (69.0 + 12.0 * (self.settings.pitch / 440.0).log2()).round() as i32;
-        self.note = note;
-        self.octave = (note / 12 - 1).clamp(1, 6);
-        self.send(Cmd::Voice(self.settings));
-        self.send(Cmd::Note(self.note_f32()));
+        self.base = self.preset.settings().with_engine(self.engine);
+        self.voice_changed();
         self.status = format!("voice: {}", self.preset);
     }
 
@@ -537,6 +634,16 @@ impl App {
         Some((x as f32, y as f32))
     }
 
+    /// How many terminal rows `row` lies from the row that holds the
+    /// tract's midline.
+    fn rows_from_midline(&self, row: u16) -> u16 {
+        let a = self.tract_area;
+        let fy = Y_BOUNDS[1] / (Y_BOUNDS[1] - Y_BOUNDS[0]);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let midline = a.y + (fy * f64::from(a.height)) as u16;
+        row.abs_diff(midline)
+    }
+
     /// Hit areas of the glottis panel, given its inner area. Rows follow
     /// `ui::draw_glottis`.
     #[must_use]
@@ -563,6 +670,22 @@ impl App {
             button(8, 12, 11, Control::Drone),
             button(8, 23, 21, Control::Engine),
         ]
+    }
+
+    /// Hit areas of the persona panel, given its inner area: one dial per
+    /// row, as `ui::draw_persona` draws them.
+    #[must_use]
+    pub fn persona_controls(inner: Rect) -> Vec<(Rect, Control)> {
+        (0..DIALS.len())
+            .map(|k| {
+                #[allow(clippy::cast_possible_truncation)]
+                let row = inner.y + k as u16;
+                (
+                    Rect::new(inner.x + BAR_START, row, BAR_WIDTH, 1),
+                    Control::Dial(k),
+                )
+            })
+            .collect()
     }
 
     /// Where a vowel landmark sits on the tract view for the engine in use.
@@ -660,8 +783,14 @@ impl App {
         match grab {
             Grab::Constriction => {
                 // Distance from the midline is the opening left; the finger
-                // cannot leave the tract.
-                let diameter = (y.abs().min(LUMEN) * 2.0 - 0.1).max(0.0);
+                // cannot leave the tract. The row of the midline shuts the
+                // tract, the row beside it leaves a gap that hisses, and
+                // rows further out only shape it.
+                let diameter = match self.rows_from_midline(row) {
+                    0 => FINGER_SHUT,
+                    1 => FINGER_HISS,
+                    _ => (y.abs().min(LUMEN) * 2.0 - 0.1).max(FINGER_OPEN),
+                };
                 self.send(Cmd::Constriction(
                     SLOT_MOUSE,
                     Some(Constriction::new(index, diameter)),
@@ -726,6 +855,10 @@ impl App {
             Control::Loud => {
                 self.loud = LOUD_RANGE.0 + v * (LOUD_RANGE.1 - LOUD_RANGE.0);
                 self.send(Cmd::Lung(self.loud));
+            }
+            Control::Dial(k) => {
+                let (_, lo, hi) = DIALS[k.min(DIALS.len() - 1)];
+                self.set_dial(k, lo + v * (hi - lo));
             }
             _ => {}
         }
@@ -858,6 +991,8 @@ mod tests {
         let (mut app, rx) = app(true);
         app.tract_area = Rect::new(1, 2, 138, 26);
         app.controls = App::glottis_controls(Rect::new(1, 30, 44, 9));
+        app.controls
+            .extend(App::persona_controls(Rect::new(56, 30, 36, 9)));
         app.controls.push((Rect::new(40, 0, 6, 1), Control::Mode));
         // Park the tongue handle away from where the tests press.
         app.snap.tongue = (13.0, 3.5);
@@ -905,6 +1040,98 @@ mod tests {
             sent(&rx)[..],
             [Cmd::Constriction(SLOT_MOUSE, None)]
         ));
+    }
+
+    #[test]
+    fn the_row_beside_the_midline_leaves_a_gap_that_hisses() {
+        // Whatever the height of the terminal: on the midline's row the
+        // finger shuts the tract, one row off it leaves a fricative's gap,
+        // and further out the tract is only shaped.
+        for height in [18, 26, 40, 61] {
+            let (mut app, rx) = laid_out();
+            app.tract_area = Rect::new(1, 2, 138, height);
+            let (col, midline) = cell(&app, 36.0, 0.0);
+            let mut openings = Vec::new();
+            for rows in 0..4 {
+                for row in [midline + rows, midline - rows] {
+                    mouse(&mut app, DOWN, (col, row), PLAIN);
+                    mouse(&mut app, UP, (col, row), PLAIN);
+                    let cmds = sent(&rx);
+                    let [Cmd::Constriction(SLOT_MOUSE, Some(c)), _] = cmds[..] else {
+                        panic!("height {height}, {rows} rows off: {cmds:?}");
+                    };
+                    openings.push(c.diameter);
+                }
+            }
+            let [shut, _, above, below, wide, _, wider, _] = openings[..] else {
+                panic!("{openings:?}");
+            };
+            assert!(shut <= 0.01, "height {height}: {openings:?}");
+            assert!(
+                (above - 0.5).abs() < 0.01 && (below - 0.5).abs() < 0.01,
+                "height {height}: {openings:?}"
+            );
+            assert!(
+                wide >= 0.9 && wider >= wide,
+                "height {height}: {openings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn persona_dials_answer_the_mouse_and_the_keys() {
+        let (mut app, rx) = laid_out();
+        // Dragging the size dial to its left end makes a small, high voice.
+        let r = app
+            .controls
+            .iter()
+            .find(|(_, c)| *c == Control::Dial(0))
+            .unwrap()
+            .0;
+        mouse(&mut app, DOWN, (r.x, r.y), PLAIN);
+        mouse(&mut app, UP, (r.x, r.y), PLAIN);
+        let cmds = sent(&rx);
+        let [Cmd::Voice(small), Cmd::Note(note)] = cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        let deep = Preset::Deep.settings();
+        assert!(app.persona.size < 0.65, "{:?}", app.persona);
+        assert!(small.tract_length < 0.65 * deep.tract_length + 0.02);
+        assert!(small.pitch > 2.5 * deep.pitch && note > 55.0, "{small:?}");
+        // The apostrophe picks the next dial; PgUp and PgDn turn it.
+        app.key(key('\'', KeyKind::Press));
+        assert_eq!(app.dial, 1);
+        let turn = |app: &mut App, code| {
+            app.key(Key {
+                code,
+                kind: KeyKind::Press,
+                ..key(' ', KeyKind::Press)
+            });
+        };
+        turn(&mut app, KeyCode::PageUp);
+        turn(&mut app, KeyCode::PageUp);
+        assert!((app.persona.effort - 0.6).abs() < 1e-3, "{:?}", app.persona);
+        let cmds = sent(&rx);
+        let Some(Cmd::Voice(louder)) = cmds.iter().rev().find(|c| matches!(c, Cmd::Voice(_)))
+        else {
+            panic!("{cmds:?}");
+        };
+        assert!(louder.tuning.lung_pressure > small.tuning.lung_pressure);
+        assert!((app.loud - louder.tuning.lung_pressure).abs() < 1e-3);
+        // Del goes back to the voice as it was.
+        turn(&mut app, KeyCode::Delete);
+        assert_eq!(app.persona, Persona::NEUTRAL);
+        assert_eq!(app.settings, deep);
+        // A change of voice keeps the dials.
+        turn(&mut app, KeyCode::PageUp);
+        app.key(key('v', KeyKind::Press));
+        assert!((app.persona.effort - 0.55).abs() < 1e-3);
+        let next = Preset::ALL[1].settings();
+        assert_eq!(
+            app.settings,
+            next.with_persona(&app.persona),
+            "the next voice, with the same persona"
+        );
     }
 
     #[test]

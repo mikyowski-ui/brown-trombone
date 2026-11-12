@@ -2,8 +2,8 @@
 //! and the speech line.
 
 use crate::app::{
-    App, BAR_WIDTH, Control, LANDMARKS, LOUD_RANGE, Mode, NOSE_Y, VOWEL_KEYS, X_BOUNDS, Y_BOUNDS,
-    engine_name, tongue_handle,
+    App, BAR_WIDTH, Control, DIALS, LANDMARKS, LOUD_RANGE, Mode, NOSE_Y, VOWEL_KEYS, X_BOUNDS,
+    Y_BOUNDS, engine_name, tongue_handle,
 };
 use crate::audio::SCOPE_LEN;
 use ratatui::Frame;
@@ -35,9 +35,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_header(frame, header, app);
     draw_tract(frame, tract, app);
-    let [glottis, scope] =
-        Layout::horizontal([Constraint::Length(54), Constraint::Min(20)]).areas(mid);
+    let [glottis, persona, scope] = Layout::horizontal([
+        Constraint::Length(54),
+        Constraint::Length(38),
+        Constraint::Min(12),
+    ])
+    .areas(mid);
     draw_glottis(frame, glottis, app);
+    draw_persona(frame, persona, app);
     draw_scope(frame, scope, app);
     draw_speech(frame, speech, app);
     draw_footer(frame, footer, app);
@@ -219,6 +224,54 @@ fn row<'a>(label: &'a str, bar: Vec<Span<'a>>, value: impl std::fmt::Display) ->
     spans.extend(bar);
     spans.push(Span::styled(format!(" {value}"), fg(FG)));
     Line::from(spans)
+}
+
+/// One persona dial as a panel row; the dial the keys work is marked.
+fn dial(app: &App, k: usize) -> Line<'static> {
+    let (name, lo, hi) = DIALS[k];
+    let value = app.dials()[k];
+    let chosen = app.dial == k;
+    let mut spans = vec![Span::styled(
+        format!("{}{name:<8}", if chosen { "›" } else { " " }),
+        if chosen { bold(MAGENTA) } else { fg(DIM) },
+    )];
+    spans.extend(meter((value - lo) / (hi - lo), usize::from(BAR_WIDTH)));
+    spans.push(Span::styled(format!(" {value:.2}"), fg(FG)));
+    Line::from(spans)
+}
+
+/// The persona panel: the voice described the way a person would, four
+/// dials that each move several parameters together.
+fn draw_persona(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = panel("persona  ·  drag", false);
+    app.controls
+        .extend(App::persona_controls(block.inner(area)));
+    let app = &*app;
+    let v = &app.settings;
+    let lines = vec![
+        dial(app, 0),
+        dial(app, 1),
+        dial(app, 2),
+        dial(app, 3),
+        Line::default(),
+        Line::from(vec![
+            Span::styled(" pitch ", fg(DIM)),
+            Span::styled(format!("{:.0} Hz", v.pitch), fg(FG)),
+            Span::styled("  tract ", fg(DIM)),
+            Span::styled(format!("×{:.2}", v.tract_length), fg(FG)),
+        ]),
+        Line::from(vec![
+            Span::styled(" lungs ", fg(DIM)),
+            Span::styled(format!("{:.1} cmH2O", v.tuning.lung_pressure), fg(FG)),
+            Span::styled("  tense ", fg(DIM)),
+            Span::styled(format!("{:.2}", v.tenseness), fg(FG)),
+        ]),
+        Line::from(Span::styled(
+            " ' next  PgUp/PgDn turn  Del neutral",
+            fg(DIM),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 fn draw_glottis(frame: &mut Frame, area: Rect, app: &mut App) {

@@ -9,7 +9,7 @@ mod ui;
 #[cfg(test)]
 mod screenshots;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
     event::{
@@ -24,7 +24,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, panic, time::Duration};
-use synthie_trombone::Engine;
+use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
@@ -35,8 +35,57 @@ struct Cli {
     /// lung pressure, yielding walls and airflow-driven noise.
     #[arg(long, global = true, default_value = "classic", value_parser = parse_engine)]
     engine: Engine,
+    /// Voice to start with (a preset name; `v` cycles them in the app).
+    #[arg(long, value_parser = parse_voice)]
+    voice: Option<Preset>,
+    /// Voice profile to lay over the voice: a JSON file as written by the
+    /// tuner or by `match_voice.py`.
+    #[arg(long)]
+    profile: Option<std::path::PathBuf>,
+    /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
+    #[arg(long, default_value_t = Persona::NEUTRAL.size)]
+    size: f32,
+    /// Vocal effort, 0 (murmur) to 1 (calling out).
+    #[arg(long, default_value_t = Persona::NEUTRAL.effort)]
+    effort: f32,
+    /// Breathiness, 0 (pressed) to 1 (breathy).
+    #[arg(long, default_value_t = Persona::NEUTRAL.breathiness)]
+    breathiness: f32,
+    /// Clarity of articulation, 0 (casual) to 1 (careful).
+    #[arg(long, default_value_t = Persona::NEUTRAL.clarity)]
+    clarity: f32,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+fn parse_voice(name: &str) -> Result<Preset, String> {
+    Preset::from_name(name).ok_or_else(|| {
+        let names: Vec<_> = Preset::ALL.iter().map(|p| p.name()).collect();
+        format!("unknown voice {name:?}; try one of {}", names.join(", "))
+    })
+}
+
+impl Cli {
+    /// The voice the flags describe: preset, base settings (the profile
+    /// laid over the preset) and persona dials.
+    fn voice(&self) -> Result<(Preset, VoiceSettings, Persona)> {
+        let preset = self.voice.unwrap_or(Preset::Deep);
+        let mut base = preset.settings().with_engine(self.engine);
+        if let Some(path) = &self.profile {
+            let json = std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            base = base
+                .with_profile(&json)
+                .with_context(|| format!("in {}", path.display()))?;
+        }
+        let persona = Persona {
+            size: self.size,
+            effort: self.effort,
+            breathiness: self.breathiness,
+            clarity: self.clarity,
+        };
+        Ok((preset, base, persona))
+    }
 }
 
 fn parse_engine(name: &str) -> Result<Engine, String> {
@@ -57,11 +106,15 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Sing(args)) => sing::run(&args, cli.engine),
-        None => tui(cli.engine),
+        None => {
+            let (preset, base, persona) = cli.voice()?;
+            // A profile may name its own sound model.
+            tui(base.engine, preset, base, persona)
+        }
     }
 }
 
-fn tui(engine: Engine) -> Result<()> {
+fn tui(engine: Engine, preset: Preset, base: VoiceSettings, persona: Persona) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = restore();
@@ -92,6 +145,15 @@ fn tui(engine: Engine) -> Result<()> {
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let mut app = app::App::new(link, release, engine);
+    if (preset, base, persona)
+        != (
+            Preset::Deep,
+            Preset::Deep.settings().with_engine(engine),
+            Persona::NEUTRAL,
+        )
+    {
+        app.set_voice(preset, base, persona);
+    }
     let result = run(&mut terminal, &mut app);
 
     if release {
