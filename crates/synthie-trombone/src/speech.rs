@@ -24,6 +24,7 @@
 
 use crate::math::lerp;
 use crate::phoneme::{Articulation, Manner, Phoneme};
+use crate::vowel_targets::VowelKey;
 use crate::{Engine, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -93,6 +94,9 @@ pub struct Utterance {
     /// closure, seconds (physical engine).
     lead: f32,
     release_lead: f32,
+    /// Articulator speed while a vowel glides or drifts, relative
+    /// (physical engine).
+    glide_rate: f32,
 }
 
 /// A phoneme with its lexical context, the output of [`phonemize`].
@@ -138,6 +142,7 @@ impl Utterance {
             segments,
             lead: Tuning::DEFAULT.lead,
             release_lead: Tuning::DEFAULT.release_lead,
+            glide_rate: Tuning::DEFAULT.glide_rate,
         }
     }
 
@@ -175,6 +180,9 @@ pub struct Speaker {
     started: bool,
     /// The next segment's shape has already been sent (physical engine).
     ahead: bool,
+    /// The articulator speed to return to after a glide, while one is
+    /// under way (physical engine).
+    gliding: Option<f32>,
 }
 
 // On the physical engine the articulators get a head start on each sound
@@ -203,6 +211,9 @@ impl Speaker {
 
     /// Stop speaking (the voice fades out). Returns the utterance.
     pub fn stop(&mut self, voice: &mut Trombone) -> Utterance {
+        if let Some(speed) = self.gliding.take() {
+            voice.set_articulation_speed(speed);
+        }
         voice.set_voiced(false);
         voice.articulate_phoneme(Phoneme::Sil);
         self.index = usize::MAX;
@@ -240,13 +251,36 @@ impl Speaker {
         voice.set_always_voice(false);
     }
 
+    /// Move `voice` to `seg`'s articulation. On the physical engine the
+    /// articulators slow down (`Tuning::glide_rate`) for the glide of a
+    /// diphthong or the drift of a vowel, so that it lasts the whole
+    /// segment, and pick up their speed again for the next sound.
+    fn articulate(&mut self, voice: &mut Trombone, seg: &Segment) {
+        if voice.engine() == Engine::Physical {
+            let glide = seg.articulation.vowel == Some(VowelKey::End(seg.phoneme));
+            match (glide, self.gliding) {
+                (true, None) => {
+                    let speed = voice.articulation_speed();
+                    self.gliding = Some(speed);
+                    voice.set_articulation_speed(speed * self.utterance.glide_rate);
+                }
+                (false, Some(speed)) => {
+                    self.gliding = None;
+                    voice.set_articulation_speed(speed);
+                }
+                _ => {}
+            }
+        }
+        voice.articulate(&seg.articulation);
+    }
+
     /// Advance one output sample and render it.
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
-        if let Some(seg) = self.utterance.segments.get(self.index) {
+        if let Some(&seg) = self.utterance.segments.get(self.index) {
             if !self.started {
                 self.started = true;
                 if !self.ahead {
-                    voice.articulate(&seg.articulation);
+                    self.articulate(voice, &seg);
                 }
                 self.ahead = false;
                 voice.set_voiced(seg.voiced);
@@ -257,7 +291,7 @@ impl Speaker {
             self.elapsed += 1.0 / voice.sample_rate();
             if !self.ahead
                 && voice.engine() == Engine::Physical
-                && let Some(next) = self.utterance.segments.get(self.index + 1)
+                && let Some(&next) = self.utterance.segments.get(self.index + 1)
             {
                 let closed = matches!(
                     seg.phoneme.manner(),
@@ -272,7 +306,7 @@ impl Speaker {
                     self.utterance.lead
                 };
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
-                    voice.articulate(&next.articulation);
+                    self.articulate(voice, &next);
                     self.ahead = true;
                 }
             }
@@ -281,6 +315,9 @@ impl Speaker {
                 self.index += 1;
                 self.started = false;
                 if self.index == self.utterance.segments.len() {
+                    if let Some(speed) = self.gliding.take() {
+                        voice.set_articulation_speed(speed);
+                    }
                     voice.set_voiced(false);
                     voice.articulate_phoneme(Phoneme::Sil);
                 }
@@ -749,6 +786,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         segments,
         lead: timing.lead,
         release_lead: timing.release_lead,
+        glide_rate: timing.glide_rate,
     }
 }
 

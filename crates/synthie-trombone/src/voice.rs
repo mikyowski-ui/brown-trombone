@@ -608,6 +608,13 @@ impl Trombone {
         }
     }
 
+    /// Articulator speed multiplier (see
+    /// [`set_articulation_speed`](Self::set_articulation_speed)).
+    #[must_use]
+    pub fn articulation_speed(&self) -> f32 {
+        self.tract.movement_speed / MOVEMENT_SPEED
+    }
+
     /// Move to an articulation. Uses [`SLOT_MAIN`] and [`SLOT_LIPS`]; leaves
     /// voicing and pitch alone (see [`Articulation::voiced`]). On the
     /// physical engine a vowel takes the shape that suits the current

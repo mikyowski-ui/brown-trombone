@@ -72,6 +72,27 @@ def gpu_lock():
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+TARGETS_RS = HERE.parent.parent / "crates" / "synthie-trombone" / "src" / "vowel_targets.rs"
+
+
+def targets(path: Path = TARGETS_RS) -> dict[str, list[float]]:
+    """The engine's vowel targets as ``say`` profiles key them (``IH``,
+    ``AY<``, ``AY>``, ``IH>``): F1, F2, F3 of an adult man, Hz, read from
+    ``src/vowel_targets.rs``."""
+    import re
+
+    text = path.read_text(encoding="utf-8")
+    consts = {m.group(1): [float(x) for x in m.group(2).split(",")]
+              for m in re.finditer(r"const (\w+): \[f32; 3\] = \[([^\]]+)\];", text)}  # fmt: skip
+    out = {}
+    row = re.compile(r"^\s*(vowel|start|end)\(Phoneme::(\w+),\s*(\[[^\]]+\]|\w+),", re.M)
+    for kind, ph, f in row.findall(text):
+        sym = ph.upper()
+        key = sym + {"vowel": "", "start": "<", "end": ">"}[kind]
+        out[key] = consts[f] if f in consts else [float(x) for x in f.strip("[]").split(",")]
+    return out
+
+
 def write_profile(profile: dict, folder: Path) -> Path:
     """``profile`` as a JSON file named by its content."""
     text = json.dumps(profile, sort_keys=True)

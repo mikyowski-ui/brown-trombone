@@ -190,42 +190,49 @@ tuning! {
     closure_overshoot = 0.3, 0.1..=0.5, B;
 
     // ----- C: each vowel's length, against `vowel_length` -----------------
+    //
+    // English vowels have lengths of their own. These are the men's mean
+    // durations of Hillenbrand et al. (1995) over their mean (233 ms for
+    // the ten monophthongs, 266 ms for /eɪ oʊ/): lax /ɪ ɛ ʌ ʊ/ about 0.8,
+    // tense /æ ɑ ɔ ɝ/ 1.1 to 1.2. They did not record schwa, /aɪ aʊ ɔɪ/:
+    // schwa is made short (0.7), and those three a little longer than /eɪ
+    // oʊ/, as Peterson & Lehiste (1960) found them.
 
     /// Length of /i/ ("beat") against `vowel_length` (physical engine).
-    iy_length = 1.0, 0.5..=2.0, C;
+    iy_length = 1.04, 0.5..=2.0, C;
     /// Length of /ɪ/ ("bit") against `vowel_length` (physical engine).
-    ih_length = 1.0, 0.5..=2.0, C;
+    ih_length = 0.82, 0.5..=2.0, C;
     /// Length of /ɛ/ ("bet") against `vowel_length` (physical engine).
-    eh_length = 1.0, 0.5..=2.0, C;
+    eh_length = 0.81, 0.5..=2.0, C;
     /// Length of /æ/ ("bat") against `vowel_length` (physical engine).
-    ae_length = 1.0, 0.5..=2.0, C;
+    ae_length = 1.19, 0.5..=2.0, C;
     /// Length of /ʌ/ ("but") against `vowel_length` (physical engine).
-    ah_length = 1.0, 0.5..=2.0, C;
+    ah_length = 0.81, 0.5..=2.0, C;
     /// Length of /ɑ/ ("father") against `vowel_length` (physical engine).
-    aa_length = 1.0, 0.5..=2.0, C;
+    aa_length = 1.14, 0.5..=2.0, C;
     /// Length of /ɔ/ ("thought") against `vowel_length` (physical engine).
-    ao_length = 1.0, 0.5..=2.0, C;
+    ao_length = 1.21, 0.5..=2.0, C;
     /// Length of /ʊ/ ("book") against `vowel_length` (physical engine).
-    uh_length = 1.0, 0.5..=2.0, C;
+    uh_length = 0.82, 0.5..=2.0, C;
     /// Length of /u/ ("boot") against `vowel_length` (physical engine).
-    uw_length = 1.0, 0.5..=2.0, C;
+    uw_length = 1.02, 0.5..=2.0, C;
     /// Length of /ɝ/ ("bird") against `vowel_length` (physical engine).
-    er_length = 1.0, 0.5..=2.0, C;
+    er_length = 1.13, 0.5..=2.0, C;
     /// Length of schwa ("about") against `vowel_length` (physical engine).
-    ax_length = 1.0, 0.5..=2.0, C;
+    ax_length = 0.7, 0.5..=2.0, C;
 
     // ----- C: each diphthong's length, against `diphthong_length` ---------
 
     /// Length of /eɪ/ ("bait") against `diphthong_length` (physical engine).
-    ey_length = 1.0, 0.5..=2.0, C;
+    ey_length = 0.95, 0.5..=2.0, C;
     /// Length of /aɪ/ ("bite") against `diphthong_length` (physical engine).
-    ay_length = 1.0, 0.5..=2.0, C;
+    ay_length = 1.05, 0.5..=2.0, C;
     /// Length of /oʊ/ ("boat") against `diphthong_length` (physical engine).
-    ow_length = 1.0, 0.5..=2.0, C;
+    ow_length = 0.95, 0.5..=2.0, C;
     /// Length of /aʊ/ ("bout") against `diphthong_length` (physical engine).
-    aw_length = 1.0, 0.5..=2.0, C;
+    aw_length = 1.1, 0.5..=2.0, C;
     /// Length of /ɔɪ/ ("boy") against `diphthong_length` (physical engine).
-    oy_length = 1.0, 0.5..=2.0, C;
+    oy_length = 1.1, 0.5..=2.0, C;
 
     // ----- C: movement ----------------------------------------------------
 
@@ -236,6 +243,11 @@ tuning! {
     /// Share of a diphthong spent on the vowel it starts from, before it
     /// glides to its end (physical engine; the classic engine holds 55 %).
     diphthong_nucleus = 0.55, 0.2..=0.8, C;
+    /// Speed of the tongue and lips while a diphthong glides or a vowel
+    /// drifts, against their other movements (physical engine). Below `1`
+    /// the glide takes all of its time, as people's do, instead of
+    /// arriving early and holding the end, which sounds like two vowels.
+    glide_rate = 0.25, 0.15..=1.0, C;
 }
 
 impl Default for Tuning {
