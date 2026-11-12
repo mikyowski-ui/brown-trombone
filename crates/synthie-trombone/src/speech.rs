@@ -774,6 +774,13 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         i += 1;
     }
     push_phrase_end(&mut drafts, phrase_start, Some(Break::Period));
+    if physical && !drafts.is_empty() {
+        // Speakers set their tongue before they speak: a moment of
+        // silence in which the slow tongue body gets to the first vowel
+        // (it takes that body's shape below, as every pause takes the
+        // next vowel's), so the first word does not start from rest.
+        drafts.insert(0, silence(PRE_POSITION / rate));
+    }
 
     // Lengthen the last syllable of each phrase.
     for k in 1..drafts.len() {
@@ -896,6 +903,11 @@ fn lean_on_vowels(drafts: &mut [Draft]) {
         }
     }
 }
+
+/// The silence an utterance starts with on the physical engine, seconds:
+/// long enough for the tongue body (a 40 ms time constant) to get most of
+/// the way to the first vowel.
+const PRE_POSITION: f32 = 0.1;
 
 /// Pitch, Hz, at which a [`Tuning::onset_kick`] is as given; a voice
 /// pitched elsewhere gets it in proportion.
