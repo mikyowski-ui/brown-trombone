@@ -8,6 +8,8 @@
     uv run python judge.py vowels physical        # probes (see probes.py): vowels, voicing, confusions
     uv run python judge.py voicing espeak
     uv run python judge.py confusions classic --profile p.json --name classic-p
+    uv run python judge.py natural physical espeak --listener rec.wav   # naturalness (see natural.py)
+    uv run python judge.py natural-report human espeak physical
 
 For every rendered item it measures
 
@@ -718,8 +720,28 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--scores", default="", help="comma-separated out/score-<name>.json for the sentence table")
     pr.add_argument("--out", type=Path, default=HERE / "report" / "probes.md")
     pr.add_argument("--notes", type=Path, default=None, help="Markdown inserted after the title")
+    pn = sub.add_parser("natural", help="naturalness against the human recordings (see natural.py)")
+    pn.add_argument("systems", nargs="+", choices=render.SYSTEMS)
+    pn.add_argument("--profile", type=Path, default=None, help="engine profile JSON")
+    pn.add_argument("--name", default=None, help="result name for the engine system (default: system)")
+    pn.add_argument("--voice", default=render.DEFAULT_VOICE)
+    pn.add_argument("--listener", type=Path, default=None,
+                    help="a recording of the listener saying the two reference sentences (read, never copied)")
+    pn.add_argument("--jobs", type=int, default=None, help="render threads (default: all cores)")
+    pnr = sub.add_parser("natural-report", help="report/natural.md from out/natural-<name>.json")
+    pnr.add_argument("names", nargs="+")
+    pnr.add_argument("--out", type=Path, default=HERE / "report" / "natural.md")
     args = ap.parse_args(argv)
-    if args.cmd in probe_help:
+    if args.cmd == "natural":
+        import natural
+
+        natural.run(args.systems, args.profile, args.name, args.voice, args.listener, args.jobs)
+    elif args.cmd == "natural-report":
+        import natural
+
+        natural.report(args.names, args.out)
+        print(f"wrote {args.out}")
+    elif args.cmd in probe_help:
         import probes
 
         probes.run(args.cmd, args.system, args.profile, args.name, args.set, args.cut, args.voice, args.jobs,
