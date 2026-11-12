@@ -111,7 +111,8 @@ impl Rig {
             self.press(KeyCode::Char(c));
         }
         self.press(KeyCode::Enter);
-        self.press(KeyCode::Esc);
+        // Tab, not Esc: Esc would stop speech still under way.
+        self.press(KeyCode::Tab);
     }
 
     /// Stop the take and keep the audio running until the app reports it
@@ -588,11 +589,101 @@ fn the_record_key_works_in_both_modes_and_says_when_it_cannot() {
     rig.press(KeyCode::Tab);
     rig.press(RECORD_KEY);
     assert_eq!(rig.app.recording(), Some("take-001"));
-    assert_eq!(rig.app.text, "");
+    assert_eq!(rig.app.line.text(), "");
     // …and goes to play mode, where the keys sound.
     assert_eq!(rig.app.mode, Mode::Play);
     rig.play(0.05);
     rig.stop_and_save();
+    clean(&dir);
+}
+
+/// Three sentences pasted while a take is recorded (the paste switches to
+/// type mode and says nothing), then Enter: they are spoken in order, with
+/// a pause after each, until Esc stops all of it in the third. The take
+/// holds the text as it was said and replays exactly.
+#[test]
+#[allow(clippy::cast_precision_loss)]
+fn pasted_sentences_are_spoken_in_order_stopped_and_replayed() {
+    let dir = scratch("pasted");
+    let mut rig = Rig::new(&dir, false);
+    rig.press(RECORD_KEY);
+    rig.play(0.1);
+    let pasted = "The cat sat on the mat.\r\nThe dog ran to the park!\n\nWhere did the bird go?\n";
+    rig.app.paste(pasted);
+    assert_eq!(rig.app.mode, Mode::Type);
+    rig.play(0.2);
+    assert_eq!(rig.app.snap.speaking, None, "the paste was spoken");
+    rig.press(KeyCode::Enter);
+
+    // Follow the speech as the display sees it, and stop it in the third
+    // sentence.
+    let said = "The cat sat on the mat. The dog ran to the park! Where did the bird go?";
+    let speech_of = |take: &Take| take.commands.iter().find_map(|c| c.speech.clone());
+    let mut seen: Vec<usize> = Vec::new();
+    let pauses: Vec<usize> = rig
+        .app
+        .spoken
+        .iter()
+        .filter(|(sym, r)| *sym == "SIL" && r.start > 0)
+        .map(|(_, r)| r.start)
+        .collect();
+    assert!(pauses.len() >= 2, "{:?}", rig.app.spoken);
+    let third = pauses[1] + 1;
+    let t0 = Instant::now();
+    loop {
+        rig.play(0.01);
+        if let Some(k) = rig.app.snap.speaking {
+            seen.push(k);
+            if k > third + 4 {
+                break;
+            }
+        }
+        assert!(t0.elapsed() < Duration::from_secs(20), "{seen:?}");
+        assert!(seen.len() < 2_000, "never reached the third sentence");
+    }
+    assert!(
+        seen.windows(2).all(|w| w[0] <= w[1]),
+        "out of order: {seen:?}"
+    );
+    for p in &pauses[..2] {
+        assert!(seen.contains(p), "pause at {p} not heard: {seen:?}");
+    }
+    rig.press(KeyCode::Esc);
+    rig.play(0.05);
+    assert_eq!(rig.app.snap.speaking, None, "Esc did not stop the speech");
+    assert_eq!(rig.app.mode, Mode::Type);
+    rig.play(0.3);
+    rig.stop_and_save();
+
+    let (take, sound) = read_take(&dir, "take-001");
+    let kinds: Vec<&Logged> = take
+        .commands
+        .iter()
+        .map(|c| &c.cmd)
+        .filter(|c| matches!(c, Logged::Speak(_) | Logged::StopSpeaking))
+        .collect();
+    assert!(
+        matches!(kinds[..], [Logged::Speak(_), Logged::StopSpeaking]),
+        "{kinds:?}"
+    );
+    let speech = speech_of(&take).expect("the take says what was said");
+    assert_eq!(speech.text, said);
+    // One utterance, a pause after each sentence.
+    let u = speech.utterance();
+    let long_pauses = u
+        .segments()
+        .iter()
+        .filter(|s| s.phoneme == Phoneme::Sil && s.duration > 0.25)
+        .count();
+    assert_eq!(long_pauses, 2);
+    let (diff, peak) = compare(&replay(&take), &sound);
+    println!(
+        "{} commands, {:.2} s, peak {peak:.3}, largest difference {diff:e}",
+        take.commands.len(),
+        sound.len() as f32 / SR
+    );
+    assert!(peak > 0.05, "the take is silent");
+    assert!(diff == 0.0, "replay differs by up to {diff}");
     clean(&dir);
 }
 

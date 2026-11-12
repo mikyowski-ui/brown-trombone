@@ -152,7 +152,7 @@ fn speaking() {
     let (mut app, _rx) = app();
     press(&mut app, 'v'); // bright
     app.mode = Mode::Type;
-    app.text = "Can you hear me?".into();
+    app.line.set("Can you hear me?");
 
     let text = "Hello, I am the pink trombone!";
     let mut voice = Trombone::new(SR);
