@@ -108,6 +108,18 @@ pub struct Gesture {
     /// Pitch added at the start of the segment, Hz, decaying over the
     /// voice's [`Tuning::kick_time`].
     pub kick: f32,
+    /// Share of the voice's lung pressure held back at the start and at
+    /// the end of the segment, in between in proportion (see
+    /// [`Trombone::set_breath`]): `0` pushes with all of it, `1` not at
+    /// all. A phrase builds up from nothing and dies away at its end.
+    pub pressure_drop: (f32, f32),
+    /// For a fricative: seconds at its start and at its end over which its
+    /// gap is still forming and already opening again, wider by
+    /// `gap_widening` (twice that at the end); `(0, 0)` holds the gap
+    /// throughout.
+    pub gap_opening: (f32, f32),
+    /// How much wider the gap is while it forms, diameter units.
+    pub gap_widening: f32,
     /// For the breath after a voiceless stop's release: how long after the
     /// mouth actually opens the voice comes back, seconds (a voice onset
     /// time, less the folds' own few milliseconds). The release is the
@@ -215,9 +227,16 @@ pub struct Speaker {
     ahead: bool,
     /// The larynx has already let go of the voice for the next segment.
     larynx_ahead: bool,
-    /// The shape of the pause being spoken is still to be sent (physical
-    /// engine; see [`PAUSE_HOLD`]).
+    /// In a pause the articulators are still to be set for what follows
+    /// (physical engine; see [`PAUSE_SETTLE`]).
     pause_pending: bool,
+    /// They have been set, for the rest of this pause.
+    readied: bool,
+    /// Seconds into the pause being spoken.
+    pause_time: f32,
+    /// How far a fricative's gap has got (see [`Gesture::gap_opening`]):
+    /// `0` still forming, `1` made, `2` opening again.
+    gap_stage: u8,
     /// Seconds since the utterance began.
     clock: f32,
     /// The mouth was shut at the last sample (physical engine).
@@ -232,16 +251,26 @@ pub struct Speaker {
     devoice_at: Option<f32>,
 }
 
+/// How long the voice must have been let go in a pause before the
+/// articulators are set for the sound after it, seconds (physical engine).
+///
+/// In a pause the mouth keeps the shape it ended the phrase with while the
+/// voice and the breath die away (opening it with the voice still sounding
+/// would end every phrase on a vowel nobody asked for, `... bowls-uh`).
+/// Once all is quiet, and at the start of an utterance, the articulators
+/// are put where the next sound begins, without moving through the air: a
+/// speaker readies the tongue and lips before speaking, slowly enough that
+/// nothing is heard, but moved at speech speed in a silent tract they push
+/// out a puff of air that is heard as a thump. The next sound then starts
+/// from its own shape, its tongue body already at the vowel it leads into.
+const PAUSE_SETTLE: f32 = 0.08;
+
+/// Pressure below the folds, cmH2O, under which a pause counts as quiet.
+const QUIET_PRESSURE: f32 = 0.3;
+
 /// Longest a voiceless stop waits for the mouth to shut before the voice
 /// is let go anyway, seconds.
 const DEVOICE_WAIT: f32 = 0.025;
-
-/// How long a voiced sound before a pause keeps its shape once the voice
-/// has been let go, seconds (physical engine): the voice dies away first and
-/// the mouth opens after, as a speaker's does at the end of a phrase.
-/// Opening it with the voice still sounding would end every phrase on a
-/// vowel nobody asked for (`... bowls-uh`).
-const PAUSE_HOLD: f32 = 0.04;
 
 // On the physical engine the articulators get a head start on each sound
 // (`Tuning::lead`): their tissue has inertia there, and people begin moving
@@ -266,6 +295,8 @@ impl Speaker {
         self.ahead = false;
         self.larynx_ahead = false;
         self.pause_pending = false;
+        self.readied = false;
+        self.pause_time = 0.0;
         self.clock = 0.0;
         self.was_shut = false;
         self.voice_at = None;
@@ -277,6 +308,7 @@ impl Speaker {
     /// Stop speaking (the voice fades out). Returns the utterance.
     pub fn stop(&mut self, voice: &mut Trombone) -> Utterance {
         voice.set_voiced(false);
+        voice.set_breath(1.0);
         voice.set_glottal_spread(0.0);
         voice.set_fold_slack(0.0);
         voice.set_cavity_expansion(0.0);
@@ -323,14 +355,20 @@ impl Speaker {
             let physical = voice.engine() == Engine::Physical;
             if !self.started {
                 self.started = true;
-                let voiced_before = self
-                    .index
-                    .checked_sub(1)
-                    .and_then(|k| self.utterance.segments.get(k))
-                    .is_some_and(|p| p.voiced && p.phoneme != Phoneme::Sil);
-                self.pause_pending = physical && seg.phoneme == Phoneme::Sil && voiced_before;
-                if !self.ahead && !self.pause_pending {
-                    voice.articulate(&seg.articulation);
+                let pause = physical && seg.phoneme == Phoneme::Sil;
+                if !pause {
+                    self.readied = false;
+                    self.pause_time = 0.0;
+                }
+                // The pause that ends the utterance readies nothing: the
+                // breath dies away in it as its gesture says.
+                let last = self.utterance.segments[self.index..]
+                    .iter()
+                    .all(|s| s.phoneme == Phoneme::Sil);
+                self.pause_pending = pause && !self.readied && !last;
+                self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
+                if !self.ahead && !pause {
+                    voice.articulate(&entry_shape(&seg));
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -362,6 +400,17 @@ impl Speaker {
                 }
             }
             let t = (self.elapsed / seg.duration).min(1.0);
+            if physical {
+                // In a pause the lungs wait until the articulators are set
+                // for what follows.
+                let (from, to) = seg.gesture.pressure_drop;
+                let breath = if self.pause_pending {
+                    0.0
+                } else {
+                    1.0 - lerp(from, to, t)
+                };
+                voice.set_breath(breath);
+            }
             let mut hz = lerp(seg.pitch.0, seg.pitch.1, t);
             if seg.gesture.kick.abs() > 0.0 && self.clock >= self.kick_from {
                 hz += seg.gesture.kick
@@ -373,14 +422,31 @@ impl Speaker {
             }
             self.elapsed += 1.0 / voice.sample_rate();
             self.clock += 1.0 / voice.sample_rate();
-            if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
-                voice.articulate(&seg.articulation);
+            if physical && seg.phoneme == Phoneme::Sil {
+                self.pause_time += 1.0 / voice.sample_rate();
+            }
+            if self.pause_pending
+                && (self.index == 0 || self.pause_time >= PAUSE_SETTLE)
+                && !voice.is_voiced()
+                && voice.intensity() <= 0.0
+                && voice.gauges().subglottal_pressure < QUIET_PRESSURE
+            {
+                let segments = &self.utterance.segments[self.index..];
+                if let Some(next) = segments.iter().find(|s| s.phoneme != Phoneme::Sil) {
+                    voice.articulate(&entry_shape(next));
+                    voice.settle();
+                    // What little still rings in the tract belongs to the
+                    // old shape; let it go with it.
+                    voice.reset();
+                    self.ahead = true;
+                }
                 self.pause_pending = false;
+                self.readied = true;
             }
             if !self.ahead
                 && physical
                 && let Some(&next) = self.utterance.segments.get(self.index + 1)
-                && !(seg.voiced && next.phoneme == Phoneme::Sil)
+                && next.phoneme != Phoneme::Sil
             {
                 let closed = matches!(
                     seg.phoneme.manner(),
@@ -395,9 +461,25 @@ impl Speaker {
                     self.utterance.lead
                 };
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
-                    voice.articulate(&next.articulation);
+                    voice.articulate(&entry_shape(&next));
                     self.ahead = true;
                 }
+            }
+            // A fricative's gap forming and opening again.
+            let (into, out_of) = seg.gesture.gap_opening;
+            let lead = self.utterance.lead;
+            if physical && self.gap_stage == 0 && self.elapsed >= into - lead.min(0.5 * into) {
+                voice.articulate(&seg.articulation);
+                self.gap_stage = 1;
+            }
+            if physical
+                && self.gap_stage == 1
+                && out_of > 0.0
+                && !self.ahead
+                && self.elapsed >= seg.duration - out_of - lead.min(0.5 * out_of)
+            {
+                voice.articulate(&widened(&seg.articulation, 2.0 * seg.gesture.gap_widening));
+                self.gap_stage = 2;
             }
             // Into a voiceless fricative the larynx moves a little ahead
             // too, so the voice stops as the tract narrows rather than
@@ -427,7 +509,17 @@ impl Speaker {
                     voice.set_glottal_spread(0.0);
                     voice.set_fold_slack(0.0);
                     voice.set_cavity_expansion(0.0);
-                    voice.articulate_phoneme(Phoneme::Sil);
+                    // The physical tract keeps the shape it ended on (see
+                    // `PAUSE_SETTLE`); the next utterance starts from its
+                    // own. The lungs stop pushing: an utterance that ends
+                    // without a pause (a single word) would otherwise go on
+                    // breathing through its last shape, a hiss or a murmur
+                    // after it.
+                    if physical {
+                        voice.set_breath(0.0);
+                    } else {
+                        voice.articulate_phoneme(Phoneme::Sil);
+                    }
                 }
             }
         }
@@ -507,6 +599,26 @@ impl Speaker {
         for s in out {
             *s = self.process(voice);
         }
+    }
+}
+
+/// The shape a segment begins with: a fricative's gap still forming (see
+/// [`Gesture::gap_opening`]), anything else its own.
+fn entry_shape(seg: &Segment) -> Articulation {
+    if seg.gesture.gap_opening.0 > 0.0 {
+        widened(&seg.articulation, seg.gesture.gap_widening)
+    } else {
+        seg.articulation
+    }
+}
+
+/// `a` with its gap wider by `by` (diameter units).
+fn widened(a: &Articulation, by: f32) -> Articulation {
+    Articulation {
+        constriction: a
+            .constriction
+            .map(|c| crate::Constriction::new(c.index, c.diameter + by)),
+        ..*a
     }
 }
 
@@ -911,9 +1023,15 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let mut drafts: Vec<Draft> = Vec::new();
     let mut phrase_start = 0;
     let mut i = 0;
+    // Each phrase's drafts and how it ends, for the breath (physical).
+    let mut phrases: Vec<(usize, usize, Break)> = Vec::new();
 
+    // The physical engine shapes its phrases once they have their final
+    // lengths (see `intonation`).
     let push_phrase_end = |drafts: &mut Vec<Draft>, start: usize, brk: Option<Break>| {
-        shape_phrase(&mut drafts[start..], brk, expr);
+        if !physical {
+            shape_phrase(&mut drafts[start..], brk, expr);
+        }
     };
 
     while i < tokens.len() {
@@ -940,6 +1058,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             Token::WordBreak => {}
             Token::Break(b) => {
                 push_phrase_end(&mut drafts, phrase_start, Some(b));
+                phrases.push((phrase_start, drafts.len(), b));
                 let pause = match b {
                     Break::Comma => 0.18,
                     _ => 0.38,
@@ -951,12 +1070,16 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         i += 1;
     }
     push_phrase_end(&mut drafts, phrase_start, Some(Break::Period));
+    phrases.push((phrase_start, drafts.len(), Break::Period));
     if physical && !drafts.is_empty() {
         // Speakers set their tongue before they speak: a moment of
         // silence in which the slow tongue body gets to the first vowel
         // (it takes that body's shape below, as every pause takes the
         // next vowel's), so the first word does not start from rest.
         drafts.insert(0, silence(PRE_POSITION / rate));
+        for p in &mut phrases {
+            (p.0, p.1) = (p.0 + 1, p.1 + 1);
+        }
     }
 
     // Lengthen the last syllable of each phrase.
@@ -992,6 +1115,10 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        for &(a, b, brk) in &phrases {
+            intonation(&mut drafts[a..b], brk, expr, &timing);
+        }
+        breathe(&mut drafts, &mut phrases, &timing);
         lean_on_vowels(&mut drafts);
         assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
@@ -1366,9 +1493,140 @@ fn expand(
                 out.push(with(draft(p, shut, closure, true), voiced_stop));
                 dur = (dur - closure).max(0.5 * dur);
             }
+            let g = if matches!(p, Phoneme::S | Phoneme::Sh) {
+                // The gap narrows into the hiss and widens out of it: the
+                // first and last part of /s ʃ/ are made with a wider gap
+                // (the Speaker sends the shapes), so the hiss swells in and
+                // dies away over tens of milliseconds, as a speaker's does,
+                // instead of switching on and off with the gap; out of it
+                // the breath is flowing freely already, and the gap has to
+                // open further for the hiss to fade. Next to another
+                // obstruent or a closure the tongue goes straight from one
+                // to the other, and a wider gap there would be a vowel
+                // between them. Not /z ʒ/, whose hiss is weak enough beside
+                // their voice (any less and they are heard as /ð/), nor the
+                // faint /f θ v ð/.
+                let ramp = timing.frication_ramp * dur;
+                let closes = |q: Phoneme| is_obstruent(q) || q.manner() == Manner::Nasal;
+                let into = if context.prev.is_some_and(closes) {
+                    0.0
+                } else {
+                    ramp
+                };
+                let out_of = if context.next.is_some_and(|(q, _, _)| closes(q)) {
+                    0.0
+                } else {
+                    ramp
+                };
+                Gesture {
+                    gap_opening: (into, out_of),
+                    gap_widening: timing.frication_widening,
+                    ..g
+                }
+            } else {
+                g
+            };
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
         _ => out.push(draft(p, a, dur, a.voiced)),
+    }
+}
+
+/// The physical engine's breath over each phrase (`phrases`: the drafts
+/// of each and the break that ends it).
+///
+/// People start a phrase by raising the pressure with the folds coming
+/// together and end it with the pressure falling and the folds parting: the
+/// level swells in and dies away instead of switching on and off. So the
+/// lungs build up from nothing over [`Tuning::phrase_onset`], lose
+/// [`Tuning::phrase_decline`] of their pressure by the end, and let go
+/// [`Tuning::final_drop`] of it over the last vowel, the consonants after
+/// it keeping what is left (half of that before a comma); in a pause they
+/// stop.
+///
+/// A phrase that opens on a vowel or a sonorant starts from
+/// [`Tuning::onset_pressure`] of the pressure, about what the folds need
+/// to start, and the voice grows from there. Before a phrase that opens on
+/// an obstruent or /h/ the lungs start pushing in the pause, its last part
+/// split off for it, with all their pressure, for [`Tuning::lead`]: the
+/// voice starts as from a closure in the middle of speech, the release
+/// bursts and the first hiss is there from the start (built up from
+/// nothing, an opening /f/, /s/ or /h/ was mostly lost). `phrases` is kept
+/// up to date with the split.
+fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timing: &Tuning) {
+    for d in drafts.iter_mut() {
+        if d.phoneme == Phoneme::Sil {
+            d.gesture.pressure_drop = (1.0, 1.0);
+        }
+    }
+    for p in (0..phrases.len()).rev() {
+        let (a, b, brk) = phrases[p];
+        let Some(first) = drafts.get(a).filter(|_| a < b) else {
+            continue;
+        };
+        let pause = a
+            .checked_sub(1)
+            .filter(|&k| drafts[k].phoneme == Phoneme::Sil);
+        // Seconds the lungs push before the phrase, the share of their
+        // pressure they start from, and the seconds over which they build
+        // up to all of it.
+        let breathy = is_obstruent(first.phoneme) || first.phoneme.manner() == Manner::Aspirate;
+        let (ready, floor, swell_time) = match pause {
+            Some(k) if breathy => (drafts[k].duration.min(timing.lead), 1.0, 0.0),
+            _ => (0.0, timing.onset_pressure, timing.phrase_onset),
+        };
+        let phrase = &drafts[a..b];
+        let total: f32 = phrase.iter().map(|d| d.duration).sum();
+        let last_vowel = phrase.iter().rposition(|d| d.vowel).unwrap_or(0);
+        let final_start: f32 = phrase[..last_vowel].iter().map(|d| d.duration).sum();
+        let final_end = final_start + phrase.get(last_vowel).map_or(0.0, |d| d.duration);
+        let final_drop = match brk {
+            Break::Comma => 0.5 * timing.final_drop,
+            _ => timing.final_drop,
+        };
+        let held = |t: f32| {
+            let swell = if swell_time > 0.0 {
+                floor + (1.0 - floor) * ((t + ready) / swell_time).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let decline = 1.0 - timing.phrase_decline * (t / total).max(0.0);
+            let fade = if t > final_start && final_end > final_start {
+                let x = ((t - final_start) / (final_end - final_start)).min(1.0);
+                1.0 - final_drop * x * x * (3.0 - 2.0 * x)
+            } else {
+                1.0
+            };
+            1.0 - swell * decline * fade
+        };
+        let mut t = 0.0;
+        for d in &mut drafts[a..b] {
+            let start = held(t);
+            t += d.duration;
+            d.gesture.pressure_drop = (start, held(t));
+        }
+        // After the last phrase the breath dies away over the closing pause,
+        // so its last sound is not cut off.
+        if b + 1 == drafts.len()
+            && let Some(end) = drafts.get_mut(b).filter(|d| d.phoneme == Phoneme::Sil)
+        {
+            end.gesture.pressure_drop = (held(total), 1.0);
+        }
+        let Some(k) = pause.filter(|_| ready > 0.0) else {
+            continue;
+        };
+        let mut lead_in = drafts[k];
+        lead_in.duration = ready;
+        lead_in.gesture.pressure_drop = (held(-ready), held(0.0));
+        if drafts[k].duration > ready {
+            drafts[k].duration -= ready;
+            drafts.insert(k + 1, lead_in);
+            for q in &mut phrases[p..] {
+                (q.0, q.1) = (q.0 + 1, q.1 + 1);
+            }
+        } else {
+            drafts[k] = lead_in;
+        }
     }
 }
 
@@ -1402,6 +1660,98 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         aspiration: false,
     }
 }
+
+/// The physical engine's intonation for one phrase, in semitones at
+/// expressiveness 1 from the [`Tuning`]: the pitch declines by
+/// [`Tuning::declination`] over the phrase; on each stressed vowel it rises
+/// by [`Tuning::accent_size`] and sinks back over [`Tuning::accent_decay`]
+/// seconds through what follows (so it moves inside vowels and from
+/// syllable to syllable, as a speaker's does, rather than stepping up for
+/// each stress and down again at its consonant); a statement falls by
+/// [`Tuning::final_fall`] across its last vowel, after an accent on it that
+/// has risen on the way in; a question rises instead and a comma lifts a
+/// little.
+#[allow(clippy::cast_precision_loss)]
+fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
+    let total: f32 = drafts.iter().map(|d| d.duration).sum();
+    if total <= 0.0 {
+        return;
+    }
+    // Start and end time of every draft.
+    let mut spans = Vec::with_capacity(drafts.len());
+    let mut t = 0.0;
+    for d in drafts.iter() {
+        spans.push((t, t + d.duration));
+        t += d.duration;
+    }
+    let last_vowel = drafts.iter().rposition(|d| d.vowel);
+    let falling = matches!(brk, Break::Period | Break::Exclamation);
+    let accents: Vec<(f32, f32)> = drafts
+        .iter()
+        .zip(&spans)
+        .enumerate()
+        .filter(|(_, (d, _))| d.accent > 0.0 && d.vowel)
+        .map(|(k, (_, &(a, b)))| {
+            // The nucleus of a statement peaks as its vowel begins, its rise
+            // carried by the sounds before it, and falls from there.
+            if falling && Some(k) == last_vowel {
+                let onset = spans[..k]
+                    .iter()
+                    .rev()
+                    .zip(drafts[..k].iter().rev())
+                    .take_while(|(_, d)| !d.vowel)
+                    .last()
+                    .map_or(a - 0.05, |(&(s, _), _)| s);
+                (onset, a)
+            } else {
+                (a, b)
+            }
+        })
+        .collect();
+    let size = timing.accent_size * expr;
+    let accent = |t: f32| {
+        accents
+            .iter()
+            .map(|&(a, b)| {
+                if t < a {
+                    0.0
+                } else if t <= b {
+                    size * (t - a) / (b - a).max(1e-3)
+                } else {
+                    size * (1.0 - (t - b) / timing.accent_decay).max(0.0)
+                }
+            })
+            .fold(0.0f32, f32::max)
+    };
+    let (vowel_start, vowel_end) = last_vowel.map_or((total, total), |k| spans[k]);
+    let boundary = |t: f32| {
+        let x = ((t - vowel_start) / (vowel_end - vowel_start).max(1e-3)).clamp(0.0, 1.0);
+        let shape = x * x * (3.0 - 2.0 * x);
+        match brk {
+            Break::Period => -timing.final_fall * expr * shape,
+            Break::Exclamation => -1.4 * timing.final_fall * expr * shape,
+            Break::Question => QUESTION_RISE * expr * shape,
+            Break::Comma => COMMA_RISE * expr * shape,
+        }
+    };
+    let declination = timing.declination * expr;
+    let semitones = |t: f32| declination * (0.5 - t / total) + accent(t) + boundary(t);
+    for (d, &(_, end)) in drafts.iter_mut().zip(&spans) {
+        d.accent = crate::math::powf(2.0, semitones(end) / 12.0);
+    }
+    // After a question's rise the consonants stay up.
+    if let (Some(v), Break::Question) = (last_vowel, brk) {
+        let top = drafts[v].accent;
+        for d in &mut drafts[v + 1..] {
+            d.accent = top;
+        }
+    }
+}
+
+/// Rise at the end of a question, semitones at expressiveness 1.
+const QUESTION_RISE: f32 = 8.0;
+/// Lift at a comma, semitones at expressiveness 1: the phrase is not over.
+const COMMA_RISE: f32 = 1.5;
 
 /// Intonation for one phrase: gentle declination, accents on stressed
 /// vowels, and a boundary tone.

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the forty-nine numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-three numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -136,7 +136,8 @@ tuning! {
     teeth_gain = 0.28, 0.07..=1.0, A;
     /// Efficiency of the jet between the folds (breath noise).
     glottal_efficiency = 0.043, 0.01..=0.15, A;
-    /// Frequency above which turbulence has less and less energy, Hz.
+    /// Frequency above which turbulence has less and less energy, Hz (that
+    /// of a jet on the teeth: `teeth_corner`).
     hiss_corner = 4500.0, 2500.0..=8000.0, A;
 
     // ----- A: gaps ------------------------------------------------------
@@ -278,6 +279,67 @@ tuning! {
     /// (`body_rate`), and a vowel held for the classic engine's time ends
     /// before the body has reached it.
     vowel_hold = 1.18, 1.0..=1.6, C;
+
+    // ----- A: the breath over a phrase (physical engine) ---------------
+
+    /// Share of the lung pressure lost between the start and the end of a
+    /// phrase: the speaker's breath running down, which lowers the level
+    /// and the pitch together.
+    phrase_decline = 0.15, 0.0..=0.4, A;
+    /// Share of the lung pressure let go over the last vowel of a
+    /// statement: the voice dies away instead of being cut off (half of it
+    /// before a comma).
+    final_drop = 0.5, 0.0..=0.9, A;
+    /// Share of the lung pressure a phrase that opens on a vowel or a
+    /// sonorant starts from, rising to all of it over `phrase_onset`: about
+    /// what the folds need to start, so the voice grows in from its first
+    /// cycles without the first sound being lost.
+    onset_pressure = 0.5, 0.0..=1.0, A;
+
+    // ----- A: the hiss of fricatives (physical engine) -----------------
+
+    /// Corner below which a jet on the teeth (/s ʃ/) makes less and less
+    /// noise, Hz at the native size. Raising it takes the low end out of
+    /// /s/ (a speaker's has little below 3 kHz), but also blurs /i/, whose
+    /// narrow front lets a little of that jet through.
+    hiss_floor = 400.0, 200.0..=3000.0, A;
+    /// Frequency above which the noise of a jet on the teeth has less and
+    /// less energy, Hz at the native size: a speaker's /s/ peaks at 5 to 8
+    /// kHz.
+    teeth_corner = 5500.0, 3000.0..=10000.0, A;
+    /// Lip opening of /ʃ ʒ tʃ dʒ/ (diameter units): rounded, but open.
+    postalveolar_lips = 1.2, 0.8..=2.5, A;
+    /// How much wider the gap of /s ʃ/ is as it forms (twice that as it
+    /// opens again), diameter units.
+    frication_widening = 0.15, 0.0..=0.3, A;
+
+    // ----- B: the hiss of fricatives (physical engine) -----------------
+
+    /// Share of /s ʃ/ at each end spent in that wider gap. Off by default:
+    /// at 0.25 the hiss rises over some 25 ms as a speaker's does, but the
+    /// recognizer heard 2 to 6 points more phoneme errors in sentences and
+    /// carrier phrases.
+    frication_ramp = 0.0, 0.0..=0.4, B;
+
+    // ----- B: intonation (physical engine) ------------------------------
+
+    /// Rise of the pitch on a stressed vowel, semitones at expressiveness
+    /// 1 (a speaker's accents are 2 to 5).
+    accent_size = 6.0, 0.0..=16.0, B;
+    /// Seconds over which an accent sinks back after its vowel.
+    accent_decay = 0.2, 0.05..=0.5, B;
+    /// Fall of the pitch over a phrase, semitones at expressiveness 1.
+    declination = 6.0, 0.0..=12.0, B;
+    /// Fall across the last vowel of a statement, semitones at
+    /// expressiveness 1.
+    final_fall = 8.0, 0.0..=16.0, B;
+
+    // ----- B: the breath over a phrase (physical engine) ---------------
+
+    /// Seconds over which the lungs build up their pressure at the start of
+    /// a phrase, from nothing: the first sound swells in rather than
+    /// switching on.
+    phrase_onset = 0.15, 0.04..=0.3, B;
 }
 
 impl Default for Tuning {
@@ -300,10 +362,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_two_and_twenty_seven() {
+    fn two_passes_of_twenty_nine_and_thirty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (22, 27));
+        assert_eq!((a, b), (29, 33));
     }
 
     #[test]

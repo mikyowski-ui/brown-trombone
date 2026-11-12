@@ -52,8 +52,27 @@ pub(crate) const V_MAX: f32 = 5000.0;
 /// Turbulence follows the stream, not each sound wave riding on it; it
 /// still follows the voice's own pulsing, as real voiced fricatives do.
 pub(crate) const FLOW_AVERAGING: f32 = 0.001;
-/// Corner of the high-pass that removes rumble from the noise, Hz.
+/// Corner of the high-pass that removes rumble from the noise of free jets
+/// and of the breath, Hz.
 const RUMBLE_CORNER: f32 = 400.0;
+
+/// High-pass coefficient, low-pass coefficient and the gain that brings
+/// white noise through them back to unit variance, for a high-pass corner
+/// `low` and a low-pass corner `high` (Hz) at tick `dt`.
+fn shaping(low: f32, high: f32, dt: f32) -> (f32, f32, f32) {
+    let r = 1.0 / (1.0 + 2.0 * PI * low * dt);
+    let w = 2.0 * PI * high * dt;
+    let k = w / (1.0 + w);
+    // Variance left by two equal one-pole low-passes in a row, for a
+    // white input: k⁴·(1 + a²)/(1 − a²)³ with a = 1 − k. Scaled back to
+    // unit variance whatever the tick rate; the high-pass only takes away
+    // what lies below its corner, so the noise above keeps its level.
+    let a2 = (1.0 - k) * (1.0 - k);
+    let k2 = k * k;
+    let rest = 1.0 - a2;
+    let kept = k2 * k2 * (1.0 + a2) / (rest * rest * rest);
+    (r, k, 1.0 / crate::math::sqrt(kept))
+}
 
 /// Amplitude, dyn/cm², of the noise pressure at a joint where flow `u`
 /// (cm³/s, rightward) leaves a cell of inverse area `inv_narrow` for one of
@@ -148,10 +167,21 @@ pub(crate) struct Turbulence {
     jets: Hiss,
     teeth: Hiss,
     glottis: Hiss,
+    /// High-pass and low-pass coefficients and gain of the noise of free
+    /// jets and of the breath, and of the jet that strikes the teeth.
     r: f32,
     k: f32,
     gain: f32,
+    r_teeth: f32,
+    k_teeth: f32,
+    gain_teeth: f32,
+    /// Corner above which free jets and the breath have less and less
+    /// energy, Hz.
     pub(crate) corner: f32,
+    /// Corners below and above which the jet on the teeth has less and
+    /// less, Hz.
+    pub(crate) teeth_floor: f32,
+    pub(crate) teeth_corner: f32,
     /// Efficiency of a free jet, of a jet on the teeth, and of the jet
     /// between the folds.
     pub(crate) jet_eff: f32,
@@ -169,6 +199,11 @@ impl Turbulence {
             r: 1.0,
             k: 1.0,
             gain: 1.0,
+            r_teeth: 1.0,
+            k_teeth: 1.0,
+            gain_teeth: 1.0,
+            teeth_floor: Tuning::DEFAULT.hiss_floor,
+            teeth_corner: Tuning::DEFAULT.teeth_corner,
             corner: Tuning::DEFAULT.hiss_corner,
             jet_eff: Tuning::DEFAULT.jet_efficiency,
             teeth_eff: Tuning::DEFAULT.jet_efficiency * Tuning::DEFAULT.teeth_gain,
@@ -179,6 +214,8 @@ impl Turbulence {
     /// Take the noise settings of a voice. Call `set_rate` afterwards.
     pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
         self.corner = tuning.hiss_corner;
+        self.teeth_floor = tuning.hiss_floor;
+        self.teeth_corner = tuning.teeth_corner;
         self.jet_eff = tuning.jet_efficiency;
         self.teeth_eff = tuning.jet_efficiency * tuning.teeth_gain;
         self.glottal_eff = tuning.glottal_efficiency;
@@ -189,17 +226,9 @@ impl Turbulence {
     /// small speaker's jets are as fast but narrower: the corner rises as
     /// the body shrinks.
     pub(crate) fn set_rate(&mut self, dt: f32, size: f32) {
-        self.r = 1.0 / (1.0 + 2.0 * PI * RUMBLE_CORNER * dt);
-        let w = 2.0 * PI * self.corner / size * dt;
-        self.k = w / (1.0 + w);
-        // Variance left by two equal one-pole low-passes in a row, for a
-        // white input: k⁴·(1 + a²)/(1 − a²)³ with a = 1 − k. Scale the
-        // result back to unit variance, whatever the tick rate.
-        let a2 = (1.0 - self.k) * (1.0 - self.k);
-        let k2 = self.k * self.k;
-        let rest = 1.0 - a2;
-        let kept = k2 * k2 * (1.0 + a2) / (rest * rest * rest);
-        self.gain = 1.0 / crate::math::sqrt(kept);
+        (self.r, self.k, self.gain) = shaping(RUMBLE_CORNER, self.corner / size, dt);
+        (self.r_teeth, self.k_teeth, self.gain_teeth) =
+            shaping(self.teeth_floor / size, self.teeth_corner / size, dt);
     }
 
     pub(crate) fn reset(&mut self) {
@@ -208,13 +237,17 @@ impl Turbulence {
         }
     }
 
-    /// This tick's noise for free jets and for the teeth.
+    /// This tick's noise for free jets and for the teeth. A jet striking the
+    /// teeth (/s ʃ/) makes its noise from small, fast eddies, reaching well
+    /// past 5 kHz (Stevens 1971; Shadle 1985): its noise has a corner of
+    /// its own, higher than the rest.
     #[inline]
     pub(crate) fn tick(&mut self) -> (f32, f32) {
         let (r, k, gain) = (self.r, self.k, self.gain);
+        let (rt, kt, gt) = (self.r_teeth, self.k_teeth, self.gain_teeth);
         (
             self.jets.next(&mut self.rng, r, k, gain),
-            self.teeth.next(&mut self.rng, r, k, gain),
+            self.teeth.next(&mut self.rng, rt, kt, gt),
         )
     }
 
@@ -253,20 +286,24 @@ mod tests {
     #[test]
     fn hiss_has_unit_variance_and_no_offset() {
         let mut t = Turbulence::new(3);
-        // At any tick rate (the rate follows the tract length).
+        // At any tick rate (the rate follows the tract length). The breath
+        // and free jets have unit variance, and the jet on the teeth.
         for rate in [60_000.0, 96_000.0, 192_000.0] {
             t.set_rate(1.0 / rate, 1.0);
-            let (mut sum, mut sq) = (0.0f64, 0.0f64);
+            let (mut sum, mut sq, mut breath) = (0.0f64, 0.0f64, 0.0f64);
             let n = 300_000;
             for _ in 0..n {
-                let (x, _) = t.tick();
+                let (_, x) = t.tick();
                 sum += f64::from(x);
                 sq += f64::from(x * x);
+                breath += f64::from(t.breath().powi(2));
             }
             let mean = sum / f64::from(n);
             let var = sq / f64::from(n);
+            let breath = breath / f64::from(n);
             assert!(mean.abs() < 0.01, "{rate}: mean {mean}");
             assert!((0.75..1.1).contains(&var), "{rate}: variance {var}");
+            assert!((0.75..1.1).contains(&breath), "{rate}: breath {breath}");
         }
     }
 }

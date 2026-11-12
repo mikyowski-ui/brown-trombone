@@ -27,6 +27,11 @@ const PHYSICAL_GAIN: f32 = 2.5e-7;
 /// wider consonant openings are approximants.
 pub(crate) const FRICATIVE_WIDEST: f32 = HISS_WIDEST;
 
+/// Places of the tongue (tract index) behind the alveolar ridge whose
+/// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`Tuning::postalveolar_lips`]);
+/// /r/, further back, keeps its rounding.
+const POSTALVEOLAR_PLACE: core::ops::RangeInclusive<f32> = 32.5..=34.5;
+
 /// Which model turns the articulation into sound.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -450,6 +455,18 @@ impl Trombone {
         }
     }
 
+    /// Push with `share` (`0‥1.5`) of the lung pressure
+    /// ([`set_lung_pressure`](Self::set_lung_pressure)): a speaker's
+    /// breath building up at the start of a phrase and dying away at its
+    /// end, while the lung pressure setting stays the voice's. The pressure
+    /// follows within a few tens of milliseconds. Physical engine only; `1`
+    /// by default.
+    pub fn set_breath(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.breath = share.clamp(0.0, 1.5);
+        }
+    }
+
     /// Slacken the cover of the folds by `share` (`0‥0.5`) of its tension,
     /// as a speaker does in a voiced stop: they then keep vibrating with
     /// less pressure across them, and their pitch dips a little. Physical
@@ -682,10 +699,21 @@ impl Trombone {
                 c
             }
         };
-        let a = Articulation {
+        let mut a = Articulation {
             constriction: a.constriction.map(gap),
             ..a
         };
+        // The physical /ʃ ʒ tʃ dʒ/ are rounded less than the classic
+        // engine's: lips nearly shut over the long front cavity behind them
+        // make it ring as one narrow, low resonance (a whistle near 1.5
+        // kHz), where a speaker's hiss is broad from about 2 kHz up.
+        if self.engine == Engine::Physical
+            && let (Some(c), Some(lips)) = (a.constriction, &mut a.lips)
+            && POSTALVEOLAR_PLACE.contains(&c.index)
+            && c.diameter <= FRICATIVE_WIDEST
+        {
+            lips.diameter = lips.diameter.max(self.tuning.postalveolar_lips);
+        }
         self.tract.set_constriction(SLOT_MAIN, a.constriction);
         self.tract.set_constriction(SLOT_LIPS, a.lips);
         self.tract.set_velum(a.velum);

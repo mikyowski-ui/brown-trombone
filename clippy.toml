@@ -1,1 +1,6 @@
-doc-valid-idents = ["ARPAbet", "AudioWorklet", ".."]
+doc-valid-idents = ["ARPAbet", "AudioWorklet", "LibriSpeech", ".."]
+# A voice's settings (`VoiceSettings`, with its `Tuning`) are some 300 bytes,
+# copied by value on purpose: plain data handed from the UI to the audio
+# thread.
+pass-by-value-size-limit = 512
+enum-variant-size-threshold = 512

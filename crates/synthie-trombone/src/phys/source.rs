@@ -69,6 +69,10 @@ const FRY_OPEN_TIME: f32 = 0.007;
 /// Pressure across the folds, dyn/cm², that counts as enough to start:
 /// just above what these folds need to keep going.
 const START_PRESSURE: f32 = 3.5 * CM_H2O;
+/// Lung pressure, cmH2O, under which the folds are not pressed together
+/// while the breath builds up or dies away (see `Source::building`): a
+/// little over what they need to start.
+const SOFT_START: f32 = 4.5;
 /// Swing of the area between the folds, cm² at native size, below which
 /// they count as stalled.
 const STALL_SWING: f32 = 0.03;
@@ -243,6 +247,9 @@ pub(crate) struct Source {
     /// present. It moves at the arytenoids' pace (`abduction_time`).
     pub(crate) spread_target: f32,
     spread: f32,
+    /// Share of `lung_base` the lungs push with: below one while a phrase
+    /// is building up or dying away (see `Trombone::set_breath`).
+    pub(crate) breath: f32,
     /// Share by which the fold cover is slackened, wanted and present.
     pub(crate) slack_target: f32,
     slack: f32,
@@ -318,6 +325,7 @@ impl Source {
             chink_target: 0.0,
             spread_target: 0.0,
             spread: 0.0,
+            breath: 1.0,
             slack_target: 0.0,
             slack: 0.0,
             fold_share: 1.0,
@@ -361,9 +369,9 @@ impl Source {
         let overrides = (self.tension_override, self.gap_override);
         let muscles = self.muscle_override;
         let (lung_base, tuning) = (self.lung_base, self.tuning);
-        let (spread, slack) = (self.spread_target, self.slack_target);
+        let (spread, slack, breath) = (self.spread_target, self.slack_target, self.breath);
         *self = Self::new();
-        (self.spread_target, self.slack_target) = (spread, slack);
+        (self.spread_target, self.slack_target, self.breath) = (spread, slack, breath);
         self.kind = kind;
         self.probe = probe;
         self.fallback = fallback;
@@ -407,6 +415,16 @@ impl Source {
     /// the pressure is all there (2 cmH2O at least).
     pub(crate) fn breath_is_up(&self) -> bool {
         self.lung_target > 2.0 * CM_H2O && self.lung >= 0.9 * self.lung_target
+    }
+
+    /// Whether the breath is too weak for the folds to need pressing: it is
+    /// still building at the start of a phrase, or dying away at its end.
+    /// There the folds are left where the tenseness holds them, and they
+    /// start (or stop) by themselves as the pressure passes what they need,
+    /// growing (or fading) over a few cycles, as in a soft onset; pressed
+    /// together they would start at once, as from a glottal stop.
+    fn building(&self) -> bool {
+        self.breath < 1.0 && self.lung < SOFT_START * CM_H2O
     }
 
     /// Fold size follows the tract: `len` is the relative tract length.
@@ -491,7 +509,7 @@ impl Source {
         self.amp1 = g.intensity;
 
         let voicing = g.voiced || g.always_voice;
-        if voicing && !self.voicing {
+        if voicing && !self.voicing && !self.building() {
             self.press();
         }
         if !voicing {
@@ -568,7 +586,7 @@ impl Source {
             }
         }
         self.lung_target = if breathing {
-            self.lung_base * effort
+            self.lung_base * effort * self.breath
         } else {
             0.0
         };
@@ -706,7 +724,11 @@ impl Source {
                     self.restart_watch();
                 }
             }
-        } else if self.voicing && self.gap_override.is_none() && self.probe.monitor {
+        } else if self.voicing
+            && self.gap_override.is_none()
+            && self.probe.monitor
+            && !self.building()
+        {
             // Wanted but stalled: press together and start again.
             self.watch_lo = self.watch_lo.min(between);
             self.watch_hi = self.watch_hi.max(between);
