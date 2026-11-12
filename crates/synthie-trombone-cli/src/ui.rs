@@ -3,7 +3,7 @@
 
 use crate::app::{
     App, BAR_WIDTH, Control, DIALS, LANDMARKS, LOUD_RANGE, Mode, NOSE_Y, VOWEL_KEYS, X_BOUNDS,
-    Y_BOUNDS, engine_name, tongue_handle,
+    Y_BOUNDS, engine_name, lerp_cell,
 };
 use crate::audio::SCOPE_LEN;
 use ratatui::Frame;
@@ -75,15 +75,6 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn amp_color(a: f32) -> Color {
     theme::heat((a * 1.6).clamp(0.0, 1.0))
-}
-
-fn lerp_cell(cells: &[f32], x: f64) -> f64 {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let lo = (x.floor().max(0.0) as usize).min(cells.len() - 1);
-    let hi = (lo + 1).min(cells.len() - 1);
-    #[allow(clippy::cast_precision_loss)]
-    let frac = (x - lo as f64).clamp(0.0, 1.0);
-    f64::from(cells[lo]) * (1.0 - frac) + f64::from(cells[hi]) * frac
 }
 
 #[allow(
@@ -181,16 +172,11 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
             ));
             ctx.layer();
 
-            // Where the vowels sit, faintly; then the tongue handle on top.
+            // Where the vowels sit, faintly. The tongue handle goes on top
+            // once the canvas is drawn.
             for &(x, y, name) in &marks {
                 ctx.print(x, y, Span::styled(name, fg(DIM)));
             }
-            let (hx, hy) = tongue_handle(s.tongue);
-            ctx.print(
-                f64::from(hx),
-                f64::from(hy),
-                Span::styled("◆ tongue", bold(YELLOW)),
-            );
             // Each constriction is marked where it presses on the wall.
             for (k, c) in s.constrictions.iter().enumerate() {
                 if let Some(c) = c {
@@ -213,6 +199,14 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
             ctx.print(NOSE_START as f64 - 3.5, 2.4, Span::styled("velum", fg(DIM)));
         });
     frame.render_widget(canvas, area);
+    // The tongue handle, in the cell the walls are drawn around and the
+    // mouse finds it in: inside the mouth whatever shape the tract has.
+    if let Some((col, row)) = app.tongue_cell() {
+        let room = usize::from(app.tract_area.right().saturating_sub(col));
+        frame
+            .buffer_mut()
+            .set_stringn(col, row, "◆ tongue", room, bold(YELLOW));
+    }
 }
 
 fn note_name(note: i32) -> String {
@@ -245,7 +239,8 @@ fn dial(app: &App, k: usize) -> Line<'static> {
 /// The persona panel: the voice described the way a person would, four
 /// dials that each move several parameters together.
 fn draw_persona(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = panel("persona  ·  drag", false);
+    // Turning a dial with nothing sounding sounds the voice for a moment.
+    let block = panel("persona  ·  drag to hear", false);
     app.controls
         .extend(App::persona_controls(block.inner(area)));
     let app = &*app;
@@ -651,7 +646,7 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &mut App) {
 mod tests {
     use super::*;
     use crate::audio::{Cmd, Link};
-    use crossbeam_channel::bounded;
+    use crossbeam_channel::{Receiver, bounded};
     use ratatui::{Terminal, backend::TestBackend};
     use synthie_trombone::speech::{Prosody, Speaker, Utterance};
     use synthie_trombone::{Constriction, Phoneme, Trombone};
@@ -776,6 +771,10 @@ mod tests {
                 .iter()
                 .find(|(_, c)| *c == Control::FormantLock);
             assert!(lock.is_some(), "{w}×{h}: no lock button");
+            if w >= 80 {
+                // Down to 80 columns the persona panel says a turn is heard.
+                assert!(text.contains("persona  ·  drag to hear"), "{w}×{h}: {text}");
+            }
             if (w, h) == (120, 34) {
                 assert_eq!(app.chart_area, Rect::new(93, 17, 26, 9));
                 assert!(text.contains("F1 ") && text.contains("[/ scope]"), "{text}");
@@ -802,5 +801,168 @@ mod tests {
             "{text}"
         );
         assert_eq!(app.chart_area, Rect::default());
+    }
+
+    /// Rows of the tract view with dots of one wall in column `col`, the
+    /// wall drawn as `draw_tract` draws it (`side` 1 for the upper wall,
+    /// -1 for the lower).
+    #[allow(clippy::cast_precision_loss)]
+    fn wall_rows(area: Rect, diameters: &[f32; N], side: f64, col: u16) -> Vec<u16> {
+        let canvas = Canvas::default()
+            .marker(Marker::Braille)
+            .x_bounds(X_BOUNDS)
+            .y_bounds(Y_BOUNDS)
+            .paint(|ctx| {
+                for i in 0..N - 1 {
+                    let (a, b) = (f64::from(diameters[i]), f64::from(diameters[i + 1]));
+                    let (x0, x1) = (i as f64, (i + 1) as f64);
+                    ctx.draw(&CLine::new(x0, side * a / 2.0, x1, side * b / 2.0, CYAN));
+                }
+            });
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        ratatui::widgets::Widget::render(canvas, area, &mut buf);
+        (area.y..area.bottom())
+            .filter(|&r| buf[(col, r)].symbol() != " ")
+            .collect()
+    }
+
+    /// Draw `app` in a `size` terminal: the tongue handle is drawn once, in
+    /// its cell, between the walls there, and a press on it takes hold of
+    /// the tongue without moving it.
+    fn check_handle(app: &mut App, rx: &Receiver<Cmd>, size: (u16, u16), what: &str) {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let mut term = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer();
+        let a = app.tract_area;
+        let shown: Vec<(u16, u16)> = (a.y..a.bottom())
+            .flat_map(|r| (a.x..a.right()).map(move |c| (c, r)))
+            .filter(|&p| buf[p].symbol() == "◆")
+            .collect();
+        let handle = app.tongue_cell();
+        assert_eq!(shown, Vec::from_iter(handle), "{what}");
+        let (col, row) = handle.unwrap();
+        let upper = wall_rows(a, &app.snap.diameters, 1.0, col);
+        let lower = wall_rows(a, &app.snap.diameters, -1.0, col);
+        assert!(
+            upper.first().is_some_and(|&u| row >= u),
+            "{what}: handle in row {row}, above the upper wall {upper:?}"
+        );
+        assert!(
+            lower.last().is_some_and(|&l| row <= l),
+            "{what}: handle in row {row}, below the lower wall {lower:?}"
+        );
+        while rx.try_recv().is_ok() {}
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            app.mouse(MouseEvent {
+                kind,
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        let cmds: Vec<Cmd> = rx.try_iter().collect();
+        let [Cmd::Tongue(i, d)] = cmds[..] else {
+            panic!("{what}: a press on the handle sent {cmds:?}");
+        };
+        let (ti, td) = app.snap.tongue;
+        assert!(
+            (i - ti).abs() < 1e-3 && (d - td).abs() < 1e-3,
+            "{what}: the press moved the tongue to {:?}",
+            (i, d)
+        );
+    }
+
+    /// Wherever the voice puts the tongue, for any vowel, body size and
+    /// engine and at any terminal size, the handle is drawn between the
+    /// walls of the mouth, and a press on it takes hold of the tongue.
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn the_tongue_handle_stays_in_the_mouth() {
+        use synthie_trombone::{Engine, Persona, Preset, TONGUE_DIAMETER, TONGUE_INDEX};
+
+        // The shortest and longest tracts the size dial gives any voice.
+        let (_, small, large) = DIALS[0];
+        let lengths: Vec<f32> = Preset::ALL
+            .iter()
+            .flat_map(|p| {
+                [small, large].map(|size| {
+                    let persona = Persona {
+                        size,
+                        ..Persona::NEUTRAL
+                    };
+                    p.settings().with_persona(&persona).tract_length
+                })
+            })
+            .collect();
+        let shortest = lengths.iter().copied().fold(f32::INFINITY, f32::min);
+        let longest = lengths.iter().copied().fold(0.0, f32::max);
+        // Every tongue position on a grid over its whole range, and every
+        // vowel the keys and the tract view set.
+        let (i0, i1) = (*TONGUE_INDEX.start(), *TONGUE_INDEX.end());
+        let (d0, d1) = (*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end());
+        let mut tongues = Vec::new();
+        for k in 0..=17 {
+            for j in 0..=8 {
+                tongues.push((
+                    i0 + (i1 - i0) * k as f32 / 17.0,
+                    d0 + (d1 - d0) * j as f32 / 8.0,
+                ));
+            }
+        }
+        let vowels: Vec<Phoneme> = VOWEL_KEYS
+            .iter()
+            .map(|&(_, v)| v)
+            .chain(LANDMARKS.iter().map(|&(_, v)| v))
+            .collect();
+
+        let mut checked = 0;
+        for engine in [Engine::Classic, Engine::Physical] {
+            let (cmd, rx) = bounded::<Cmd>(1024);
+            let (_snap_tx, snapshots) = bounded(1);
+            let (_trash_tx, trash) = bounded(1);
+            let link = Link {
+                cmd,
+                snapshots,
+                trash,
+                sample_rate: 48_000.0,
+                microphone: false,
+                microphone_name: None,
+            };
+            let mut app = App::new(link, true, engine);
+            for length in [shortest, 1.0, longest] {
+                let shapes = tongues
+                    .iter()
+                    .map(|&t| (Some(t), None))
+                    .chain(vowels.iter().map(|&v| (None, Some(v))));
+                for (tongue, vowel) in shapes {
+                    let mut voice = Trombone::new(48_000.0);
+                    voice.set_engine(engine);
+                    voice.set_tract_length(length);
+                    if let Some(v) = vowel {
+                        voice.articulate_phoneme(v);
+                    }
+                    if let Some((i, d)) = tongue {
+                        voice.set_tongue(i, d);
+                    }
+                    voice.settle();
+                    app.snap.diameters = *voice.diameters();
+                    app.snap.targets = *voice.target_diameters();
+                    app.snap.tongue = voice.tongue();
+                    for (w, h) in [(80, 24), (120, 34), (200, 60)] {
+                        let what = format!(
+                            "{engine:?}, length {length}, {tongue:?} {vowel:?}, {w}×{h}, tongue at {:?}",
+                            app.snap.tongue
+                        );
+                        check_handle(&mut app, &rx, (w, h), &what);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        println!("tongue handle checked in {checked} frames");
     }
 }
