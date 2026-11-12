@@ -40,9 +40,8 @@ of audio, and a debug build can't keep up with the sound card.
 ## Playing the terminal app
 
 The app starts in play mode, with the piano on your home row. Hold a key to
-sing, change the vowel with the number keys, and drag across the tract with
-the mouse to shape consonants the way you would with a finger in the
-original.
+sing, change the vowel with the number keys, and work everything else with
+the mouse: the tract, the tongue, the velum, and every meter in the panels.
 
 | Key | Action |
 |---|---|
@@ -50,15 +49,24 @@ original.
 | `Space` or `Esc` | stop singing (and speaking) |
 | `1` … `0` | vowels IY IH EH AE AA AH AO UH UW ER |
 | arrow keys | move the tongue body |
-| left-drag on the tract | constrict it |
-| right-drag on the tract | move the tongue |
 | `v` / `V` | next / previous voice |
+| `'`, `PgUp` / `PgDn`, `Del` | pick a persona dial, turn it, back to neutral |
 | `n`, `b`, `i` | nasal (velum), lip pop, drone |
 | `[` `]`, `-` `=` | tenseness, vibrato |
 | `m`, `r`, `c` | pitch wobble, reverb amount, clear constrictions |
+| `\` | switch between the classic and the physical engine |
 | `Tab` | type a line; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
+
+| Mouse | Action |
+|---|---|
+| left-drag in the mouth or throat | a finger on the wall: the row of the midline shuts the tract (a stop), the row beside it leaves a gap that hisses (a fricative), rows further out only shape it |
+| left-drag the tongue handle `◆`, or Shift-drag anywhere | move the tongue body (right-drag also works where the terminal passes it on) |
+| click a vowel mark (`i e a o u`) | that vowel |
+| click in the nose; drag in the gap under it | open or shut the velum; set how far it hangs open |
+| click or drag a meter | tenseness, tongue, velum, vibrato, reverb, loudness (lung pressure, physical engine), and the four persona dials |
+| click `[-]` `[+]`, `wobble`, `drone`, `engine` | octave and the toggles |
 
 Notes stop when you let go of the key in terminals that report key releases
 (kitty, WezTerm, foot, Ghostty). In other terminals a note holds until you
@@ -90,6 +98,54 @@ of `VoiceSettings`, so your own voice starts from a preset and changes what
 you like. With the `serde` feature, the settings can live in your game's
 data files.
 
+### Personas and profiles
+
+Describing a voice by its parameters is slow. A `Persona` describes it the
+way you would describe a person, with four dials that each move several
+parameters together, as they move together in people:
+
+| Dial | From … to | What moves |
+|---|---|---|
+| `size` | 0.6 (small body) … 1.4 (large) | tract length, and pitch faster than length |
+| `effort` | 0 (murmur) … 1 (calling out) | lung pressure, firmer folds, higher and livelier pitch, quicker articulators |
+| `breathiness` | 0 (pressed) … 1 (breathy) | how much air escapes past the folds |
+| `clarity` | 0 (casual) … 1 (careful) | earlier and faster articulators, longer sounds, firmer closures |
+
+```sh
+cargo run --release -p synthie-trombone-cli -- --engine physical --voice bright --size 0.8 --effort 0.7
+cargo run --release -p synthie-trombone --example say -- --engine physical --breathiness 0.7 "Hello there."
+```
+
+```rust
+use synthie_trombone::{Persona, Preset};
+
+let voice = Preset::Bright.settings().with_persona(&Persona {
+    size: 0.8,
+    effort: 0.7,
+    ..Persona::NEUTRAL
+});
+```
+
+Underneath sit the thirty numbers of `Tuning`: lung pressure and how the
+folds start, the efficiency and colour of hiss, the width of consonant
+gaps, how long each kind of sound lasts and how fast the articulators move.
+A voice with its persona and tuning can be kept as a JSON profile (feature
+`profile`); every key is optional and a misspelt one is an error:
+
+```json
+{
+  "persona": { "size": 0.9, "clarity": 0.7 },
+  "pitch": 120.0,
+  "tuning": { "lead": 0.035, "fricative_length": 0.11 }
+}
+```
+
+```sh
+cargo run --release -p synthie-trombone --example say -- --engine physical --profile my-voice.json "Hello there."
+cargo run --release -p synthie-trombone --example say -- --dump-profile     # the voice in use, as a profile
+cargo run --release -p synthie-trombone-cli -- --engine physical --profile my-voice.json
+```
+
 ## The physical engine
 
 Next to Pink Trombone's own model there is a second one, `Engine::Physical`,
@@ -118,6 +174,20 @@ use synthie_trombone::{Engine, Preset, Talker};
 let voice = Preset::Deep.settings().with_engine(Engine::Physical);
 let line = Talker::new(44_100.0, voice).bake("Stay a while, and listen.");
 ```
+
+The physical voice also listens to itself. Each block it reads what its
+own air is doing and corrects two things a person corrects by ear: a gap
+that is meant to hiss but is shut, choked, or too fine for its stream to
+turn turbulent is widened until it does (and the place remembers, so the
+next fricative there starts right); and a vowel that starts to hiss, as a
+close /u/ does in a loud voice, is opened a little around the place that
+hisses and let back when it is quiet. Neither moves anything by more than
+0.15 in diameter, and the default voice is left as it was. That is what
+lets a persona make the body small or the breath strong without breaking
+the consonants, and what lets a finger in the app find a fricative without
+landing on its exact width. `examples/hiss.rs` prints the levels over body
+size and lung pressure; `Trombone::set_regulation(false)` switches the
+correction off to compare.
 
 It is held to published measurements of real voices by tests
 (`crates/synthie-trombone/tests/physical_gates.rs` and
