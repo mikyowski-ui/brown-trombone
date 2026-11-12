@@ -499,6 +499,8 @@ mod tests {
             snapshots,
             trash,
             sample_rate: 48_000.0,
+            microphone: false,
+            microphone_name: None,
         };
         let mut app = App::new(link, true, synthie_trombone::Engine::Classic);
         app.preset = synthie_trombone::Preset::Critter;

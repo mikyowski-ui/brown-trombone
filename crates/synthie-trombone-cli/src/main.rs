@@ -54,6 +54,15 @@ struct Cli {
     /// Clarity of articulation, 0 (casual) to 1 (careful).
     #[arg(long, default_value_t = Persona::NEUTRAL.clarity)]
     clarity: f32,
+    /// Copy what the microphone hears: pitch, vowels and hiss (physical
+    /// engine). Wear headphones, or the voice will hear itself; `` ` ``
+    /// switches it off and on while playing.
+    #[arg(long)]
+    mimic: bool,
+    /// Microphone for `--mimic`: part of an input device's name (the
+    /// system's default, then a sound server, are tried otherwise).
+    #[arg(long, requires = "mimic")]
+    mic: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -107,22 +116,40 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Command::Sing(args)) => sing::run(&args, cli.engine),
         None => {
-            let (preset, base, persona) = cli.voice()?;
+            let (preset, mut base, persona) = cli.voice()?;
+            if cli.mimic {
+                // The map from formants to shapes is the physical engine's.
+                base.engine = Engine::Physical;
+            }
             // A profile may name its own sound model.
-            tui(base.engine, preset, base, persona)
+            tui(
+                base.engine,
+                preset,
+                base,
+                persona,
+                cli.mimic,
+                cli.mic.as_deref(),
+            )
         }
     }
 }
 
-fn tui(engine: Engine, preset: Preset, base: VoiceSettings, persona: Persona) -> Result<()> {
+fn tui(
+    engine: Engine,
+    preset: Preset,
+    base: VoiceSettings,
+    persona: Persona,
+    mimic: bool,
+    microphone: Option<&str>,
+) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = restore();
         original_hook(info);
     }));
 
-    let (stream, link) = audio::start()?;
-    let _stream = stream;
+    let (streams, link) = audio::start(mimic, microphone)?;
+    let _streams = streams;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

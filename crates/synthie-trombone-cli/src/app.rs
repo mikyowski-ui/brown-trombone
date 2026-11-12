@@ -185,6 +185,9 @@ pub struct App {
     grab: Option<Grab>,
     pop_until: Option<Instant>,
     pub status: String,
+    /// Mimic mode: copying what the microphone hears (`None` without a
+    /// microphone).
+    pub mimic: Option<bool>,
 }
 
 /// Lowercase name of a sound model.
@@ -232,6 +235,7 @@ impl App {
             grab: None,
             pop_until: None,
             status: String::new(),
+            mimic: None,
         };
         app.status = if keyboard_release {
             "hold a piano key to sing · Space stops · Tab to type text".into()
@@ -240,6 +244,9 @@ impl App {
         };
         app.send(Cmd::Model(engine));
         app.send(Cmd::Note(app.note_f32()));
+        if app.link.microphone {
+            app.set_mimic(true);
+        }
         app
     }
 
@@ -261,6 +268,30 @@ impl App {
     pub fn dials(&self) -> [f32; 4] {
         let p = &self.persona;
         [p.size, p.effort, p.breathiness, p.clarity]
+    }
+
+    /// Start or stop copying the microphone.
+    fn set_mimic(&mut self, on: bool) {
+        if self.mimic.is_none() && !self.link.microphone {
+            self.status = "no microphone: start with --mimic".into();
+            return;
+        }
+        if on && self.engine != Engine::Physical {
+            self.toggle_engine();
+        }
+        self.mimic = Some(on);
+        self.send(Cmd::Mimic(on));
+        self.status = if on {
+            format!(
+                "mimic: copying {} (wear headphones) · ` stops",
+                self.link
+                    .microphone_name
+                    .as_deref()
+                    .unwrap_or("the microphone")
+            )
+        } else {
+            "mimic off · ` starts it again".into()
+        };
     }
 
     /// Hand the keys the next persona dial.
@@ -325,6 +356,20 @@ impl App {
             self.snap = s;
         }
         while self.link.trash.try_recv().is_ok() {}
+        if self.mimic == Some(true)
+            && let Some(h) = self.snap.heard
+        {
+            self.status = if h.voiced {
+                format!(
+                    "mimic: hearing {:.0} Hz, formants {:.0} / {:.0} Hz · ` stops",
+                    h.pitch, h.formants[0], h.formants[1]
+                )
+            } else if h.hiss > 0.5 {
+                format!("mimic: hearing hiss at {:.0} Hz · ` stops", h.brightness)
+            } else {
+                "mimic: listening (wear headphones) · ` stops".into()
+            };
+        }
         if self.pop_until.is_some_and(|t| Instant::now() >= t) {
             self.pop_until = None;
             self.send(Cmd::Constriction(SLOT_POP, None));
@@ -443,6 +488,7 @@ impl App {
             }
             '\\' => self.toggle_engine(),
             '\'' => self.next_dial(),
+            '`' => self.set_mimic(self.mimic != Some(true)),
             '[' => self.set_tenseness(self.tenseness - 0.05),
             ']' => self.set_tenseness(self.tenseness + 0.05),
             '-' => self.set_vibrato(self.vibrato - 0.005),
@@ -907,6 +953,8 @@ mod tests {
             snapshots,
             trash,
             sample_rate: 48_000.0,
+            microphone: false,
+            microphone_name: None,
         };
         let app = App::new(link, release, Engine::Classic);
         while rx.try_recv().is_ok() {}
@@ -1132,6 +1180,28 @@ mod tests {
             next.with_persona(&app.persona),
             "the next voice, with the same persona"
         );
+    }
+
+    #[test]
+    fn mimic_needs_a_microphone_and_the_physical_engine() {
+        // Without a microphone the key only says how to get one.
+        let (mut app, rx) = app(true);
+        app.key(key('`', KeyKind::Press));
+        assert!(sent(&rx).is_empty());
+        assert!(app.status.contains("--mimic"), "{}", app.status);
+        // With one, it switches to the physical engine and starts copying;
+        // the same key stops it.
+        app.link.microphone = true;
+        app.key(key('`', KeyKind::Press));
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Model(Engine::Physical), Cmd::Mimic(true)]),
+            "{cmds:?}"
+        );
+        assert_eq!((app.mimic, app.engine), (Some(true), Engine::Physical));
+        app.key(key('`', KeyKind::Press));
+        assert!(matches!(sent(&rx)[..], [Cmd::Mimic(false)]));
+        assert_eq!(app.mimic, Some(false));
     }
 
     #[test]

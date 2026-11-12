@@ -14,7 +14,6 @@
 #[path = "../examples/support/spectrum.rs"]
 mod spectrum;
 #[path = "../examples/support/survey.rs"]
-#[allow(dead_code)]
 mod survey;
 
 use synthie_trombone::listen::Listener;

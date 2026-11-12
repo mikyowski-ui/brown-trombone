@@ -5,7 +5,11 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender, bounded};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use synthie::audio::fx::Reverb;
+use synthie_trombone::listen::{Heard, Listener};
+use synthie_trombone::mimic::{Gesture, Mimic};
 use synthie_trombone::speech::{Speaker, Utterance};
 use synthie_trombone::{
     Constriction, Engine as SoundModel, MAX_CONSTRICTIONS, N, NOSE_LEN, Phoneme, Trombone,
@@ -38,6 +42,8 @@ pub enum Cmd {
     Vowel(Phoneme),
     Speak(Utterance),
     StopSpeaking,
+    /// Copy what the microphone hears (physical engine), or stop.
+    Mimic(bool),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -59,6 +65,8 @@ pub struct Snapshot {
     pub speaking: Option<usize>,
     pub scope: [f32; SCOPE_LEN],
     pub level: f32,
+    /// What the microphone last heard, while mimicking.
+    pub heard: Option<Heard>,
 }
 
 impl Snapshot {
@@ -82,6 +90,7 @@ impl Snapshot {
             speaking: speaker.current().map(|(i, _)| i),
             scope: scope.ordered(),
             level: scope.level,
+            heard: None,
         }
     }
 }
@@ -146,7 +155,17 @@ struct Engine {
     cmd_rx: Receiver<Cmd>,
     snap_tx: Sender<Snapshot>,
     trash_tx: Sender<Utterance>,
+    /// Gestures from the microphone thread, with what it heard.
+    ear_rx: Option<Receiver<(Gesture, Heard)>>,
+    /// The voice's tract length, for the microphone thread (`f32` bits).
+    size: Arc<AtomicU32>,
+    mimicking: bool,
+    heard: Option<Heard>,
 }
+
+/// Articulator speed while mimicking: the person being copied has already
+/// taken the time to move their own.
+const MIMIC_SPEED: f32 = 8.0;
 
 impl Engine {
     fn apply(&mut self, cmd: Cmd) {
@@ -202,6 +221,33 @@ impl Engine {
                 let _ = self.trash_tx.try_send(old);
             }
             Cmd::StopSpeaking => self.stop_speaking(),
+            Cmd::Mimic(on) => {
+                self.mimicking = on && self.ear_rx.is_some();
+                self.heard = None;
+                self.stop_speaking();
+                let v = &mut self.voice;
+                if self.mimicking {
+                    v.set_articulation_speed(MIMIC_SPEED);
+                    v.set_glide(f32::INFINITY);
+                    v.set_always_voice(false);
+                } else {
+                    Gesture::REST.apply(v);
+                    self.restore_instrument();
+                }
+            }
+        }
+        self.size
+            .store(self.voice.tract_length().to_bits(), Ordering::Relaxed);
+    }
+
+    /// Carry out what the microphone thread asks for.
+    fn follow(&mut self) {
+        let Some(rx) = &self.ear_rx else { return };
+        while let Ok((gesture, heard)) = rx.try_recv() {
+            if self.mimicking && !self.speaker.is_speaking() {
+                gesture.apply(&mut self.voice);
+                self.heard = Some(heard);
+            }
         }
     }
 
@@ -227,6 +273,7 @@ impl Engine {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             self.apply(cmd);
         }
+        self.follow();
         for frame in data.chunks_mut(channels) {
             let dry = self.speaker.process(&mut self.voice);
             if self.was_speaking && !self.speaker.is_speaking() {
@@ -240,7 +287,8 @@ impl Engine {
             self.since_snapshot += 1;
             if self.since_snapshot >= self.snapshot_every {
                 self.since_snapshot = 0;
-                let snap = Snapshot::capture(&self.voice, &self.speaker, &self.scope);
+                let mut snap = Snapshot::capture(&self.voice, &self.speaker, &self.scope);
+                snap.heard = self.heard;
                 let _ = self.snap_tx.try_send(snap);
             }
         }
@@ -253,10 +301,106 @@ pub struct Link {
     pub snapshots: Receiver<Snapshot>,
     pub trash: Receiver<Utterance>,
     pub sample_rate: f32,
+    /// Whether a microphone is open for mimic mode, and which.
+    pub microphone: bool,
+    pub microphone_name: Option<String>,
 }
 
-/// Open the default output device and start the engine.
-pub fn start() -> Result<(cpal::Stream, Link)> {
+/// Open the default input device and listen to it: every measurement is
+/// turned into a gesture for the voice and sent to the audio thread. The
+/// search for a vowel shape runs here, off the output callback.
+fn listen(
+    size: &Arc<AtomicU32>,
+    ear_tx: &Sender<(Gesture, Heard)>,
+    wanted: Option<&str>,
+) -> Result<(cpal::Stream, String)> {
+    let host = cpal::default_host();
+    let name = |d: &cpal::Device| {
+        d.description()
+            .map_or_else(|_| "unnamed".to_string(), |x| x.name().to_string())
+    };
+    // The system's default first, then sound servers, then the rest: on
+    // some systems the default capture device cannot be opened while a
+    // sound server holds the card.
+    let mut devices: Vec<cpal::Device> = host.default_input_device().into_iter().collect();
+    let mut others: Vec<cpal::Device> = host
+        .input_devices()
+        .context("failed to list audio inputs")?
+        .collect();
+    others.sort_by_key(|d| {
+        let n = name(d).to_lowercase();
+        !(n.contains("pipewire") || n.contains("pulse"))
+    });
+    devices.extend(others);
+    if let Some(wanted) = wanted {
+        let wanted = wanted.to_lowercase();
+        devices.retain(|d| name(d).to_lowercase().contains(&wanted));
+    }
+    let mut tried = Vec::new();
+    for device in devices {
+        let label = name(&device);
+        match open(&device, Arc::clone(size), ear_tx.clone()) {
+            Ok(stream) => return Ok((stream, label)),
+            Err(e) => tried.push(format!("{label}: {e:#}")),
+        }
+    }
+    anyhow::bail!(
+        "no microphone could be opened for --mimic{}",
+        if tried.is_empty() {
+            ": no audio input found".to_string()
+        } else {
+            format!(":\n  {}", tried.join("\n  "))
+        }
+    )
+}
+
+/// Open one input device and start listening to it.
+fn open(
+    device: &cpal::Device,
+    size: Arc<AtomicU32>,
+    ear_tx: Sender<(Gesture, Heard)>,
+) -> Result<cpal::Stream> {
+    let config = device
+        .default_input_config()
+        .context("failed to query its config")?;
+    #[allow(clippy::cast_precision_loss)]
+    let sample_rate = config.sample_rate() as f32;
+    let channels = usize::from(config.channels()).max(1);
+    let stream_config = cpal::StreamConfig {
+        channels: config.channels(),
+        sample_rate: config.sample_rate(),
+        buffer_size: cpal::BufferSize::Default,
+    };
+    anyhow::ensure!(
+        (12_000.0..=96_000.0).contains(&sample_rate),
+        "unsupported sample rate {sample_rate}"
+    );
+    let mut listener = Listener::new(sample_rate);
+    let mut mimic = Mimic::new(1.0);
+    let stream = device
+        .build_input_stream(
+            stream_config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                mimic.set_tract_length(f32::from_bits(size.load(Ordering::Relaxed)));
+                for frame in data.chunks(channels) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let mono = frame.iter().sum::<f32>() / channels as f32;
+                    if let Some(heard) = listener.push(mono) {
+                        let _ = ear_tx.try_send((mimic.follow(&heard), heard));
+                    }
+                }
+            },
+            |_err| {},
+            None,
+        )
+        .context("failed to open it")?;
+    stream.play().context("failed to start it")?;
+    Ok(stream)
+}
+
+/// Open the default output device and start the engine; with `mimic`, the
+/// default microphone too. The streams stop when dropped.
+pub fn start(mimic: bool, microphone: Option<&str>) -> Result<(Vec<cpal::Stream>, Link)> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -276,6 +420,18 @@ pub fn start() -> Result<(cpal::Stream, Link)> {
     let (cmd_tx, cmd_rx) = bounded(256);
     let (snap_tx, snap_rx) = bounded(4);
     let (trash_tx, trash_rx) = bounded(16);
+    let size = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+    let mut streams = Vec::new();
+    let mut heard_on = None;
+    let ear_rx = if mimic {
+        let (ear_tx, ear_rx) = bounded(64);
+        let (stream, name) = listen(&size, &ear_tx, microphone)?;
+        streams.push(stream);
+        heard_on = Some(name);
+        Some(ear_rx)
+    } else {
+        None
+    };
 
     let mut reverb = Reverb::new();
     reverb.set_params(0.55, 0.45);
@@ -303,6 +459,10 @@ pub fn start() -> Result<(cpal::Stream, Link)> {
         cmd_rx,
         snap_tx,
         trash_tx,
+        ear_rx,
+        size,
+        mimicking: false,
+        heard: None,
     };
 
     let stream = device
@@ -314,14 +474,17 @@ pub fn start() -> Result<(cpal::Stream, Link)> {
         )
         .context("failed to build output stream")?;
     stream.play().context("failed to start audio stream")?;
+    streams.push(stream);
 
     Ok((
-        stream,
+        streams,
         Link {
             cmd: cmd_tx,
             snapshots: snap_rx,
             trash: trash_rx,
             sample_rate,
+            microphone: heard_on.is_some(),
+            microphone_name: heard_on,
         },
     ))
 }

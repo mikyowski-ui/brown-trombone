@@ -19,11 +19,11 @@
 //!
 //! [`Listener`]: crate::listen::Listener
 
+use crate::Phoneme;
 use crate::inverse::{self, Shape};
 use crate::listen::Heard;
 use crate::tract::Constriction;
 use crate::voice::{SLOT_MAIN, Trombone};
-use crate::Phoneme;
 
 /// Share of the sound that must be hiss for it to count as a fricative.
 const HISS: f32 = 0.5;
