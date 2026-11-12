@@ -61,8 +61,16 @@ fn consonants() -> Vec<f32> {
     out
 }
 
+/// "Hello there, how are you? Pink trombone, 42." as the text front end
+/// read it when the hashes were recorded. It is given as phonemes (`0`
+/// keeps a word unaccented) so that improvements to the front end, which
+/// now accents hel*lo* and trom*bone*, do not move the classic engine's
+/// baseline.
+const SPOKEN: &str = "[HH AX1 L OW] [DH EH1 R], [HH AW1] [AA0 R] [Y UW0]? \
+                      [P IH1 NG K] [T R AA1 M B OW N], [F AO1 R T IY] [T UW1].";
+
 fn spoken(preset: Preset) -> Vec<f32> {
-    Talker::new(22_050.0, preset).bake("Hello there, how are you? Pink trombone, 42.")
+    Talker::new(22_050.0, preset).bake(SPOKEN)
 }
 
 const GOLDEN: &[(&str, u64)] = &[

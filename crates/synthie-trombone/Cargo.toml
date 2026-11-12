@@ -15,13 +15,16 @@ keywords             = ["synthesizer", "speech", "vocal-tract", "waveguide", "au
 categories           = ["multimedia::audio", "simulation", "no-std"]
 
 [features]
-default = ["std"]
+default = ["std", "dictionary"]
 ## Native `std` float math. Without it, enable `libm` for a `no_std` build.
 std     = ["alloc"]
 ## `libm` float math for `no_std` targets.
 libm    = ["dep:libm"]
 ## Text-to-speech front end ([`speech`]): needs an allocator to compile text.
 alloc   = []
+## The front end's larger pronouncing dictionary (about 22 KB, 1200 less
+## frequent irregular words); a 32 KB core of 2000 is always built in.
+dictionary = []
 ## `Serialize`/`Deserialize` for `VoiceSettings`, `Preset` and `Prosody`.
 serde   = ["dep:serde"]
 ## Voice profiles as JSON files (`VoiceSettings::with_profile`).
