@@ -63,6 +63,8 @@ Material sets (`material/*.tsv`, built by `material.py build`):
 | `human` | 16 | LibriSpeech dev-clean sentences. The `human` system plays the recordings; every other system synthesizes the transcript, so all systems are compared on the same text (shown as `librispeech` in the report). |
 | `vowel` | 96 | probe set (not in the default scoreboard): every vowel alone and in five CVC frames |
 | `voicing` | 110 | probe set: P/B T/D K/G S/Z F/V minimal pairs (initial, medial, final) and VCVs |
+| `harvard_tune` / `harvard_heldout` | 20 / 20 | vowel tuner: Harvard lists 3 and 4 (tuning) and 5 and 6 (held out); every vowel slot scored |
+| `carrier_tune` / `carrier_heldout` | 126 / 126 | vowel tuner: every stressed vowel in four CVC frames inside two carrier phrases, AX in three words; tuning and held-out splits share no frame and no carrier; only the CVC's vowel is scored |
 
 The probe sets have a sixth column, `meta` (`key=value;...`): the scored
 slot, the intended phoneme, the frame, the minimal-pair twin and so on.
@@ -163,6 +165,28 @@ normalizer or the decoder is wrong and no other number from the judge can be
 trusted: fix the judge, do not move the threshold. `report/judge.md` prints
 PASS or FAIL at the top.
 
+## Vowels: the lab and the tuner
+
+```sh
+uv run python vowel_lab.py eval --split tune                     # vowel error and margins, per vowel
+uv run python vowel_lab.py eval --split heldout --profile p.json --name p
+uv run python vowel_tune.py --base base.json --out out/vowels-tuned.json   # coordinate search on the tuning split
+```
+
+`vowel_lab.py` scores every vowel slot of a split under a profile (renders
+in a scratch folder, GPU lock held only while judging): **tune** =
+`sentence_tune`, `harvard_tune`, `carrier_tune`; **heldout** =
+`sentence_heldout`, `harvard_heldout`, `carrier_heldout`, `human` (the
+held-out split is never tuned on). A profile may carry a `"vowels"` object
+of F1/F2/F3 targets (adult man, Hz) keyed `IH`, `AY<`, `AY>`, `IH>`; `bin/say`
+solves their shapes through the babble map at start-up, so a candidate
+needs no rebuild. `vowel_tune.py` moves F1 and F2 of every vowel shape in
+steps, within 12 % (F1) and 10 % (F2) of the published value, keeping the
+vowels' order in F1 and F2, with a mild pull back to the published value;
+the objective is the mean clipped margin over the tuning split. Bake a
+result into `crates/synthie-trombone/src/vowel_targets.rs` and regenerate
+the shapes (`cargo run -p synthie-trombone --example vowel_size --release`).
+
 ## Tuning
 
 ```sh
@@ -218,7 +242,9 @@ Whisper check.
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
 | `tune.py` | the CMA-ES tuner. |
-| `params.json` | the 30 tuning parameters: `lo`, `hi`, `default`, `pass` (same content as `bin/say --dump-parameters`). |
+| `vowel_lab.py` | vowel error and margins per vowel under a profile, on the tuning or held-out split. |
+| `vowel_tune.py` | coordinate search over the vowel targets on the tuning split. |
+| `params.json` | the tuning parameters: `lo`, `hi`, `default`, `pass`; passes a and b for `tune.py`, pass c (vowel lengths and glides) for reference. |
 | `data/w2v_vocab.json` | the phoneme model's tokenizer vocabulary (bundled; checked against the model at load). |
 | `data/fold_table.tsv` | every model token and the phonemes it folds to, for review (a test checks it is current). |
 | `tests/` | pytest: normalizer (every symbol maps, round trips, diphthongs and affricates as single model tokens, eSpeak agreement) and model-free parts of the judge and tuner. |

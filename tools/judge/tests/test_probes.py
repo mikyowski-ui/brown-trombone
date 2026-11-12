@@ -32,11 +32,18 @@ BLANK = VOCAB[A.BLANK_TOKEN]
 
 @pytest.mark.parametrize("name", material.PROBE_SETS)
 def test_probe_material_is_current(name):
-    built = {"vowel": material.build_vowel, "voicing": material.build_voicing}[name]()
+    built = {
+        "vowel": material.build_vowel,
+        "voicing": material.build_voicing,
+        "carrier_tune": lambda: material.build_carrier("carrier_tune"),
+        "carrier_heldout": lambda: material.build_carrier("carrier_heldout"),
+        "harvard_tune": lambda: material.build_sentences("harvard_tune", material.HARVARD_TUNE, "harv"),
+        "harvard_heldout": lambda: material.build_sentences("harvard_heldout", material.HARVARD_HELDOUT, "harv"),
+    }[name]()
     assert material.load([name]) == built, f"material/{name}.tsv is stale: run `uv run python material.py build`"
 
 
-@pytest.mark.parametrize("name", material.PROBE_SETS)
+@pytest.mark.parametrize("name", [s for s in material.PROBE_SETS if s not in material.SENTENCE_SETS])
 def test_probe_items_map_through_arpabet(name):
     items = material.load([name])
     assert len({it.id for it in items}) == len(items)
