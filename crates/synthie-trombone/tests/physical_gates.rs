@@ -14,12 +14,16 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 use synthie_trombone::{
-    Constriction, Engine, GlottalSource, Persona, Phoneme, Preset, SLOT_MAIN, Talker, Trombone,
-    VoiceSettings,
+    Articulation, Constriction, Engine, GlottalSource, Persona, Phoneme, Preset, SLOT_MAIN, Talker,
+    Trombone, VoiceSettings,
 };
 
 const SR: f32 = 48_000.0;
 
+#[path = "../examples/support/place.rs"]
+mod place;
+#[path = "../examples/support/spectrum.rs"]
+mod spectrum;
 #[path = "../examples/support/stops.rs"]
 mod stops;
 
@@ -1513,9 +1517,19 @@ fn stop_releases_are_bursts_not_clicks() {
     // samples after a long closed phase, in vowels, not at consonants; and
     // the whisper (8; measured 5.8), where it is the hiss of the breath
     // through a tongue tip closing on a wide-open glottis, against vowels
-    // that are themselves only breath. No kind of stop bursts louder on
+    // that are themselves only breath. The elder has 2.5 (measured 2.1;
+    // it was under 1.5 before the articulators had two speeds): as the
+    // fast tongue tip shuts for a voiceless /tʃ dʒ t/ behind a slow body
+    // with the glottis opening, the air the closing front squeezes out
+    // of the lips leaves as a short hiss of noise in his low, quiet
+    // voice; it is noise, at a closure, not a click at a release (those
+    // stay under a quarter of a vowel peak). No kind of stop bursts louder on
     // average than 6 dB below the vowel that follows, and no single burst
-    // is louder than that vowel.
+    // is louder than that vowel; in the whisper, no more than 3 dB louder
+    // (measured +2.1, the /t/ of "two" before a whispered /u/, its faintest
+    // vowel: the tongue tip now leaves the mouth in front of it open, so its
+    // burst radiates as a real one does; it was under 0 dB when the tip's
+    // closure narrowed the whole front of the mouth).
     const AT_RELEASE: f32 = 0.25;
     const STEP: f32 = 1.5;
     const MEAN_BURST: f32 = -6.0;
@@ -1530,6 +1544,7 @@ fn stop_releases_are_bursts_not_clicks() {
         let (at_release, step) = match preset {
             Preset::Whisper => (0.5, 8.0),
             Preset::Critter => (AT_RELEASE, 4.0),
+            Preset::Elder => (AT_RELEASE, 2.5),
             _ => (AT_RELEASE, STEP),
         };
         let (mut worst, mut worst_release) = (0.0f32, 0.0f32);
@@ -1558,8 +1573,13 @@ fn stop_releases_are_bursts_not_clicks() {
                 mean <= MEAN_BURST,
                 "{preset} {p}: bursts {mean:+.1} dB on average"
             );
+            let max_burst = if preset == Preset::Whisper {
+                3.0
+            } else {
+                MAX_BURST
+            };
             assert!(
-                max <= MAX_BURST,
+                max <= max_burst,
                 "{preset} {p}: a burst {max:+.1} dB over the vowel"
             );
         }
@@ -1572,5 +1592,210 @@ fn stop_releases_are_bursts_not_clicks() {
             worst <= step,
             "{preset}: a step of {worst:.2} x the loudest vowel sample"
         );
+    }
+}
+
+// ----- place of articulation -------------------------------------------
+
+#[test]
+fn the_tongue_tip_is_quicker_than_the_tongue_body() {
+    // The tip, the blade and the lips are light; the tongue body and the
+    // jaw are heavy (in speech a tip gesture takes some 10 to 20 ms, a
+    // body movement between vowels 40 to 50 ms and more). Here a /t/ is
+    // released into /i/ out of /a/: the tip's cell opens and the body's
+    // cells move from /a/ to /i/, both from the same moment. Measured: the
+    // tip covers 63 % of its way in 11 ms, the body in 75.
+    let settled = |a: &Articulation| {
+        let mut t = Trombone::new(SR);
+        t.set_engine(Engine::Physical);
+        t.articulate(a);
+        t.settle();
+        *t.diameters()
+    };
+    let iy = Phoneme::Iy.articulation();
+    let mut t_on_aa = Phoneme::T.articulation();
+    t_on_aa.tongue = Phoneme::Aa.articulation().tongue;
+    let (from, to) = (settled(&t_on_aa), settled(&iy));
+    // The body's cell: the one that moves furthest between the vowels,
+    // well behind the tip.
+    let body = (12..28)
+        .max_by(|&a, &b| (to[a] - from[a]).abs().total_cmp(&(to[b] - from[b]).abs()))
+        .expect("cells");
+    let tip = 36;
+    let mut t = Trombone::new(SR);
+    t.set_engine(Engine::Physical);
+    synthie_trombone::speech::Speaker::prepare(&mut t);
+    t.articulate(&t_on_aa);
+    t.settle();
+    t.articulate(&iy);
+    let mut reached = [None; 2];
+    for n in 0..(0.4 * SR) as usize {
+        t.process();
+        let d = t.diameters();
+        for (k, &i) in [tip, body].iter().enumerate() {
+            let share = (d[i] - from[i]) / (to[i] - from[i]);
+            if reached[k].is_none() && share >= 0.63 {
+                reached[k] = Some(n as f32 / SR * 1000.0);
+            }
+        }
+    }
+    let (tip_ms, body_ms) = (reached[0].expect("tip"), reached[1].expect("body"));
+    println!(
+        "63 % of the way: tip (cell {tip}) {tip_ms:.0} ms, body (cell {body}) {body_ms:.0} ms"
+    );
+    assert!(tip_ms <= 35.0, "tip {tip_ms} ms");
+    assert!((50.0..=150.0).contains(&body_ms), "body {body_ms} ms");
+    assert!(
+        body_ms >= 2.5 * tip_ms,
+        "tip {tip_ms} ms, body {body_ms} ms"
+    );
+}
+
+#[test]
+fn stop_transitions_point_to_their_place() {
+    // The second formant at the onset of a vowel after a voiced stop
+    // points back at the place it was released from (Delattre, Liberman
+    // & Cooper 1955; Sussman's locus equations): below the vowel's own F2
+    // after /b/ (bilabial locus 700 to 1100 Hz), above it after /d/
+    // before back vowels and above /b/'s everywhere (alveolar, about
+    // 1800 Hz), and after /g/ high before back vowels, following the
+    // vowel, with a locus between the two and a slope well under 1.
+    let settings = stops::judge_voice();
+    let vowels = [Phoneme::Iy, Phoneme::Aa, Phoneme::Uw];
+    let mut velar = Vec::new();
+    for v in vowels {
+        let b = place::transition(&settings, Phoneme::B, v);
+        let d = place::transition(&settings, Phoneme::D, v);
+        let g = place::transition(&settings, Phoneme::G, v);
+        println!(
+            "{v}: vowel F2 {:.0} | onset after B {:.0}, D {:.0}, G {:.0} Hz",
+            b.mid[0], b.onset[0], d.onset[0], g.onset[0]
+        );
+        assert!(
+            b.onset[0] < 0.97 * b.mid[0],
+            "{v}: /b/ onset {:?} vs {:?}",
+            b.onset,
+            b.mid
+        );
+        assert!(
+            d.onset[0] > b.onset[0] + 100.0,
+            "{v}: /d/ {:?}, /b/ {:?}",
+            d.onset,
+            b.onset
+        );
+        if v != Phoneme::Iy {
+            assert!(
+                d.onset[0] > d.mid[0],
+                "{v}: /d/ onset {:?} vs {:?}",
+                d.onset,
+                d.mid
+            );
+            assert!(
+                g.onset[0] > g.mid[0] + 150.0,
+                "{v}: /g/ onset {:?} vs {:?}",
+                g.onset,
+                g.mid
+            );
+        }
+        velar.push((g.mid[0], g.onset[0]));
+    }
+    let (locus, slope) = place::locus(&velar);
+    println!("/g/ locus {locus:.0} Hz, slope {slope:.2}");
+    assert!(
+        (1400.0..=2300.0).contains(&locus) && slope < 0.8,
+        "/g/ locus {locus} slope {slope}"
+    );
+}
+
+/// The deepest notch of a murmur's transfer function between `lo` and
+/// `hi` Hz, if any is at least `depth` dB deep.
+fn notch_in(notches: &[place::Notch], lo: f32, hi: f32, depth: f32) -> Option<place::Notch> {
+    notches
+        .iter()
+        .filter(|n| (lo..=hi).contains(&n.hz) && n.depth >= depth)
+        .max_by(|a, b| a.depth.total_cmp(&b.depth))
+        .copied()
+}
+
+#[test]
+fn nasal_murmurs_have_the_antiresonance_of_their_place() {
+    // The mouth closed behind a nasal's closure is a side branch of the
+    // nose; its own resonance is an antiresonance of the murmur: 800 to
+    // 1000 Hz for /m/ (the whole mouth), higher for /n/ (1500 to 2000 Hz in
+    // men; here 1000 to 1200, above /m/'s), and above 3 kHz for /ŋ/, whose
+    // closure leaves almost nothing behind it. Measured on the settled
+    // shapes after /a/ and /i/: /m/ 825 and 910 Hz, /n/ 1190 and 1000 Hz,
+    // /ŋ/ nothing deeper than 11 dB below 1.3 kHz and 3670 Hz.
+    let settings = stops::judge_voice();
+    for v in [Phoneme::Aa, Phoneme::Iy] {
+        let m = place::murmur(&settings, Phoneme::M, v);
+        let n = place::murmur(&settings, Phoneme::N, v);
+        let ng = place::murmur(&settings, Phoneme::Ng, v);
+        let m0 = notch_in(&m, 600.0, 1300.0, 12.0).expect("an /m/ antiresonance");
+        let n0 = notch_in(&n, 600.0, 1300.0, 12.0).expect("an /n/ antiresonance");
+        println!(
+            "after {v}: /m/ {:.0} Hz ({:.0} dB), /n/ {:.0} Hz ({:.0} dB), /ŋ/ {:?}",
+            m0.hz,
+            m0.depth,
+            n0.hz,
+            n0.depth,
+            notch_in(&ng, 3000.0, 4000.0, 12.0).map(|x| x.hz)
+        );
+        assert!((750.0..=1000.0).contains(&m0.hz), "after {v}: /m/ {m0:?}");
+        assert!(n0.hz > m0.hz + 50.0, "after {v}: /n/ {n0:?}, /m/ {m0:?}");
+        assert!(
+            notch_in(&ng, 600.0, 1300.0, 12.0).is_none(),
+            "after {v}: /ŋ/ {ng:?}"
+        );
+        assert!(
+            notch_in(&ng, 3000.0, 4000.0, 12.0).is_some(),
+            "after {v}: /ŋ/ {ng:?}"
+        );
+    }
+}
+
+#[test]
+fn no_vowel_comes_between_the_consonants_of_a_cluster() {
+    // Movements between sounds must not be heard as sounds of their own.
+    // Between the middles of two consonants that follow one another, the
+    // tract's first resonance stays where a constriction holds it: under
+    // 400 Hz between two obstruents (an /l/ or a vowel has it higher), and
+    // under 600 Hz going into /l r/ (an /a/-like opening has 700). Measured
+    // on these words: no frame over either.
+    let settings = stops::judge_voice();
+    for word in place::CLUSTER_WORDS {
+        let s = place::speak(&settings, word, true);
+        for (a, b, _) in place::cluster_vowel_frames(&s, 0.0) {
+            let limit = if b.manner() == synthie_trombone::Manner::Approximant {
+                600.0
+            } else {
+                400.0
+            };
+            let open = place::cluster_vowel_frames(&s, limit)
+                .into_iter()
+                .find(|&(x, y, _)| (x, y) == (a, b))
+                .map_or(0, |e| e.2);
+            assert_eq!(
+                open, 0,
+                "{word}: {a}-{b} has {open} frames with F1 over {limit} Hz"
+            );
+        }
+    }
+}
+
+#[test]
+fn final_stops_are_released() {
+    // A stop at the end of a phrase is released, so it is heard: within
+    // 10 ms of the opening the output rises to no less than 36 dB under the
+    // vowel's peak (measured -18 to -31 dB; /k g/ were -49 and -45 dB, shut
+    // to the end, before the release segment existed).
+    let settings = stops::judge_voice();
+    for p in ["P", "B", "T", "D", "K", "G"] {
+        let r = stops::record(&settings, &format!("[AA1 {p}]"));
+        let bursts = stops::bursts(&r);
+        let b = bursts.last().expect("a release");
+        let level = stops::db(b.peak) - stops::db(b.vowel);
+        println!("final {p}: {level:+.1} dB re the vowel");
+        assert!(level > -36.0, "final {p}: {level} dB");
     }
 }

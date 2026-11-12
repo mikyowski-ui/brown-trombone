@@ -208,6 +208,9 @@ def test_parse_arpabet():
         ("K K L AE NG K S SIL", ["K", "L", "AE", "NG", "K", "S"]),
         ("B AE T", ["B", "AE", "T"]),  # already one per phoneme
         ("AA T", ["AA", "T"]),  # final stop: nothing to undo
+        ("AA D D SIL", ["AA", "D"]),  # physical: a final stop's release
+        ("SIL DH DH AX K AE T T", ["DH", "AX", "K", "AE", "T"]),  # dental onset after a pause
+        ("AX DH AX", ["AX", "DH", "AX"]),
     ],
 )
 def test_parse_engine_line(line, phones):

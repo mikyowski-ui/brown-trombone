@@ -1,4 +1,4 @@
-//! [`Tuning`]: the forty-five numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the forty-nine numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -173,8 +173,10 @@ tuning! {
 
     /// Head start the articulators get on each sound, s (physical engine).
     lead = 0.03, 0.0..=0.06, B;
-    /// The head start out of a closure, s: short, so stops stay shut.
-    release_lead = 0.008, 0.0..=0.03, B;
+    /// The head start out of a closure, s: short, so stops stay shut. A
+    /// little over one articulation block (10.7 ms), so the release falls
+    /// before the next sound starts whatever the phase of the blocks.
+    release_lead = 0.011, 0.0..=0.03, B;
     /// Length of an unstressed vowel, s.
     vowel_length = 0.085, 0.06..=0.14, B;
     /// Length of a diphthong, s.
@@ -202,11 +204,11 @@ tuning! {
     /// How long the glottis stays open after a /p/ is released before a
     /// stressed vowel, s (the voice follows a few milliseconds later).
     /// The physical engine uses these three in place of `aspiration`.
-    vot_labial = 0.04, 0.015..=0.08, B;
+    vot_labial = 0.035, 0.015..=0.08, B;
     /// The same after /t/, s.
     vot_alveolar = 0.045, 0.015..=0.08, B;
     /// The same after /k/, s.
-    vot_velar = 0.05, 0.015..=0.09, B;
+    vot_velar = 0.047, 0.015..=0.09, B;
     /// How long before a voiceless consonant the voice is let go and the
     /// glottis starts to open, s: with the tract, which starts closing
     /// `lead` ahead, so the voice stops as the tract shuts.
@@ -234,6 +236,35 @@ tuning! {
     release_speed = 0.37, 0.1..=0.8, B;
     /// How far past contact a closing articulator aims (diameter units).
     closure_overshoot = 0.3, 0.1..=0.5, B;
+
+    // ----- B: two speeds of articulator (physical engine) --------------
+
+    /// Natural frequency of the tongue body and the jaw, rad/s at speed 1
+    /// (physical engine). They are heavy and slow (a time constant of
+    /// about 40 ms in speech), so the vowel shape glides from vowel to
+    /// vowel underneath the consonants; `articulation_rate` is that of the
+    /// light, quick tongue tip, blade and lips that make the consonants on
+    /// top of it.
+    body_rate = 11.4, 6.0..=25.0, B;
+    /// Natural frequency of the back of the tongue making a closure or a
+    /// gap (/k g ŋ/), rad/s at speed 1: between the two.
+    dorsum_rate = 20.0, 10.0..=40.0, B;
+
+    // ----- A: voiced sibilants (physical engine) ------------------------
+
+    /// Opening left behind the vibrating folds in a word-final /z ʒ/, cm²
+    /// at native size: more than `voiced_fricative_spread`. English lets
+    /// them go partly voiceless at the end of a word, and their hiss has to
+    /// be as plain as the voice under it (a final /z/ with too little air
+    /// is heard as /ð/); /v ð/ are weak, and too much air makes them breathy.
+    voiced_sibilant_spread = 0.05, 0.0..=0.12, A;
+
+    // ----- B: voiced sibilants (physical engine) ------------------------
+
+    /// Length of /z ʒ/, s: longer than the weak /v ð/
+    /// (`voiced_fricative_length`), as in English; a short /z/ is heard as
+    /// /ð/ or /d/.
+    voiced_sibilant_length = 0.095, 0.06..=0.14, B;
 }
 
 impl Default for Tuning {
@@ -256,10 +287,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_one_and_twenty_four() {
+    fn two_passes_of_twenty_two_and_twenty_seven() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (21, 24));
+        assert_eq!((a, b), (22, 27));
     }
 
     #[test]

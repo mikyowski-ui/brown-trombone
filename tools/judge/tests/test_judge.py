@@ -45,3 +45,11 @@ def test_profile_shape(tmp_path):
     p = tmp_path / "x.json"
     T.write_profile(p, {"lead": 0.0351234567, "jet_efficiency": 0.05})
     assert json.loads(p.read_text()) == {"tuning": {"lead": 0.0351235, "jet_efficiency": 0.05}}
+
+
+def test_inserted_segments_count_only_what_was_not_asked_for():
+    assert J.inserted_segments(["S", "L", "IH", "D"], ["S", "L", "IH", "D"]) == 0
+    assert J.inserted_segments(["S", "L", "IH", "D"], ["S", "AA", "L", "IH", "D"]) == 1
+    # A substitution is not an insertion; a deletion neither.
+    assert J.inserted_segments(["S", "L", "IH", "D"], ["S", "R", "IH"]) == 0
+    assert J.inserted_segments(["L"], ["L", "AA"]) == 1
