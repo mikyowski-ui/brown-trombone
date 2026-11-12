@@ -187,6 +187,35 @@ the objective is the mean clipped margin over the tuning split. Bake a
 result into `crates/synthie-trombone/src/vowel_targets.rs` and regenerate
 the shapes (`cargo run -p synthie-trombone --example vowel_size --release`).
 
+### Naturalness
+
+The recognizer hears whether the words come through, not whether they sound
+like a person. `natural.py` (`judge.py natural`) compares a system saying the
+16 LibriSpeech texts (and, with `--listener`, the listener's own two
+sentences) with the recordings of people saying them:
+
+```sh
+uv run python judge.py natural physical espeak classic --listener ~/my-sentences.wav
+SAY_BIN=other/say uv run python judge.py natural physical --name physical-new
+uv run python judge.py natural-report human espeak classic physical physical-new   # -> report/natural.md
+```
+
+| group | measures |
+|---|---|
+| spectrum in time | log-mel distance (40 bands, per-band mean removed) to the person after dynamic time warping, overall and by the class of the person's segment |
+| loudness | phrase rise and fall (-30 to -6 dB of the peak), segment rise and fall (10-90 % of each climb of 15 dB or more), dips more than 30 dB down inside a sentence (per second, length, share; dead silence under -60 dB), level steps (95th percentile, walls of 20 dB in 10 ms), modulation spectrum of the envelope (peak, share in 2-8 and 8-32 Hz) |
+| pitch | median, 5-95 % range, declination, last 150 ms against the median, step from vowel to vowel, change across a vowel, micro-variation |
+| fricatives | per /s z/, /sh zh/, /f v th dh/: hiss rise and fall (-15 to -3 dB), duration within 10 dB, level against the neighbouring vowel, centroid, flatness, peak prominence and width (1-8 kHz) |
+| timing | speaking rate (syllables per second of speech), mean duration per class |
+
+Segments come from forced alignment with the phoneme model (boundaries
+halfway between neighbouring spikes). The person's column gives his mean and
+the 10th to 90th percentile across his sentences; each system's value has a
+`z` against that spread. There is no second person saying the same
+sentences, so the warped distance has no person-to-person value. Each run
+writes `out/natural-<name>.json`; `tests/test_natural.py` checks every
+measure on synthetic signals.
+
 ## Tuning
 
 ```sh
@@ -239,6 +268,7 @@ Whisper check.
 | `anchors.py` | fetches the LibriSpeech anchors (`fetch`). |
 | `render.py` | renders a material set through a system (`classic`, `physical`, `espeak`, `human`); renders are cached under `out/render/` by binary, voice, profile and text. |
 | `judge.py` | the judge: `score`, `report`, `items`, and the probes `vowels`, `voicing`, `confusions`, `probe-report`. |
+| `natural.py` | the naturalness measure against the human recordings (`judge.py natural`, `natural-report`). |
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
 | `tune.py` | the CMA-ES tuner. |

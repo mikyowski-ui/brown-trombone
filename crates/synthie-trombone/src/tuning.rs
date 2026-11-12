@@ -294,7 +294,7 @@ tuning! {
     /// sonorant starts from, rising to all of it over `phrase_onset`: about
     /// what the folds need to start, so the voice grows in from its first
     /// cycles without the first sound being lost.
-    onset_pressure = 0.6, 0.0..=1.0, A;
+    onset_pressure = 0.5, 0.0..=1.0, A;
 
     // ----- A: the hiss of fricatives (physical engine) -----------------
 
