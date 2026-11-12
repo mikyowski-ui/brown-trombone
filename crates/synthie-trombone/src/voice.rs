@@ -63,8 +63,13 @@ pub enum GlottalSource {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Fallback {
-    /// Notes outside the folds' range are sung by the pulse: below it as
-    /// vocal fry, above it as a falsetto the folds have no register for.
+    /// Notes outside the folds' range ([`Trombone::fold_range`]) are sung
+    /// by the pulse: below it as vocal fry, above it as a falsetto the
+    /// folds have no register for. Inside it the folds sing every note,
+    /// even one they keep stalling on. The range is about 56 to 288 Hz for
+    /// the native-size voice at modal tenseness and scales with the
+    /// inverse of the size, so a small voice speaking high (the critter
+    /// preset, up to about 520 Hz) is sung by the pulse at its peaks.
     #[default]
     Auto,
     /// The folds sing everything; a note they cannot hold is not sung.
