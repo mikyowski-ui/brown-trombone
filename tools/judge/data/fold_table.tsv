@@ -1,0 +1,393 @@
+id	token	fold	source
+0	<pad>	-	special
+1	<s>	-	special
+2	</s>	-	special
+3	<unk>	-	special
+4	n	N	explicit
+5	s	S	explicit
+6	t	T	explicit
+7	ə	AX	explicit
+8	l	L	explicit
+9	a	AA	rule
+10	i	IY	explicit
+11	k	K	explicit
+12	d	D	explicit
+13	m	M	explicit
+14	ɛ	EH	explicit
+15	ɾ	DX	explicit
+16	e	EY	explicit
+17	ɪ	IH	explicit
+18	p	P	explicit
+19	o	OW	rule
+20	ɐ	AX	explicit
+21	z	Z	explicit
+22	ð	DH	explicit
+23	f	F	explicit
+24	j	Y	explicit
+25	v	V	explicit
+26	b	B	explicit
+27	ɹ	R	explicit
+28	ʁ	R	rule
+29	ʊ	UH	explicit
+30	iː	IY	explicit
+31	r	R	explicit
+32	w	W	explicit
+33	ʌ	AH	explicit
+34	u	UW	rule
+35	ɡ	G	explicit
+36	æ	AE	explicit
+37	aɪ	AY	explicit
+38	ʃ	SH	explicit
+39	h	HH	explicit
+40	ɔ	AO	explicit
+41	ɑː	AA	explicit
+42	ŋ	NG	explicit
+43	ɚ	ER	explicit
+44	eɪ	EY	explicit
+45	β	V	rule
+46	uː	UW	explicit
+47	y	UW	rule
+48	ɑ̃	AA	explicit
+49	oʊ	OW	explicit
+50	ᵻ	IH	explicit
+51	eː	EY	rule
+52	θ	TH	explicit
+53	aʊ	AW	explicit
+54	ts	T S	rule
+55	oː	OW	rule
+56	ɔ̃	AO	rule
+57	ɣ	G	rule
+58	ɜ	ER	explicit
+59	ɑ	AA	rule
+60	dʒ	JH	explicit
+61	əl	AX L	explicit
+62	x	HH	explicit
+63	ɜː	ER	explicit
+64	ç	HH	explicit
+65	ʒ	ZH	explicit
+66	tʃ	CH	explicit
+67	ɔː	AO	explicit
+68	ɑːɹ	AA R	explicit
+69	ɛ̃	EH	rule
+70	ʎ	L	rule
+71	ɔːɹ	AO R	explicit
+72	ʋ	V	rule
+73	aː	AA	rule
+74	ɕ	SH	rule
+75	œ	ER	rule
+76	ø	ER	rule
+77	oːɹ	AO R	explicit
+78	ɲ	N	rule
+79	yː	UW	rule
+80	ʔ	T	explicit
+81	iə	IY AX	explicit
+82	i5	IY	rule
+83	s.	S	rule
+84	tɕ	CH	rule
+85	??	OTH	explicit
+86	nʲ	N	rule
+87	ɛː	EH	rule
+88	œ̃	ER	rule
+89	ɭ	L	rule
+90	ɔø	OY	rule
+91	ʑ	ZH	rule
+92	tʲ	T	rule
+93	ɨ	IH	rule
+94	ɛɹ	EH R	explicit
+95	ts.	T S	rule
+96	rʲ	R	rule
+97	ɪɹ	IH R	explicit
+98	ɭʲ	L	rule
+99	i.5	IY	rule
+100	ɔɪ	OY	explicit
+101	q	K	rule
+102	sʲ	S	rule
+103	u5	UW	rule
+104	ʊɹ	UH R	explicit
+105	iɜ	IY	rule
+106	a5	AA	rule
+107	iɛ5	IY EH	rule
+108	øː	ER	rule
+109	ʕ	OTH	rule
+110	ja	Y AA	rule
+111	əɜ	AX	rule
+112	th	T	rule
+113	ɑ5	AA	rule
+114	oɪ	OY	rule
+115	dʲ	D	rule
+116	ə5	AX	rule
+117	tɕh	CH	rule
+118	ts.h	T S	rule
+119	mʲ	M	rule
+120	ɯ	UW	rule
+121	dʑ	JH	rule
+122	vʲ	V	rule
+123	e̞	EY	rule
+124	tʃʲ	CH	rule
+125	ei5	EY	rule
+126	o5	OW	rule
+127	onɡ5	OW N G	rule
+128	ɑu5	AW	rule
+129	iɑ5	IY AA	rule
+130	ai5	AY	rule
+131	aɪɚ	AY ER	explicit
+132	kh	K	rule
+133	ə1	AX	rule
+134	ʐ	ZH	rule
+135	i2	IY	rule
+136	ʉ	UW	rule
+137	ħ	HH	rule
+138	t[	T	rule
+139	aɪə	AY AX	explicit
+140	ʲ	OTH	explicit
+141	ju	Y UW	rule
+142	ə2	AX	rule
+143	u2	UW	rule
+144	oɜ	OW	rule
+145	pː	P	rule
+146	iɛɜ	IY EH	rule
+147	ou5	OW	rule
+148	y5	UW	rule
+149	uɜ	UW	rule
+150	tː	T	rule
+151	uo5	UW OW	rule
+152	d[	D	rule
+153	uoɜ	UW OW	rule
+154	tsh	T S	rule
+155	ɑɜ	AA	rule
+156	ɵ	UH	rule
+157	i̪5	IY	rule
+158	uei5	UW EY	rule
+159	ɟ	G	rule
+160	aɜ	AA	rule
+161	ɑɨ	AA IH	rule
+162	i.ɜ	IY	rule
+163	eʊ	EY UH	rule
+164	o2	OW	rule
+165	ɐ̃	AX	rule
+166	ä	AA	rule
+167	pʲ	P	rule
+168	kʲ	K	rule
+169	n̩	AX N	explicit
+170	ɒ	AA	rule
+171	ph	P	rule
+172	ɑu2	AW	rule
+173	uɨ	UW IH	rule
+174	əɪ	AX IH	rule
+175	ɫ	L	rule
+176	ɬ	OTH	rule
+177	yɜ	UW	rule
+178	bʲ	B	rule
+179	ɑ2	AA	rule
+180	s̪	S	rule
+181	aiɜ	AY	rule
+182	χ	HH	rule
+183	ɐ̃ʊ̃	AX UH	rule
+184	1	OTH	explicit
+185	ə4	AX	rule
+186	yæɜ	UW AE	rule
+187	a2	AA	rule
+188	ɨː	IH	rule
+189	t̪	T	rule
+190	iouɜ	IY OW	rule
+191	ũ	UW	rule
+192	onɡɜ	OW N G	rule
+193	aɨ	AA IH	rule
+194	iɛ2	IY EH	rule
+195	ɔɨ	AO IH	rule
+196	ɑuɜ	AW	rule
+197	o̞	OW	rule
+198	ei2	EY	rule
+199	iou2	IY OW	rule
+200	c	K	rule
+201	kː	K	rule
+202	y2	UW	rule
+203	ɖ	D	rule
+204	oe	OW EY	rule
+205	dˤ	D	rule
+206	yɛɜ	UW EH	rule
+207	əʊ	OW	explicit
+208	S	SH	rule
+209	ɡʲ	G	rule
+210	onɡ2	OW N G	rule
+211	u"	UW	rule
+212	eiɜ	EY	rule
+213	ʈ	T	rule
+214	ɯᵝ	UW	rule
+215	iou5	IY OW	rule
+216	dZ	JH	rule
+217	r̝̊	R	rule
+218	i.2	IY	rule
+219	tS	CH	rule
+220	s^	S	rule
+221	ʝ	Y	rule
+222	yə5	UW AX	rule
+223	iɑɜ	IY AA	rule
+224	uə5	UW AX	rule
+225	pf	P F	rule
+226	ɨu	IH UW	rule
+227	iɑ2	IY AA	rule
+228	ou2	OW	rule
+229	ər2	AX R	rule
+230	fʲ	F	rule
+231	ai2	AY	rule
+232	r̝	R	rule
+233	uəɜ	UW AX	rule
+234	ɳ	N	rule
+235	əɨ	AX IH	rule
+236	ua5	UW AA	rule
+237	uɪ	UW IH	rule
+238	ɽ	R	rule
+239	bː	B	rule
+240	yu5	UW	rule
+241	uo2	UW OW	rule
+242	yɛ5	UW EH	rule
+243	l̩	AX L	explicit
+244	ɻ	R	rule
+245	ərɜ	AX R	rule
+246	ʂ	SH	rule
+247	i̪2	IY	rule
+248	ouɜ	OW	rule
+249	uaɜ	UW AA	rule
+250	a.	AA	rule
+251	a.ː	AA	rule
+252	yæ5	UW AE	rule
+253	dː	D	rule
+254	r̩	ER	explicit
+255	ee	EY	rule
+256	ɪu	IH UW	rule
+257	ər5	AX R	rule
+258	i̪ɜ	IY	rule
+259	æi	AE IY	rule
+260	u:	UW	rule
+261	i.ː	IY	rule
+262	t^	T	rule
+263	o1	OW	rule
+264	ɪ^	IH	rule
+265	ai	AY	rule
+266	ueiɜ	UW EY	rule
+267	æː	AE	rule
+268	ɛɪ	EY	rule
+269	eə	EH AX	explicit
+270	i.	IY	rule
+271	ɴ	NG	rule
+272	ie	IY EY	rule
+273	ua2	UW AA	rule
+274	ɑ1	AA	rule
+275	o4	OW	rule
+276	tʃː	CH	rule
+277	o:	OW	rule
+278	ɑ:	AA	rule
+279	u1	UW	rule
+280	N	NG	rule
+281	i̪1	IY	rule
+282	au	AW	rule
+283	yæ2	UW AE	rule
+284	u.	UW	rule
+285	qː	K	rule
+286	yəɜ	UW AX	rule
+287	y:	UW	rule
+288	kʰ	K	rule
+289	tʃʰ	CH	rule
+290	iʊ	IY UH	rule
+291	sx	S HH	rule
+292	õ	OW	rule
+293	uo	UW OW	rule
+294	tʰ	T	rule
+295	uai5	UW AY	rule
+296	bʰ	B	rule
+297	u.ː	UW	rule
+298	uə2	UW AX	rule
+299	ʊə	UH AX	explicit
+300	d^	D	rule
+301	s̪ː	S	rule
+302	yiɜ	UW IY	rule
+303	dʰ	D	rule
+304	r.	R	rule
+305	oe:	OW EY	rule
+306	i1	IY	rule
+307	ɟː	G	rule
+308	yu2	UW	rule
+309	nʲʲ	N	rule
+310	i̪4	IY	rule
+311	uei2	UW EY	rule
+312	tsʲ	T S	rule
+313	ɸ	F	rule
+314	ĩ	IY	rule
+315	ɑ4	AA	rule
+316	t̪ː	T	rule
+317	eɑ	EY AA	rule
+318	u4	UW	rule
+319	e:	EY	rule
+320	tsː	T S	rule
+321	ʈʰ	T	rule
+322	ɡʰ	G	rule
+323	ɯɯ	UW	rule
+324	dʒʲ	JH	rule
+325	ʂʲ	SH	rule
+326	X	HH	rule
+327	ɵː	UH	rule
+328	uaiɜ	UW AY	rule
+329	tɕʲ	CH	rule
+330	ã	AA	rule
+331	t^ː	T	rule
+332	ẽː	EY	rule
+333	yɛ2	UW EH	rule
+334	cː	K	rule
+335	i.1	IY	rule
+336	ɛʊ	EH UH	rule
+337	dˤdˤ	D	rule
+338	dʒː	JH	rule
+339	i4	IY	rule
+340	ɡː	G	rule
+341	yi	UW IY	rule
+342	ɕʲ	SH	rule
+343	ɟʰ	G	rule
+344	pʰ	P	rule
+345	dʑʲ	JH	rule
+346	yuɜ	UW	rule
+347	ua1	UW AA	rule
+348	ua4	UW AA	rule
+349	æiː	AE IY	rule
+350	ɐɐ	AX	rule
+351	ui	UW IY	rule
+352	iou1	IY OW	rule
+353	ʊː	UH	rule
+354	a1	AA	rule
+355	iou4	IY OW	rule
+356	cʰ	K	rule
+357	iɛ1	IY EH	rule
+358	yə2	UW AX	rule
+359	ɖʰ	D	rule
+360	ẽ	EY	rule
+361	ʒʲ	ZH	rule
+362	ää	AA	rule
+363	ər4	AX R	rule
+364	iːː	IY	rule
+365	ɪː	IH	rule
+366	iɑ1	IY AA	rule
+367	ər1	AX R	rule
+368	œː	ER	rule
+369	øi	OY	rule
+370	ɪuː	IH UW	rule
+371	cʰcʰ	K	rule
+372	əː1	AX	rule
+373	iː1	IY	rule
+374	ũ	UW	rule
+375	kʰː	K	rule
+376	o̞o̞	OW	rule
+377	xʲ	HH	rule
+378	ou1	OW	rule
+379	iɛ4	IY EH	rule
+380	e̞e̞	EY	rule
+381	y1	UW	rule
+382	dzː	D Z	rule
+383	dʲʲ	D	rule
+384	dʰː	D	rule
+385	ɯᵝɯᵝ	UW	rule
+386	lː	L	rule
+387	uo1	UW OW	rule
+388	i.4	IY	rule
+389	i:	IY	rule
+390	yɛ5ʲ	OTH	rule
+391	a4	AA	rule

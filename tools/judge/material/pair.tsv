@@ -1,0 +1,45 @@
+id	set	text	expected	ortho
+pair_bat	pair	[B AE1 T]	B AE T	bat
+pair_pat	pair	[P AE1 T]	P AE T	pat
+pair_tip	pair	[T IH1 P]	T IH P	tip
+pair_dip	pair	[D IH1 P]	D IH P	dip
+pair_coat	pair	[K OW1 T]	K OW T	coat
+pair_goat	pair	[G OW1 T]	G OW T	goat
+pair_fan	pair	[F AE1 N]	F AE N	fan
+pair_van	pair	[V AE1 N]	V AE N	van
+pair_sip	pair	[S IH1 P]	S IH P	sip
+pair_zip	pair	[Z IH1 P]	Z IH P	zip
+pair_see	pair	[S IY1]	S IY	see
+pair_she	pair	[SH IY1]	SH IY	she
+pair_thin	pair	[TH IH1 N]	TH IH N	thin
+pair_tin	pair	[T IH1 N]	T IH N	tin
+pair_then	pair	[DH EH1 N]	DH EH N	then
+pair_den	pair	[D EH1 N]	D EH N	den
+pair_cheap	pair	[CH IY1 P]	CH IY P	cheap
+pair_jeep	pair	[JH IY1 P]	JH IY P	jeep
+pair_ship	pair	[SH IH1 P]	SH IH P	ship
+pair_chip	pair	[CH IH1 P]	CH IH P	chip
+pair_rock	pair	[R AA1 K]	R AA K	rock
+pair_lock	pair	[L AA1 K]	L AA K	lock
+pair_wet	pair	[W EH1 T]	W EH T	wet
+pair_yet	pair	[Y EH1 T]	Y EH T	yet
+pair_map	pair	[M AE1 P]	M AE P	map
+pair_nap	pair	[N AE1 P]	N AE P	nap
+pair_sin	pair	[S IH1 N]	S IH N	sin
+pair_sing	pair	[S IH1 NG]	S IH NG	sing
+pair_heat	pair	[HH IY1 T]	HH IY T	heat
+pair_eat	pair	[IY1 T]	IY T	eat
+pair_beat	pair	[B IY1 T]	B IY T	beat
+pair_bit	pair	[B IH1 T]	B IH T	bit
+pair_pen	pair	[P EH1 N]	P EH N	pen
+pair_pan	pair	[P AE1 N]	P AE N	pan
+pair_pull	pair	[P UH1 L]	P UH L	pull
+pair_pool	pair	[P UW1 L]	P UW L	pool
+pair_cup	pair	[K AH1 P]	K AH P	cup
+pair_cop	pair	[K AA1 P]	K AA P	cop
+pair_late	pair	[L EY1 T]	L EY T	late
+pair_light	pair	[L AY1 T]	L AY T	light
+pair_three	pair	[TH R IY1]	TH R IY	three
+pair_free	pair	[F R IY1]	F R IY	free
+pair_boat	pair	[B OW1 T]	B OW T	boat
+pair_bought	pair	[B AO1 T]	B AO T	bought

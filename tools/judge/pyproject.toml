@@ -1,0 +1,36 @@
+[project]
+name = "trombone-judge"
+version = "0.1.0"
+description = "Offline intelligibility judge (phoneme CTC + Whisper) and CMA-ES tuner for synthie-trombone"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # GPU PyTorch: pinned to the CUDA 12.6 wheel index below (works with any
+    # NVIDIA driver >= 560; judge.py falls back to CPU when CUDA is unusable).
+    "torch>=2.6",
+    "transformers>=4.48",
+    "huggingface-hub",
+    # Whisper reference implementation: pure PyTorch, takes numpy audio, so no
+    # ffmpeg / CTranslate2 / cuDNN system libraries are needed.
+    "openai-whisper>=20250625",
+    "cma>=4",
+    "numpy",
+    "scipy",
+    "soundfile",
+    "pytest",
+    "pyarrow>=26.0.1",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

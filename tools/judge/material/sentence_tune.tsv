@@ -1,0 +1,11 @@
+id	set	text	expected	ortho
+sent_tune_01	sentence_tune	The birch canoe slid on the smooth planks.	DH AX B ER CH K AX N UW S L IH D AO N DH AX S M UW DH P L AE NG K S	The birch canoe slid on the smooth planks.
+sent_tune_02	sentence_tune	Glue the sheet to the dark blue background.	G L UW DH AX SH IY T T AX DH AX D AA R K B L UW B AE K G R AW N D	Glue the sheet to the dark blue background.
+sent_tune_03	sentence_tune	It's easy to tell the depth of a well.	IH T S IY Z IY T AX T EH L DH AX D EH P TH AX V AX W EH L	It's easy to tell the depth of a well.
+sent_tune_04	sentence_tune	These days a chicken leg is a rare dish.	DH IY Z D EY Z AX CH IH K IH N L EH G IH Z AX R EH R D IH SH	These days a chicken leg is a rare dish.
+sent_tune_05	sentence_tune	Rice is often served in round bowls.	R AY S IH Z AO F AX N S ER V D IH N R AW N D B OW L Z	Rice is often served in round bowls.
+sent_tune_06	sentence_tune	The juice of lemons makes fine punch.	DH AX JH UW S AH V L EH M AX N Z M EY K S F AY N P AH N CH	The juice of lemons makes fine punch.
+sent_tune_07	sentence_tune	The box was thrown beside the parked truck.	DH AX B AA K S W AH Z TH R OW N B IH S AY D DH AX P AA R K T T R AH K	The box was thrown beside the parked truck.
+sent_tune_08	sentence_tune	The hogs were fed chopped corn and garbage.	DH AX HH AA G Z W ER F EH D CH AA P T K AO R N AE N D G AA R B IH JH	The hogs were fed chopped corn and garbage.
+sent_tune_09	sentence_tune	Four hours of steady work faced us.	F AO R AW ER Z AH V S T EH D IY W ER K F EY S D AH S	Four hours of steady work faced us.
+sent_tune_10	sentence_tune	A large size in stockings is hard to sell.	AX L AA R JH S AY Z IH N S T AA K IH NG Z IH Z HH AA R D T AX S EH L	A large size in stockings is hard to sell.

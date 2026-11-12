@@ -1,0 +1,43 @@
+id	set	text	expected	ortho
+word_water	word	[W AO1 T ER]	W AO T ER	water
+word_people	word	[P IY1 P AX L]	P IY P AX L	people
+word_about	word	[AX B AW1 T]	AX B AW T	about
+word_because	word	[B IH K AH1 Z]	B IH K AH Z	because
+word_little	word	[L IH1 T AX L]	L IH T AX L	little
+word_mother	word	[M AH1 DH ER]	M AH DH ER	mother
+word_father	word	[F AA1 DH ER]	F AA DH ER	father
+word_thing	word	[TH IH1 NG]	TH IH NG	thing
+word_house	word	[HH AW1 S]	HH AW S	house
+word_school	word	[S K UW1 L]	S K UW L	school
+word_music	word	[M Y UW1 Z IH K]	M Y UW Z IH K	music
+word_yellow	word	[Y EH1 L OW]	Y EH L OW	yellow
+word_children	word	[CH IH1 L D R AX N]	CH IH L D R AX N	children
+word_measure	word	[M EH1 ZH ER]	M EH ZH ER	measure
+word_church	word	[CH ER1 CH]	CH ER CH	church
+word_judge	word	[JH AH1 JH]	JH AH JH	judge
+word_young	word	[Y AH1 NG]	Y AH NG	young
+word_thought	word	[TH AO1 T]	TH AO T	thought
+word_voice	word	[V OY1 S]	V OY S	voice
+word_around	word	[AX R AW1 N D]	AX R AW N D	around
+word_world	word	[W ER1 L D]	W ER L D	world
+word_number	word	[N AH1 M B ER]	N AH M B ER	number
+word_picture	word	[P IH1 K CH ER]	P IH K CH ER	picture
+word_money	word	[M AH1 N IY]	M AH N IY	money
+word_garden	word	[G AA1 R D AX N]	G AA R D AX N	garden
+word_river	word	[R IH1 V ER]	R IH V ER	river
+word_window	word	[W IH1 N D OW]	W IH N D OW	window
+word_table	word	[T EY1 B AX L]	T EY B AX L	table
+word_paper	word	[P EY1 P ER]	P EY P ER	paper
+word_orange	word	[AO1 R IH N JH]	AO R IH N JH	orange
+word_city	word	[S IH1 T IY]	S IH T IY	city
+word_happy	word	[HH AE1 P IY]	HH AE P IY	happy
+word_question	word	[K W EH1 S CH AX N]	K W EH S CH AX N	question
+word_language	word	[L AE1 NG G W IH JH]	L AE NG G W IH JH	language
+word_together	word	[T AX G EH1 DH ER]	T AX G EH DH ER	together
+word_morning	word	[M AO1 R N IH NG]	M AO R N IH NG	morning
+word_between	word	[B IH T W IY1 N]	B IH T W IY N	between
+word_good	word	[G UH1 D]	G UH D	good
+word_family	word	[F AE1 M AX L IY]	F AE M AX L IY	family
+word_beautiful	word	[B Y UW1 T AX F AX L]	B Y UW T AX F AX L	beautiful
+word_today	word	[T AX D EY1]	T AX D EY	today
+word_zero	word	[Z IY1 R OW]	Z IY R OW	zero

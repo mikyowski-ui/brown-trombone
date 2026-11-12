@@ -1,0 +1,8 @@
+# Python environment, model caches, renders and the prebuilt renderer
+.venv/
+.cache/
+out/
+bin/
+__pycache__/
+.pytest_cache/
+*.pyc

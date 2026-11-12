@@ -1,0 +1,11 @@
+id	set	text	expected	ortho
+sent_held_01	sentence_heldout	The boy was there when the sun rose.	DH AX B OY W AH Z DH EH R W EH N DH AX S AH N R OW Z	The boy was there when the sun rose.
+sent_held_02	sentence_heldout	A rod is used to catch pink salmon.	AX R AA D IH Z Y UW Z D T AX K AE CH P IH NG K S AE M AX N	A rod is used to catch pink salmon.
+sent_held_03	sentence_heldout	The source of the huge river is the clear spring.	DH AX S AO R S AH V DH AX HH Y UW JH R IH V ER R IH Z DH AX K L IH R S P R IH NG	The source of the huge river is the clear spring.
+sent_held_04	sentence_heldout	Kick the ball straight and follow through.	K IH K DH AX B AO L S T R EY T AE N D F AA L OW TH R UW	Kick the ball straight and follow through.
+sent_held_05	sentence_heldout	Help the woman get back to her feet.	HH EH L P DH AX W UH M AX N G EH T B AE K T AX HH ER F IY T	Help the woman get back to her feet.
+sent_held_06	sentence_heldout	A pot of tea helps to pass the evening.	AX P AA T AH V T IY HH EH L P S T AX P AE S DH IH IY V N IH NG	A pot of tea helps to pass the evening.
+sent_held_07	sentence_heldout	Smoky fires lack flame and heat.	S M OW K IY F AY ER Z L AE K F L EY M AE N D HH IY T	Smoky fires lack flame and heat.
+sent_held_08	sentence_heldout	The soft cushion broke the man's fall.	DH AX S AO F T K UH SH AX N B R OW K DH AX M AE N Z F AO L	The soft cushion broke the man's fall.
+sent_held_09	sentence_heldout	The salt breeze came across from the sea.	DH AX S AO L T B R IY Z K EY M AX K R AA S F R AH M DH AX S IY	The salt breeze came across from the sea.
+sent_held_10	sentence_heldout	The girl at the booth sold fifty bonds.	DH AX G ER L AE T DH AX B UW TH S OW L D F IH F T IY B AA N D Z	The girl at the booth sold fifty bonds.
