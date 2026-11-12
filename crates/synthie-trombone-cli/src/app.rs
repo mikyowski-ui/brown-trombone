@@ -1,9 +1,15 @@
 //! UI state and input handling.
 
 use crate::audio::{Cmd, Link, Snapshot};
+use crate::line::{self, MAX_CHARS, TextLine};
+use crate::record::Recorder;
 use crossbeam_channel::Sender;
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
+use serde_json::json;
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 use synthie_trombone::inverse::{self, Shape};
 use synthie_trombone::speech::{Prosody, Utterance};
@@ -17,7 +23,7 @@ const SLOT_MOUSE: usize = 2;
 /// Constriction slot for the lip-pop key.
 const SLOT_POP: usize = 3;
 const NO_RELEASE_HINT: &str =
-    "terminal sends no key releases: notes hold, Space stops · Tab to type text";
+    "terminal sends no key releases: notes hold, Space stops · Tab to type or paste text";
 /// Piano keys, one semitone apart, starting at C.
 const PIANO: &str = "awsedftgyhujkolp;";
 /// Canvas y range of the tract view (shared with `ui`).
@@ -56,6 +62,19 @@ pub const LOUD_RANGE: (f32, f32) = (2.0, 20.0);
 /// or glottis meter made while nothing else was sounding, so that the
 /// change can be heard.
 const PREVIEW_HOLD: Duration = Duration::from_millis(400);
+
+/// What the status line says on entering type mode.
+const TYPE_HINT: &str = "type or paste, Enter to speak · ↑↓ history · Tab back";
+/// How much of a long text the status line quotes.
+const QUOTE_CHARS: usize = 40;
+
+/// The key that starts and stops recording a take, in either mode.
+pub const RECORD_KEY: KeyCode = KeyCode::F(5);
+/// How long a command that must arrive (to start or stop a take) may wait
+/// for room in the queue to the audio thread.
+const MUST_ARRIVE: Duration = Duration::from_millis(200);
+/// How long leaving the app waits for the take being recorded to be saved.
+const SAVE_WAIT: Duration = Duration::from_secs(3);
 
 /// Vowels marked on the tract view; a click sets them.
 pub const LANDMARKS: [(&str, Phoneme); 5] = [
@@ -193,7 +212,8 @@ pub struct App {
     pub settings: VoiceSettings,
     pub engine: Engine,
 
-    pub text: String,
+    /// The text line of type mode.
+    pub line: TextLine,
     history: Vec<String>,
     history_pos: usize,
     /// Phoneme symbols of the last utterance with their segment ranges.
@@ -260,7 +280,7 @@ impl App {
             dial: 0,
             settings: Preset::Deep.settings().with_engine(engine),
             engine,
-            text: String::new(),
+            line: TextLine::default(),
             history: Vec::new(),
             history_pos: 0,
             spoken: Vec::new(),
@@ -278,7 +298,7 @@ impl App {
             chart_area: Rect::default(),
         };
         app.status = if keyboard_release {
-            "hold a piano key to sing · Space stops · Tab to type text".into()
+            "hold a piano key to sing · Space stops · Tab to type or paste text".into()
         } else {
             NO_RELEASE_HINT.into()
         };
@@ -407,6 +427,9 @@ impl App {
             self.snap = s;
         }
         while self.link.trash.try_recv().is_ok() {}
+        if let Some(saved) = self.link.recorder.as_ref().and_then(Recorder::poll) {
+            self.status = saved_status(&saved);
+        }
         if self.mimic == Some(true)
             && let Some(h) = self.snap.heard
         {
@@ -457,6 +480,12 @@ impl App {
 
     /// Handle a key; returns `true` to quit.
     pub fn key(&mut self, key: Key) -> bool {
+        if key.code == RECORD_KEY {
+            if key.kind == KeyKind::Press {
+                self.toggle_recording();
+            }
+            return false;
+        }
         let quit = if key.ctrl && key.code == KeyCode::Char('c') {
             true
         } else {
@@ -594,7 +623,7 @@ impl App {
         match code {
             KeyCode::Tab => {
                 self.mode = Mode::Type;
-                self.status = "type, Enter to speak · ↑↓ history · Esc/Tab back".into();
+                self.status = TYPE_HINT.into();
                 return;
             }
             KeyCode::Enter => {
@@ -630,40 +659,149 @@ impl App {
     }
 
     fn type_key(&mut self, key: Key) {
+        let line = &mut self.line;
         match key.code {
+            KeyCode::Esc if self.snap.speaking.is_some() => {
+                // Esc stops the speech first, all of it; again, it goes
+                // back to play mode.
+                self.send(Cmd::StopSpeaking);
+                self.status = "stopped · Esc again to play".into();
+            }
             KeyCode::Esc | KeyCode::Tab => {
                 self.mode = Mode::Play;
                 self.status.clear();
             }
-            KeyCode::Enter => {
-                let t = self.text.trim().to_string();
-                if !t.is_empty() {
-                    self.speak(&t);
-                    if self.history.last() != Some(&t) {
-                        self.history.push(t);
-                    }
-                    self.history_pos = self.history.len();
-                    self.text.clear();
+            KeyCode::Enter => self.say_line(),
+            KeyCode::Left | KeyCode::Right if key.ctrl => {
+                if key.code == KeyCode::Left {
+                    line.word_left();
+                } else {
+                    line.word_right();
                 }
             }
-            KeyCode::Backspace => {
-                self.text.pop();
-            }
+            KeyCode::Left => line.left(),
+            KeyCode::Right => line.right(),
+            KeyCode::Backspace if key.ctrl => line.delete_word(),
+            KeyCode::Backspace => line.backspace(),
+            KeyCode::Delete => line.delete(),
             KeyCode::Up if self.history_pos > 0 => {
                 self.history_pos -= 1;
-                self.text.clone_from(&self.history[self.history_pos]);
+                line.set(&self.history[self.history_pos]);
             }
             KeyCode::Down => {
                 self.history_pos = (self.history_pos + 1).min(self.history.len());
-                self.text = self
-                    .history
-                    .get(self.history_pos)
-                    .cloned()
-                    .unwrap_or_default();
+                line.set(
+                    self.history
+                        .get(self.history_pos)
+                        .map_or("", String::as_str),
+                );
             }
-            KeyCode::Char(c) if self.text.len() < 400 => self.text.push(c),
+            // The usual line-editing keys of a shell.
+            KeyCode::Char(c) if key.ctrl => match c.to_ascii_lowercase() {
+                'a' => line.home(),
+                'e' => line.end(),
+                'b' => line.left(),
+                'f' => line.right(),
+                'u' => line.clear(),
+                'k' => line.delete_to_end(),
+                'w' => line.delete_word(),
+                'd' => line.delete(),
+                // Backspace, in terminals that send it as Ctrl+H.
+                'h' => line.backspace(),
+                // A line feed: what a pasted line break arrives as when
+                // the terminal pastes without bracketing it. A space, as
+                // in a bracketed paste; only Enter speaks.
+                'j' => {
+                    line.insert_pasted(" ");
+                }
+                _ => {}
+            },
+            KeyCode::Char(_) if line.is_full() => {
+                self.status = format!("the text line is full ({MAX_CHARS} characters)");
+            }
+            KeyCode::Char(c) => {
+                line.insert(c.encode_utf8(&mut [0; 4]));
+            }
             _ => {}
         }
+    }
+
+    /// Speak the text line and keep it in the history.
+    fn say_line(&mut self) {
+        let t = line::normalise(self.line.text()).trim().to_string();
+        if t.is_empty() {
+            return;
+        }
+        self.speak(&t);
+        if self.history.last() != Some(&t) {
+            self.history.push(t);
+        }
+        self.history_pos = self.history.len();
+        self.line.clear();
+    }
+
+    /// Text pasted into the terminal (a bracketed paste): it goes into the
+    /// text line at the cursor, tidied for the speech front end (see
+    /// [`line::normalise`]); in play mode the app switches to type mode
+    /// first. Pasting never speaks: a line break in the text is a space,
+    /// and only Enter speaks.
+    pub fn paste(&mut self, text: &str) {
+        self.mode = Mode::Type;
+        let tidy = line::normalise(text);
+        let left_out = self.line.insert_pasted(&tidy);
+        self.status = if left_out > 0 {
+            format!(
+                "the text line is full ({MAX_CHARS} characters): {left_out} pasted characters left out"
+            )
+        } else {
+            "pasted · Enter to speak · Ctrl+U clears".into()
+        };
+    }
+
+    /// A key as the terminal reports it. Keys [`Key`] has no room for
+    /// (Home, End, Alt with a key) are handled here, the rest by
+    /// [`key`](Self::key). With `burst` the key came in a burst of typed
+    /// text faster than anyone types: the terminal pasting without
+    /// bracketed paste. In type mode a line break or tab in it is then a
+    /// space, as in a bracketed paste, so that half a paste is not spoken
+    /// and the rest played on the piano.
+    pub fn terminal_key(&mut self, ev: KeyEvent, burst: bool) -> bool {
+        use crossterm::event::KeyCode as C;
+        if self.mode == Mode::Type && ev.kind != KeyEventKind::Release {
+            let alt = ev.modifiers.contains(KeyModifiers::ALT);
+            let line = &mut self.line;
+            let handled = match ev.code {
+                C::Home => {
+                    line.home();
+                    true
+                }
+                C::End => {
+                    line.end();
+                    true
+                }
+                C::Enter | C::Tab if burst => {
+                    line.insert_pasted(" ");
+                    true
+                }
+                C::Backspace if alt => {
+                    line.delete_word();
+                    true
+                }
+                C::Left | C::Char('b') if alt => {
+                    line.word_left();
+                    true
+                }
+                C::Right | C::Char('f') if alt => {
+                    line.word_right();
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                return false;
+            }
+        }
+        self.key(ev.into())
     }
 
     /// Stop singing and speaking; the voice fades out. Also ends a drone.
@@ -734,10 +872,16 @@ impl App {
                 _ => self.spoken.push((sym, k..k + 1)),
             }
         }
-        self.status = format!("“{text}” · {:.1} s", u.duration());
+        self.status = format!("“{}” · {:.1} s", quote(text), u.duration());
         // Speech takes over the voice; a dial being heard stops first.
         self.end_preview();
-        self.send(Cmd::Speak(u));
+        // A take logs what was said, so that it can be said again.
+        let id = self
+            .link
+            .recorder
+            .as_mut()
+            .map_or(0, |r| r.said(text, &prosody));
+        self.send(Cmd::Speak(u, id));
     }
 
     fn vowel(&mut self, v: Phoneme) {
@@ -1090,7 +1234,7 @@ impl App {
             Control::Mode => match self.mode {
                 Mode::Play => {
                     self.mode = Mode::Type;
-                    self.status = "type, Enter to speak · ↑↓ history · Esc/Tab back".into();
+                    self.status = TYPE_HINT.into();
                 }
                 Mode::Type => {
                     self.mode = Mode::Play;
@@ -1106,6 +1250,139 @@ impl App {
             Control::FormantLock => self.toggle_lock(),
             _ => {}
         }
+    }
+}
+
+/// The start of `text` for the status line: [`QUOTE_CHARS`] characters at
+/// most.
+fn quote(text: &str) -> String {
+    match text.char_indices().nth(QUOTE_CHARS) {
+        Some((b, _)) => format!("{}…", text[..b].trim_end()),
+        None => text.to_string(),
+    }
+}
+
+// ----- recording takes ----------------------------------------------------
+
+/// What the status line says about a saved take.
+fn saved_status(saved: &crate::record::Saved) -> String {
+    let mut status = format!(
+        "saved {} · {:.1} s · {} commands",
+        saved.log_path.display(),
+        saved.seconds(),
+        saved.commands
+    );
+    if saved.dropped_commands > 0 || saved.dropped_samples > 0 {
+        let _ = write!(
+            status,
+            " · LOST {} commands, {} samples (the disk did not keep up)",
+            saved.dropped_commands, saved.dropped_samples
+        );
+    }
+    if let Some(e) = &saved.error {
+        let _ = write!(status, " · write failed: {e}");
+    }
+    status
+}
+
+/// Send a command that must arrive, waiting up to [`MUST_ARRIVE`] for
+/// room in the queue. It tries again rather than waits on the queue: a
+/// sender waiting there would make the audio thread take a lock to wake
+/// it. Whether it was sent.
+fn send_surely(tx: &Sender<Cmd>, cmd: Cmd) -> bool {
+    let start = Instant::now();
+    let mut cmd = cmd;
+    loop {
+        match tx.try_send(cmd) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::TrySendError::Full(c)) if start.elapsed() < MUST_ARRIVE => {
+                cmd = c;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+impl App {
+    /// The take being recorded.
+    #[must_use]
+    pub fn recording(&self) -> Option<&str> {
+        self.link.recorder.as_ref().and_then(Recorder::current)
+    }
+
+    /// Start recording a take, or stop the one being recorded.
+    fn toggle_recording(&mut self) {
+        let info = self.take_info();
+        let rate = self.sample_rate();
+        let Some(recorder) = self.link.recorder.as_mut() else {
+            self.status = "recording is not available".into();
+            return;
+        };
+        if let Some(name) = recorder.close() {
+            send_surely(&self.cmd, Cmd::Record(false));
+            self.status = format!("saving {name}…");
+            return;
+        }
+        match recorder.open(rate, info) {
+            Ok(name) => {
+                if send_surely(&self.cmd, Cmd::Record(true)) {
+                    self.status = format!(
+                        "recording {name} into {} · F5 stops",
+                        recorder.dir().display()
+                    );
+                    // A take is for playing: in type mode the keys would
+                    // only fill the text line, and nothing would sound.
+                    self.mode = Mode::Play;
+                } else {
+                    recorder.cancel();
+                    self.status = "cannot record: the audio thread is not answering".into();
+                }
+            }
+            Err(e) => self.status = format!("cannot record: {e}"),
+        }
+    }
+
+    /// Before leaving: stop the take being recorded and wait (a little)
+    /// for it to be saved.
+    pub fn finish(&mut self) {
+        if self.recording().is_none() {
+            return;
+        }
+        self.toggle_recording();
+        if let Some(saved) = self.link.recorder.as_ref().and_then(|r| r.wait(SAVE_WAIT)) {
+            self.status = saved_status(&saved);
+        }
+    }
+
+    /// What the app knows about the voice, for a take's header: the
+    /// preset, profile and persona it was made from, and the app's own
+    /// view of the controls. For reading; a replay needs only the state
+    /// the audio thread reports.
+    fn take_info(&self) -> serde_json::Value {
+        let value = |x: Result<serde_json::Value, _>| x.unwrap_or_default();
+        crate::take::tidied(json!({
+            "preset": self.preset.name(),
+            "base": value(serde_json::to_value(self.base)),
+            "persona": value(serde_json::to_value(self.persona)),
+            "settings": value(serde_json::to_value(self.settings)),
+            "engine": engine_name(self.engine),
+            "note": self.note,
+            "octave": self.octave,
+            "held": self.held.is_some(),
+            "speech_rate": self.rate,
+            "tongue": [self.tongue.0, self.tongue.1],
+            "tenseness": self.tenseness,
+            "vibrato": self.vibrato,
+            "wobble": self.wobble,
+            "drone": self.drone,
+            "nasal": self.nasal,
+            "reverb": self.reverb,
+            "loud": self.loud,
+            "mimic": self.mimic,
+            "formant_lock": self.formant_lock.as_ref().map(crate::take::shape_json),
+            "keyboard_release": self.keyboard_release,
+        }))
     }
 }
 
@@ -1480,6 +1757,7 @@ mod tests {
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
+            recorder: None,
         };
         let app = App::new(link, release, Engine::Classic);
         while rx.try_recv().is_ok() {}
@@ -1555,6 +1833,220 @@ mod tests {
         app.key(key(' ', KeyKind::Press));
         assert!(sent(&rx).iter().any(|c| matches!(c, Cmd::NoteOff)));
     }
+
+    // ----- the text line -------------------------------------------------
+
+    fn ctrl(c: char) -> Key {
+        Key {
+            ctrl: true,
+            ..Key::press(KeyCode::Char(c))
+        }
+    }
+
+    /// A key as the terminal reports it.
+    fn terminal(code: crossterm::event::KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    fn type_in(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.key(Key::press(KeyCode::Char(c)));
+        }
+    }
+
+    /// How many utterances were sent to be spoken.
+    fn said(cmds: &[Cmd]) -> usize {
+        cmds.iter().filter(|c| matches!(c, Cmd::Speak(..))).count()
+    }
+
+    #[test]
+    fn a_paste_goes_in_at_the_cursor() {
+        let (mut app, rx) = app(true);
+        app.key(Key::press(KeyCode::Tab));
+        type_in(&mut app, "say  now");
+        for _ in 0..4 {
+            app.key(Key::press(KeyCode::Left));
+        }
+        app.paste("hello,\r\nworld ");
+        assert_eq!(app.line.text(), "say hello, world now");
+        assert_eq!(app.line.cursor(), "say hello, world".len());
+        assert_eq!(app.mode, Mode::Type);
+        assert_eq!(said(&sent(&rx)), 0);
+    }
+
+    #[test]
+    fn pasting_in_play_mode_switches_to_type_mode() {
+        let (mut app, rx) = app(true);
+        assert_eq!(app.mode, Mode::Play);
+        app.paste("Good dog.");
+        assert_eq!(app.mode, Mode::Type);
+        assert_eq!(app.line.text(), "Good dog.");
+        assert!(app.status.contains("Enter to speak"), "{}", app.status);
+        // Nothing was played on the piano, and nothing said.
+        let cmds = sent(&rx);
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, Cmd::NoteOn(_) | Cmd::Speak(..))),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn a_pasted_line_break_never_speaks() {
+        let (mut app, rx) = app(true);
+        app.paste("First line.\nSecond line.\r\n\nThird line.\n");
+        assert_eq!(app.line.text(), "First line. Second line. Third line. ");
+        assert_eq!(said(&sent(&rx)), 0);
+        // Without bracketed paste the terminal sends the keys: the line
+        // breaks in the burst are spaces too, a line feed on its own as
+        // well.
+        app.line.clear();
+        let plain = KeyModifiers::NONE;
+        for c in "ab".chars() {
+            app.terminal_key(terminal(crossterm::event::KeyCode::Char(c), plain), true);
+        }
+        app.terminal_key(terminal(crossterm::event::KeyCode::Enter, plain), true);
+        app.terminal_key(terminal(crossterm::event::KeyCode::Tab, plain), true);
+        app.key(ctrl('j'));
+        app.terminal_key(terminal(crossterm::event::KeyCode::Char('c'), plain), true);
+        assert_eq!(app.line.text(), "ab c");
+        assert_eq!(app.mode, Mode::Type);
+        assert_eq!(said(&sent(&rx)), 0);
+        // Enter speaks, all of it, once.
+        app.paste(" Done.");
+        app.key(Key::press(KeyCode::Enter));
+        assert_eq!(said(&sent(&rx)), 1);
+        assert!(app.line.is_empty());
+        assert_eq!(app.history.last().map(String::as_str), Some("ab c Done."));
+    }
+
+    #[test]
+    fn editing_keys_work_the_text_line() {
+        let (mut app, rx) = app(true);
+        app.key(Key::press(KeyCode::Tab));
+        type_in(&mut app, "the quick brown fox");
+        app.key(ctrl('w'));
+        assert_eq!(app.line.text(), "the quick brown ");
+        app.key(ctrl('w'));
+        assert_eq!(app.line.text(), "the quick ");
+        let word_left = Key {
+            ctrl: true,
+            ..Key::press(KeyCode::Left)
+        };
+        app.key(word_left);
+        assert_eq!(app.line.cursor(), 4);
+        app.key(Key::press(KeyCode::Delete));
+        assert_eq!(app.line.text(), "the uick ");
+        let home = terminal(crossterm::event::KeyCode::Home, KeyModifiers::NONE);
+        let end = terminal(crossterm::event::KeyCode::End, KeyModifiers::NONE);
+        app.terminal_key(home, false);
+        assert_eq!(app.line.cursor(), 0);
+        app.key(Key::press(KeyCode::Char('A')));
+        app.terminal_key(end, false);
+        app.key(Key::press(KeyCode::Backspace));
+        assert_eq!(app.line.text(), "Athe uick");
+        let alt_backspace = terminal(crossterm::event::KeyCode::Backspace, KeyModifiers::ALT);
+        app.terminal_key(alt_backspace, false);
+        assert_eq!(app.line.text(), "Athe ");
+        // Control keys edit; they do not type their letter.
+        app.key(ctrl('a'));
+        app.key(ctrl('k'));
+        assert!(app.line.is_empty());
+        type_in(&mut app, "again");
+        app.key(ctrl('u'));
+        assert!(app.line.is_empty());
+        // In play mode Home and End are no editing keys.
+        app.key(Key::press(KeyCode::Tab));
+        app.terminal_key(home, false);
+        assert_eq!(app.mode, Mode::Play);
+        assert_eq!(said(&sent(&rx)), 0);
+    }
+
+    #[test]
+    fn the_text_line_holds_a_long_text_and_says_when_it_is_full() {
+        let (mut app, rx) = app(true);
+        let sentence = "The pink trombone speaks one sentence after another. ";
+        let long = sentence.repeat(MAX_CHARS / sentence.len() + 2);
+        app.paste(&long);
+        assert!(app.line.is_full());
+        assert!(app.status.contains("full"), "{}", app.status);
+        type_in(&mut app, "x");
+        assert!(app.status.contains("full"), "{}", app.status);
+        // All of it is compiled and sent as one utterance.
+        let t0 = Instant::now();
+        app.key(Key::press(KeyCode::Enter));
+        let took = t0.elapsed();
+        let cmds = sent(&rx);
+        assert_eq!(said(&cmds), 1);
+        println!("{MAX_CHARS} characters compiled in {took:?}");
+        assert!(took < Duration::from_secs(1), "{took:?}");
+        // The status quotes only the start.
+        assert!(
+            app.status.chars().count() < QUOTE_CHARS + 20,
+            "{}",
+            app.status
+        );
+    }
+
+    #[test]
+    fn escape_in_type_mode_stops_speech_first() {
+        let (mut app, rx) = app(true);
+        app.paste("One. Two. Three.");
+        app.key(Key::press(KeyCode::Enter));
+        sent(&rx);
+        // Speech is under way, as the audio thread reports it.
+        app.snap.speaking = Some(12);
+        app.key(Key::press(KeyCode::Esc));
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::StopSpeaking]),
+            "only speech stops: {cmds:?}"
+        );
+        assert_eq!(app.mode, Mode::Type);
+        app.snap.speaking = None;
+        app.key(Key::press(KeyCode::Esc));
+        assert_eq!(app.mode, Mode::Play);
+    }
+
+    #[test]
+    fn several_sentences_are_one_utterance_with_a_pause_and_a_new_contour_each() {
+        let (mut app, rx) = app(true);
+        app.paste("The cat sat down.\nThe dog ran far!\nWhere is the bird?\n");
+        app.key(Key::press(KeyCode::Enter));
+        let cmds = sent(&rx);
+        let Some(Cmd::Speak(u, _)) = cmds.iter().find(|c| matches!(c, Cmd::Speak(..))) else {
+            panic!("nothing said: {cmds:?}");
+        };
+        let segs = u.segments();
+        // A sentence's pause, and the short release at the very end.
+        let pauses: Vec<usize> = (0..segs.len())
+            .filter(|&k| segs[k].phoneme == Phoneme::Sil && segs[k].duration > 0.25)
+            .collect();
+        assert_eq!(pauses.len(), 2, "{segs:?}");
+        let vowel = |s: &&synthie_trombone::speech::Segment| {
+            matches!(
+                s.phoneme.manner(),
+                synthie_trombone::Manner::Vowel | synthie_trombone::Manner::Diphthong
+            )
+        };
+        let mut starts = Vec::new();
+        for &p in &pauses {
+            // Pitch falls into the pause and starts afresh after it.
+            let before = segs[..p].iter().rev().find(vowel).unwrap().pitch.1;
+            let after = segs[p..].iter().find(vowel).unwrap().pitch.1;
+            println!("pause at {p}: {before:.1} Hz, then {after:.1} Hz");
+            assert!(after > before * 1.05, "{before} Hz, then {after} Hz");
+            starts.push(after);
+        }
+        // The question rises at the end, above where it started.
+        let last = segs.iter().rev().find(vowel).unwrap().pitch.1;
+        assert!(last > starts[1] * 1.1, "{last} Hz from {} Hz", starts[1]);
+        // The strip of phonemes covers all three sentences.
+        let n: usize = app.spoken.iter().map(|(_, r)| r.len()).sum();
+        assert_eq!(n, segs.len());
+    }
+
     // ----- mouse -------------------------------------------------------
 
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};

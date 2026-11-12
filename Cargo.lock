@@ -1851,9 +1851,12 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "ratatui",
+ "serde",
+ "serde_json",
  "synthie",
  "synthie-trombone",
  "synthie-ui",
+ "unicode-width",
 ]
 
 [[package]]

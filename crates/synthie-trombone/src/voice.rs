@@ -657,6 +657,9 @@ impl Trombone {
     /// [tract length](Self::set_tract_length), so its formants scale with
     /// the speaker's size; after changing the size, articulate again.
     pub fn articulate(&mut self, a: &Articulation) {
+        // A consonant with a body of its own moves it at the speed of the
+        // back of the tongue (physical engine).
+        self.tract.quick_body = a.own_body();
         // Vowel shapes are tuned per engine.
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),

@@ -3,17 +3,23 @@
 
 mod app;
 mod audio;
+mod line;
+mod record;
 mod sing;
+mod take;
 mod ui;
 
 #[cfg(test)]
 mod screenshots;
+#[cfg(test)]
+mod take_tests;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
@@ -23,7 +29,7 @@ use crossterm::{
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, panic, time::Duration};
+use std::{io, panic, path::PathBuf, time::Duration};
 use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
@@ -41,7 +47,7 @@ struct Cli {
     /// Voice profile to lay over the voice: a JSON file as written by the
     /// tuner or by `match_voice.py`.
     #[arg(long)]
-    profile: Option<std::path::PathBuf>,
+    profile: Option<PathBuf>,
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
@@ -63,6 +69,11 @@ struct Cli {
     /// system's default, then a sound server, are tried otherwise).
     #[arg(long, requires = "mimic")]
     mic: Option<String>,
+    /// Directory for takes: F5 starts and stops recording one (the
+    /// commands as the voice carried them out, and its sound), numbered
+    /// take-001, take-002, … Created on the first take.
+    #[arg(long, value_name = "DIR", default_value = "takes")]
+    record: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -124,11 +135,10 @@ fn main() -> Result<()> {
             // A profile may name its own sound model.
             tui(
                 base.engine,
-                preset,
-                base,
-                persona,
+                (preset, base, persona),
                 cli.mimic,
                 cli.mic.as_deref(),
+                cli.record,
             )
         }
     }
@@ -136,11 +146,10 @@ fn main() -> Result<()> {
 
 fn tui(
     engine: Engine,
-    preset: Preset,
-    base: VoiceSettings,
-    persona: Persona,
+    (preset, base, persona): (Preset, VoiceSettings, Persona),
     mimic: bool,
     microphone: Option<&str>,
+    takes: PathBuf,
 ) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -148,12 +157,31 @@ fn tui(
         original_hook(info);
     }));
 
-    let (streams, link) = audio::start(mimic, microphone)?;
+    let (streams, link) = audio::start(mimic, microphone, takes)?;
     let _streams = streams;
 
     enable_raw_mode()?;
+    let result = session(engine, (preset, base, persona), link);
+    // Whatever happened, the terminal is given back as it was.
+    restore()?;
+    result
+}
+
+/// The app in the terminal, once it is in raw mode.
+fn session(
+    engine: Engine,
+    (preset, base, persona): (Preset, VoiceSettings, Persona),
+    link: audio::Link,
+) -> Result<()> {
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    // Bracketed paste: a paste arrives as one piece of text, not as keys
+    // (where a line break in it would be Enter and speak half of it).
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     // Key releases (kitty protocol) let notes stop when keys come up.
     // Releases of text keys (the piano letters) are only reported when all
     // keys arrive as escape codes; alternate keys keep Shift+letter typing
@@ -182,13 +210,31 @@ fn tui(
         app.set_voice(preset, base, persona);
     }
     let result = run(&mut terminal, &mut app);
+    // A take still recording is saved while the sound still runs.
+    app.finish();
 
     if release {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     }
-    restore()?;
     terminal.show_cursor()?;
     result
+}
+
+/// Text keys in one read of the terminal from which on the keys are taken
+/// to be a paste the terminal did not bracket: nobody types that fast.
+const BURST_KEYS: usize = 3;
+
+/// Whether `events`, read in one go, hold a burst of typed text.
+fn is_burst(events: &[Event]) -> bool {
+    let typed = events
+        .iter()
+        .filter(|e| {
+            matches!(e, Event::Key(k) if k.kind != KeyEventKind::Release
+                && matches!(k.code, KeyCode::Char(_))
+                && !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT))
+        })
+        .count();
+    typed >= BURST_KEYS
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut app::App) -> Result<()> {
@@ -197,18 +243,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut app::App
         terminal.draw(|f| ui::draw(f, app))?;
         if event::poll(Duration::from_millis(16))? {
             // Drain everything queued so drags stay responsive.
-            loop {
-                match event::read()? {
+            let mut events = vec![event::read()?];
+            while event::poll(Duration::ZERO)? {
+                events.push(event::read()?);
+            }
+            let burst = is_burst(&events);
+            for e in events {
+                match e {
                     Event::Key(k) => {
-                        if app.key(k.into()) {
+                        if app.terminal_key(k, burst) {
                             return Ok(());
                         }
                     }
                     Event::Mouse(m) => app.mouse(m),
+                    Event::Paste(text) => app.paste(&text),
                     _ => {}
-                }
-                if !event::poll(Duration::ZERO)? {
-                    break;
                 }
             }
         }
@@ -217,6 +266,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut app::App
 
 fn restore() -> Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        io::stdout(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     Ok(())
 }

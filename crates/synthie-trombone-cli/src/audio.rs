@@ -1,10 +1,13 @@
 //! Audio thread: one [`Trombone`], a [`Speaker`] for typed text, and
-//! synthie's reverb. Talks to the UI over bounded channels; the callback
-//! never allocates or blocks.
+//! synthie's reverb; it also records takes (see [`record`]). Talks to the
+//! UI over bounded channels; the callback never allocates or blocks.
 
+use crate::record::{self, Clock, Recorder, Tap};
+use crate::take::{Logged, Performer};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender, bounded};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use synthie::audio::fx::Reverb;
@@ -15,6 +18,9 @@ use synthie_trombone::{
     Constriction, Engine as SoundModel, MAX_CONSTRICTIONS, N, NOSE_LEN, Phoneme, Trombone,
     VoiceSettings,
 };
+
+/// Snapshots sent to the UI per second.
+const SNAPSHOT_RATE: f32 = 60.0;
 
 /// Samples kept for the oscilloscope.
 pub const SCOPE_LEN: usize = 1024;
@@ -40,12 +46,15 @@ pub enum Cmd {
     Model(SoundModel),
     /// Move to a vowel's shape, as the current sound model tunes it.
     Vowel(Phoneme),
-    Speak(Utterance),
+    /// Speak an utterance; the number is the one the recorder gave it.
+    Speak(Utterance, u32),
     StopSpeaking,
     /// Copy what the microphone hears (physical engine), or stop.
     Mimic(bool),
     /// Hold a vowel shape of the physical engine (Formant Lock).
     Shape(synthie_trombone::inverse::Shape),
+    /// Start (`true`) or stop recording a take.
+    Record(bool),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -69,6 +78,8 @@ pub struct Snapshot {
     pub level: f32,
     /// What the microphone last heard, while mimicking.
     pub heard: Option<Heard>,
+    /// How far the take being recorded has got.
+    pub take: Option<Clock>,
 }
 
 impl Snapshot {
@@ -93,6 +104,7 @@ impl Snapshot {
             scope: scope.ordered(),
             level: scope.level,
             heard: None,
+            take: None,
         }
     }
 }
@@ -135,22 +147,10 @@ impl Scope {
     }
 }
 
-/// Instrument settings to restore after speaking.
-struct Instrument {
-    tenseness: f32,
-    velum: f32,
-    wobble: bool,
-    /// Speech turns the drone off while it talks; restored afterwards.
-    drone: bool,
-}
-
-struct Engine {
-    voice: Trombone,
-    speaker: Speaker,
+pub(crate) struct Engine {
+    /// The voice and the speaker, played by commands.
+    core: Performer,
     reverb: Reverb,
-    reverb_mix: f32,
-    instrument: Instrument,
-    was_speaking: bool,
     scope: Scope,
     snapshot_every: usize,
     since_snapshot: usize,
@@ -161,142 +161,115 @@ struct Engine {
     ear_rx: Option<Receiver<(Gesture, Heard)>>,
     /// The voice's tract length, for the microphone thread (`f32` bits).
     size: Arc<AtomicU32>,
-    mimicking: bool,
     heard: Option<Heard>,
+    /// Where takes are recorded.
+    tap: Tap,
 }
-
-/// Articulator speed while mimicking: the person being copied has already
-/// taken the time to move their own.
-const MIMIC_SPEED: f32 = 8.0;
 
 impl Engine {
     fn apply(&mut self, cmd: Cmd) {
-        let v = &mut self.voice;
-        match cmd {
-            Cmd::NoteOn(note) => {
-                self.stop_speaking();
-                let v = &mut self.voice;
-                v.set_note(note);
-                v.note_on();
+        let logged = match cmd {
+            Cmd::Record(on) => {
+                self.record(on);
+                return;
             }
-            Cmd::NoteOff => v.note_off(),
-            Cmd::Note(note) => v.set_note(note),
-            Cmd::Tongue(i, d) => v.set_tongue(i, d),
-            Cmd::Constriction(slot, c) => v.set_constriction(slot, c),
-            Cmd::Velum(x) => {
-                self.instrument.velum = x;
-                v.set_velum(x);
+            Cmd::Speak(u, id) => {
+                let old = self.core.speak(u);
+                self.trash(old);
+                Logged::Speak(id)
             }
-            Cmd::Tenseness(t) => {
-                self.instrument.tenseness = t;
-                if !self.speaker.is_speaking() {
-                    v.set_tenseness(t);
-                }
-            }
-            Cmd::Vibrato(a) => v.set_vibrato(a, 5.5),
-            Cmd::Wobble(w) => {
-                self.instrument.wobble = w;
-                v.set_wobble(w);
-            }
-            Cmd::Drone(on) => {
-                self.instrument.drone = on;
-                if !self.speaker.is_speaking() {
-                    v.set_always_voice(on);
-                }
-            }
-            Cmd::Reverb(mix) => self.reverb_mix = mix,
-            Cmd::Voice(settings) => {
-                settings.apply(v);
-                self.instrument.tenseness = settings.tenseness;
-            }
-            Cmd::Lung(p) => v.set_lung_pressure(p),
-            Cmd::Model(model) => v.set_engine(model),
-            Cmd::Vowel(p) => {
-                v.articulate_phoneme(p);
-                v.set_velum(self.instrument.velum);
-            }
-            Cmd::Speak(u) => {
-                Speaker::prepare(&mut self.voice);
-                let old = self.speaker.speak(u);
-                self.was_speaking = true;
-                // Hand the old track back so it is freed off this thread.
-                let _ = self.trash_tx.try_send(old);
-            }
-            Cmd::StopSpeaking => self.stop_speaking(),
-            Cmd::Shape(shape) => v.set_shape(&shape),
             Cmd::Mimic(on) => {
-                self.mimicking = on && self.ear_rx.is_some();
                 self.heard = None;
-                self.stop_speaking();
-                let v = &mut self.voice;
-                if self.mimicking {
-                    v.set_articulation_speed(MIMIC_SPEED);
-                    v.set_glide(f32::INFINITY);
-                    v.set_always_voice(false);
-                } else {
-                    Gesture::REST.apply(v);
-                    self.restore_instrument();
-                }
+                Logged::Mimic(on && self.ear_rx.is_some())
             }
+            Cmd::NoteOn(note) => Logged::NoteOn(note),
+            Cmd::NoteOff => Logged::NoteOff,
+            Cmd::Note(note) => Logged::Note(note),
+            Cmd::Tongue(i, d) => Logged::Tongue(i, d),
+            Cmd::Constriction(slot, c) => Logged::Constriction(slot, c),
+            Cmd::Velum(x) => Logged::Velum(x),
+            Cmd::Tenseness(t) => Logged::Tenseness(t),
+            Cmd::Vibrato(a) => Logged::Vibrato(a),
+            Cmd::Wobble(w) => Logged::Wobble(w),
+            Cmd::Drone(on) => Logged::Drone(on),
+            Cmd::Reverb(mix) => Logged::Reverb(mix),
+            Cmd::Voice(settings) => Logged::Voice(settings),
+            Cmd::Lung(p) => Logged::Lung(p),
+            Cmd::Model(model) => Logged::Model(model),
+            Cmd::Vowel(p) => Logged::Vowel(p),
+            Cmd::StopSpeaking => Logged::StopSpeaking,
+            Cmd::Shape(shape) => Logged::Shape(shape),
+        };
+        if let Some(old) = self.core.apply(&logged) {
+            self.trash(old);
         }
-        self.size
-            .store(self.voice.tract_length().to_bits(), Ordering::Relaxed);
+        self.tap.command(logged);
+        self.size.store(
+            self.core.voice().tract_length().to_bits(),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Start or stop a take. A take starts from silence: speech stops and
+    /// the voice is rebuilt from its controls, as a replay builds it, so
+    /// that it can be replayed sample for sample.
+    fn record(&mut self, on: bool) {
+        if !on {
+            self.tap.end();
+        } else if !self.tap.is_recording() {
+            let old = self.core.restart();
+            self.trash(old);
+            self.tap.begin(&self.core.controls());
+        }
+    }
+
+    /// Hand an utterance back so it is freed off this thread.
+    fn trash(&self, old: Utterance) {
+        let _ = self.trash_tx.try_send(old);
     }
 
     /// Carry out what the microphone thread asks for.
     fn follow(&mut self) {
         let Some(rx) = &self.ear_rx else { return };
         while let Ok((gesture, heard)) = rx.try_recv() {
-            if self.mimicking && !self.speaker.is_speaking() {
-                gesture.apply(&mut self.voice);
+            if self.core.follow(&gesture) {
                 self.heard = Some(heard);
+                self.tap.command(Logged::Gesture(gesture));
             }
         }
     }
 
-    fn stop_speaking(&mut self) {
-        if self.speaker.is_speaking() {
-            let old = self.speaker.stop(&mut self.voice);
-            let _ = self.trash_tx.try_send(old);
-        }
-    }
-
-    fn restore_instrument(&mut self) {
-        let v = &mut self.voice;
-        v.reset_voicing_rates();
-        v.set_articulation_speed(1.0);
-        v.set_glide(0.1);
-        v.set_wobble(self.instrument.wobble);
-        v.set_tenseness(self.instrument.tenseness);
-        v.set_velum(self.instrument.velum);
-        v.set_always_voice(self.instrument.drone);
-    }
-
+    /// Fill one block of the output: what the audio callback does.
+    /// Commands are taken off the queue at the start of the block, so a
+    /// take stamps each with the sample it is applied before.
     fn render(&mut self, data: &mut [f32], channels: usize) {
+        self.tap.service();
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             self.apply(cmd);
         }
         self.follow();
-        for frame in data.chunks_mut(channels) {
-            let dry = self.speaker.process(&mut self.voice);
-            if self.was_speaking && !self.speaker.is_speaking() {
-                self.was_speaking = false;
-                self.restore_instrument();
-            }
-            let s = (self.reverb.process(dry, self.reverb_mix) * 0.9).clamp(-1.0, 1.0);
+        for frame in data.chunks_mut(channels.max(1)) {
+            let dry = self.core.sample();
+            self.tap.sample(dry);
+            let s = (self.reverb.process(dry, self.core.reverb()) * OUTPUT_GAIN).clamp(-1.0, 1.0);
             frame.fill(s);
             self.scope.push(s);
 
             self.since_snapshot += 1;
             if self.since_snapshot >= self.snapshot_every {
                 self.since_snapshot = 0;
-                let mut snap = Snapshot::capture(&self.voice, &self.speaker, &self.scope);
+                let mut snap =
+                    Snapshot::capture(self.core.voice(), self.core.speaker(), &self.scope);
                 snap.heard = self.heard;
+                snap.take = self.tap.clock();
                 let _ = self.snap_tx.try_send(snap);
             }
         }
     }
 }
+
+/// Gain of the output after the reverb.
+const OUTPUT_GAIN: f32 = 0.9;
 
 /// Channels the UI keeps.
 pub struct Link {
@@ -307,6 +280,8 @@ pub struct Link {
     /// Whether a microphone is open for mimic mode, and which.
     pub microphone: bool,
     pub microphone_name: Option<String>,
+    /// Records takes (`None`: recording is not available).
+    pub recorder: Option<Recorder>,
 }
 
 /// Open the default input device and listen to it: every measurement is
@@ -401,9 +376,73 @@ fn open(
     Ok(stream)
 }
 
+/// The body of the output callback: the engine filling interleaved blocks
+/// of `channels` channels. The device runs exactly this (see [`start`]),
+/// and so do the tests, with plain buffers.
+pub(crate) fn output(mut engine: Engine, channels: usize) -> impl FnMut(&mut [f32]) + Send {
+    move |data: &mut [f32]| engine.render(data, channels)
+}
+
+/// The engine and the UI's end of its channels, without a sound device:
+/// [`output`] turns the engine into the device's callback. With `takes`,
+/// takes are recorded into that directory.
+pub(crate) fn wire(
+    sample_rate: f32,
+    ear_rx: Option<Receiver<(Gesture, Heard)>>,
+    size: Arc<AtomicU32>,
+    takes: Option<PathBuf>,
+) -> (Engine, Link) {
+    let (cmd_tx, cmd_rx) = bounded(256);
+    let (snap_tx, snap_rx) = bounded(4);
+    let (trash_tx, trash_rx) = bounded(16);
+    let (tap, recorder) = match takes {
+        Some(dir) => {
+            let (events, saved) = record::spawn();
+            (
+                Tap::new(Some(events.clone())),
+                Some(Recorder::new(dir, events, saved)),
+            )
+        }
+        None => (Tap::new(None), None),
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let snapshot_every = (sample_rate / SNAPSHOT_RATE) as usize;
+    let mut reverb = Reverb::new();
+    reverb.set_params(0.55, 0.45);
+    let engine = Engine {
+        core: Performer::new(sample_rate),
+        reverb,
+        scope: Scope::default(),
+        snapshot_every,
+        since_snapshot: 0,
+        cmd_rx,
+        snap_tx,
+        trash_tx,
+        ear_rx,
+        size,
+        heard: None,
+        tap,
+    };
+    let link = Link {
+        cmd: cmd_tx,
+        snapshots: snap_rx,
+        trash: trash_rx,
+        sample_rate,
+        microphone: false,
+        microphone_name: None,
+        recorder,
+    };
+    (engine, link)
+}
+
 /// Open the default output device and start the engine; with `mimic`, the
-/// default microphone too. The streams stop when dropped.
-pub fn start(mimic: bool, microphone: Option<&str>) -> Result<(Vec<cpal::Stream>, Link)> {
+/// default microphone too. Takes are recorded into `takes`. The streams
+/// stop when dropped.
+pub fn start(
+    mimic: bool,
+    microphone: Option<&str>,
+    takes: PathBuf,
+) -> Result<(Vec<cpal::Stream>, Link)> {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -420,9 +459,6 @@ pub fn start(mimic: bool, microphone: Option<&str>) -> Result<(Vec<cpal::Stream>
         buffer_size: cpal::BufferSize::Default,
     };
 
-    let (cmd_tx, cmd_rx) = bounded(256);
-    let (snap_tx, snap_rx) = bounded(4);
-    let (trash_tx, trash_rx) = bounded(16);
     let size = Arc::new(AtomicU32::new(1.0f32.to_bits()));
     let mut streams = Vec::new();
     let mut heard_on = None;
@@ -435,59 +471,20 @@ pub fn start(mimic: bool, microphone: Option<&str>) -> Result<(Vec<cpal::Stream>
     } else {
         None
     };
-
-    let mut reverb = Reverb::new();
-    reverb.set_params(0.55, 0.45);
-    let mut voice = Trombone::new(sample_rate);
-    voice.set_frequency(110.0);
-    voice.set_tenseness(0.6);
-
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let snapshot_every = (sample_rate / 60.0) as usize;
-    let mut engine = Engine {
-        voice,
-        speaker: Speaker::new(),
-        reverb,
-        reverb_mix: 0.18,
-        instrument: Instrument {
-            tenseness: 0.6,
-            velum: 0.0,
-            wobble: false,
-            drone: false,
-        },
-        was_speaking: false,
-        scope: Scope::default(),
-        snapshot_every,
-        since_snapshot: 0,
-        cmd_rx,
-        snap_tx,
-        trash_tx,
-        ear_rx,
-        size,
-        mimicking: false,
-        heard: None,
-    };
+    let (engine, mut link) = wire(sample_rate, ear_rx, size, Some(takes));
+    let mut callback = output(engine, channels);
+    link.microphone = heard_on.is_some();
+    link.microphone_name = heard_on;
 
     let stream = device
         .build_output_stream(
             stream_config,
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| engine.render(data, channels),
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| callback(data),
             |_err| {},
             None,
         )
         .context("failed to build output stream")?;
     stream.play().context("failed to start audio stream")?;
     streams.push(stream);
-
-    Ok((
-        streams,
-        Link {
-            cmd: cmd_tx,
-            snapshots: snap_rx,
-            trash: trash_rx,
-            sample_rate,
-            microphone: heard_on.is_some(),
-            microphone_name: heard_on,
-        },
-    ))
+    Ok((streams, link))
 }

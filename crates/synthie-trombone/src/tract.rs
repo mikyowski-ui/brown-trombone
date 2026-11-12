@@ -40,6 +40,9 @@ const GRID_OFFSET: f32 = 1.7;
 const VELUM_CLOSED: f32 = 0.01;
 const VELUM_OPEN: f32 = 0.4;
 const FRICATIVE_ATTACK: f32 = 0.1;
+/// How fast the velum shuts on the physical engine, in the units of the
+/// original's `0.1` (diameter per unit of articulator movement).
+const VELUM_SHUTTING: f32 = 0.25;
 const MAX_TRANSIENTS: usize = 8;
 const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
 /// The slot that holds lip rounding: a shaping of the vowel, never meant to
@@ -69,6 +72,72 @@ const JAW_TIME: f32 = 0.02;
 /// Lip cells over which the jaw's opening grows to its full width, from
 /// [`LIP_START`] on: the corners of the mouth open less than its middle.
 const JAW_RAMP: f32 = 3.0;
+
+// ----- articulators of two speeds (physical engine) ----------------------
+//
+// The tongue body and the jaw are heavy; the tongue tip, the blade and the
+// lips are light. A speaker moves the vowel shape slowly underneath the
+// consonants and flicks the tip or the lips on top of it, so a /t/ is a
+// quick touch on a tongue body still on its way to the next vowel, and the
+// formants that come out of the release move with that body: the locus
+// transitions. Each cell follows whichever articulator is shaping it.
+
+/// Cells behind a tongue-tip constriction (towards the glottis) over which
+/// its shoulder runs on the physical engine: the blade rises behind the tip.
+const TIP_SHOULDER_BACK: f32 = 5.0;
+/// Cells in front of it (towards the lips): the tip touches the ridge and
+/// the mouth in front of it stays open, a small front cavity of its own.
+const TIP_SHOULDER_FRONT: f32 = 1.5;
+/// The same behind the ridge (/ʃ ʒ tʃ dʒ/, from [`TIP_START`] to
+/// [`BLADE_PLACE`]): the blade makes a long channel, sloping down to the
+/// teeth, as long in front as behind (the original's shoulder; a shorter
+/// one takes a fifth off the hiss of /ʃ/).
+const BLADE_SHOULDER_FRONT: f32 = 3.5;
+/// Constriction index from which the tip, not the blade, makes it.
+const BLADE_PLACE: f32 = 34.5;
+/// The front shoulder of /s z/: their jet crosses a short, narrow channel
+/// to the teeth (the jaw is raised), whose small cavity gives them their
+/// high hiss.
+const SIBILANT_SHOULDER_FRONT: f32 = 4.0;
+/// Constriction index from which the tongue tip is at the teeth (/θ ð/):
+/// nothing in front of it but the lips.
+const DENTAL_PLACE: f32 = 38.5;
+/// Shoulder of a closure of the lips, cells either way: the lips are the
+/// last four cells of the tract, and closing them leaves the tongue alone.
+const LIP_SHOULDER: f32 = 2.5;
+/// Where the lips begin, as a constriction index (labials sit at 40.5 to
+/// 41).
+const LIP_PLACE: f32 = 40.0;
+/// A cell is being shaped by a consonant when the consonant takes this
+/// much off what the vowel shape alone would give it, diameter units.
+const CARVED: f32 = 0.05;
+/// Widest constriction that is a consonant's rather than a shading of the
+/// vowel (touch diameter): approximants included.
+const CONSONANT_WIDEST: f32 = 1.3;
+/// A cell a consonant has let go is back with the tongue body once it is
+/// this close to where the body wants it, diameter units.
+const RETURNED: f32 = 0.08;
+
+/// Which articulator moves a cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mover {
+    /// The tongue body and the jaw: the vowel shape.
+    Body,
+    /// The back of the tongue making a consonant (/k g ŋ/).
+    Dorsum,
+    /// The tongue tip and blade, or the lips, making a consonant.
+    Tip,
+}
+
+/// The articulator that makes a consonant constriction at `index`.
+fn mover_of(index: f32) -> Mover {
+    #[allow(clippy::cast_precision_loss)]
+    if index >= (TIP_START - 2) as f32 {
+        Mover::Tip
+    } else {
+        Mover::Dorsum
+    }
+}
 
 // ----- the hiss regulator (physical engine) ------------------------------
 //
@@ -256,6 +325,14 @@ pub(crate) struct Tract {
     /// How the damped articulators move (the speeds of the voice's tuning).
     pub(crate) motion: Tuning,
     velocity: [f32; N],
+    /// The vowel shape alone, before the consonants are carved into it
+    /// (physical engine), and which articulator moves each cell.
+    body: [f32; N],
+    mover: [Mover; N],
+    /// The tongue body is being held by a consonant of its own (/k g ŋ l
+    /// r/): it moves at the back of the tongue's speed, until it is back
+    /// with the vowels.
+    pub(crate) quick_body: bool,
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
@@ -309,6 +386,9 @@ impl Tract {
             jaw_open: 0.0,
             motion: Tuning::DEFAULT,
             velocity: [0.0; N],
+            body: [0.0; N],
+            mover: [Mover::Body; N],
+            quick_body: false,
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             trim: [0.0; N / PLACE],
@@ -512,6 +592,10 @@ impl Tract {
             Dynamics::Linear => 0.0,
             Dynamics::Damped => -self.motion.closure_overshoot,
         };
+        if self.dynamics == Dynamics::Damped {
+            self.compute_shaped_targets(floor);
+            return;
+        }
         for (k, s) in self.slots.iter().enumerate() {
             let Some(s) = s.filter(|s| s.alive) else {
                 continue;
@@ -524,6 +608,82 @@ impl Tract {
         }
         if let Some(c) = self.narrowing {
             carve(&mut self.target, c, floor);
+        }
+        if self.relief > 0.0 {
+            self.relieve();
+        }
+    }
+
+    /// [`compute_targets`](Self::compute_targets) on the physical engine:
+    /// the vowel shape first (tongue, jaw, lip rounding and the vowel's own
+    /// narrowing, exactly as before), kept as [`Tract::body`]; then each
+    /// consonant carved into it with the shoulder of the articulator that
+    /// makes it, and every cell assigned the articulator that moves it.
+    #[allow(clippy::needless_range_loop)] // five arrays, cell by cell
+    fn compute_shaped_targets(&mut self, floor: f32) {
+        // Lip rounding that belongs to a consonant (/ʃ ʒ tʃ dʒ r/) is the
+        // lips' own gesture and moves at their speed; a vowel's moves with
+        // the vowel shape.
+        let consonant = self.slots.iter().enumerate().any(|(k, s)| {
+            k != ROUNDING_SLOT && s.is_some_and(|s| s.alive && s.c.diameter < CONSONANT_WIDEST)
+        });
+        if let Some(Some(s)) = self.slots.get(ROUNDING_SLOT)
+            && s.alive
+        {
+            let before = self.target;
+            carve(&mut self.target, s.c, floor);
+            if consonant {
+                let lips = self.target[LIP_START..].iter().zip(&before[LIP_START..]);
+                for (m, (t, b)) in self.mover[LIP_START..].iter_mut().zip(lips) {
+                    if *t < b - CARVED {
+                        *m = Mover::Tip;
+                    }
+                }
+            }
+        }
+        if let Some(c) = self.narrowing {
+            carve(&mut self.target, c, floor);
+        }
+        self.body = self.target;
+        let mut by = [None; N];
+        for (k, s) in self.slots.iter().enumerate() {
+            let Some(s) = s.filter(|s| s.alive) else {
+                continue;
+            };
+            if k == ROUNDING_SLOT {
+                continue;
+            }
+            let mut c = s.c;
+            if intent(k, c.diameter) == Intent::Hiss {
+                c.diameter += self.trim[place(c.index)];
+            }
+            let before = self.target;
+            if intent(k, c.diameter) == Intent::Open {
+                // An approximant (/l r/) shapes the tongue as a whole, as
+                // the original's did.
+                carve(&mut self.target, c, floor);
+            } else {
+                let hiss = intent(k, c.diameter) == Intent::Hiss;
+                carve_consonant(&mut self.target, c, floor, hiss);
+            }
+            for i in 0..N {
+                if self.target[i] < before[i] - CARVED * 0.1 {
+                    by[i] = Some(mover_of(c.index));
+                }
+            }
+        }
+        for i in 0..N {
+            if self.target[i] < self.body[i] - CARVED
+                && let Some(m) = by[i]
+            {
+                self.mover[i] = m;
+            } else if self.quick_body {
+                self.mover[i] = Mover::Dorsum;
+            } else if self.mover[i] != Mover::Body
+                && (self.diameter[i] - self.target[i]).abs() <= RETURNED
+            {
+                self.mover[i] = Mover::Body;
+            }
         }
         if self.relief > 0.0 {
             self.relieve();
@@ -752,25 +912,25 @@ impl Tract {
     /// solution over `dt`, so it is stable for any block length.
     #[allow(clippy::cast_precision_loss)]
     fn move_damped(&mut self, dt: f32) {
-        let base = self.movement_speed * (self.motion.articulation_rate / MOVEMENT_SPEED);
+        // Natural frequencies of the three articulators at this speed.
+        let speed = self.movement_speed / MOVEMENT_SPEED;
+        let tip = speed * self.motion.articulation_rate;
+        let dorsum = speed * self.motion.dorsum_rate;
+        let body = speed * self.motion.body_rate;
         for i in 0..N {
-            // The back of the tract is slower than the tip and lips.
-            let region = if i < NOSE_START {
-                0.6
-            } else if i >= TIP_START {
-                1.0
-            } else {
-                0.6 + 0.4 * (i - NOSE_START) as f32 / (TIP_START - NOSE_START) as f32
-            };
             let e0 = self.diameter[i] - self.target[i];
-            // Closing is twice as fast as opening, as in the original.
-            let w = base
-                * region
-                * if e0 > 0.0 {
-                    self.motion.closing_ratio
-                } else {
-                    1.0
-                };
+            // Consonants close twice as fast as they open, as in the
+            // original; the vowel shape moves alike either way.
+            let closing = if e0 > 0.0 {
+                self.motion.closing_ratio
+            } else {
+                1.0
+            };
+            let w = match self.mover[i] {
+                Mover::Body => body,
+                Mover::Dorsum => dorsum * closing,
+                Mover::Tip => tip * closing,
+            };
             let mut v0 = self.velocity[i];
             if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {
                 // Letting go of a closure: surfaces pressed together spring
@@ -795,11 +955,15 @@ impl Tract {
         self.last_obstruction = None;
 
         let amount = dt * self.movement_speed;
+        // The velum shuts as fast as it opens (the original's took two
+        // and a half times longer): after a nasal, a stop at the same
+        // place (/nd/ in "and", "round") must have the nose shut by its
+        // release, or it builds no pressure and is not heard at all.
         self.nose_diameter[0] = move_towards(
             self.nose_diameter[0],
             self.velum_target,
             amount * 0.25,
-            amount * 0.1,
+            amount * VELUM_SHUTTING,
         );
         self.calculate_reflections();
     }
@@ -980,6 +1144,57 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
         }
         let j = j as usize;
         let rel = (j as f32 - index).abs() - 0.5;
+        let shrink = if rel <= 0.0 {
+            0.0
+        } else if rel > width {
+            1.0
+        } else {
+            0.5 * (1.0 - cos(PI * rel / width))
+        };
+        if d < target[j] {
+            target[j] = d + (target[j] - d) * shrink;
+        }
+    }
+}
+
+/// Carve a consonant into a target shape (physical engine), with the
+/// shoulder of the articulator that makes it: lips close only the lips; the
+/// tongue tip raises the blade behind it but leaves the mouth in front of
+/// it open; the back of the tongue humps over its usual reach either way.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn carve_consonant(target: &mut [f32; N], c: Constriction, floor: f32, hiss: bool) {
+    let index = c.index;
+    let d = (c.diameter - 0.3).max(floor);
+    if !(2.0..N as f32).contains(&index) || d >= 3.0 {
+        return;
+    }
+    let (back, front) = if index >= LIP_PLACE {
+        (LIP_SHOULDER, LIP_SHOULDER)
+    } else if index >= BLADE_PLACE && hiss && index < DENTAL_PLACE {
+        (TIP_SHOULDER_BACK, SIBILANT_SHOULDER_FRONT)
+    } else if index >= BLADE_PLACE {
+        (TIP_SHOULDER_BACK, TIP_SHOULDER_FRONT)
+    } else if index >= TIP_START as f32 {
+        (TIP_SHOULDER_BACK, BLADE_SHOULDER_FRONT)
+    } else {
+        (reach(index), reach(index))
+    };
+    let centre = (index + 0.5) as i32;
+    let span = back.max(front) as i32 + 2;
+    for k in -span..=span {
+        let j = centre + k;
+        if !(0..N as i32).contains(&j) {
+            continue;
+        }
+        let j = j as usize;
+        let signed = j as f32 - index;
+        let width = if signed < 0.0 { back } else { front };
+        let rel = signed.abs() - 0.5;
         let shrink = if rel <= 0.0 {
             0.0
         } else if rel > width {

@@ -356,13 +356,27 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             if p == Phoneme::W {
                 continue;
             }
-            let mut s = Phoneme::S.articulation();
-            s.tongue = p.articulation().tongue;
-            let mut c = Trombone::new(48_000.0);
-            c.set_engine(Engine::Physical);
-            c.set_tract_length(l);
-            c.articulate(&s);
-            assert_eq!(Some(c.tongue()), tongue, "{p} with /s/ at {l}");
+            let leaning = |q: Phoneme| {
+                let mut a = q.articulation();
+                a.tongue = p.articulation().tongue;
+                let mut c = Trombone::new(48_000.0);
+                c.set_engine(Engine::Physical);
+                c.set_tract_length(l);
+                c.articulate(&a);
+                c.tongue()
+            };
+            // The lips leave the body exactly where the vowel has it...
+            assert_eq!(Some(leaning(Phoneme::P)), tongue, "{p} with /p/ at {l}");
+            // ...the tongue tip of /s/ draws it a little forward and up,
+            // never further than the tongue's own reach.
+            let (index, diameter) = (shape.tongue_index, shape.tongue_diameter);
+            let (si, sd) = leaning(Phoneme::S);
+            assert!(
+                (si - index).abs() <= 0.35 * (26.5 - index).abs() + 1e-3
+                    && (sd - diameter).abs() <= 0.35 * (2.5 - diameter).abs() + 1e-3
+                    && (si - index) * (26.5 - index) >= 0.0,
+                "{p} with /s/ at {l}: {si} {sd} from {index} {diameter}"
+            );
         }
         // Diphthongs glide between their own two shapes.
         for p in [

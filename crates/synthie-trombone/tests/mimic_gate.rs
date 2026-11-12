@@ -134,7 +134,14 @@ fn a_sung_vowel_sequence_is_followed() {
         if told.is_none_or(|ms| ms > 60.0) {
             failures.push(format!("{p}: told after {told:?} ms"));
         }
-        if there.is_none_or(|ms| ms > 60.0) {
+        // The copy's tongue body has the inertia of a real one (a time
+        // constant of about 40 ms in speech, a quarter of that at the
+        // copier's speed), so its tract lands later than the listener
+        // tells it: the bound was 60 ms (measured 35 to 52 when every
+        // articulator moved at the tongue tip's speed), it is 95 (measured
+        // 47 to 88 with the heavy body, which made in-sentence consonants
+        // 56 % → 74 % right for the speech judge).
+        if there.is_none_or(|ms| ms > 95.0) {
             failures.push(format!("{p}: tract there after {there:?} ms"));
         }
         assert!(b.is_voiced());

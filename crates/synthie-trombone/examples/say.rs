@@ -21,7 +21,7 @@
 //! other targets without regenerating the vowel table: a `"vowels"` object
 //! of F1, F2 and F3 for an adult man, Hz (see `vowel_targets`), keyed by
 //! the vowel (`"IH"`), a diphthong's start (`"AY<"` or `"AY"`) or end
-//! (`"AY>"`), or where a vowel drifts to (`"IH>"`):
+//! (`"AY>"`):
 //!
 //! ```json
 //! { "engine": "Physical", "vowels": { "IH": [410, 2050, 2700], "AY>": [400, 2100, 2800] } }
@@ -46,7 +46,7 @@ use synthie_trombone::vowel_targets::{self, VowelKey};
 use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
 use synthie_trombone::{Trombone, normalize};
 
-/// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`, `IH>`.
+/// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`.
 fn vowel_key(name: &str) -> Option<VowelKey> {
     let (symbol, end) = match name.strip_suffix('>') {
         Some(s) => (s, true),

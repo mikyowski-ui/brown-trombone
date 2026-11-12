@@ -31,8 +31,5 @@
   "closure_overshoot": {"lo": 0.1, "hi": 0.5, "default": 0.3, "pass": "b"},
   "lax_length": {"lo": 0.5, "hi": 1.5, "default": 0.905, "pass": "c"},
   "long_length": {"lo": 0.7, "hi": 2, "default": 1.085, "pass": "c"},
-  "wide_diphthong_length": {"lo": 0.7, "hi": 2, "default": 1.05, "pass": "c"},
-  "vowel_drift": {"lo": 0, "hi": 0.7, "default": 0, "pass": "c"},
-  "diphthong_nucleus": {"lo": 0.2, "hi": 0.8, "default": 0.55, "pass": "c"},
   "glide_rate": {"lo": 0.15, "hi": 1, "default": 0.25, "pass": "c"}
 }

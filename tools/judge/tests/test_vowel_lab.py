@@ -10,8 +10,8 @@ def test_targets_are_read_from_the_engine_source():
         assert k in t and len(t[k]) == 3
         f1, f2, f3 = t[k]
         assert 200 < f1 < f2 < f3 < 4000, k
-    # Every vowel also has a row for where it drifts to.
-    assert all(k + ">" in t for k in ["IY", "IH", "EH", "AE", "AH", "AA", "AO", "UH", "UW", "ER", "AX"])
+    # Diphthongs have a start and an end.
+    assert all(k + "<" in t and k + ">" in t for k in ["EY", "AY", "OW", "AW", "OY"])
 
 
 def test_splits_do_not_overlap():

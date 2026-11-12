@@ -128,6 +128,30 @@ const VELAR_TONGUE: (f32, f32) = (VELAR, 2.1);
 const PHYSICAL_VELAR_TONGUE: (f32, f32) = (25.0, 2.05);
 /// Narrow enough to hiss.
 const HISS: f32 = 0.45;
+
+// ----- consonants on the vowel's body (physical engine) ------------------
+
+/// Tongue body a tongue-tip consonant drags the body towards: forward and
+/// fairly high, where the blade behind a raised tip holds it.
+const TIP_BODY: (f32, f32) = (26.5, 2.5);
+/// How much narrower the physical engine makes /l r/ (touch diameter).
+const APPROXIMANT_NARROWING: f32 = 0.08;
+/// Widest consonant constriction that is an approximant's (touch
+/// diameter); wider ones only shade a vowel.
+const APPROXIMANT_WIDEST: f32 = 1.3;
+/// Share of the way to [`TIP_BODY`] that alveolars (/t d n s z/) and
+/// postalveolars (/ʃ ʒ tʃ dʒ/) take the body: the alveolar F2 locus near
+/// 1800 Hz comes from a body held forward by the tip.
+const ALVEOLAR_PULL: f32 = 0.3;
+const POSTALVEOLAR_PULL: f32 = 0.45;
+
+/// Where /k g ŋ/ close before a vowel whose body is at tongue index
+/// `index`: at the classic closure ([`VELAR`]) before back vowels, further
+/// forward before front ones. Never further back: the throat behind a /g/
+/// must stay large enough to take up the voice's air.
+fn velar_place(index: f32) -> f32 {
+    (0.3 * index + 14.5).clamp(VELAR, VELAR + 2.0)
+}
 macro_rules! phonemes {
     ($( $(#[$doc:meta])* $name:ident = $arpa:literal, $manner:ident; )*) => {
         /// An English phoneme (ARPAbet names).
@@ -295,18 +319,6 @@ impl Phoneme {
         }
     }
 
-    /// Where a vowel drifts to by its end: its own articulation on the
-    /// classic engine, standing for the vowel's end shape on the physical
-    /// engine (see [`VowelKey::End`]). `None` for everything that is not a
-    /// vowel (diphthongs glide instead; see [`glide_end`](Self::glide_end)).
-    #[must_use]
-    pub const fn drift_end(self) -> Option<Articulation> {
-        match self.manner() {
-            Manner::Vowel => Some(self.classic().standing_for(VowelKey::End(self))),
-            _ => None,
-        }
-    }
-
     /// Whether the vocal folds vibrate.
     #[must_use]
     pub const fn is_voiced(self) -> bool {
@@ -407,15 +419,12 @@ impl Phoneme {
 impl VowelKey {
     /// The articulation that stands for this shape: the phoneme's own for a
     /// vowel, glide or diphthong start, its [`glide_end`](Phoneme::glide_end)
-    /// or [`drift_end`](Phoneme::drift_end) for an end.
+    /// for a diphthong's end.
     #[must_use]
     pub const fn articulation(self) -> Option<Articulation> {
         match self {
             VowelKey::Vowel(p) | VowelKey::Start(p) => Some(p.articulation()),
-            VowelKey::End(p) => match p.glide_end() {
-                Some(a) => Some(a),
-                None => p.drift_end(),
-            },
+            VowelKey::End(p) => p.glide_end(),
         }
     }
 }
@@ -437,6 +446,30 @@ impl Articulation {
     /// [`physical`](Self::physical) for a voice that holds some vowel
     /// shapes of its own (`held`) in place of the table's.
     pub(crate) fn physical_in(
+        self,
+        tract_length: f32,
+        held: &vowel_size::OwnShapes,
+    ) -> (Self, Option<Constriction>) {
+        let (mut a, narrowing) = self.physical_shape_of(tract_length, held);
+        // /l r/ are narrower on the physical engine: with the classic
+        // engine's gap their F1 stood near 550 Hz, a vowel's, where an /l/
+        // has 350 to 400.
+        if narrowing.is_none()
+            && let Some(c) = a.constriction
+            && c.diameter > HISS + 0.3
+            && c.diameter < APPROXIMANT_WIDEST
+        {
+            a.constriction = Some(Constriction::new(
+                c.index,
+                c.diameter - APPROXIMANT_NARROWING,
+            ));
+        }
+        (a, narrowing)
+    }
+
+    /// [`physical_in`](Self::physical_in) before the approximants are
+    /// narrowed.
+    fn physical_shape_of(
         self,
         tract_length: f32,
         held: &vowel_size::OwnShapes,
@@ -473,7 +506,70 @@ impl Articulation {
             a.lips = lips.map(|d| Constriction::new(LIPS, d));
             return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        (a, None)
+        (self.leaning_on(tongue, tract_length), None)
+    }
+
+    /// A consonant made on top of a vowel's tongue body `body` (physical
+    /// engine): the heavy body stays the vowel's and glides from vowel to
+    /// vowel underneath, and the consonant is a gesture of the tip or the
+    /// lips added to it, whose release comes out of a body still on its
+    /// way: the locus transitions. Alveolar and postalveolar tongue-tip
+    /// sounds draw the body a little forward and up with the tip.
+    ///
+    /// Consonants with a tongue body of their own (/k g ŋ l r/; /r/ that of
+    /// /ɚ/; see
+    /// [`own_body`](Self::own_body)) keep it: the back of the tongue is
+    /// their articulator. /k g ŋ/ close a little further forward before
+    /// front vowels and further back before back ones ([`velar_place`]).
+    fn leaning_on(self, body: (f32, f32), tract_length: f32) -> Self {
+        let mut a = self;
+        let (index, diameter) = body;
+        // `w` of the way from the vowel's body to `(i0, d0)`.
+        let pull = |(i0, d0): (f32, f32), w: f32| {
+            (index + (i0 - index) * w, diameter + (d0 - diameter) * w)
+        };
+        let Some(c) = self.constriction else {
+            a.tongue = Some(body);
+            return a;
+        };
+        if self.tongue == Some(VELAR_TONGUE) {
+            a.tongue = Some(PHYSICAL_VELAR_TONGUE);
+            a.constriction = Some(Constriction::new(velar_place(index), c.diameter));
+        } else if self.own_body() {
+            // /l r/: their own body. /r/'s is that of /ɚ/ (the classic
+            // engine gives both the same), as the physical engine shapes it.
+            if self.tongue == Phoneme::R.classic().tongue
+                && let Some((er, _, _)) =
+                    vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
+            {
+                a.tongue = Some(er);
+            }
+        } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0 {
+            // (An /n/ leaves the body be: drawn up and forward behind a
+            // nasal closure it is heard as /ŋ/.)
+            let w = if c.index < ALVEOLAR - 1.0 {
+                POSTALVEOLAR_PULL
+            } else {
+                ALVEOLAR_PULL
+            };
+            a.tongue = Some(pull(TIP_BODY, w));
+        } else {
+            a.tongue = Some(body);
+        }
+        a
+    }
+
+    /// Whether this is a consonant with a tongue body of its own (/k g ŋ l
+    /// r/): on the physical engine the back of the tongue is then the
+    /// articulator making the consonant, and moves at its speed (see
+    /// `Tuning::dorsum_rate`), not at the vowel shape's.
+    #[must_use]
+    pub(crate) fn own_body(self) -> bool {
+        // By the tongue alone: a consonant before /ɚ/ (whose classic tongue
+        // is /r/'s) is drawn into its r-colouring by the back of the
+        // tongue too.
+        let own = |p: Phoneme| self.tongue == p.classic().tongue;
+        self.constriction.is_some() && (own(Phoneme::K) || own(Phoneme::L) || own(Phoneme::R))
     }
 
     /// The vowel shape the physical engine holds for this articulation in

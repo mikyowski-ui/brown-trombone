@@ -119,8 +119,8 @@ pub struct Utterance {
     /// closure, seconds (physical engine).
     lead: f32,
     release_lead: f32,
-    /// Articulator speed while a vowel glides or drifts, relative
-    /// (physical engine).
+    /// Articulator speed while a diphthong glides, relative (physical
+    /// engine).
     glide_rate: f32,
     /// Seconds over which a segment's pitch kick decays.
     kick_time: f32,
@@ -204,6 +204,7 @@ impl Utterance {
 
 /// Plays [`Utterance`]s on a [`Trombone`]. Never allocates.
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent flags
 pub struct Speaker {
     utterance: Utterance,
     index: usize,
@@ -216,7 +217,17 @@ pub struct Speaker {
     gliding: Option<f32>,
     /// The larynx has already let go of the voice for the next segment.
     larynx_ahead: bool,
+    /// The shape of the pause being spoken is still to be sent (physical
+    /// engine; see [`PAUSE_HOLD`]).
+    pause_pending: bool,
 }
+
+/// How long a voiced sound before a pause keeps its shape once the voice
+/// has been let go, seconds (physical engine): the voice dies away first and
+/// the mouth opens after, as a speaker's does at the end of a phrase.
+/// Opening it with the voice still sounding would end every phrase on a
+/// vowel nobody asked for (`... bowls-uh`).
+const PAUSE_HOLD: f32 = 0.04;
 
 // On the physical engine the articulators get a head start on each sound
 // (`Tuning::lead`): their tissue has inertia there, and people begin moving
@@ -240,6 +251,7 @@ impl Speaker {
         self.started = false;
         self.ahead = false;
         self.larynx_ahead = false;
+        self.pause_pending = false;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -290,7 +302,7 @@ impl Speaker {
 
     /// Move `voice` to `seg`'s articulation. On the physical engine the
     /// articulators slow down (`Tuning::glide_rate`) for the glide of a
-    /// diphthong or the drift of a vowel, so that it lasts the whole
+    /// diphthong, so that it lasts the whole
     /// segment, and pick up their speed again for the next sound.
     fn articulate(&mut self, voice: &mut Trombone, seg: &Segment) {
         if voice.engine() == Engine::Physical {
@@ -314,9 +326,16 @@ impl Speaker {
     /// Advance one output sample and render it.
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
         if let Some(&seg) = self.utterance.segments.get(self.index) {
+            let physical = voice.engine() == Engine::Physical;
             if !self.started {
                 self.started = true;
-                if !self.ahead {
+                let voiced_before = self
+                    .index
+                    .checked_sub(1)
+                    .and_then(|k| self.utterance.segments.get(k))
+                    .is_some_and(|p| p.voiced && p.phoneme != Phoneme::Sil);
+                self.pause_pending = physical && seg.phoneme == Phoneme::Sil && voiced_before;
+                if !self.ahead && !self.pause_pending {
                     self.articulate(voice, &seg);
                 }
                 self.ahead = false;
@@ -337,9 +356,14 @@ impl Speaker {
             }
             voice.set_frequency(hz);
             self.elapsed += 1.0 / voice.sample_rate();
+            if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
+                self.articulate(voice, &seg);
+                self.pause_pending = false;
+            }
             if !self.ahead
-                && voice.engine() == Engine::Physical
+                && physical
                 && let Some(&next) = self.utterance.segments.get(self.index + 1)
+                && !(seg.voiced && next.phoneme == Phoneme::Sil)
             {
                 let closed = matches!(
                     seg.phoneme.manner(),
@@ -363,7 +387,7 @@ impl Speaker {
             // carrying on into the closure.
             if !self.larynx_ahead
                 && seg.voiced
-                && voice.engine() == Engine::Physical
+                && physical
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
                 && !next.voiced
                 && is_obstruent(next.phoneme)
@@ -641,6 +665,14 @@ fn number_words(digits: &str) -> String {
 
 // ===== tokens → timed segments ============================================
 
+/// How much longer /aɪ aʊ ɔɪ/ are than /eɪ oʊ/ (Peterson & Lehiste 1960),
+/// against `Tuning::diphthong_length` (physical engine).
+const WIDE_DIPHTHONG_LENGTH: f32 = 1.05;
+
+/// Share of a diphthong spent on the vowel it starts from, before it
+/// glides to its end.
+const NUCLEUS: f32 = 0.55;
+
 /// How long vowel or diphthong `p` lasts against others of its kind, on
 /// the physical engine (pass C of the tuning): lax vowels are shorter than
 /// long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
@@ -649,12 +681,13 @@ fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
     match p {
         P::Ih | P::Eh | P::Ah | P::Uh => timing.lax_length,
         P::Ae | P::Aa | P::Ao | P::Er => timing.long_length,
-        P::Ay | P::Aw | P::Oy => timing.wide_diphthong_length,
+        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH,
         _ => 1.0,
     }
 }
 
-/// Base durations in seconds at rate 1.
+/// Base durations in seconds at rate 1 (`physical`: for the physical
+/// engine, which gives each vowel and /z ʒ/ a length of its own).
 fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
     let own = |d: f32| {
         if physical {
@@ -669,7 +702,9 @@ fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) ->
         Manner::Stop | Manner::Affricate => timing.stop_length,
         Manner::Nasal => timing.nasal_length,
         Manner::Fricative => {
-            if p.is_voiced() {
+            if matches!(p, Phoneme::Z | Phoneme::Zh) && physical {
+                timing.voiced_sibilant_length
+            } else if p.is_voiced() {
                 timing.voiced_fricative_length
             } else {
                 timing.fricative_length
@@ -693,8 +728,6 @@ enum Part {
     Head,
     /// A diphthong's glide to its end.
     Glide,
-    /// A vowel's drift towards its end shape (physical engine).
-    Drift,
 }
 
 #[derive(Clone, Copy)]
@@ -819,6 +852,13 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         i += 1;
     }
     push_phrase_end(&mut drafts, phrase_start, Some(Break::Period));
+    if physical && !drafts.is_empty() {
+        // Speakers set their tongue before they speak: a moment of
+        // silence in which the slow tongue body gets to the first vowel
+        // (it takes that body's shape below, as every pause takes the
+        // next vowel's), so the first word does not start from rest.
+        drafts.insert(0, silence(PRE_POSITION / rate));
+    }
 
     // Lengthen the last syllable of each phrase.
     for k in 1..drafts.len() {
@@ -832,16 +872,6 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 head -= 1;
                 drafts[head].duration *= 1.4;
             }
-        }
-    }
-
-    // A vowel that drifts keeps the pitch course it would have had held
-    // still: its first part ends on the way to the accent, not on it.
-    for k in 1..drafts.len() {
-        if drafts[k].part == Part::Drift {
-            let before = if k >= 2 { drafts[k - 2].accent } else { 1.0 };
-            let (head, tail) = (drafts[k - 1].duration, drafts[k].duration);
-            drafts[k - 1].accent = lerp(before, drafts[k].accent, head / (head + tail));
         }
     }
 
@@ -863,6 +893,8 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        lean_on_vowels(&mut drafts);
+        assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
     }
 
@@ -900,6 +932,75 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         devoicing_lead: timing.devoicing_lead,
     }
 }
+
+/// The physical engine's place assimilation: /t d n/ right before /θ ð/
+/// are made where the dental is, with the tip against the teeth ("get the",
+/// "in the" are [t̪ ð], [n̪ ð]), so the tongue goes straight on into the
+/// fricative's gap instead of letting a closure behind the ridge burst
+/// into a gap at the teeth.
+fn assimilate_place(drafts: &mut [Draft]) {
+    for k in 0..drafts.len().saturating_sub(1) {
+        let next = drafts[k + 1];
+        if !matches!(drafts[k].phoneme, Phoneme::T | Phoneme::D | Phoneme::N)
+            || !matches!(next.phoneme, Phoneme::Th | Phoneme::Dh)
+        {
+            continue;
+        }
+        let (Some(c), Some(dental)) = (
+            drafts[k].articulation.constriction,
+            next.articulation.constriction,
+        ) else {
+            continue;
+        };
+        // The closure and, for a stop, its release segment.
+        let p = drafts[k].phoneme;
+        for d in drafts[..=k].iter_mut().rev().take_while(|d| d.phoneme == p) {
+            if let Some(own) = &mut d.articulation.constriction
+                && own.diameter <= c.diameter
+            {
+                own.index = dental.index;
+            }
+        }
+    }
+}
+
+/// The physical engine makes consonants on the tongue body of the vowel
+/// they lead into (of the one before, at the end of an utterance): each
+/// consonant is told which vowel shape that is, so that its tongue tip, lips
+/// or tongue back act on that vowel's body instead of moving the whole
+/// tongue to a body of their own (see `Articulation::leaning_on`).
+fn lean_on_vowels(drafts: &mut [Draft]) {
+    let leans = |d: &Draft| !d.vowel && d.phoneme != Phoneme::Sil && d.articulation.vowel.is_none();
+    let mut next = None;
+    for d in drafts.iter_mut().rev() {
+        if d.vowel {
+            next = d.articulation.vowel;
+        } else if leans(d) {
+            d.articulation.vowel = next;
+        }
+    }
+    let mut prev = None;
+    for d in drafts.iter_mut() {
+        if d.vowel {
+            prev = d.articulation.vowel;
+        } else if leans(d) {
+            d.articulation.vowel = prev;
+        }
+    }
+}
+
+/// Length of the frication of /tʃ/, as a share of a voiceless
+/// fricative's (physical engine).
+const AFFRICATE_FRICATION: f32 = 0.8;
+
+/// The dental closure an /ð/ starts with after a pause, seconds (physical
+/// engine).
+const DENTAL_ONSET: f32 = 0.025;
+
+/// The silence an utterance starts with on the physical engine, seconds:
+/// long enough for the tongue body (a 40 ms time constant) to get most of
+/// the way to the first vowel.
+const PRE_POSITION: f32 = 0.1;
 
 /// Pitch, Hz, at which a [`Tuning::onset_kick`] is as given; a voice
 /// pitched elsewhere gets it in proportion.
@@ -1020,6 +1121,15 @@ fn expand(
         spread: timing.voiced_fricative_spread,
         ..Gesture::default()
     };
+    // Inside a word /ʒ/ (and /z/, with less air) is a long, loud hiss with
+    // the voice under it all the way: air behind the folds, and the
+    // pharynx widened a little, as for a voiced stop, so the mouth does not
+    // fill and stop the voice before the hiss is over.
+    let medial_zh = Gesture {
+        spread: timing.voiced_sibilant_spread,
+        expansion: SIBILANT_EXPANSION * timing.cavity_expansion,
+        ..Gesture::default()
+    };
     let with = |mut d: Draft, g: Gesture| {
         d.gesture = g;
         d
@@ -1047,24 +1157,19 @@ fn expand(
     match p.manner() {
         Manner::Diphthong => {
             let end = p.glide_end().expect("diphthong");
-            let head = timing.diphthong_nucleus;
+            let head = NUCLEUS;
             out.push(draft(p, a, dur * head, true));
             let mut tail = draft(p, end, dur * (1.0 - head), true);
             tail.accent = 0.0;
             tail.part = Part::Glide;
             out.push(tail);
         }
-        Manner::Vowel if timing.vowel_drift > 0.0 => {
-            // Held, then on the way to where the vowel drifts: lax vowels
-            // towards the middle of the mouth, tense ones further out.
-            let end = p.drift_end().expect("a vowel");
-            let share = timing.vowel_drift;
-            out.push(draft(p, a, dur * (1.0 - share), true));
-            let mut tail = draft(p, end, dur * share, true);
-            tail.part = Part::Drift;
-            out.push(tail);
+        Manner::Stop if a.voiced => {
+            out.push(with(draft(p, a, dur, true), voiced_stop));
+            if context.next.is_none() {
+                out.push(final_release(p, rate));
+            }
         }
-        Manner::Stop if a.voiced => out.push(with(draft(p, a, dur, true), voiced_stop)),
         Manner::Stop => {
             // After /s/ the glottis has been open through the hiss and is
             // closing again by the release: no aspiration, and a short
@@ -1081,7 +1186,9 @@ fn expand(
             let released_into = context
                 .next
                 .filter(|&(n, _, same)| same && (is_vowel(n) || n.manner() == Manner::Approximant));
-            if let Some((n, n_stressed, _)) = released_into
+            if context.next.is_none() {
+                out.push(final_release(p, rate));
+            } else if let Some((n, n_stressed, _)) = released_into
                 && !after_s
             {
                 let stressed = if is_vowel(n) {
@@ -1102,23 +1209,98 @@ fn expand(
         Manner::Affricate => {
             let fric = if a.voiced { Phoneme::Zh } else { Phoneme::Sh };
             let g = if a.voiced { voiced_stop } else { voiceless };
+            // The frication of /dʒ/ comes straight out of the closure, with
+            // the folds still pressed for its voice.
             let fg = if a.voiced {
-                voiced_fricative
+                Gesture::default()
             } else {
                 voiceless
             };
             out.push(with(draft(p, a, dur * 0.6, a.voiced), g));
-            out.push(with(draft(p, fric.articulation(), dur, a.voiced), fg));
+            // The frication of /tʃ/ is nearly as long as a fricative's (70
+            // to 100 ms in English), or its hiss has no time to build after
+            // the release; that of /dʒ/ is shorter.
+            let frication = if a.voiced {
+                dur
+            } else {
+                (AFFRICATE_FRICATION * timing.fricative_length / rate).max(dur)
+            };
+            out.push(with(draft(p, fric.articulation(), frication, a.voiced), fg));
         }
         Manner::Fricative => {
-            let g = if a.voiced {
+            let word_final = context.next.is_none_or(|(_, _, same)| !same);
+            let g = if matches!(p, Phoneme::Z | Phoneme::Zh) && word_final {
+                // At the end of a word English lets /z/ go partly
+                // voiceless: more air behind the folds, a plainer hiss.
+                Gesture {
+                    spread: timing.voiced_sibilant_spread,
+                    ..Gesture::default()
+                }
+            } else if p == Phoneme::Zh {
+                medial_zh
+            } else if p == Phoneme::Z {
+                Gesture {
+                    spread: f32::midpoint(
+                        timing.voiced_fricative_spread,
+                        timing.voiced_sibilant_spread,
+                    ),
+                    ..medial_zh
+                }
+            } else if a.voiced {
                 voiced_fricative
             } else {
                 voiceless
             };
+            let after_pause = out.last().is_none_or(|d| d.phoneme == Phoneme::Sil);
+            if p == Phoneme::Dh
+                && after_pause
+                && let Some(c) = a.constriction
+            {
+                // After a pause /ð/ starts as a dental stop ([d̪ð], "The
+                // ..."): out of silence a voiced gap alone is heard as
+                // /l/.
+                let shut = Articulation {
+                    constriction: Some(crate::Constriction::new(c.index, 0.0)),
+                    ..a
+                };
+                let closure = DENTAL_ONSET / rate;
+                out.push(with(draft(p, shut, closure, true), voiced_stop));
+                dur = (dur - closure).max(0.5 * dur);
+            }
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
         _ => out.push(draft(p, a, dur, a.voiced)),
+    }
+}
+
+/// Share of a voiced stop's widening of the pharynx (`Tuning::cavity_expansion`)
+/// that /z ʒ/ make inside a word (physical engine).
+const SIBILANT_EXPANSION: f32 = 0.5;
+
+/// How long the breath goes on through the release of a stop at the end
+/// of a phrase, seconds (physical engine).
+const FINAL_RELEASE: f32 = 0.04;
+
+/// The release of a stop that ends a phrase (physical engine): the mouth
+/// opens towards the vowel before it on the air still pent up behind the
+/// closure, so the closure ends in an audible burst rather than fading out
+/// shut. Word-final stops are often unreleased in running speech, but a
+/// listener hearing no release hears no stop.
+fn final_release(p: Phoneme, rate: f32) -> Draft {
+    Draft {
+        phoneme: p,
+        articulation: Articulation {
+            voiced: false,
+            ..Phoneme::Hh.articulation()
+        },
+        duration: FINAL_RELEASE / rate,
+        voiced: false,
+        tenseness: None,
+        accent: 0.0,
+        vowel: false,
+        part: Part::Head,
+        gesture: Gesture::default(),
+        aspiration: false,
     }
 }
 
