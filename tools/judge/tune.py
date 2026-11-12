@@ -45,12 +45,13 @@ import argparse
 import contextlib
 import json
 import math
+import multiprocessing
 import os
 import shutil
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -226,6 +227,7 @@ class Evaluator:
         self.humans: dict = {}
         #: The starting point's naturalness distance (set after evaluation 0).
         self.nat0: float | None = None
+        self.pool: ProcessPoolExecutor | None = None
         with gpu_lock():
             self.judge = J.PhonemeJudge()
             if args.natural_weight > 0:
@@ -236,6 +238,8 @@ class Evaluator:
                 self.human_summary = N.summarize(N.run_system(self.judge, "human", self.humans, None, "", None))
 
     def close(self) -> None:
+        if self.pool is not None:
+            self.pool.shutdown()
         self.judge.close()
 
     def render_population(self, profiles: list[Path], scratch: Path) -> list[list[render.Rendered]]:
@@ -270,21 +274,25 @@ class Evaluator:
         obj = mper + self.args.ll_weight * mnll + self.args.prior_weight * pen
         return {"objective": obj, "per": per, "ll": ll, "mean_per": mper, "mean_nll": mnll, "penalty": pen}
 
-    def naturalness(self, rendered: list[render.Rendered]) -> dict:
-        """The naturalness distance of one candidate's renders of the
-        LibriSpeech texts (``natural.distance``)."""
+    def natural_jobs(self, rendered: list[render.Rendered]) -> list:
+        """Align one candidate's renders of the LibriSpeech texts (needs the
+        model) and return the per-sentence comparisons to run on the CPU
+        (``natural.compare``)."""
         import natural as N
 
         audios = [render.load_audio(r.path) for r in rendered]
         lps = self.judge.log_probs(audios, batch_size=2)
-        per_item = []
+        jobs = []
         for it, au, lp in zip(self.nat_items, audios, lps):
             segs = N.align(self.judge, au, list(it.expected), lp)
-            rec = {"id": it.id, "set": it.set, "analysis": N.analyse(au, segs, N.syllables(it.expected))}
             h = self.humans[it.id]
-            mean, path, local = N.dtw(N.log_mel(h.audio), N.log_mel(au))
-            rec["dtw"] = {"mean": mean, **N.class_distances(path, local, N.level_db(h.audio), h.segs)}
-            per_item.append(rec)
+            jobs.append((it.id, it.set, au, segs, N.syllables(it.expected), h.audio, h.segs))
+        return jobs
+
+    def naturalness(self, per_item: list[dict]) -> dict:
+        """The naturalness distance of one candidate (``natural.distance``)."""
+        import natural as N
+
         d, zs = N.distance(N.summarize(per_item), self.human_summary)
         return {"distance": d, "z": zs}
 
@@ -306,18 +314,29 @@ class Evaluator:
                 gates = [pool.submit(run_gates, self.args.gates, p, self.args.gate_threads) for p in profiles]
             out = []
             n = len(self.items)
+            nat_jobs = []
             with gpu_lock():
                 for u, rs in zip(us, rendered):
                     scores = J.score_phonemes(self.judge, rs[:n], batch_size=self.args.batch)
-                    r = self.objective(scores, u)
+                    out.append(self.objective(scores, u))
                     if self.nat_items:
-                        nat = self.naturalness(rs[n:])
-                        r["natural"] = nat["distance"]
-                        r["natural_z"] = nat["z"]
-                        if self.nat0 is not None:
-                            r["natural_penalty"] = max(0.0, nat["distance"] - self.nat0)
-                            r["objective"] += self.args.natural_weight * r["natural_penalty"]
-                    out.append(r)
+                        nat_jobs.append(self.natural_jobs(rs[n:]))
+            # The naturalness measures are plain numpy: worker processes,
+            # with the GPU lock let go.
+            if nat_jobs:
+                import natural as N
+
+                if self.pool is None:
+                    ctx = multiprocessing.get_context("spawn")  # the parent holds CUDA: no fork
+                    self.pool = ProcessPoolExecutor(max_workers=self.args.natural_jobs, mp_context=ctx)
+                futs = [[self.pool.submit(N.compare, *job) for job in jobs] for jobs in nat_jobs]
+                for r, fs in zip(out, futs):
+                    nat = self.naturalness([f.result() for f in fs])
+                    r["natural"] = nat["distance"]
+                    r["natural_z"] = nat["z"]
+                    if self.nat0 is not None:
+                        r["natural_penalty"] = max(0.0, nat["distance"] - self.nat0)
+                        r["objective"] += self.args.natural_weight * r["natural_penalty"]
             t2 = time.perf_counter()
             if gates is not None:
                 for r, fut in zip(out, gates):
@@ -694,6 +713,7 @@ def main(argv: list[str] | None = None) -> int:
         help="compiled gate test binaries, or a folder with physical_gates and natural_gate; "
         "candidates that fail a gate are rejected",
     )
+    ap.add_argument("--natural-jobs", type=int, default=4, help="worker processes for the naturalness guard")
     ap.add_argument("--gate-jobs", type=int, default=4, help="candidates gated at once")
     ap.add_argument("--gate-threads", type=int, default=4, help="test threads per gate run")
     ap.add_argument("--no-final-whisper", dest="final_whisper", action="store_false")

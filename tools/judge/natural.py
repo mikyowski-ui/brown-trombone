@@ -893,6 +893,17 @@ def human_reference(pj, listener: Path | None) -> dict:
     return {u.id: u for u in utts}
 
 
+def compare(item_id: str, item_set: str, audio: np.ndarray, segs: list[Seg], syllables_: int,
+            human_audio: np.ndarray, human_segs: list[Seg]) -> dict:  # fmt: skip
+    """One sentence of a system against the person's: its analysis and the
+    warped log-mel distance. Plain numpy, so it can run in a worker
+    process (the tuner's guard does)."""
+    rec = {"id": item_id, "set": item_set, "analysis": analyse(audio, segs, syllables_)}
+    mean, path, local = dtw(log_mel(human_audio), log_mel(audio))
+    rec["dtw"] = {"mean": mean, **class_distances(path, local, level_db(human_audio), human_segs)}
+    return rec
+
+
 def run_system(pj, system: str, humans: dict, profile: Path | None, voice: str, listener: Path | None,
                jobs=None) -> list[dict]:  # fmt: skip
     """Analyse one system's renders of every reference text."""
