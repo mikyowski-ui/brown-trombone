@@ -1,6 +1,6 @@
 //! Voice character: [`VoiceSettings`] and ready-made [`Preset`]s.
 
-use crate::{Engine, Trombone};
+use crate::{Engine, Trombone, Tuning};
 
 /// Everything that makes one speaker sound different from another.
 ///
@@ -35,6 +35,8 @@ pub struct VoiceSettings {
     pub nasality: f32,
     /// The sound model: Pink Trombone's own, or the physical one.
     pub engine: Engine,
+    /// How the voice turns sounds into speech (see [`Tuning`]).
+    pub tuning: Tuning,
 }
 
 impl Default for VoiceSettings {
@@ -43,11 +45,115 @@ impl Default for VoiceSettings {
     }
 }
 
+/// A voice described the way a person would describe it, instead of by
+/// its parameters. Applied on top of any voice with
+/// [`VoiceSettings::with_persona`]; [`Persona::NEUTRAL`] changes nothing.
+///
+/// Each dial moves several parameters together, as they move together in
+/// people:
+///
+/// * **size:** body size relative to the base voice. A smaller speaker has
+///   a shorter tract (every resonance higher) and a higher pitch.
+/// * **effort:** from murmuring (`0`) to calling out (`1`): lung pressure,
+///   firmer folds, a slightly higher and livelier pitch, quicker
+///   articulators.
+/// * **breathiness:** from pressed (`0`) to breathy (`1`): how much air
+///   escapes past the folds.
+/// * **clarity:** from casual (`0`) to careful (`1`) speech: articulators
+///   start earlier and move faster, sounds are held longer, stressed
+///   vowels stand out more, closures are firmer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct Persona {
+    /// Body size relative to the base voice, `0.6‥1.4` (`1` unchanged).
+    pub size: f32,
+    /// Vocal effort, `0‥1` (`0.5` unchanged).
+    pub effort: f32,
+    /// Breathiness, `0‥1` (`0.35` unchanged).
+    pub breathiness: f32,
+    /// Clarity of articulation, `0‥1` (`0.5` unchanged).
+    pub clarity: f32,
+}
+
+impl Persona {
+    /// The persona that leaves a voice as it is.
+    pub const NEUTRAL: Self = Self {
+        size: 1.0,
+        effort: 0.5,
+        breathiness: 0.35,
+        clarity: 0.5,
+    };
+}
+
+impl Default for Persona {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+impl VoiceSettings {
+    /// The same voice as a different person would produce it (see
+    /// [`Persona`]). Every factor is written as `1 + k·(dial − neutral)`,
+    /// so the neutral persona returns the voice bit for bit.
+    #[must_use]
+    pub fn with_persona(mut self, persona: &Persona) -> Self {
+        let finite = |x: f32, neutral: f32| if x.is_finite() { x } else { neutral };
+        let size = finite(persona.size, 1.0).clamp(0.6, 1.4);
+        let effort = finite(persona.effort, 0.5).clamp(0.0, 1.0) - 0.5;
+        let breath = finite(persona.breathiness, 0.35).clamp(0.0, 1.0) - 0.35;
+        let clarity = finite(persona.clarity, 0.5).clamp(0.0, 1.0) - 0.5;
+
+        // Size: the tract scales with the body; pitch falls faster than
+        // length grows (folds lengthen and thicken), about as the built-in
+        // voices do between child and giant.
+        self.tract_length = (self.tract_length * size).clamp(0.5, 1.6);
+        self.pitch *= crate::math::powf(size, -2.5);
+
+        // Effort: lung pressure doubles and halves across the dial's range
+        // and a bit more; the folds press together, pitch rises and moves
+        // more, the articulators hurry.
+        let t = &mut self.tuning;
+        t.lung_pressure *= crate::math::powf(2.0, 1.6 * effort);
+        self.pitch *= 1.0 + 0.24 * effort;
+        self.expressiveness *= 1.0 + 0.6 * effort;
+        t.articulation_rate *= 1.0 + 0.2 * effort;
+
+        // Breathiness and effort both act on how firmly the folds close.
+        // A whisper has no voice to press or loosen and stays a whisper.
+        let firmer = 0.3 * effort - 0.6 * breath;
+        if firmer != 0.0 && self.tenseness >= 0.12 {
+            self.tenseness = (self.tenseness + firmer).clamp(0.15, 0.95);
+        }
+
+        // Clarity: earlier, faster, longer, firmer.
+        t.lead *= 1.0 + 0.8 * clarity;
+        t.articulation_rate *= 1.0 + 0.4 * clarity;
+        let consonants = 1.0 + 0.3 * clarity;
+        t.stop_length *= consonants;
+        t.nasal_length *= consonants;
+        t.fricative_length *= consonants;
+        t.voiced_fricative_length *= consonants;
+        t.approximant_length *= consonants;
+        t.aspirate_length *= consonants;
+        let vowels = 1.0 + 0.2 * clarity;
+        t.vowel_length *= vowels;
+        t.diphthong_length *= vowels;
+        t.stress_stretch *= 1.0 + 0.2 * clarity;
+        t.closure_overshoot *= 1.0 + 0.4 * clarity;
+        t.fricative_gap -= 0.06 * clarity;
+
+        self.tuning = self.tuning.clamped();
+        self
+    }
+}
+
 impl VoiceSettings {
     /// Configure `voice` with these settings (voice quality only; pitch is
     /// set per segment while speaking).
     pub fn apply(&self, voice: &mut Trombone) {
         voice.set_engine(self.engine);
+        voice.set_tuning(&self.tuning);
         voice.set_tract_length(self.tract_length);
         voice.set_tenseness(self.tenseness);
         voice.set_vibrato(self.vibrato, self.vibrato_rate);
@@ -65,6 +171,7 @@ impl VoiceSettings {
             rate: self.rate,
             tenseness: self.tenseness,
             nasality: self.nasality,
+            tuning: self.tuning,
         }
     }
 
@@ -168,6 +275,7 @@ impl Preset {
             jitter: 1.0,
             nasality: 0.0,
             engine: Engine::Classic,
+            tuning: Tuning::DEFAULT,
         };
         match self {
             Preset::Deep => base,
@@ -272,5 +380,79 @@ impl From<Preset> for VoiceSettings {
 impl core::fmt::Display for Preset {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_neutral_persona_changes_nothing() {
+        for preset in Preset::ALL {
+            let voice = preset.settings();
+            assert_eq!(voice.with_persona(&Persona::NEUTRAL), voice, "{preset}");
+        }
+    }
+
+    #[test]
+    fn each_dial_moves_what_it_says() {
+        let base = Preset::Deep.settings();
+        let with = |p: Persona| base.with_persona(&p);
+        let n = Persona::NEUTRAL;
+
+        let small = with(Persona { size: 0.7, ..n });
+        assert!(small.tract_length < base.tract_length && small.pitch > 1.5 * base.pitch);
+        let large = with(Persona { size: 1.3, ..n });
+        assert!(large.tract_length > base.tract_length && large.pitch < base.pitch);
+
+        let loud = with(Persona { effort: 1.0, ..n });
+        let soft = with(Persona { effort: 0.0, ..n });
+        assert!(loud.tuning.lung_pressure > 13.0 && soft.tuning.lung_pressure < 5.0);
+        assert!(loud.tenseness > base.tenseness && soft.tenseness < base.tenseness);
+        assert!(loud.pitch > soft.pitch);
+
+        let breathy = with(Persona {
+            breathiness: 1.0,
+            ..n
+        });
+        let pressed = with(Persona {
+            breathiness: 0.0,
+            ..n
+        });
+        assert!(breathy.tenseness < base.tenseness && pressed.tenseness > base.tenseness);
+
+        let careful = with(Persona { clarity: 1.0, ..n });
+        let casual = with(Persona { clarity: 0.0, ..n });
+        assert!(careful.tuning.lead > casual.tuning.lead);
+        assert!(careful.tuning.articulation_rate > casual.tuning.articulation_rate);
+        assert!(careful.tuning.stop_length > casual.tuning.stop_length);
+        assert!(careful.tuning.vowel_length > casual.tuning.vowel_length);
+    }
+
+    #[test]
+    fn extreme_dials_stay_inside_every_range() {
+        for persona in [
+            Persona {
+                size: 0.0,
+                effort: 9.0,
+                breathiness: -3.0,
+                clarity: 7.0,
+            },
+            Persona {
+                size: f32::NAN,
+                effort: f32::INFINITY,
+                breathiness: 2.0,
+                clarity: -1.0,
+            },
+        ] {
+            for preset in Preset::ALL {
+                let voice = preset.settings().with_persona(&persona);
+                assert_eq!(voice.tuning, voice.tuning.clamped(), "{preset}");
+                assert!(voice.pitch.is_finite() && voice.pitch > 0.0);
+                assert!((0.5..=1.6).contains(&voice.tract_length));
+                assert!((0.0..=0.95).contains(&voice.tenseness));
+            }
+        }
     }
 }

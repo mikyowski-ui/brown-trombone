@@ -9,6 +9,7 @@ use crate::phoneme::{Articulation, Phoneme};
 use crate::phys::source::{Source, SourceKind};
 use crate::phys::{CM_H2O, Drive, Phys};
 use crate::tract::{Constriction, Dynamics, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
+use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
 /// Internal samples per parameter block.
@@ -21,6 +22,10 @@ pub const SLOT_LIPS: usize = 1;
 /// Output level of the physical engine: radiated flow derivative
 /// (cm³/s²) to sample units, set so both engines are about equally loud.
 const PHYSICAL_GAIN: f32 = 2.5e-7;
+
+/// Widest opening (touch-diameter units) that still counts as a fricative;
+/// wider consonant openings are approximants.
+pub(crate) const FRICATIVE_WIDEST: f32 = 0.75;
 
 /// Which model turns the articulation into sound.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -93,6 +98,7 @@ pub struct Trombone {
     /// Radiated flow at the previous internal sample (physical engine).
     phys_flow: f32,
     glottal_area: f32,
+    tuning: Tuning,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -150,6 +156,7 @@ impl Trombone {
             },
             phys_flow: 0.0,
             glottal_area: 0.0,
+            tuning: Tuning::DEFAULT,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -222,6 +229,25 @@ impl Trombone {
             self.source.kind = kind;
             self.source.reset();
         }
+    }
+
+    /// How this voice turns sounds into speech: the breath and folds, the
+    /// noise of jets, consonant gaps and articulator speeds (see
+    /// [`Tuning`]). Values outside their allowed range are pulled into it.
+    /// This also sets the lung pressure. The timing fields act where speech
+    /// is compiled ([`Prosody`](crate::speech::Prosody) carries them).
+    pub fn set_tuning(&mut self, tuning: &Tuning) {
+        let tuning = tuning.clamped();
+        self.tuning = tuning;
+        self.source.set_tuning(&tuning);
+        self.phys.set_tuning(&tuning);
+        self.tract.motion = tuning;
+    }
+
+    /// The tuning in use.
+    #[must_use]
+    pub fn tuning(&self) -> &Tuning {
+        &self.tuning
     }
 
     /// Lung pressure of the physical engine while sounding, in cmH2O
@@ -499,6 +525,26 @@ impl Trombone {
         if let Some((index, diameter)) = a.tongue {
             self.set_tongue(index, diameter);
         }
+        // The voice's tuning widens or narrows consonant gaps: fricatives
+        // (a narrow opening) and approximants (a wider one). Closures and
+        // vowel shapes are left alone.
+        let gap = |c: Constriction| {
+            let d = c.diameter;
+            if d > 0.3 && d <= FRICATIVE_WIDEST {
+                Constriction::new(c.index, (d + self.tuning.fricative_gap).max(0.32))
+            } else if d > FRICATIVE_WIDEST && d < 1.3 {
+                Constriction::new(
+                    c.index,
+                    (d + self.tuning.approximant_gap).max(FRICATIVE_WIDEST + 0.01),
+                )
+            } else {
+                c
+            }
+        };
+        let a = Articulation {
+            constriction: a.constriction.map(gap),
+            ..a
+        };
         self.tract.set_constriction(SLOT_MAIN, a.constriction);
         self.tract.set_constriction(SLOT_LIPS, a.lips);
         self.tract.set_velum(a.velum);
