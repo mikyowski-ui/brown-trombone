@@ -146,6 +146,14 @@ let voice = Preset::Bright.settings().with_persona(&Persona {
 });
 ```
 
+A body of another size is not the same tube scaled: the walls, the side
+cavities and the lips do not shrink with it, and unchanged vowel shapes
+drift by up to 9 % in the first formant. So each vowel has a shape for
+every tract length (a small generated table, `examples/vowel_size.rs`),
+which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
+to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
+close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
+
 Underneath sit the thirty numbers of `Tuning`: lung pressure and how the
 folds start, the efficiency and colour of hiss, the width of consonant
 gaps, how long each kind of sound lasts and how fast the articulators move.

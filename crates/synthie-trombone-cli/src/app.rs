@@ -657,7 +657,7 @@ impl App {
     fn vowel(&mut self, v: Phoneme) {
         // The sound model picks the shape; remember where it puts the
         // tongue so the handle and the arrow keys start from there.
-        if let Some((i, d)) = v.tongue(self.engine) {
+        if let Some((i, d)) = v.tongue_for(self.engine, self.settings.tract_length) {
             self.tongue = (
                 i.clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
                 d.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
@@ -758,7 +758,9 @@ impl App {
     /// Where a vowel landmark sits on the tract view for the engine in use.
     #[must_use]
     pub fn landmark(&self, vowel: Phoneme) -> Option<(f32, f32)> {
-        vowel.tongue(self.engine).map(tongue_handle)
+        vowel
+            .tongue_for(self.engine, self.settings.tract_length)
+            .map(tongue_handle)
     }
 
     /// Whether tract coordinates fall in the nasal cavity or the velum gap
