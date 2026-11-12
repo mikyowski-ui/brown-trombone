@@ -433,6 +433,42 @@ impl Trombone {
         self.glottis.voiced
     }
 
+    /// Hold the glottis open behind the folds by `cm2` (cm² at native size,
+    /// `0‥1`), as a speaker spreads it for a voiceless consonant: on top of
+    /// whatever the voicing gate does, and moving at the arytenoids' pace
+    /// ([`Tuning::abduction_time`]). With the gate on, a small opening
+    /// leaves the folds vibrating beside a stream of breath (a voiced
+    /// fricative); a large one with the gate off is the wide glottis of an
+    /// aspirated stop. Physical engine only; `0` (the default) leaves the
+    /// glottis to the voicing gate.
+    pub fn set_glottal_spread(&mut self, cm2: f32) {
+        if cm2.is_finite() {
+            self.source.spread_target = cm2.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Slacken the cover of the folds by `share` (`0‥0.5`) of its tension,
+    /// as a speaker does in a voiced stop: they then keep vibrating with
+    /// less pressure across them, and their pitch dips a little. Physical
+    /// engine only; `0` by default.
+    pub fn set_fold_slack(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.slack_target = share.clamp(0.0, 0.5);
+        }
+    }
+
+    /// Widen the pharynx actively at `cm3_per_s` (cm³/s at native size,
+    /// `0‥500`), as a speaker does to keep the voice going through a voiced
+    /// closure: the air the folds send into the shut tract is taken up
+    /// there, so the pressure across the folds holds. Stops by itself after
+    /// 15 cm³ until it is set to `0` again. Physical engine only; `0` by
+    /// default.
+    pub fn set_cavity_expansion(&mut self, cm3_per_s: f32) {
+        if cm3_per_s.is_finite() {
+            self.phys.expansion_target = cm3_per_s.clamp(0.0, 500.0);
+        }
+    }
+
     /// Phonate continuously, ignoring the gate, like the original web toy.
     pub fn set_always_voice(&mut self, on: bool) {
         self.glottis.always_voice = on;
@@ -897,6 +933,7 @@ impl Trombone {
             }
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
+                self.phys.set_motion(self.tract.velocity());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),

@@ -516,6 +516,7 @@ pub fn compile_timed(
             pitch,
             tenseness: articulation.tenseness.unwrap_or(tense),
             voiced,
+            gesture: crate::speech::Gesture::default(),
         });
         *cursor = until;
     };

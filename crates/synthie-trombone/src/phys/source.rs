@@ -231,6 +231,14 @@ pub(crate) struct Source {
     /// Standing gap between the cartilages behind the vibrating edges.
     chink: f32,
     chink_target: f32,
+    /// Glottal opening behind the folds that the speaker asks for, apart
+    /// from voicing (a voiceless consonant's abduction), cm²: wanted and
+    /// present. It moves at the arytenoids' pace (`abduction_time`).
+    pub(crate) spread_target: f32,
+    spread: f32,
+    /// Share by which the fold cover is slackened, wanted and present.
+    pub(crate) slack_target: f32,
+    slack: f32,
     /// Share of the glottal flow that passes between the vibrating edges.
     fold_share: f32,
     f0: f32,
@@ -298,6 +306,10 @@ impl Source {
             gap_target: Tuning::DEFAULT.abducted_area / (2.0 * 1.4),
             chink: 0.0,
             chink_target: 0.0,
+            spread_target: 0.0,
+            spread: 0.0,
+            slack_target: 0.0,
+            slack: 0.0,
             fold_share: 1.0,
             f0: 140.0,
             f1: 140.0,
@@ -338,7 +350,9 @@ impl Source {
         let overrides = (self.tension_override, self.gap_override);
         let muscles = self.muscle_override;
         let (lung_base, tuning) = (self.lung_base, self.tuning);
+        let (spread, slack) = (self.spread_target, self.slack_target);
         *self = Self::new();
+        (self.spread_target, self.slack_target) = (spread, slack);
         self.kind = kind;
         self.probe = probe;
         self.fallback = fallback;
@@ -473,7 +487,8 @@ impl Source {
             self.pressing = false;
         }
         self.voicing = voicing;
-        let breathing = voicing || constricted || g.intensity > 0.01;
+        // A spread glottis is held open for air: the lungs keep pushing.
+        let breathing = voicing || constricted || g.intensity > 0.01 || self.spread_target > 0.0;
         let area_scale = self.size * self.size;
         let slack = 1.0 - self.tense1;
         self.leak_target = area_scale
@@ -505,12 +520,26 @@ impl Source {
         let mut effort = 1.0;
         if self.kind == SourceKind::Folds {
             let (tension, covered) = self.tension_for(f1);
+            // Whether the folds can sing the note is read at the gap they
+            // sing it with, also while they are apart for a pause or a
+            // voiceless sound (at the open gap nothing is "covered"); and
+            // the voice is only handed over while it sounds. The folds were
+            // otherwise handed to the pulse source at every voiceless
+            // consonant and back at the vowel, and the swap of the folds'
+            // opening for the pulse source's leak in one tick went out as a
+            // click.
+            let covered = if voicing || self.tension_override.is_some() {
+                covered
+            } else {
+                let gap = self.modal_gap(f1, self.tense1.max(WHISPER_TENSENESS));
+                tension_from_table(f1 * self.size, gap).1
+            };
             // Inside their range the folds sing every note themselves, even
             // one they keep stalling on: the stall watch presses them
             // together again, as a speaker would, but never hands the note
             // to the pulse.
             let covered = covered || self.fallback == Fallback::Never;
-            if covered != self.reachable {
+            if voicing && covered != self.reachable {
                 // Handing over between the models: start the other cleanly.
                 self.reachable = covered;
                 self.folds.reset();
@@ -548,14 +577,18 @@ impl Source {
         };
         self.gap += (gap_target - self.gap) * (dt / time);
         self.chink += (self.chink_target - self.chink) * (dt / adduction);
+        let arytenoids = self.tuning.abduction_time;
+        let spread = self.spread_target * self.size * self.size;
+        self.spread += (spread - self.spread) * (dt / arytenoids);
+        self.slack += (self.slack_target - self.slack) * (dt / arytenoids);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
         if self.active() == SourceKind::Folds {
             self.folds.hold_at(self.gap, dt);
             let tension = self.tension0 + (self.tension1 - self.tension0) * lambda;
-            self.folds.tension = tension * exp(self.trim);
+            self.folds.tension = tension * exp(self.trim) * (1.0 - self.slack);
             let between = self.folds.area();
-            let total = between + self.chink;
+            let total = between + self.chink + self.spread;
             self.fold_share = if total > 0.0 { between / total } else { 1.0 };
             self.edge_area = between;
             return (total, self.lung);
@@ -584,7 +617,7 @@ impl Source {
         let blown = (self.lung / VIBRATION_PRESSURE).clamp(0.25, 2.5);
         let swing = self.size * self.size * VIBRATION_AREA * blown;
         self.edge_area = swing * amp * engage * pulse;
-        (self.leak + self.edge_area, self.lung)
+        (self.leak + self.spread + self.edge_area, self.lung)
     }
 
     /// Which model is making the voice right now, or `None` while no voice
@@ -613,7 +646,7 @@ impl Source {
             if !self.probe.supraglottal {
                 alone.p_supra = 0.0;
             }
-            let area = self.folds.area() + self.chink;
+            let area = self.folds.area() + self.chink + self.spread;
             let drop = (alone.p_sub - alone.p_supra).max(0.0);
             alone.u_glottis = area * sqrt(2.0 * drop / (1.1 * super::RHO));
             self.folds.step(&alone, self.fold_share, dt);
@@ -670,7 +703,13 @@ impl Source {
             }
             // The table sets the pitch at once; this only removes what is
             // left, slowly, and only once the voice is running cleanly.
-            if self.clean_cycles >= 3 && self.tension_override.is_none() && self.probe.trim {
+            // Not while the cover is slackened on purpose: that pitch dip is
+            // wanted.
+            if self.clean_cycles >= 3
+                && self.tension_override.is_none()
+                && self.probe.trim
+                && self.slack < 0.005
+            {
                 self.trim =
                     (self.trim + (period / TRIM_TIME) * ln(ratio)).clamp(-TRIM_RANGE, TRIM_RANGE);
             }
