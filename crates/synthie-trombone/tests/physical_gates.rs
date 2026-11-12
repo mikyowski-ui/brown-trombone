@@ -11,6 +11,7 @@
     clippy::cast_sign_loss
 )]
 
+use std::sync::OnceLock;
 use synthie_trombone::{
     Constriction, Engine, GlottalSource, Persona, Phoneme, Preset, SLOT_MAIN, Talker, Trombone,
     VoiceSettings,
@@ -18,8 +19,42 @@ use synthie_trombone::{
 
 const SR: f32 = 48_000.0;
 
-fn voice(hz: f32, tenseness: f32, length: f32) -> Trombone {
+/// The tuning under test: the default one, or, when the environment
+/// variable `SYNTHIE_TROMBONE_PROFILE` names a profile file, that
+/// profile's. The gates hold a tuned voice to the same figures as the
+/// built-in one:
+///
+/// ```text
+/// SYNTHIE_TROMBONE_PROFILE=profiles/tuned.json cargo test --release --test physical_gates
+/// ```
+fn tuned(settings: VoiceSettings) -> VoiceSettings {
+    static PROFILE: OnceLock<Option<String>> = OnceLock::new();
+    let profile = PROFILE.get_or_init(|| {
+        let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("gates run with the profile {path}");
+        Some(text)
+    });
+    let Some(profile) = profile else {
+        return settings;
+    };
+    // Only the tuning is taken: each test chooses its own voice.
+    let laid = settings.with_profile(profile).expect("a voice profile");
+    VoiceSettings {
+        tuning: laid.tuning,
+        ..settings
+    }
+}
+
+/// A voice with the tuning under test.
+fn fresh() -> Trombone {
     let mut t = Trombone::new(SR);
+    t.set_tuning(&tuned(VoiceSettings::default()).tuning);
+    t
+}
+
+fn voice(hz: f32, tenseness: f32, length: f32) -> Trombone {
+    let mut t = fresh();
     t.set_engine(Engine::Physical);
     t.set_tract_length(length);
     t.articulate_phoneme(Phoneme::Aa);
@@ -171,7 +206,7 @@ fn every_vowel_voices_promptly_after_a_consonant() {
     ];
     for p in vowels {
         for (before, limit) in [(None, 60), (Some(Phoneme::S), 60), (Some(Phoneme::P), 120)] {
-            let mut t = Trombone::new(SR);
+            let mut t = fresh();
             t.set_engine(Engine::Physical);
             t.set_articulation_speed(2.2);
             t.set_voicing_rates(40.0, 40.0);
@@ -302,7 +337,7 @@ fn a_whisper_has_no_voice() {
 
 /// Level and centroid of a sustained voiceless fricative.
 fn fricative(p: Phoneme) -> (f32, f32) {
-    let mut t = Trombone::new(SR);
+    let mut t = fresh();
     t.set_engine(Engine::Physical);
     t.articulate_phoneme(Phoneme::Aa);
     t.articulate_phoneme(p);
@@ -350,7 +385,7 @@ fn sibilants_are_loud_and_the_others_faint() {
 fn nothing_hisses_without_air() {
     // The classic engine hisses wherever a finger narrows the tract. Here
     // a narrowing with no breath behind it is silent.
-    let mut t = Trombone::new(SR);
+    let mut t = fresh();
     t.set_engine(Engine::Physical);
     t.set_constriction(SLOT_MAIN, Some(Constriction::new(37.0, 0.45)));
     render(&mut t, 0.3);
@@ -479,14 +514,14 @@ fn muscle_driven_folds_sing_and_follow_their_muscles() {
 /// The default voice at another body size and lung pressure, as a
 /// [`Persona`] would make it.
 fn sized_voice(size: f32, lung: f32) -> Trombone {
-    let mut settings = VoiceSettings::default()
+    let mut settings = tuned(VoiceSettings::default())
         .with_engine(Engine::Physical)
         .with_persona(&Persona {
             size,
             ..Persona::NEUTRAL
         });
     settings.tuning.lung_pressure = lung;
-    let mut t = Trombone::new(SR);
+    let mut t = fresh();
     settings.apply(&mut t);
     t.set_vibrato(0.0, 0.0);
     t.set_jitter(0.0);
@@ -595,7 +630,7 @@ fn a_gap_near_a_fricative_still_hisses() {
     // gap still hisses: no more than 20 dB under the fricative itself,
     // where without the regulator the narrow ones are shut or choked.
     let level = |index: f32, diameter: f32, regulated: bool| {
-        let mut t = Trombone::new(SR);
+        let mut t = fresh();
         t.set_engine(Engine::Physical);
         t.set_regulation(regulated);
         t.articulate_phoneme(Phoneme::Aa);
@@ -654,7 +689,10 @@ fn the_regulator_barely_touches_the_default_voice() {
     // fraction of what it may; the speech is as loud either way.
     let text = "She sells sea shells; who would choose those few?";
     let speak = |regulated: bool| {
-        let mut talker = Talker::new(SR, VoiceSettings::default().with_engine(Engine::Physical));
+        let mut talker = Talker::new(
+            SR,
+            tuned(VoiceSettings::default()).with_engine(Engine::Physical),
+        );
         talker.voice_mut().set_regulation(regulated);
         talker.say(text);
         let (mut x, mut nudge, mut relief) = (Vec::new(), 0.0f32, 0.0f32);
@@ -681,11 +719,11 @@ fn the_regulator_barely_touches_the_default_voice() {
 /// three tenseness settings. Returns the quietest: level in dB re
 /// `reference`, the note and the tenseness.
 fn sweep_notes(preset: Preset, vowel: Phoneme, reference: f32) -> (f32, usize, f32) {
-    let settings = preset.settings().with_engine(Engine::Physical);
+    let settings = tuned(preset.settings()).with_engine(Engine::Physical);
     let mut quietest = (0.0f32, 0, 0.0f32);
     for tense in [0.4f32, 0.65, 0.85] {
         for note in (24..=96).step_by(2) {
-            let mut t = Trombone::new(SR);
+            let mut t = fresh();
             settings.apply(&mut t);
             t.articulate_phoneme(vowel);
             t.set_tenseness(tense);
@@ -724,9 +762,8 @@ fn no_held_note_is_ever_silent() {
         let mut jobs = Vec::new();
         for preset in presets {
             let reference = {
-                let mut t = Trombone::new(SR);
-                preset
-                    .settings()
+                let mut t = fresh();
+                tuned(preset.settings())
                     .with_engine(Engine::Physical)
                     .apply(&mut t);
                 t.articulate_phoneme(Phoneme::Aa);
@@ -761,9 +798,8 @@ fn the_voice_recovers_at_once_from_a_pinch() {
     for index in [
         3.0f32, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0, 34.0, 37.0, 40.0, 42.5,
     ] {
-        let mut t = Trombone::new(SR);
-        Preset::Deep
-            .settings()
+        let mut t = fresh();
+        tuned(Preset::Deep.settings())
             .with_engine(Engine::Physical)
             .apply(&mut t);
         t.articulate_phoneme(Phoneme::Aa);
@@ -809,7 +845,7 @@ fn the_voice_recovers_at_once_from_a_pinch() {
 fn every_preset_speaks_on_the_physical_engine() {
     let text = "Hello there, how are you? Pink trombone, 42.";
     for p in Preset::ALL {
-        let settings = p.settings().with_engine(Engine::Physical);
+        let settings = tuned(p.settings()).with_engine(Engine::Physical);
         let out = Talker::new(22_050.0, settings).bake(text);
         let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         println!("{p}: rms {:.4}, peak {peak:.3}", rms(&out));
@@ -822,7 +858,7 @@ fn every_preset_speaks_on_the_physical_engine() {
 #[test]
 fn speech_ends_in_silence() {
     // Breath stops with the sentence: no hiss in the tail.
-    let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let settings = tuned(Preset::Deep.settings()).with_engine(Engine::Physical);
     let out = Talker::new(SR, settings).bake("Stay a while, and listen.");
     let tail = &out[out.len() - (0.1 * SR) as usize..];
     let body = rms(&out[..out.len() / 2]);
@@ -854,7 +890,7 @@ fn garbage_and_abuse_never_break_the_physical_engine() {
         seed ^= seed << 5;
         (seed >> 8) as f32 / 16_777_216.0
     };
-    let mut t = Trombone::new(SR);
+    let mut t = fresh();
     t.set_engine(Engine::Physical);
     t.set_frequency(f32::NAN);
     t.set_tongue(f32::INFINITY, 2.0);
