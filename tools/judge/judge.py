@@ -5,6 +5,9 @@
     uv run python judge.py score physical --sets sentence_heldout --profile best.json --name best-heldout
     uv run python judge.py report                 # rebuild report/judge.md from out/score-*.json
     uv run python judge.py items physical --set vcv   # per-item reference vs heard
+    uv run python judge.py vowels physical        # probes (see probes.py): vowels, voicing, confusions
+    uv run python judge.py voicing espeak
+    uv run python judge.py confusions classic --profile p.json --name classic-p
 
 For every rendered item it measures
 
@@ -91,6 +94,97 @@ def device() -> str:
 # --------------------------------------------------------------------------
 
 
+def build_unit_ids(vocab: dict[str, int]) -> dict[tuple[str, ...], list[int]]:
+    """Unit (tuple of scoring symbols) -> ids of every token that folds to it.
+
+    The flap is accepted for T and D, and T and D for the flap."""
+    by_fold: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for tok, idx in vocab.items():
+        if tok not in A.SPECIAL_TOKENS:
+            by_fold[A.fold_token(tok)].append(idx)
+    unit_ids: dict[tuple[str, ...], list[int]] = dict(by_fold)
+    flap = by_fold.get((A.FLAP,), [])
+    for s in ("T", "D"):
+        unit_ids[(s,)] = by_fold.get((s,), []) + flap
+    unit_ids[(A.FLAP,)] = flap + by_fold.get(("T",), []) + by_fold.get(("D",), [])
+    return unit_ids
+
+
+def scoring_phones(phones) -> list[str]:
+    """Stress removed, only scoring symbols kept."""
+    return [p for p in (A.strip_stress(x) for x in phones) if p in A.SCORING_SYMBOLS]
+
+
+def units_of(phones: list[str], merge: bool, unit_ids: dict) -> list[tuple[str, ...]]:
+    """Phonemes -> CTC units; with ``merge`` the r-coloured / syllabic pairs
+    the model writes as one token (``AA R`` = ``ɑːɹ``) become one unit."""
+    units: list[tuple[str, ...]] = []
+    i = 0
+    while i < len(phones):
+        pair = tuple(phones[i : i + 2])
+        if merge and len(pair) == 2 and pair in A.MERGED_TOKENS and pair in unit_ids:
+            units.append(pair)
+            i += 2
+        else:
+            units.append((phones[i],))
+            i += 1
+    return units
+
+
+def class_matrix(lp, classes: list[tuple[str, ...]], unit_ids: dict, blank: int):
+    """T x (1 + K) log-probabilities: the blank, then each unit class
+    (log-sum over every model token that folds to it)."""
+    import torch
+
+    cols = [lp[:, blank]]
+    for u in classes:
+        ids = unit_ids.get(u) or unit_ids[(A.OTHER,)]
+        cols.append(torch.logsumexp(lp[:, ids], dim=-1))
+    return torch.stack(cols, dim=-1)
+
+
+def sequences_logprob(lp, seqs: list[list[str]], unit_ids: dict, blank: int) -> list[float]:
+    """CTC log P(string | audio), in nats (not normalised), for each phoneme
+    string in ``seqs``, every accepted spelling of each phoneme pooled; the
+    r-coloured pairs are tried merged and split and the better is kept.
+    All strings are scored in one batched ``ctc_loss`` call.  ``-inf`` when
+    the audio is too short for a string."""
+    import torch
+
+    variants: list[tuple[int, tuple]] = []
+    for k, phones in enumerate(seqs):
+        seen = set()
+        for merge in (True, False):
+            units = tuple(units_of(list(phones), merge, unit_ids))
+            if units and units not in seen:
+                seen.add(units)
+                variants.append((k, units))
+    best = [-math.inf] * len(seqs)
+    if not variants:
+        return best
+    classes = sorted({u for _, units in variants for u in units})
+    index = {u: c + 1 for c, u in enumerate(classes)}
+    small = class_matrix(lp, classes, unit_ids, blank)  # T x (1 + K)
+    n, t = len(variants), small.shape[0]
+    width = max(len(units) for _, units in variants)
+    target = torch.zeros((n, width), dtype=torch.long)
+    for row, (_, units) in enumerate(variants):
+        target[row, : len(units)] = torch.tensor([index[u] for u in units], dtype=torch.long)
+    loss = torch.nn.functional.ctc_loss(
+        small[:, None, :].expand(t, n, small.shape[1]),
+        target,
+        torch.full((n,), t, dtype=torch.long),
+        torch.tensor([len(units) for _, units in variants], dtype=torch.long),
+        blank=0,
+        reduction="none",
+        zero_infinity=False,
+    )
+    for (k, _), value in zip(variants, loss.tolist()):
+        best[k] = max(best[k], -value)
+    return best
+
+
+
 @dataclass
 class PhonemeResult:
     tokens: list[str]  # decoded model tokens
@@ -117,16 +211,7 @@ class PhonemeJudge:
         self.id2tok = {i: t for t, i in vocab.items()}
         self.blank = vocab[A.BLANK_TOKEN]
         self.special = {vocab[t] for t in A.SPECIAL_TOKENS}
-        # unit (tuple of scoring symbols) -> ids of every token that folds to it
-        by_fold: dict[tuple[str, ...], list[int]] = defaultdict(list)
-        for tok, idx in vocab.items():
-            if tok not in A.SPECIAL_TOKENS:
-                by_fold[A.fold_token(tok)].append(idx)
-        self.unit_ids: dict[tuple[str, ...], list[int]] = dict(by_fold)
-        flap = by_fold.get((A.FLAP,), [])
-        for s in ("T", "D"):
-            self.unit_ids[(s,)] = by_fold.get((s,), []) + flap
-        self.unit_ids[(A.FLAP,)] = flap + by_fold.get(("T",), []) + by_fold.get(("D",), [])
+        self.unit_ids = build_unit_ids(vocab)
 
     def close(self) -> None:
         del self.model
@@ -176,50 +261,19 @@ class PhonemeJudge:
         return toks
 
     def _units(self, phones: list[str], merge: bool) -> list[tuple[str, ...]]:
-        units: list[tuple[str, ...]] = []
-        i = 0
-        while i < len(phones):
-            pair = tuple(phones[i : i + 2])
-            if merge and len(pair) == 2 and pair in A.MERGED_TOKENS and pair in self.unit_ids:
-                units.append(pair)
-                i += 2
-            else:
-                units.append((phones[i],))
-                i += 1
-        return units
+        return units_of(phones, merge, self.unit_ids)
+
+    def sequences_logprob(self, lp, seqs: list[list[str]]) -> list[float]:
+        """Total log P(phoneme string | audio) for each string (see
+        :func:`sequences_logprob`)."""
+        return sequences_logprob(lp, seqs, self.unit_ids, self.blank)
 
     def ref_loglik(self, lp, expected: list[str]) -> float:
         """log P(reference | audio) per reference phoneme, any accepted spelling."""
-        torch = self.torch
-        phones = [p for p in (A.strip_stress(x) for x in expected) if p in A.SCORING_SYMBOLS]
+        phones = scoring_phones(expected)
         if not phones:
             return 0.0
-        best = -math.inf
-        tried = set()
-        for merge in (True, False):
-            units = self._units(phones, merge)
-            key = tuple(units)
-            if key in tried:
-                continue
-            tried.add(key)
-            classes = sorted(set(units))
-            cols = [lp[:, self.blank]]
-            for u in classes:
-                ids = self.unit_ids.get(u) or self.unit_ids[(A.OTHER,)]
-                cols.append(torch.logsumexp(lp[:, ids], dim=-1))
-            small = torch.stack(cols, dim=-1)  # T x (1 + K)
-            index = {u: k + 1 for k, u in enumerate(classes)}
-            target = torch.tensor([index[u] for u in units], dtype=torch.long)
-            loss = torch.nn.functional.ctc_loss(
-                small[:, None, :],
-                target[None, :],
-                torch.tensor([small.shape[0]]),
-                torch.tensor([len(units)]),
-                blank=0,
-                reduction="sum",
-                zero_infinity=False,
-            )
-            best = max(best, -float(loss))
+        best = self.sequences_logprob(lp, [phones])[0]
         if not math.isfinite(best):
             return LL_FLOOR
         return max(LL_FLOOR, best / len(phones))
@@ -616,8 +670,40 @@ def main(argv: list[str] | None = None) -> int:
     si = sub.add_parser("items", help="per-item reference vs heard for a scored system")
     si.add_argument("name")
     si.add_argument("--set", default=None)
+    probe_help = {
+        "vowels": "vowel error rate, PER, per-vowel confusions and margins (material: vowel)",
+        "voicing": "voicing minimal pairs: forced choice and free recognition (material: voicing)",
+        "confusions": "consonant confusions by place, manner and voicing (material: vcv)",
+    }
+    for metric, text in probe_help.items():
+        pp = sub.add_parser(metric, help=text)
+        pp.add_argument("system", choices=render.SYSTEMS)
+        pp.add_argument("--profile", type=Path, default=None, help="engine profile JSON")
+        pp.add_argument("--name", default=None, help="result name (default: system or system-<profile stem>)")
+        pp.add_argument("--set", default=None, help="material set (default: the probe's own; 'human' = in-sentence)")
+        pp.add_argument("--cut", action="store_true", help="human system: tokens cut out of the anchor recordings")
+        pp.add_argument("--voice", default=render.DEFAULT_VOICE)
+        pp.add_argument("--jobs", type=int, default=None, help="render threads (default: all cores)")
+        pp.add_argument("--fresh", action="store_true", help="render into a scratch folder, no cache (timing)")
+        pp.add_argument("--batch", type=int, default=8, help="GPU batch size")
+    pr = sub.add_parser("probe-report", help="one Markdown page from out/<probe>-<name>.json")
+    pr.add_argument("names", nargs="+")
+    pr.add_argument("--refs", default="", help="comma-separated reference runs (ceilings) shown too")
+    pr.add_argument("--scores", default="", help="comma-separated out/score-<name>.json for the sentence table")
+    pr.add_argument("--out", type=Path, default=HERE / "report" / "probes.md")
+    pr.add_argument("--notes", type=Path, default=None, help="Markdown inserted after the title")
     args = ap.parse_args(argv)
-    if args.cmd == "score":
+    if args.cmd in probe_help:
+        import probes
+
+        probes.run(args.cmd, args.system, args.profile, args.name, args.set, args.cut, args.voice, args.jobs,
+                   args.fresh, args.batch)  # fmt: skip
+    elif args.cmd == "probe-report":
+        import probes
+
+        split = lambda s: [x for x in s.split(",") if x]  # noqa: E731
+        probes.probe_report(args.names, args.out, split(args.refs), split(args.scores), args.notes)
+    elif args.cmd == "score":
         sets = args.sets.split(",") if args.sets else None
         score(args.systems, sets, args.profile, args.name, not args.no_whisper, args.jobs, args.voice)
     elif args.cmd == "report":
