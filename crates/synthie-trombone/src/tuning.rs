@@ -1,4 +1,4 @@
-//! [`Tuning`]: the fifty-three numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-one numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -133,7 +133,7 @@ tuning! {
     /// Efficiency of the jet between the folds (breath noise).
     glottal_efficiency = 0.043, 0.01..=0.15, A;
     /// Frequency above which turbulence has less and less energy, Hz.
-    hiss_corner = 4500.0, 2500.0..=8000.0, A;
+    hiss_corner = 7000.0, 2500.0..=10000.0, A;
 
     // ----- A: gaps ------------------------------------------------------
 
@@ -282,6 +282,36 @@ tuning! {
     /// cycles without the first sound being lost.
     onset_pressure = 0.4, 0.0..=1.0, A;
 
+    // ----- A: the hiss of fricatives (physical engine) -----------------
+
+    /// Corner below which the jets in the mouth make less and less noise,
+    /// Hz at the native size: their eddies are small and fast, and a
+    /// speaker's /s/ has little energy below 3 kHz.
+    hiss_floor = 1500.0, 400.0..=3000.0, A;
+    /// Lip opening of /ʃ ʒ tʃ dʒ/ (diameter units): rounded, but open.
+    postalveolar_lips = 1.8, 0.8..=2.5, A;
+    /// How much wider the gap of /s ʃ/ is as it forms (twice that as it
+    /// opens again), diameter units.
+    frication_widening = 0.15, 0.0..=0.3, A;
+
+    // ----- B: the hiss of fricatives (physical engine) -----------------
+
+    /// Share of /s ʃ/ at each end spent in that wider gap.
+    frication_ramp = 0.25, 0.0..=0.4, B;
+
+    // ----- B: intonation (physical engine) ------------------------------
+
+    /// Rise of the pitch on a stressed vowel, semitones at expressiveness
+    /// 1 (a speaker's accents are 2 to 5).
+    accent_size = 10.0, 0.0..=16.0, B;
+    /// Seconds over which an accent sinks back after its vowel.
+    accent_decay = 0.2, 0.05..=0.5, B;
+    /// Fall of the pitch over a phrase, semitones at expressiveness 1.
+    declination = 6.0, 0.0..=12.0, B;
+    /// Fall across the last vowel of a statement, semitones at
+    /// expressiveness 1.
+    final_fall = 8.0, 0.0..=16.0, B;
+
     // ----- B: the breath over a phrase (physical engine) ---------------
 
     /// Seconds over which the lungs build up their pressure at the start of
@@ -310,10 +340,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_five_and_twenty_eight() {
+    fn two_passes_of_twenty_eight_and_thirty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (25, 28));
+        assert_eq!((a, b), (28, 33));
     }
 
     #[test]

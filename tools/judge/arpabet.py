@@ -293,6 +293,10 @@ def parse_arpabet(text: str) -> list[str]:
     return out
 
 
+#: Fricatives the physical engine says as three segments.
+RAMPED_FRICATIVES = {"S", "SH"}
+
+
 def parse_engine_line(line: str) -> list[str]:
     """Phonemes from the first stdout line of ``say``.
 
@@ -300,10 +304,13 @@ def parse_engine_line(line: str) -> list[str]:
     two segments, a voiceless stop before a vowel or approximant gets an
     extra aspiration segment, a stop before a pause (physical engine) an
     extra release segment, a /DH/ after a pause (physical engine) a dental
-    closure first, and pauses are ``SIL``.  This undoes that, so
-    ``AA P P AA B AY AY T`` reads ``AA P AA B AY T`` and
-    ``SIL DH DH AX K AE T T SIL`` reads ``DH AX K AE T``.  A line that
-    already has one symbol per phoneme passes through unchanged.
+    closure first, /S SH/ (physical engine) three segments (the
+    gap forming, the hiss, the gap opening), and pauses are ``SIL``.  This
+    undoes that, so ``AA P P AA B AY AY T`` reads ``AA P AA B AY T``,
+    ``SIL DH DH AX K AE T T SIL`` reads ``DH AX K AE T`` and
+    ``AA S S S AA`` reads ``AA S AA``.  A line that already has one symbol
+    per phoneme passes through unchanged (a run of one fricative is taken
+    as triples only when its length is a multiple of three).
     """
     raw = [strip_stress(x) for x in line.split()]
     # Pauses are kept here (as None) to tell what stands next to one.
@@ -319,7 +326,13 @@ def parse_engine_line(line: str) -> list[str]:
         after = segs[i + 2] if i + 2 < len(segs) else None
         before = segs[i - 1] if i > 0 else None
         out.append(s)
-        if nxt == s and (s in DIPHTHONGS or s in AFFRICATES):
+        run = 1
+        while i + run < len(segs) and segs[i + run] == s:
+            run += 1
+        if s in RAMPED_FRICATIVES and run % 3 == 0:
+            out.extend([s] * (run // 3 - 1))
+            i += run
+        elif nxt == s and (s in DIPHTHONGS or s in AFFRICATES):
             i += 2
         elif nxt == s and s in ("P", "T", "K") and (after in VOCALIC or after in APPROXIMANTS):
             i += 2

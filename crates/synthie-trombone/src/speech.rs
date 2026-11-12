@@ -790,8 +790,12 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     // Each phrase's drafts and how it ends, for the breath (physical).
     let mut phrases: Vec<(usize, usize, Break)> = Vec::new();
 
+    // The physical engine shapes its phrases once they have their final
+    // lengths (see `intonation`).
     let push_phrase_end = |drafts: &mut Vec<Draft>, start: usize, brk: Option<Break>| {
-        shape_phrase(&mut drafts[start..], brk, expr);
+        if !physical {
+            shape_phrase(&mut drafts[start..], brk, expr);
+        }
     };
 
     while i < tokens.len() {
@@ -869,6 +873,20 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        for d in &mut drafts {
+            // The physical engine's /ʃ ʒ tʃ dʒ/ are rounded less than the
+            // classic engine's: lips nearly shut over the long front
+            // cavity make it ring as one narrow, low resonance (a whistle
+            // near 1.5 kHz) where a speaker's hiss is broad from 2 kHz up.
+            if matches!(d.phoneme, Phoneme::Sh | Phoneme::Zh | Phoneme::Ch | Phoneme::Jh)
+                && let Some(lips) = &mut d.articulation.lips
+            {
+                lips.diameter = lips.diameter.max(timing.postalveolar_lips);
+            }
+        }
+        for &(a, b, brk) in &phrases {
+            intonation(&mut drafts[a..b], brk, expr, &timing);
+        }
         breathe(&mut drafts, &mut phrases, &timing);
         lean_on_vowels(&mut drafts);
         assimilate_place(&mut drafts);
@@ -1239,7 +1257,30 @@ fn expand(
                 out.push(with(draft(p, shut, closure, true), voiced_stop));
                 dur = (dur - closure).max(0.5 * dur);
             }
-            out.push(with(draft(p, a, dur, a.voiced), g));
+            if matches!(p, Phoneme::S | Phoneme::Sh)
+                && let Some(c) = a.constriction
+            {
+                // The gap narrows into the hiss and widens out of it: the
+                // first and last part of /s ʃ/ are made a little wider, so
+                // the hiss swells in and dies away over tens of
+                // milliseconds, as a speaker's does, instead of switching
+                // on and off with the gap. Not /z ʒ/, whose hiss is weak
+                // enough beside their voice (any less and they are heard as
+                // /ð/), nor the faint /f θ v ð/.
+                // Out of the gap the breath is flowing freely already, so
+                // the gap has to open further for the hiss to fade.
+                let ramp = timing.frication_ramp * dur;
+                let widened = |by: f32| Articulation {
+                    constriction: Some(crate::Constriction::new(c.index, c.diameter + by)),
+                    ..a
+                };
+                let w = timing.frication_widening;
+                out.push(with(draft(p, widened(w), ramp, a.voiced), g));
+                out.push(with(draft(p, a, dur - 2.0 * ramp, a.voiced), g));
+                out.push(with(draft(p, widened(2.0 * w), ramp, a.voiced), g));
+            } else {
+                out.push(with(draft(p, a, dur, a.voiced), g));
+            }
         }
         _ => out.push(draft(p, a, dur, a.voiced)),
     }
@@ -1364,6 +1405,98 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         aspiration: false,
     }
 }
+
+/// The physical engine's intonation for one phrase, in semitones at
+/// expressiveness 1 from the [`Tuning`]: the pitch declines by
+/// [`Tuning::declination`] over the phrase; on each stressed vowel it rises
+/// by [`Tuning::accent_size`] and sinks back over [`Tuning::accent_decay`]
+/// seconds through what follows (so it moves inside vowels and from
+/// syllable to syllable, as a speaker's does, rather than stepping up for
+/// each stress and down again at its consonant); a statement falls by
+/// [`Tuning::final_fall`] across its last vowel, after an accent on it that
+/// has risen on the way in; a question rises instead and a comma lifts a
+/// little.
+#[allow(clippy::cast_precision_loss)]
+fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
+    let total: f32 = drafts.iter().map(|d| d.duration).sum();
+    if total <= 0.0 {
+        return;
+    }
+    // Start and end time of every draft.
+    let mut spans = Vec::with_capacity(drafts.len());
+    let mut t = 0.0;
+    for d in drafts.iter() {
+        spans.push((t, t + d.duration));
+        t += d.duration;
+    }
+    let last_vowel = drafts.iter().rposition(|d| d.vowel);
+    let falling = matches!(brk, Break::Period | Break::Exclamation);
+    let accents: Vec<(f32, f32)> = drafts
+        .iter()
+        .zip(&spans)
+        .enumerate()
+        .filter(|(_, (d, _))| d.accent > 0.0 && d.vowel)
+        .map(|(k, (_, &(a, b)))| {
+            // The nucleus of a statement peaks as its vowel begins, its rise
+            // carried by the sounds before it, and falls from there.
+            if falling && Some(k) == last_vowel {
+                let onset = spans[..k]
+                    .iter()
+                    .rev()
+                    .zip(drafts[..k].iter().rev())
+                    .take_while(|(_, d)| !d.vowel)
+                    .last()
+                    .map_or(a - 0.05, |(&(s, _), _)| s);
+                (onset, a)
+            } else {
+                (a, b)
+            }
+        })
+        .collect();
+    let size = timing.accent_size * expr;
+    let accent = |t: f32| {
+        accents
+            .iter()
+            .map(|&(a, b)| {
+                if t < a {
+                    0.0
+                } else if t <= b {
+                    size * (t - a) / (b - a).max(1e-3)
+                } else {
+                    size * (1.0 - (t - b) / timing.accent_decay).max(0.0)
+                }
+            })
+            .fold(0.0f32, f32::max)
+    };
+    let (vowel_start, vowel_end) = last_vowel.map_or((total, total), |k| spans[k]);
+    let boundary = |t: f32| {
+        let x = ((t - vowel_start) / (vowel_end - vowel_start).max(1e-3)).clamp(0.0, 1.0);
+        let shape = x * x * (3.0 - 2.0 * x);
+        match brk {
+            Break::Period => -timing.final_fall * expr * shape,
+            Break::Exclamation => -1.4 * timing.final_fall * expr * shape,
+            Break::Question => QUESTION_RISE * expr * shape,
+            Break::Comma => COMMA_RISE * expr * shape,
+        }
+    };
+    let declination = timing.declination * expr;
+    let semitones = |t: f32| declination * (0.5 - t / total) + accent(t) + boundary(t);
+    for (d, &(_, end)) in drafts.iter_mut().zip(&spans) {
+        d.accent = crate::math::powf(2.0, semitones(end) / 12.0);
+    }
+    // After a question's rise the consonants stay up.
+    if let (Some(v), Break::Question) = (last_vowel, brk) {
+        let top = drafts[v].accent;
+        for d in &mut drafts[v + 1..] {
+            d.accent = top;
+        }
+    }
+}
+
+/// Rise at the end of a question, semitones at expressiveness 1.
+const QUESTION_RISE: f32 = 8.0;
+/// Lift at a comma, semitones at expressiveness 1: the phrase is not over.
+const COMMA_RISE: f32 = 1.5;
 
 /// Intonation for one phrase: gentle declination, accents on stressed
 /// vowels, and a boundary tone.

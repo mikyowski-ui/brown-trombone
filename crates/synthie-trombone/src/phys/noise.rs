@@ -52,8 +52,27 @@ pub(crate) const V_MAX: f32 = 5000.0;
 /// Turbulence follows the stream, not each sound wave riding on it; it
 /// still follows the voice's own pulsing, as real voiced fricatives do.
 pub(crate) const FLOW_AVERAGING: f32 = 0.001;
-/// Corner of the high-pass that removes rumble from the noise, Hz.
+/// Corner of the high-pass that removes rumble from the breath's noise at
+/// the glottis, Hz; it excites every formant of the sound it leads into.
 const RUMBLE_CORNER: f32 = 400.0;
+
+/// High-pass coefficient, low-pass coefficient and the gain that brings
+/// white noise through them back to unit variance, for a high-pass corner
+/// `low` and a low-pass corner `high` (Hz) at tick `dt`.
+fn shaping(low: f32, high: f32, dt: f32) -> (f32, f32, f32) {
+    let r = 1.0 / (1.0 + 2.0 * PI * low * dt);
+    let w = 2.0 * PI * high * dt;
+    let k = w / (1.0 + w);
+    // Variance left by two equal one-pole low-passes in a row, for a
+    // white input: k⁴·(1 + a²)/(1 − a²)³ with a = 1 − k. Scaled back to
+    // unit variance whatever the tick rate; the high-pass only takes away
+    // what lies below its corner, so the noise above keeps its level.
+    let a2 = (1.0 - k) * (1.0 - k);
+    let k2 = k * k;
+    let rest = 1.0 - a2;
+    let kept = k2 * k2 * (1.0 + a2) / (rest * rest * rest);
+    (r, k, 1.0 / crate::math::sqrt(kept))
+}
 
 /// Amplitude, dyn/cm², of the noise pressure at a joint where flow `u`
 /// (cm³/s, rightward) leaves a cell of inverse area `inv_narrow` for one of
@@ -126,6 +145,9 @@ struct Hiss {
     y: f32,
     a: f32,
     b: f32,
+    /// A second high-pass stage, for the jets in the mouth.
+    x2: f32,
+    y2: f32,
 }
 
 impl Hiss {
@@ -139,6 +161,16 @@ impl Hiss {
         self.b += k * (self.a - self.b);
         self.b * gain
     }
+
+    /// The same with the high-pass applied twice (12 dB per octave below
+    /// its corner).
+    #[inline]
+    fn next_steep(&mut self, rng: &mut Rng, r: f32, k: f32, gain: f32) -> f32 {
+        let x = self.next(rng, r, k, gain);
+        self.y2 = r * (self.y2 + x - self.x2);
+        self.x2 = x;
+        self.y2
+    }
 }
 
 /// The random part of every noise source in one tract.
@@ -148,9 +180,17 @@ pub(crate) struct Turbulence {
     jets: Hiss,
     teeth: Hiss,
     glottis: Hiss,
+    /// High-pass and low-pass coefficients and gain of the jets' noise in
+    /// the mouth, and of the breath's at the glottis.
     r: f32,
     k: f32,
     gain: f32,
+    r_breath: f32,
+    k_breath: f32,
+    gain_breath: f32,
+    /// Corner below which the jets in the mouth make less and less noise,
+    /// Hz.
+    pub(crate) low_corner: f32,
     pub(crate) corner: f32,
     /// Efficiency of a free jet, of a jet on the teeth, and of the jet
     /// between the folds.
@@ -169,6 +209,10 @@ impl Turbulence {
             r: 1.0,
             k: 1.0,
             gain: 1.0,
+            r_breath: 1.0,
+            k_breath: 1.0,
+            gain_breath: 1.0,
+            low_corner: Tuning::DEFAULT.hiss_floor,
             corner: Tuning::DEFAULT.hiss_corner,
             jet_eff: Tuning::DEFAULT.jet_efficiency,
             teeth_eff: Tuning::DEFAULT.jet_efficiency * Tuning::DEFAULT.teeth_gain,
@@ -179,6 +223,7 @@ impl Turbulence {
     /// Take the noise settings of a voice. Call `set_rate` afterwards.
     pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
         self.corner = tuning.hiss_corner;
+        self.low_corner = tuning.hiss_floor;
         self.jet_eff = tuning.jet_efficiency;
         self.teeth_eff = tuning.jet_efficiency * tuning.teeth_gain;
         self.glottal_eff = tuning.glottal_efficiency;
@@ -189,17 +234,9 @@ impl Turbulence {
     /// small speaker's jets are as fast but narrower: the corner rises as
     /// the body shrinks.
     pub(crate) fn set_rate(&mut self, dt: f32, size: f32) {
-        self.r = 1.0 / (1.0 + 2.0 * PI * RUMBLE_CORNER * dt);
-        let w = 2.0 * PI * self.corner / size * dt;
-        self.k = w / (1.0 + w);
-        // Variance left by two equal one-pole low-passes in a row, for a
-        // white input: k⁴·(1 + a²)/(1 − a²)³ with a = 1 − k. Scale the
-        // result back to unit variance, whatever the tick rate.
-        let a2 = (1.0 - self.k) * (1.0 - self.k);
-        let k2 = self.k * self.k;
-        let rest = 1.0 - a2;
-        let kept = k2 * k2 * (1.0 + a2) / (rest * rest * rest);
-        self.gain = 1.0 / crate::math::sqrt(kept);
+        (self.r, self.k, self.gain) = shaping(self.low_corner / size, self.corner / size, dt);
+        (self.r_breath, self.k_breath, self.gain_breath) =
+            shaping(RUMBLE_CORNER, self.corner / size, dt);
     }
 
     pub(crate) fn reset(&mut self) {
@@ -208,20 +245,23 @@ impl Turbulence {
         }
     }
 
-    /// This tick's noise for free jets and for the teeth.
+    /// This tick's noise for free jets and for the teeth: turbulence in the
+    /// mouth, whose noise lies mostly above the corner of the stream's eddies
+    /// (Stevens 1971: a narrow jet's noise peaks at a few kHz and is weak
+    /// below a kilohertz or so).
     #[inline]
     pub(crate) fn tick(&mut self) -> (f32, f32) {
         let (r, k, gain) = (self.r, self.k, self.gain);
         (
-            self.jets.next(&mut self.rng, r, k, gain),
-            self.teeth.next(&mut self.rng, r, k, gain),
+            self.jets.next_steep(&mut self.rng, r, k, gain),
+            self.teeth.next_steep(&mut self.rng, r, k, gain),
         )
     }
 
     /// This tick's noise for the glottal jet.
     #[inline]
     pub(crate) fn breath(&mut self) -> f32 {
-        let (r, k, gain) = (self.r, self.k, self.gain);
+        let (r, k, gain) = (self.r_breath, self.k_breath, self.gain_breath);
         self.glottis.next(&mut self.rng, r, k, gain)
     }
 }

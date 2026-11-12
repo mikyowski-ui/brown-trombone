@@ -211,6 +211,10 @@ def test_parse_arpabet():
         ("AA D D SIL", ["AA", "D"]),  # physical: a final stop's release
         ("SIL DH DH AX K AE T T", ["DH", "AX", "K", "AE", "T"]),  # dental onset after a pause
         ("AX DH AX", ["AX", "DH", "AX"]),
+        ("AA S S S AA", ["AA", "S", "AA"]),  # physical: a fricative's gap forming, hiss, opening
+        ("IH S S S S S S IY", ["IH", "S", "S", "IY"]),  # two of them ("this sea")
+        ("IH S S IY", ["IH", "S", "S", "IY"]),  # not triples: two phonemes
+        ("SH SH SH IY", ["SH", "IY"]),
     ],
 )
 def test_parse_engine_line(line, phones):
