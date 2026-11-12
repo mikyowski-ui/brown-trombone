@@ -6,6 +6,7 @@ use crate::app::{
     Y_BOUNDS, engine_name, lerp_cell,
 };
 use crate::audio::SCOPE_LEN;
+use crate::line::MAX_CHARS;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -427,26 +428,99 @@ fn draw_scope(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(canvas, area);
 }
 
-fn draw_speech(frame: &mut Frame, area: Rect, app: &App) {
+/// Columns of the speech panel's prompt, `" ❯ "`, before the text.
+const PROMPT_WIDTH: usize = 3;
+
+fn draw_speech(frame: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.mode == Mode::Type;
-    let cursor = if focused && (theme::clock() * 2.0).fract() < 0.5 {
-        "▏"
+    let inner = usize::from(area.width.saturating_sub(2));
+    // The text scrolls sideways under the prompt to keep the cursor in
+    // view; the column left at the right end shows `…` while there is more
+    // text past it, and the prompt's space shows it for text before.
+    let room = inner.saturating_sub(PROMPT_WIDTH + 1);
+    let window = app.line.window(room);
+    let (cursor, len) = (app.line.cursor(), app.line.len());
+    let more = |b: bool| if b { "…" } else { " " };
+    let mut prompt = vec![
+        Span::styled(" ❯", bold(if focused { YELLOW } else { DIM })),
+        Span::styled(more(window.start > 0), fg(DIM)),
+    ];
+    let text = app.line.text();
+    let shown: String = text.chars().skip(window.start).take(window.len()).collect();
+    if focused {
+        // The cursor is the cell it sits on, in reverse.
+        let at = cursor - window.start;
+        let split = |k: usize| shown.char_indices().nth(k).map_or(shown.len(), |(b, _)| b);
+        let (a, b) = (split(at), split(at + 1));
+        let under = if cursor < len { &shown[a..b] } else { " " };
+        prompt.push(Span::styled(shown[..a].to_string(), fg(FG)));
+        prompt.push(Span::styled(
+            under.to_string(),
+            Style::default().fg(BG).bg(YELLOW),
+        ));
+        prompt.push(Span::styled(
+            shown[b.min(shown.len())..].to_string(),
+            fg(FG),
+        ));
     } else {
-        " "
+        prompt.push(Span::styled(shown, fg(FG)));
+    }
+    if window.end < len {
+        let used: usize = Line::from(prompt.clone()).width();
+        prompt.push(Span::raw(
+            " ".repeat((PROMPT_WIDTH + room).saturating_sub(used)),
+        ));
+        prompt.push(Span::styled("…", fg(DIM)));
+    }
+    if app.line.is_empty() && !focused {
+        prompt.push(Span::styled(
+            "press Tab and type or paste something to say",
+            fg(FAINT),
+        ));
+    }
+    let strip = phoneme_strip(app, inner);
+    // How long the text is, once it no longer fits on the line.
+    let title = if app.line.is_full() {
+        format!("speak  ·  full: {MAX_CHARS} characters")
+    } else if window.len() < len {
+        format!("speak  ·  {len} / {MAX_CHARS}")
+    } else {
+        "speak".to_string()
     };
-    let prompt = Line::from(vec![
-        Span::styled(" ❯ ", bold(if focused { YELLOW } else { DIM })),
-        Span::styled(app.text.clone(), fg(FG)),
-        Span::styled(cursor, fg(YELLOW)),
-        if app.text.is_empty() && !focused {
-            Span::styled("press Tab and type something to say", fg(FAINT))
-        } else {
-            Span::raw("")
-        },
-    ]);
+    frame.render_widget(
+        Paragraph::new(vec![Line::from(prompt), strip]).block(panel(&title, focused)),
+        area,
+    );
+}
+
+/// The phonemes of the last utterance, the one being spoken highlighted,
+/// in `width` columns. A long utterance runs past the panel: the strip
+/// then follows the speech, with the sound being spoken a third of the way
+/// in, and only what is in view is laid out.
+fn phoneme_strip(app: &App, width: usize) -> Line<'static> {
+    let spoken = &app.spoken;
     let current = app.snap.speaking;
-    let mut strip = vec![Span::raw("   ")];
-    for (sym, range) in &app.spoken {
+    // Columns a phoneme takes, with its space (a pause is a `·`).
+    let label = |sym: &str| if sym == "SIL" { 1 } else { sym.len() } + 1;
+    let start = current.map_or(0, |c| {
+        let at = spoken.partition_point(|(_, r)| r.end <= c);
+        let mut first = at.min(spoken.len());
+        let mut before = 0;
+        while first > 0 && before + label(spoken[first - 1].0) <= width / 3 {
+            first -= 1;
+            before += label(spoken[first].0);
+        }
+        first
+    });
+    let mut strip = vec![Span::styled(
+        if start > 0 { "  …" } else { "   " },
+        fg(FAINT),
+    )];
+    let mut used = 3;
+    for (sym, range) in &spoken[start..] {
+        if used >= width {
+            break;
+        }
         let style = if current.is_some_and(|c| range.contains(&c)) {
             Style::default()
                 .fg(BG)
@@ -457,13 +531,11 @@ fn draw_speech(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             fg(PURPLE)
         };
+        used += label(sym);
         let sym = if *sym == "SIL" { "·" } else { sym };
         strip.push(Span::styled(format!("{sym} "), style));
     }
-    frame.render_widget(
-        Paragraph::new(vec![prompt, Line::from(strip)]).block(panel("speak", focused)),
-        area,
-    );
+    Line::from(strip)
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
@@ -478,7 +550,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("n", "nasal"),
                 ("b", "pop"),
                 ("i", "drone"),
-                ("Tab", "type"),
+                ("Tab", "type/paste"),
                 ("q", "quit"),
             ]);
             let mut v = vec![Span::styled(" vowels ", fg(DIM))];
@@ -499,13 +571,25 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             ]);
             vec![l, Line::from(v), settings]
         }
-        Mode::Type => vec![key_hints(&[
-            ("Enter", "speak"),
-            ("↑↓", "history"),
-            ("[HH AH0 L OW1]", "ARPAbet"),
-            ("Esc", "back"),
-            ("F5", "record"),
-        ])],
+        Mode::Type => vec![
+            key_hints(&[
+                ("Enter", "speak"),
+                ("↑↓", "history"),
+                ("[HH AH0 L OW1]", "ARPAbet"),
+                ("Esc", "stop / back"),
+            ]),
+            key_hints(&[
+                ("←→ Home End", "move"),
+                ("Ctrl ←→", "word"),
+                ("Ctrl W", "delete word"),
+                ("Ctrl U", "clear"),
+            ]),
+            key_hints(&[
+                ("Ctrl Shift V", "paste"),
+                ("Shift middle-click", "paste the selection"),
+                ("F5", "record"),
+            ]),
+        ],
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -734,7 +818,7 @@ mod tests {
         snap.level = 0.4;
         snap.speaking = Some(3);
         app.snap = snap;
-        app.text = "hello there".into();
+        app.line.set("hello there");
         let u = Utterance::from_text("Hello, pink trombone!", &Prosody::default());
         for (k, s) in u.segments().iter().enumerate() {
             app.spoken.push((s.phoneme.symbol(), k..k + 1));
@@ -910,6 +994,142 @@ mod tests {
             assert!(narrow[0].contains("●"), "{w}: {}", narrow[0]);
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An app with no sound behind it, and the queue to it.
+    fn quiet_app() -> (App, Receiver<Cmd>) {
+        let (cmd, cmd_rx) = bounded::<Cmd>(1024);
+        let (_snap_tx, snapshots) = bounded(1);
+        let (_trash_tx, trash) = bounded(1);
+        let link = Link {
+            cmd,
+            snapshots,
+            trash,
+            sample_rate: 48_000.0,
+            microphone: false,
+            microphone_name: None,
+            recorder: None,
+        };
+        (
+            App::new(link, true, synthie_trombone::Engine::Classic),
+            cmd_rx,
+        )
+    }
+
+    /// The row of the text line, the cursor's cell on it (the one in
+    /// reverse) and what the row shows.
+    fn text_row(term: &Terminal<TestBackend>) -> (u16, u16, String) {
+        let buf = term.backend().buffer();
+        for y in 0..buf.area.height {
+            let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+            if row.contains("❯") {
+                let cursor = (0..buf.area.width)
+                    .find(|&x| buf[(x, y)].bg == YELLOW)
+                    .expect("no cursor on the text line");
+                return (y, cursor, row);
+            }
+        }
+        panic!("no text line:\n{}", frame_text(term));
+    }
+
+    /// A long pasted text at 80×24: the line scrolls so that the cursor is
+    /// always in view, wherever it goes, and says how long the text is.
+    #[test]
+    fn a_long_text_scrolls_with_the_cursor_at_80_by_24() {
+        use synthie_ui::{Key, KeyCode};
+        let (mut app, _rx) = quiet_app();
+        let words: Vec<String> = (0..120).map(|k| format!("w{k}")).collect();
+        app.paste(&words.join(" "));
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut look = |app: &mut App| {
+            term.draw(|f| draw(f, app)).unwrap();
+            let (y, x, row) = text_row(&term);
+            let under = term.backend().buffer()[(x, y)].symbol().to_string();
+            (x, under, row, frame_text(&term))
+        };
+        // At the end: the cursor after the last word, the start cut off.
+        let (x, under, row, frame) = look(&mut app);
+        println!("{frame}");
+        assert!(row.contains("❯…") && row.contains("w119"), "{row}");
+        assert!(!row.contains(" w1 "), "{row}");
+        assert_eq!(under, " ");
+        assert!(x < 79, "{x}");
+        assert!(
+            frame.contains(&format!("speak  ·  {} / ", app.line.len())),
+            "{frame}"
+        );
+        // Home: the start in view, the rest cut off at the right.
+        app.terminal_key(
+            crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Home),
+            false,
+        );
+        let (_, under, row, _) = look(&mut app);
+        assert!(
+            row.contains("❯ w0 w1 w2") && row.trim_end().ends_with("…│"),
+            "{row}"
+        );
+        assert_eq!(under, "w");
+        // Word by word to the right: the cursor never leaves the line, and
+        // the character under it is the one it is on.
+        let word_right = Key {
+            ctrl: true,
+            ..Key::press(KeyCode::Right)
+        };
+        for k in 0..120 {
+            app.key(word_right);
+            let (x, under, row, _) = look(&mut app);
+            assert!((3..79).contains(&x), "word {k}: cursor at {x} in {row}");
+            let want = app.line.text().chars().nth(app.line.cursor());
+            assert_eq!(
+                under,
+                want.map_or(" ".into(), String::from),
+                "word {k}: {row}"
+            );
+        }
+        // And back with Backspace held down to nothing.
+        for _ in 0..app.line.len() {
+            app.key(Key::press(KeyCode::Backspace));
+            let (x, ..) = look(&mut app);
+            assert!((3..79).contains(&x));
+        }
+        let (_, _, row, frame) = look(&mut app);
+        assert!(row.contains("❯  "), "{row}");
+        assert!(frame.contains("◆ speak "), "{frame}");
+    }
+
+    /// While a long text is spoken, the strip of phonemes follows the one
+    /// being said.
+    #[test]
+    fn the_phoneme_strip_follows_long_speech() {
+        let (mut app, rx) = quiet_app();
+        app.paste("One sentence is said first. Then another one is said. A third follows them.");
+        app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Enter));
+        let segments = rx
+            .try_iter()
+            .find_map(|c| match c {
+                Cmd::Speak(u, _) => Some(u.segments().len()),
+                _ => None,
+            })
+            .unwrap();
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        for k in (0..segments).step_by(7) {
+            app.snap.speaking = Some(k);
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = term.backend().buffer();
+            let lit: Vec<(u16, u16)> = (0..24)
+                .flat_map(|y| (0..80).map(move |x| (x, y)))
+                .filter(|&c| buf[c].bg == MAGENTA)
+                .collect();
+            assert!(!lit.is_empty(), "segment {k} of {segments} is not in view");
+            let sym = app
+                .spoken
+                .iter()
+                .find(|(_, r)| r.contains(&k))
+                .map(|(s, _)| if *s == "SIL" { "·" } else { s })
+                .unwrap();
+            let shown: String = lit.iter().map(|&c| buf[c].symbol()).collect();
+            assert_eq!(shown.trim(), sym, "segment {k}");
+        }
     }
 
     /// Rows of the tract view with dots of one wall in column `col`, the
