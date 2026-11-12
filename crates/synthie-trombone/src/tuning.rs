@@ -19,9 +19,8 @@
 //! * **B — how sounds follow one another:** how long each kind of sound
 //!   lasts, how early the articulators start for the next one, and how fast
 //!   they move.
-//! * **C — vowels (physical engine):** how long each kind of vowel lasts
-//!   against the others, and how a diphthong glides. The classic engine
-//!   keeps every vowel alike.
+//! * **C — vowels (physical engine):** how long vowels are held, and each
+//!   kind against the others. The classic engine keeps every vowel alike.
 
 /// Which tuning pass a field belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,30 +270,14 @@ tuning! {
     /// /ð/ or /d/.
     voiced_sibilant_length = 0.095, 0.06..=0.14, B;
 
-    // ----- C: vowel lengths ----------------------------------------------
-    //
-    // English vowels have lengths of their own. In the hVd words of
-    // Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.81 of
-    // their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1).
-    // Running speech holds these apart less than words said one by one, so
-    // the factors here are half-way between 1 and those ratios (the full
-    // ratios also shortened the vowels around stops enough to move their
-    // bursts and voice onsets past `tests/physical_gates.rs`).
+    // ----- C: vowels (physical engine) ---------------------------------
 
-    /// Length of the lax vowels /ɪ ɛ ʌ ʊ/ against `vowel_length` (physical
-    /// engine).
-    lax_length = 0.905, 0.5..=1.5, C;
-    /// Length of the long tense vowels /æ ɑ ɔ ɝ/ against `vowel_length`
-    /// (physical engine).
-    long_length = 1.085, 0.7..=2.0, C;
-
-    // ----- C: movement ----------------------------------------------------
-
-    /// Speed of the tongue and lips while a diphthong glides, against their
-    /// other movements (physical engine). Below `1` the glide takes all of
-    /// its time, as people's do, instead of arriving early and holding the
-    /// end, which sounds like two vowels.
-    glide_rate = 0.25, 0.15..=1.0, C;
+    /// How much longer every vowel and diphthong is held on the physical
+    /// engine than `vowel_length` and `diphthong_length` say (those are the
+    /// classic engine's). Its tongue body is heavy and slow
+    /// (`body_rate`), and a vowel held for the classic engine's time ends
+    /// before the body has reached it.
+    vowel_hold = 1.18, 1.0..=1.6, C;
 }
 
 impl Default for Tuning {
@@ -324,11 +307,11 @@ mod tests {
     }
 
     #[test]
-    fn vowel_lengths_keep_their_order() {
-        let t = Tuning::DEFAULT;
-        assert!(t.lax_length < 1.0 && t.long_length > 1.0);
+    fn vowels_are_held_longer_on_the_physical_engine() {
+        let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
+        assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 3);
+        assert_eq!(c, 1);
     }
 
     #[test]

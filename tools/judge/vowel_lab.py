@@ -108,6 +108,8 @@ class Lab:
     def __init__(self, jobs: int | None = None):
         self.pj: J.PhonemeJudge | None = None
         self.jobs = jobs
+        #: Per profile of the last ``slots`` call: ``{set: [edits, reference phonemes]}``.
+        self.per: list[dict[str, list[int]]] = []
         self.items = {s: material.load([s]) for s in material.ALL_SETS if (material.MATERIAL_DIR / f"{s}.tsv").exists()}
 
     def close(self) -> None:
@@ -163,12 +165,15 @@ class Lab:
                 if self.pj is None:
                     self.pj = J.PhonemeJudge()
                 results = []
+                self.per = []
                 for per, auds in zip(rendered, audios):
                     rows = []
+                    edits: dict[str, list[int]] = {}
                     for (s, items, rs), au in zip(per, auds):
                         said = [r.engine_phones for r in rs] if system in render.ENGINE_SYSTEMS else None
                         sentence = s in material.SENTENCE_SETS
                         res = P.score_slots(self.pj, items, au, "vowels", sentence=sentence, batch_size=batch, intended=said)
+                        edits[s] = [sum(ir.edits for ir in res), sum(len(ir.ref) for ir in res)]
                         for ir in res:
                             for sl in ir.slots:
                                 rows.append(
@@ -186,6 +191,7 @@ class Lab:
                                     }
                                 )
                     results.append(rows)
+                    self.per.append(edits)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
         return results

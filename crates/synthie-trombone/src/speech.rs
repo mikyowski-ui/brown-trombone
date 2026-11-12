@@ -24,7 +24,6 @@
 
 use crate::math::{exp, lerp};
 use crate::phoneme::{Articulation, Manner, Phoneme};
-use crate::vowel_targets::VowelKey;
 use crate::{Engine, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -119,9 +118,6 @@ pub struct Utterance {
     /// closure, seconds (physical engine).
     lead: f32,
     release_lead: f32,
-    /// Articulator speed while a diphthong glides, relative (physical
-    /// engine).
-    glide_rate: f32,
     /// Seconds over which a segment's pitch kick decays.
     kick_time: f32,
     /// Head start of the larynx into a voiceless consonant, seconds.
@@ -171,7 +167,6 @@ impl Utterance {
             segments,
             lead: Tuning::DEFAULT.lead,
             release_lead: Tuning::DEFAULT.release_lead,
-            glide_rate: Tuning::DEFAULT.glide_rate,
             kick_time: Tuning::DEFAULT.kick_time,
             devoicing_lead: Tuning::DEFAULT.devoicing_lead,
         }
@@ -212,9 +207,6 @@ pub struct Speaker {
     started: bool,
     /// The next segment's shape has already been sent (physical engine).
     ahead: bool,
-    /// The articulator speed to return to after a glide, while one is
-    /// under way (physical engine).
-    gliding: Option<f32>,
     /// The larynx has already let go of the voice for the next segment.
     larynx_ahead: bool,
     /// The shape of the pause being spoken is still to be sent (physical
@@ -257,9 +249,6 @@ impl Speaker {
 
     /// Stop speaking (the voice fades out). Returns the utterance.
     pub fn stop(&mut self, voice: &mut Trombone) -> Utterance {
-        if let Some(speed) = self.gliding.take() {
-            voice.set_articulation_speed(speed);
-        }
         voice.set_voiced(false);
         voice.set_glottal_spread(0.0);
         voice.set_fold_slack(0.0);
@@ -300,29 +289,6 @@ impl Speaker {
         voice.set_always_voice(false);
     }
 
-    /// Move `voice` to `seg`'s articulation. On the physical engine the
-    /// articulators slow down (`Tuning::glide_rate`) for the glide of a
-    /// diphthong, so that it lasts the whole
-    /// segment, and pick up their speed again for the next sound.
-    fn articulate(&mut self, voice: &mut Trombone, seg: &Segment) {
-        if voice.engine() == Engine::Physical {
-            let glide = seg.articulation.vowel == Some(VowelKey::End(seg.phoneme));
-            match (glide, self.gliding) {
-                (true, None) => {
-                    let speed = voice.articulation_speed();
-                    self.gliding = Some(speed);
-                    voice.set_articulation_speed(speed * self.utterance.glide_rate);
-                }
-                (false, Some(speed)) => {
-                    self.gliding = None;
-                    voice.set_articulation_speed(speed);
-                }
-                _ => {}
-            }
-        }
-        voice.articulate(&seg.articulation);
-    }
-
     /// Advance one output sample and render it.
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
         if let Some(&seg) = self.utterance.segments.get(self.index) {
@@ -336,7 +302,7 @@ impl Speaker {
                     .is_some_and(|p| p.voiced && p.phoneme != Phoneme::Sil);
                 self.pause_pending = physical && seg.phoneme == Phoneme::Sil && voiced_before;
                 if !self.ahead && !self.pause_pending {
-                    self.articulate(voice, &seg);
+                    voice.articulate(&seg.articulation);
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -357,7 +323,7 @@ impl Speaker {
             voice.set_frequency(hz);
             self.elapsed += 1.0 / voice.sample_rate();
             if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
-                self.articulate(voice, &seg);
+                voice.articulate(&seg.articulation);
                 self.pause_pending = false;
             }
             if !self.ahead
@@ -378,7 +344,7 @@ impl Speaker {
                     self.utterance.lead
                 };
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
-                    self.articulate(voice, &next);
+                    voice.articulate(&next.articulation);
                     self.ahead = true;
                 }
             }
@@ -403,9 +369,6 @@ impl Speaker {
                 self.index += 1;
                 self.started = false;
                 if self.index == self.utterance.segments.len() {
-                    if let Some(speed) = self.gliding.take() {
-                        voice.set_articulation_speed(speed);
-                    }
                     voice.set_voiced(false);
                     voice.set_glottal_spread(0.0);
                     voice.set_fold_slack(0.0);
@@ -665,6 +628,19 @@ fn number_words(digits: &str) -> String {
 
 // ===== tokens → timed segments ============================================
 
+// English vowels have lengths of their own. In the hVd words of
+// Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.81 of
+// their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1).
+// Running speech holds these apart less than words said one by one, so the
+// factors here are half-way between 1 and those ratios (the full ratios
+// also shortened the vowels around stops enough to move their bursts and
+// voice onsets past `tests/physical_gates.rs`).
+
+/// Length of the lax vowels /ɪ ɛ ʌ ʊ/ against the others (physical engine).
+const LAX_LENGTH: f32 = 0.905;
+/// Length of the long tense vowels /æ ɑ ɔ ɝ/ against the others (physical
+/// engine).
+const LONG_LENGTH: f32 = 1.085;
 /// How much longer /aɪ aʊ ɔɪ/ are than /eɪ oʊ/ (Peterson & Lehiste 1960),
 /// against `Tuning::diphthong_length` (physical engine).
 const WIDE_DIPHTHONG_LENGTH: f32 = 1.05;
@@ -674,15 +650,16 @@ const WIDE_DIPHTHONG_LENGTH: f32 = 1.05;
 const NUCLEUS: f32 = 0.55;
 
 /// How long vowel or diphthong `p` lasts against others of its kind, on
-/// the physical engine (pass C of the tuning): lax vowels are shorter than
-/// long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
+/// the physical engine (pass C of the tuning): every vowel is held longer
+/// than on the classic engine (`Tuning::vowel_hold`), lax vowels are
+/// shorter than long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
 fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
-        P::Ih | P::Eh | P::Ah | P::Uh => timing.lax_length,
-        P::Ae | P::Aa | P::Ao | P::Er => timing.long_length,
-        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH,
-        _ => 1.0,
+        P::Ih | P::Eh | P::Ah | P::Uh => LAX_LENGTH * timing.vowel_hold,
+        P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
+        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
+        _ => timing.vowel_hold,
     }
 }
 
@@ -927,7 +904,6 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         segments,
         lead: timing.lead,
         release_lead: timing.release_lead,
-        glide_rate: timing.glide_rate,
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
     }
@@ -1521,38 +1497,6 @@ mod tests {
             length(Engine::Classic, "[S IY1 L] [AX0]", P::Iy),
         );
         assert!((bit - beat).abs() < 1e-6, "{bit} {beat}");
-    }
-
-    #[test]
-    fn a_glide_slows_the_articulators_only_while_it_lasts() {
-        let mut voice = Trombone::new(16_000.0);
-        voice.set_engine(Engine::Physical);
-        Speaker::prepare(&mut voice);
-        let speed = voice.articulation_speed();
-        let prosody = Prosody {
-            engine: Engine::Physical,
-            ..Prosody::default()
-        };
-        let u = Utterance::from_text("[B AY1 T]", &prosody);
-        let glide_at = u
-            .segments()
-            .iter()
-            .position(|s| s.articulation.vowel == Some(VowelKey::End(P::Ay)))
-            .expect("a glide");
-        let mut sp = Speaker::new();
-        sp.speak(u);
-        let mut slowest = speed;
-        while sp.is_speaking() {
-            sp.process(&mut voice);
-            if sp.current().is_some_and(|(i, _)| i == glide_at) {
-                slowest = slowest.min(voice.articulation_speed());
-            }
-        }
-        assert!(
-            (slowest - speed * Tuning::DEFAULT.glide_rate).abs() < 1e-4,
-            "{slowest} vs {speed}"
-        );
-        assert!((voice.articulation_speed() - speed).abs() < 1e-6);
     }
 
     #[test]

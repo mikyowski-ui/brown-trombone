@@ -29,7 +29,5 @@
   "closing_ratio": {"lo": 1, "hi": 3, "default": 2, "pass": "b"},
   "release_speed": {"lo": 0.1, "hi": 0.8, "default": 0.37, "pass": "b"},
   "closure_overshoot": {"lo": 0.1, "hi": 0.5, "default": 0.3, "pass": "b"},
-  "lax_length": {"lo": 0.5, "hi": 1.5, "default": 0.905, "pass": "c"},
-  "long_length": {"lo": 0.7, "hi": 2, "default": 1.085, "pass": "c"},
-  "glide_rate": {"lo": 0.15, "hi": 1, "default": 0.25, "pass": "c"}
+  "vowel_hold": {"lo": 1, "hi": 1.6, "default": 1.18, "pass": "c"}
 }
