@@ -920,6 +920,239 @@ fn garbage_and_abuse_never_break_the_physical_engine() {
     }
 }
 
+/// The twelve monophthongs.
+const MONOPHTHONGS: [Phoneme; 12] = [
+    Phoneme::Iy,
+    Phoneme::Ih,
+    Phoneme::Eh,
+    Phoneme::Ae,
+    Phoneme::Ah,
+    Phoneme::Aa,
+    Phoneme::Ao,
+    Phoneme::Uh,
+    Phoneme::Uw,
+    Phoneme::Ow,
+    Phoneme::Er,
+    Phoneme::Ax,
+];
+
+/// Troughs of `a` (index, value), keeping only swings of at least `swing`:
+/// one per cycle.
+fn troughs(a: &[f32], swing: f32) -> Vec<(usize, f32)> {
+    let mut out = Vec::new();
+    let (mut lo, mut hi) = ((0usize, a[0]), (0usize, a[0]));
+    let mut rising = false;
+    for (i, &v) in a.iter().enumerate() {
+        if rising {
+            if v > hi.1 {
+                hi = (i, v);
+            }
+            if hi.1 - v > swing {
+                rising = false;
+                lo = (i, v);
+            }
+        } else {
+            if v < lo.1 {
+                lo = (i, v);
+            }
+            if v - lo.1 > swing {
+                out.push(lo);
+                rising = true;
+                hi = (i, v);
+            }
+        }
+    }
+    out
+}
+
+/// Strongest component of `x` within ±8 % of `hz`, under a Hann window.
+#[allow(clippy::many_single_char_names)]
+fn harmonic(x: &[f32], hz: f32) -> f32 {
+    let n = x.len() as f64;
+    let mut best = 0.0f64;
+    for step in -8..=8 {
+        let w = 2.0 * std::f64::consts::PI * f64::from(hz) * (1.0 + 0.01 * f64::from(step))
+            / f64::from(SR);
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (k, &v) in x.iter().enumerate() {
+            let k = k as f64;
+            let v = f64::from(v) * (0.5 - 0.5 * (2.0 * std::f64::consts::PI * k / n).cos());
+            re += v * (w * k).cos();
+            im += v * (w * k).sin();
+        }
+        best = best.max((re * re + im * im).sqrt());
+    }
+    best as f32
+}
+
+/// What a held vowel did: cycles, cycles whose edges never met, the
+/// longest gap between cycles (periods), the share of the voiced time the
+/// pulse sang, and the H1–H2 of the sound in 50 ms frames.
+struct Closure {
+    cycles: usize,
+    open: usize,
+    longest: f32,
+    pulse: f32,
+    h1h2: Vec<f32>,
+}
+
+/// Hold `vowel` on `settings` at the voice's own pitch: 0.2 s to start,
+/// then 2 s measured.
+fn hold_closure(settings: VoiceSettings, vowel: Phoneme) -> Closure {
+    /// A trough below this share of the typical peak counts as closed.
+    const CLOSED: f32 = 0.01;
+    let mut t = fresh();
+    settings.with_engine(Engine::Physical).apply(&mut t);
+    t.articulate_phoneme(vowel);
+    t.settle();
+    t.note_on();
+    render(&mut t, 0.2);
+    let n = (2.0 * SR) as usize;
+    let (mut edge, mut out) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let mut pulse = 0usize;
+    for _ in 0..n {
+        out.push(t.process());
+        let g = t.gauges();
+        edge.push(g.edge_area);
+        if g.sounding == Some(GlottalSource::Pulse) {
+            pulse += 1;
+        }
+    }
+    let mut sorted = edge.clone();
+    sorted.sort_by(f32::total_cmp);
+    let peak = sorted[n * 95 / 100].max(1e-6);
+    let found = troughs(&edge, 0.15 * peak);
+    let expected = SR / settings.pitch;
+    let longest = found
+        .windows(2)
+        .map(|w| (w[1].0 - w[0].0) as f32 / expected)
+        .fold(0.0f32, f32::max);
+    let open = found.iter().skip(1).filter(|t| t.1 > CLOSED * peak).count();
+    // H1-H2 per 50 ms, each frame at least four periods long.
+    let hop = (0.05 * SR) as usize;
+    let len = (hop as f32).max(4.0 * expected) as usize;
+    let mut h1h2 = Vec::new();
+    let mut from = 0;
+    while from + len <= out.len() {
+        let frame = &out[from..from + len];
+        let hz = settings.pitch;
+        h1h2.push(db(harmonic(frame, hz)) - db(harmonic(frame, 2.0 * hz)));
+        from += hop;
+    }
+    Closure {
+        cycles: found.len().saturating_sub(1),
+        open,
+        longest,
+        pulse: pulse as f32 / n as f32,
+        h1h2,
+    }
+}
+
+/// Every voiced preset as it is, and the default voice at every body size.
+fn closure_voices() -> Vec<(String, VoiceSettings)> {
+    let mut voices: Vec<(String, VoiceSettings)> = Preset::ALL
+        .into_iter()
+        .filter(|&p| p != Preset::Whisper)
+        .map(|p| (p.to_string(), tuned(p.settings())))
+        .collect();
+    for size in [0.6f32, 0.8, 1.2, 1.4] {
+        let persona = Persona {
+            size,
+            ..Persona::NEUTRAL
+        };
+        voices.push((
+            format!("deep at size {size}"),
+            tuned(Preset::Deep.settings()).with_persona(&persona),
+        ));
+    }
+    voices
+}
+
+#[test]
+fn the_folds_close_on_every_cycle_and_h1_h2_holds_steady() {
+    // Modal voice closes the membranous glottis on every cycle; a breathy
+    // one leaks through the gap behind it, not between the edges. Every
+    // vowel on every voiced preset (the whisper has no voice), and the
+    // default voice at sizes 0.6 to 1.4: in 2 s held, no cycle whose
+    // edges do not meet, no missing cycle, all of it sung by the folds,
+    // and H1-H2 (the closure's signature in the sound) steady from one
+    // 50 ms frame to the next.
+    //
+    // Before the folds felt the viscous loss along the slit they press on,
+    // 1889 of 51343 cycles did not close (/i/ and /u/ on bright, child,
+    // critter and elder, and the default voice at size 0.6, where every
+    // other cycle stayed open), elder's /i/ and /u/ missed cycles, and
+    // H1-H2 stepped by up to 19.2 dB between frames (range 20.9 dB); the
+    // default voice at size 1.4 was sung by the pulse. Now no cycle stays
+    // open, and the worst step is 1.3 dB, the worst range 1.5 dB.
+    /// Largest H1-H2 step between neighbouring frames, and range, dB.
+    const STEP: f32 = 4.0;
+    const RANGE: f32 = 5.0;
+    let voices = closure_voices();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = voices
+            .iter()
+            .flat_map(|(name, settings)| {
+                MONOPHTHONGS.map(|vowel| {
+                    (
+                        name,
+                        vowel,
+                        scope.spawn(move || hold_closure(*settings, vowel)),
+                    )
+                })
+            })
+            .collect();
+        let (mut worst_step, mut worst_range) = (0.0f32, 0.0f32);
+        let (mut cycles, mut open) = (0usize, 0usize);
+        let mut failures = Vec::new();
+        for (name, vowel, job) in jobs {
+            let c = job.join().expect("a held vowel");
+            let step = c
+                .h1h2
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max);
+            let lo = c.h1h2.iter().copied().fold(f32::INFINITY, f32::min);
+            let hi = c.h1h2.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            worst_step = worst_step.max(step);
+            worst_range = worst_range.max(hi - lo);
+            cycles += c.cycles;
+            open += c.open;
+            let mut fail = |what: String| failures.push(format!("{name} {vowel}: {what}"));
+            if c.cycles <= 50 {
+                fail(format!("only {} cycles", c.cycles));
+            }
+            if c.open > 0 {
+                fail(format!("{} of {} cycles did not close", c.open, c.cycles));
+            }
+            if c.longest >= 1.8 {
+                fail(format!("a gap of {:.1} periods between cycles", c.longest));
+            }
+            if c.pulse > 0.0 {
+                fail(format!("the pulse sang {:.0} %", 100.0 * c.pulse));
+            }
+            if step >= STEP {
+                fail(format!("H1-H2 stepped by {step:.1} dB"));
+            }
+            if hi - lo >= RANGE {
+                fail(format!("H1-H2 ranged over {:.1} dB", hi - lo));
+            }
+        }
+        println!(
+            "{open} of {cycles} cycles did not close; H1-H2: largest step {worst_step:.2} dB, largest range {worst_range:.2} dB"
+        );
+        for f in &failures {
+            println!("  {f}");
+        }
+        assert!(
+            failures.is_empty(),
+            "{} failures, first: {}",
+            failures.len(),
+            failures[0]
+        );
+    });
+}
+
 /// The judge's sentences, `(id, text)`.
 fn judge_sentences() -> Vec<(String, String)> {
     let mut lines = Vec::new();
