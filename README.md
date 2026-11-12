@@ -56,6 +56,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `m`, `r`, `c` | pitch wobble, reverb amount, clear constrictions |
 | `\` | switch between the classic and the physical engine |
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
+| `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
 | `Tab` | type a line; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
@@ -238,6 +239,80 @@ Hanna, Smith & Wolfe (2016) for the walls; Dang & Honda (1997) and Dang,
 Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
 for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
 Peterson & Barney (1952) for the vowel targets.
+
+## A voice that listens
+
+Four tools turn sound back into settings. All of them work on the physical
+engine.
+
+**The babble map** (`synthie_trombone::inverse`) goes from formants to a
+tract shape: `solve(f1, f2, f3, near)` returns the tongue position, lip
+rounding and narrowing that give those formants, found from a table of
+54,000 shapes the engine was measured at (`examples/babble.rs` regenerates
+it). Two hundred random reachable targets land within 1.7 % on F1 and
+0.8 % on F2 when measured back through the engine. It covers F1 from about
+250 to 710 Hz and F2 from 550 to 2550 Hz at the native tract length, so a
+very open /a/ is pulled in a little. Formant Lock in the app is built on
+it.
+
+**Mimic** copies a microphone: `--mimic` in the app, or in code a
+`listen::Listener` (pitch, three formants, voicing, and how much and how
+bright the hiss is, every 5 ms) feeding a `mimic::Mimic`, which picks the
+shape through the babble map and a gap for /s/, /sh/ or /f/.
+
+```sh
+cargo run --release -p synthie-trombone-cli -- --mimic --voice bright     # wear headphones
+cargo run --release -p synthie-trombone-cli -- --mimic --mic pipewire     # choose the input by name
+```
+
+In the tests a second voice copies a first from its sound alone: six sung
+vowels within 4 % on F1 and F2, the copy's tract in place within 55 ms of
+a change. It has only ever heard the synthesizer; a real microphone in a
+real room is untested. Formants are hard to read from high voices, where
+the harmonics are far apart: above about 200 Hz the first formant reads
+10 to 30 % off, and child-sized voices are worse. Pick a voice of about
+your own size; vowels the voice cannot reach are pulled to the nearest one
+it can.
+
+**Matching a voice** from a recording: `tools/judge/match_voice.py`
+measures pitch and its range, the scale of the formants (body size), how
+firmly the folds close, breathiness and pace, and writes a profile that
+makes the engine measure the same.
+
+```sh
+cd tools/judge && uv sync
+uv run python match_voice.py someone.wav --out someone.json
+cargo run --release -p synthie-trombone-cli -- --engine physical --profile tools/judge/someone.json
+```
+
+On the engine's own voices it lands within 1 % on pitch and formant scale
+and 0.6 dB on H1-H2, and it meets the same limits on six recordings of a
+human reader. It copies those five things, not the person: accent,
+intonation and everything else stay the engine's. Body size is unsteady on
+real speech (five recordings of one reader gave tract lengths from 0.78 to
+0.97), and very pressed voices are out of the engine's reach.
+
+**A judge and a tuner** (`tools/judge`, see its README): a phoneme
+recognizer and Whisper score how much of the engine's speech a machine
+understands, and CMA-ES searches the `Tuning` numbers for a better score,
+rejecting any candidate that fails the physics gates. The honest
+scoreboard, on ten held-out sentences:
+
+| | Phoneme error | Words Whisper gets |
+|---|---|---|
+| a human reader (other sentences) | 6 % | 96 % |
+| eSpeak NG | 16 % | 83 % |
+| classic engine | 73 % | 16 % |
+| physical engine | 70 % | 25 % |
+| physical engine, tuned (`profiles/tuned-r3.json`) | 65 % | 28 % |
+
+So the engines are still far from intelligible to a machine, and tuning
+the numbers buys little: the aim was a 20 % cut in phoneme error and the
+tuner reached 7.5 %, while Whisper got worse on the sentences it was tuned
+on. The tuned profile is kept as a file to listen to, not made the
+default. The judge's confusions (vowels heard as "ah", lax vowels heard as
+tense, /t/ heard as /d/) point at the vowel targets and the voicing
+contrast, which is where the next work lies.
 
 ## Making your game talk
 
