@@ -12,7 +12,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
+use synthie_trombone::inverse;
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
 use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, YELLOW, bold, fg};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
@@ -43,7 +45,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .areas(mid);
     draw_glottis(frame, glottis, app);
     draw_persona(frame, persona, app);
-    draw_scope(frame, scope, app);
+    draw_sound(frame, scope, app);
     draw_speech(frame, speech, app);
     draw_footer(frame, footer, app);
 }
@@ -438,7 +440,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("a‥;", "sing"),
                 ("Space", "stop"),
                 ("z x", "octave"),
-                ("←→↑↓", "tongue"),
+                ("←→↑↓", arrows_hint(app)),
                 ("[ ]", "tense"),
                 ("n", "nasal"),
                 ("b", "pop"),
@@ -459,6 +461,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 (", .", "speech rate"),
                 ("c", "clear"),
                 ("\\", "engine"),
+                ("/", "formant lock"),
             ]);
             vec![l, Line::from(v), settings]
         }
@@ -475,6 +478,173 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
 fn keycap_owned(c: char) -> Span<'static> {
     let style = keycap("").style;
     Span::styled(format!(" {c} "), style)
+}
+
+// ----- Formant Lock -------------------------------------------------------
+
+/// What the arrow keys do, for the footer.
+fn arrows_hint(app: &App) -> &'static str {
+    if app.formant_lock.is_some() {
+        "F2 F1"
+    } else {
+        "tongue"
+    }
+}
+
+/// The panel beside the persona: the scope, or with Formant Lock on the
+/// vowel chart; either way with the button that switches between them.
+fn draw_sound(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.formant_lock.is_some() {
+        draw_chart(frame, area, app);
+    } else {
+        app.chart_area = Rect::default();
+        draw_scope(frame, area, app);
+    }
+    lock_button(frame, area, app);
+}
+
+/// The Formant Lock button, on the right of the panel's bottom edge.
+fn lock_button(frame: &mut Frame, area: Rect, app: &mut App) {
+    let label = if app.formant_lock.is_some() {
+        "[/ scope]"
+    } else {
+        "[/ vowels]"
+    };
+    // Room for what the bottom edge shows on the left.
+    let label = if area.width >= 26 {
+        label
+    } else if area.width >= 6 {
+        "[/]"
+    } else {
+        return;
+    };
+    let width = u16::try_from(label.chars().count()).unwrap_or(0);
+    let r = Rect::new(
+        area.right().saturating_sub(width + 1),
+        area.bottom().saturating_sub(1),
+        width,
+        1,
+    );
+    frame.render_widget(Paragraph::new(Span::styled(label, bold(CYAN))), r);
+    app.controls.push((r, Control::FormantLock));
+}
+
+/// Hz as a short axis label: `590`, `2.6k`.
+fn short_hz(hz: f32) -> String {
+    if hz >= 1000.0 {
+        format!("{:.1}k", hz / 1000.0)
+    } else {
+        format!("{hz:.0}")
+    }
+}
+
+/// The vowel chart of Formant Lock: F2 across (high on the left), F1 down
+/// (low at the top), on logarithmic axes spanning what the voice's tract
+/// can reach. The reachable region is shaded and outlined, the vowels are
+/// marked where this voice makes them, and `◆` is where the voice is.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+fn draw_chart(frame: &mut Frame, area: Rect, app: &mut App) {
+    let range = app.chart_range();
+    let length = app.settings.tract_length;
+    let now = app.lock_formants();
+    // The longest title that fits between the corners, glyph and padding.
+    let room = usize::from(area.width.saturating_sub(6));
+    let title = now.map_or_else(
+        || "formant lock".to_string(),
+        |(f1, f2)| {
+            let fits = [
+                format!("F1 {f1:.0}  F2 {f2:.0} Hz"),
+                format!("F1 {f1:.0} F2 {f2:.0}"),
+                format!("{f1:.0}/{f2:.0}"),
+            ];
+            fits.iter()
+                .find(|t| t.chars().count() <= room)
+                .cloned()
+                .unwrap_or_else(|| format!("{f1:.0}"))
+        },
+    );
+    let mut block = panel(&title, true);
+    // The F2 axis on the bottom edge, where the lock button leaves room.
+    if area.width >= 28 {
+        let axis = format!(" F2 {}←→{} ", short_hz(range.f2.1), short_hz(range.f2.0));
+        block = block.title_bottom(Line::from(Span::styled(axis, fg(DIM))));
+    }
+    let inner = block.inner(area);
+    if inner.width < 8 || inner.height < 3 {
+        // Too small to draw: the title still says where the voice is.
+        app.chart_area = Rect::default();
+        frame.render_widget(block, area);
+        return;
+    }
+    app.chart_area = inner;
+
+    // The reachable region, sampled once per Braille dot.
+    let (w, h) = (usize::from(inner.width) * 2, usize::from(inner.height) * 4);
+    let mut reach = vec![false; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let (f1, f2) = range.hz((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32);
+            reach[j * w + i] = inverse::reachable_for(f1, f2, length);
+        }
+    }
+    let at = |i: isize, j: isize| {
+        i >= 0
+            && j >= 0
+            && (i as usize) < w
+            && (j as usize) < h
+            && reach[j as usize * w + i as usize]
+    };
+    let (mut edge, mut fill) = (Vec::new(), Vec::new());
+    for j in 0..h {
+        for i in 0..w {
+            if !reach[j * w + i] {
+                continue;
+            }
+            let p = (
+                (i as f64 + 0.5) / w as f64,
+                1.0 - (j as f64 + 0.5) / h as f64,
+            );
+            let (si, sj) = (i as isize, j as isize);
+            if !(at(si - 1, sj) && at(si + 1, sj) && at(si, sj - 1) && at(si, sj + 1)) {
+                edge.push(p);
+            } else if i % 2 == 0 && j % 4 == 1 {
+                fill.push(p);
+            }
+        }
+    }
+    let canvas = Canvas::default()
+        .block(block)
+        .background_color(BG)
+        .marker(Marker::Braille)
+        .x_bounds([0.0, 1.0])
+        .y_bounds([0.0, 1.0])
+        .paint(move |ctx| {
+            ctx.draw(&Points {
+                coords: &fill,
+                color: FAINT,
+            });
+            ctx.draw(&Points {
+                coords: &edge,
+                color: PURPLE,
+            });
+        });
+    frame.render_widget(canvas, area);
+
+    // Vowel marks, then the voice on top, in the cells the mouse finds
+    // them in.
+    let marks = app.chart_marks();
+    let cursor = now.and_then(|(f1, f2)| app.chart_cell(f1, f2));
+    let buf = frame.buffer_mut();
+    for (name, _, cell) in marks {
+        buf[cell].set_symbol(name).set_style(bold(FG));
+    }
+    if let Some(cell) = cursor {
+        buf[cell].set_symbol("◆").set_style(bold(YELLOW));
+    }
 }
 
 #[cfg(test)]
@@ -547,5 +717,86 @@ mod tests {
         println!("{text}");
         assert!(text.contains("vocal tract"));
         assert!(app.tract_area.width > 0);
+    }
+
+    /// A frame as text.
+    fn frame_text(term: &Terminal<TestBackend>) -> String {
+        let buf = term.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    /// The vowel chart of Formant Lock at the usual size and in smaller
+    /// terminals; look at it with `cargo test renders_the_vowel_chart --
+    /// --nocapture`.
+    #[test]
+    fn renders_the_vowel_chart() {
+        let (cmd, cmd_rx) = bounded::<Cmd>(1024);
+        let (_snap_tx, snapshots) = bounded(1);
+        let (_trash_tx, trash) = bounded(1);
+        let link = Link {
+            cmd,
+            snapshots,
+            trash,
+            sample_rate: 48_000.0,
+        };
+        let mut app = App::new(link, true, synthie_trombone::Engine::Physical);
+        app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Char('3')));
+        app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Char('/')));
+        // Let a real voice take up the shape, so the tract view shows it.
+        let shape = app.formant_lock.expect("formant lock is on");
+        let mut voice = Trombone::new(48_000.0);
+        voice.set_engine(synthie_trombone::Engine::Physical);
+        voice.set_shape(&shape);
+        voice.note_on_midi(45.0);
+        let mut buf = vec![0.0; 24_000];
+        voice.render(&mut buf);
+        app.snap.diameters = *voice.diameters();
+        app.snap.targets = *voice.target_diameters();
+        app.snap.tongue = voice.tongue();
+        drop(cmd_rx);
+
+        for (w, h) in [(120, 34), (100, 30), (80, 24), (60, 20)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, &mut app)).unwrap();
+            let text = frame_text(&term);
+            println!("{w}×{h}, chart {:?}\n{text}", app.chart_area);
+            let lock = app
+                .controls
+                .iter()
+                .find(|(_, c)| *c == Control::FormantLock);
+            assert!(lock.is_some(), "{w}×{h}: no lock button");
+            if (w, h) == (120, 34) {
+                assert_eq!(app.chart_area, Rect::new(93, 17, 26, 9));
+                assert!(text.contains("F1 ") && text.contains("[/ scope]"), "{text}");
+                // The marks are drawn in the cells a click finds them in.
+                let marks = app.chart_marks();
+                assert!(marks.len() >= 8, "{marks:?}");
+                let buf = term.backend().buffer();
+                for (name, _, cell) in marks {
+                    let shown = buf[cell].symbol();
+                    assert!(shown == name || shown == "◆", "{name} at {cell:?}: {shown}");
+                }
+            }
+            let a = app.chart_area;
+            assert!(a.right() <= w && a.bottom() <= h, "{w}×{h}: {a:?}");
+        }
+        // Off again, the scope is back and the chart takes no clicks.
+        app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Char('/')));
+        let mut term = Terminal::new(TestBackend::new(120, 34)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let text = frame_text(&term);
+        println!("{text}");
+        assert!(
+            text.contains("scope") && text.contains("[/ vowels]"),
+            "{text}"
+        );
+        assert_eq!(app.chart_area, Rect::default());
     }
 }

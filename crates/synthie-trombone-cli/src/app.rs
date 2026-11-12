@@ -5,6 +5,7 @@ use crossbeam_channel::Sender;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
+use synthie_trombone::inverse::{self, Shape};
 use synthie_trombone::speech::{Prosody, Utterance};
 use synthie_trombone::{
     Constriction, Engine, N, Persona, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
@@ -86,6 +87,8 @@ pub enum Control {
     Engine,
     Wobble,
     Drone,
+    /// The Formant Lock button: vowel chart on or off.
+    FormantLock,
 }
 
 impl Control {
@@ -115,6 +118,9 @@ enum Grab {
     TongueOld,
     Velum,
     Control(Control),
+    /// The vowel chart of Formant Lock; `true` if the press landed on a
+    /// vowel mark (the press itself is then that vowel).
+    Chart(bool),
 }
 
 /// Number keys → vowels.
@@ -185,6 +191,12 @@ pub struct App {
     grab: Option<Grab>,
     pop_until: Option<Instant>,
     pub status: String,
+    /// Formant Lock: the vowel shape the voice holds while the vowel chart
+    /// steers it, `None` when the lock is off.
+    pub formant_lock: Option<Shape>,
+    /// Inner area of the vowel chart, for mouse mapping (empty when it is
+    /// not drawn).
+    pub chart_area: Rect,
 }
 
 /// Lowercase name of a sound model.
@@ -232,6 +244,8 @@ impl App {
             grab: None,
             pop_until: None,
             status: String::new(),
+            formant_lock: None,
+            chart_area: Rect::default(),
         };
         app.status = if keyboard_release {
             "hold a piano key to sing · Space stops · Tab to type text".into()
@@ -449,12 +463,16 @@ impl App {
             '=' => self.set_vibrato(self.vibrato + 0.005),
             ',' => self.rate = (self.rate - 0.1).max(0.4),
             '.' => self.rate = (self.rate + 0.1).min(2.5),
+            '/' => self.toggle_lock(),
             _ => {}
         }
         false
     }
 
     fn play_special(&mut self, code: KeyCode) {
+        if self.nudge(code) {
+            return;
+        }
         let (mut i, mut d) = self.tongue;
         match code {
             KeyCode::Tab => {
@@ -555,6 +573,7 @@ impl App {
             self.send(Cmd::Vowel(v));
         }
         self.status = format!("engine: {}", engine_name(self.engine));
+        self.lock_engine_changed();
     }
 
     /// Switch to the next (`+1`) or previous (`-1`) voice preset.
@@ -600,6 +619,7 @@ impl App {
         }
         self.send(Cmd::Vowel(v));
         self.last_vowel = Some(v);
+        self.lock_follow_vowel(v);
     }
 
     fn set_tongue(&mut self, i: f32, d: f32) {
@@ -608,6 +628,7 @@ impl App {
             d.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
         );
         self.send(Cmd::Tongue(self.tongue.0, self.tongue.1));
+        self.lock_follow_tongue();
     }
 
     fn set_tenseness(&mut self, t: f32) {
@@ -711,6 +732,9 @@ impl App {
         {
             return Some(Grab::Control(c));
         }
+        if let Some(g) = self.chart_press(button, col, row) {
+            return Some(g);
+        }
         let (x, y) = self.to_tract(col, row)?;
         if button == MouseButton::Right {
             return (y.abs() <= LUMEN + 0.4).then_some(Grab::TongueOld);
@@ -774,6 +798,12 @@ impl App {
             self.work(c, col, first);
             return;
         }
+        if let Grab::Chart(on_vowel) = grab {
+            if !(first && on_vowel) {
+                self.steer_to_cell(col, row, !first);
+            }
+            return;
+        }
         // Outside the canvas the drag holds its last position.
         let Some((x, y)) = self.to_tract(col, row) else {
             return;
@@ -820,7 +850,7 @@ impl App {
                 self.nasal = open > 0.5;
                 self.send(Cmd::Velum(open));
             }
-            Grab::Control(_) => {}
+            Grab::Control(_) | Grab::Chart(_) => {}
         }
     }
 
@@ -888,7 +918,363 @@ impl App {
                 self.drone = !self.drone;
                 self.send(Cmd::Drone(self.drone));
             }
+            Control::FormantLock => self.toggle_lock(),
             _ => {}
+        }
+    }
+}
+
+// ----- Formant Lock -------------------------------------------------------
+
+/// A vowel shape of the physical engine.
+const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)) -> Shape {
+    Shape {
+        tongue_index: index,
+        tongue_diameter: height,
+        lips,
+        narrowing: Some(narrowing),
+    }
+}
+
+/// Vowels marked on the vowel chart: IPA letter, phoneme, and the shape the
+/// physical engine gives it (the library's physical vowel shapes; a test
+/// checks that they still agree). Where two marks share a cell the first
+/// is shown, so the corner vowels come first.
+#[rustfmt::skip]
+pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
+    ("i", Phoneme::Iy, shape(28.08, 2.05, Some(0.86), (34.0, 0.7))),
+    ("u", Phoneme::Uw, shape(25.06, 2.05, Some(0.65), (23.13, 0.7))),
+    ("ɑ", Phoneme::Aa, shape(14.36, 2.65, None, (14.0, 1.028))),
+    ("æ", Phoneme::Ae, shape(12.57, 3.339, None, (28.82, 1.4))),
+    ("ɪ", Phoneme::Ih, shape(28.67, 3.053, Some(0.944), (32.33, 0.832))),
+    ("ɛ", Phoneme::Eh, shape(21.83, 2.912, None, (30.69, 0.942))),
+    ("ʌ", Phoneme::Ah, shape(12.0, 2.39, None, (24.02, 1.015))),
+    ("ɔ", Phoneme::Ao, shape(12.0, 2.08, Some(1.348), (22.96, 1.315))),
+    ("ʊ", Phoneme::Uh, shape(19.55, 2.273, Some(0.739), (32.28, 0.887))),
+    ("o", Phoneme::Ow, shape(16.1, 2.1, Some(1.108), (26.95, 0.955))),
+    ("ɝ", Phoneme::Er, shape(13.86, 2.696, Some(1.173), (30.15, 0.727))),
+];
+
+/// The chart vowel `v`: its IPA letter and shape.
+fn chart_vowel(v: Phoneme) -> Option<(&'static str, Shape)> {
+    CHART_VOWELS
+        .iter()
+        .find(|(_, p, _)| *p == v)
+        .map(|&(name, _, s)| (name, s))
+}
+
+/// The babble map's formants for `shape` at the native length; where the
+/// map has no data for the shape itself (a few extreme ones, among them
+/// the physical /ʊ/), its formants a hair away from it.
+fn predict_near(shape: &Shape) -> Option<[f32; 3]> {
+    if let Some(f) = inverse::predict(shape) {
+        return Some(f);
+    }
+    let x = shape.coordinates();
+    for step in [0.01, 0.02, 0.04, 0.08] {
+        for k in 0..5 {
+            for sign in [-1.0, 1.0] {
+                let mut y = x;
+                y[k] = (y[k] + sign * step).clamp(0.0, 1.0);
+                if let Some(f) = inverse::predict(&Shape::from_coordinates(y)) {
+                    return Some(f);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// How far the vowel chart reaches past the babble map, as a ratio.
+const CHART_MARGIN: f32 = 1.04;
+/// Ratio an arrow key moves F1 or F2 by in Formant Lock.
+const NUDGE: f32 = 1.02;
+/// How far (ratio) a gliding Formant Lock may miss F1 or F2 to keep F3
+/// steady.
+const GLIDE_SLACK: f32 = 0.015;
+
+/// The F1 × F2 rectangle the vowel chart spans, Hz, on logarithmic axes:
+/// F2 falls from left to right and F1 rises from top to bottom, as
+/// phoneticians draw it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChartRange {
+    pub f1: (f32, f32),
+    pub f2: (f32, f32),
+}
+
+impl ChartRange {
+    /// The babble map's extent for a tract of `length`, with a margin.
+    pub fn for_length(length: f32) -> Self {
+        let lo =
+            inverse::formants_at_length([inverse::F1_RANGE.0, inverse::F2_RANGE.0, 2500.0], length);
+        let hi =
+            inverse::formants_at_length([inverse::F1_RANGE.1, inverse::F2_RANGE.1, 2500.0], length);
+        Self {
+            f1: (lo[0] / CHART_MARGIN, hi[0] * CHART_MARGIN),
+            f2: (lo[1] / CHART_MARGIN, hi[1] * CHART_MARGIN),
+        }
+    }
+
+    /// Where F1 `f1` and F2 `f2` sit on the chart, `(x, y)` with `0‥1`
+    /// across the chart from the left and down from the top (not clamped).
+    pub fn unit(&self, f1: f32, f2: f32) -> (f32, f32) {
+        let x = (self.f2.1.ln() - f2.ln()) / (self.f2.1.ln() - self.f2.0.ln());
+        let y = (f1.ln() - self.f1.0.ln()) / (self.f1.1.ln() - self.f1.0.ln());
+        (x, y)
+    }
+
+    /// `(F1, F2)`, Hz, at chart position `(x, y)` (see [`unit`](Self::unit)).
+    pub fn hz(&self, x: f32, y: f32) -> (f32, f32) {
+        let f2 = (self.f2.1.ln() - x * (self.f2.1.ln() - self.f2.0.ln())).exp();
+        let f1 = (self.f1.0.ln() + y * (self.f1.1.ln() - self.f1.0.ln())).exp();
+        (f1, f2)
+    }
+}
+
+impl App {
+    /// The vowel chart's extent for the voice in use.
+    pub fn chart_range(&self) -> ChartRange {
+        ChartRange::for_length(self.settings.tract_length)
+    }
+
+    /// F1 and F2 (Hz) of a shape for the voice in use, as the babble map
+    /// predicts them.
+    pub fn shape_formants(&self, shape: &Shape) -> Option<(f32, f32)> {
+        let [f1, f2, _] = self.shape_formants3(shape)?;
+        Some((f1, f2))
+    }
+
+    /// F1, F2 and F3 (Hz) of a shape for the voice in use (see
+    /// [`predict_near`]).
+    fn shape_formants3(&self, shape: &Shape) -> Option<[f32; 3]> {
+        let native = predict_near(shape)?;
+        Some(inverse::formants_at_length(
+            native,
+            self.settings.tract_length,
+        ))
+    }
+
+    /// Where the voice is on the vowel chart, `(F1, F2)` in Hz, while
+    /// Formant Lock is on.
+    pub fn lock_formants(&self) -> Option<(f32, f32)> {
+        self.formant_lock.and_then(|s| self.shape_formants(&s))
+    }
+
+    /// The chart cell that shows `(f1, f2)`; points off the chart are held
+    /// at its edge. `None` while the chart is not drawn.
+    pub fn chart_cell(&self, f1: f32, f2: f32) -> Option<(u16, u16)> {
+        let a = self.chart_area;
+        if a.width == 0 || a.height == 0 {
+            return None;
+        }
+        let (x, y) = self.chart_range().unit(f1, f2);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let at = |t: f32, n: u16| ((t * f32::from(n)).floor().max(0.0) as u16).min(n - 1);
+        Some((a.x + at(x, a.width), a.y + at(y, a.height)))
+    }
+
+    /// `(F1, F2)`, Hz, at the centre of a chart cell; cells off the chart
+    /// are held at its edge. `None` while the chart is not drawn.
+    pub fn chart_point(&self, col: u16, row: u16) -> Option<(f32, f32)> {
+        let a = self.chart_area;
+        if a.width == 0 || a.height == 0 {
+            return None;
+        }
+        let col = col.clamp(a.x, a.right() - 1);
+        let row = row.clamp(a.y, a.bottom() - 1);
+        let x = (f32::from(col - a.x) + 0.5) / f32::from(a.width);
+        let y = (f32::from(row - a.y) + 0.5) / f32::from(a.height);
+        Some(self.chart_range().hz(x, y))
+    }
+
+    /// The vowel marks on the chart and their cells, one per cell.
+    pub fn chart_marks(&self) -> Vec<(&'static str, Phoneme, (u16, u16))> {
+        let mut marks: Vec<(&'static str, Phoneme, (u16, u16))> = Vec::new();
+        for &(name, v, s) in &CHART_VOWELS {
+            let Some(at) = self
+                .shape_formants(&s)
+                .and_then(|(f1, f2)| self.chart_cell(f1, f2))
+            else {
+                continue;
+            };
+            if marks.iter().all(|m| m.2 != at) {
+                marks.push((name, v, at));
+            }
+        }
+        marks
+    }
+
+    /// Turn Formant Lock on or off. It belongs to the physical engine, so
+    /// turning it on there switches to it. Turning it off leaves the tract
+    /// as it is.
+    fn toggle_lock(&mut self) {
+        if self.formant_lock.take().is_some() {
+            self.status = "formant lock off · the tract stays as it is".into();
+            return;
+        }
+        let switched = self.engine != Engine::Physical;
+        if switched {
+            self.toggle_engine();
+        }
+        // Start from where the voice is: the last vowel's lips and
+        // narrowing with the tongue where it is now. After a change of
+        // engine the voice has just taken up that vowel afresh.
+        let tongue = |s: Shape, (i, d): (f32, f32)| Shape {
+            tongue_index: i,
+            tongue_diameter: d,
+            ..s
+        };
+        let last = self.last_vowel.and_then(chart_vowel).map(|(_, s)| s);
+        let start = match last {
+            Some(s) if switched => s,
+            Some(s) => tongue(s, self.tongue),
+            None => Shape {
+                tongue_index: self.tongue.0,
+                tongue_diameter: self.tongue.1,
+                lips: None,
+                narrowing: None,
+            },
+        };
+        if self.shape_formants(&start).is_some() {
+            self.hold_shape(start);
+        } else {
+            // Somewhere the map does not know: begin in the middle.
+            let r = self.chart_range();
+            let (f1, f2) = r.hz(0.5, 0.5);
+            self.formant_lock = Some(start);
+            self.steer(f1, f2, false);
+        }
+        self.status = if switched {
+            "formant lock · switched to the physical engine · drag the vowel chart".into()
+        } else {
+            "formant lock · drag the vowel chart, ←→↑↓ nudge F2/F1".into()
+        };
+    }
+
+    /// Hold `shape`: send it, and keep the tongue state in step.
+    fn hold_shape(&mut self, shape: Shape) {
+        self.formant_lock = Some(shape);
+        self.tongue = (
+            shape
+                .tongue_index
+                .clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
+            shape
+                .tongue_diameter
+                .clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
+        );
+        self.send(Cmd::Shape(shape));
+    }
+
+    /// Steer the voice to F1 `f1` and F2 `f2` (Hz, for the voice in use),
+    /// or the nearest point it can reach, from the shape it holds.
+    /// `glide` is a continuous move (a drag or an arrow key), as opposed
+    /// to a fresh press.
+    fn steer(&mut self, f1: f32, f2: f32, glide: bool) {
+        let length = self.settings.tract_length;
+        let (a, b) = inverse::nearest_reachable_for(f1, f2, length);
+        let near = self.formant_lock;
+        let plain = || inverse::solve_for(a, b, None, near.as_ref(), length);
+        // F1 and F2 leave the shape a degree of freedom, and the solver's
+        // pull towards the previous shape is weak: off a vowel's own
+        // shape it would take a different one at once. While gliding,
+        // holding F3 where it is pins that freedom, so the shape moves
+        // smoothly; unless that costs F1 or F2 more than a little.
+        let f3 = near.and_then(|s| self.shape_formants3(&s)).map(|f| f[2]);
+        let shape = match f3 {
+            Some(f3) if glide => {
+                let held = inverse::solve_for(a, b, Some(f3), near.as_ref(), length);
+                let close = self.shape_formants(&held).is_some_and(|(g1, g2)| {
+                    (g1 / a - 1.0).abs().max((g2 / b - 1.0).abs()) < GLIDE_SLACK
+                });
+                if close { held } else { plain() }
+            }
+            _ => plain(),
+        };
+        self.hold_shape(shape);
+        let off = |want: f32, got: f32| (got / want - 1.0).abs() > 0.005;
+        self.status = if off(f1, a) || off(f2, b) {
+            format!("out of reach · F1 {a:.0} Hz, F2 {b:.0} Hz is as close as this tract gets")
+        } else {
+            format!("F1 {a:.0} Hz · F2 {b:.0} Hz")
+        };
+    }
+
+    /// Follow a press (`glide` false) or drag at a cell of the vowel chart.
+    fn steer_to_cell(&mut self, col: u16, row: u16, glide: bool) {
+        if self.formant_lock.is_some()
+            && let Some((f1, f2)) = self.chart_point(col, row)
+        {
+            self.steer(f1, f2, glide);
+        }
+    }
+
+    /// What a press on the vowel chart takes hold of. A press on a vowel
+    /// mark is that vowel.
+    fn chart_press(&mut self, button: MouseButton, col: u16, row: u16) -> Option<Grab> {
+        if button != MouseButton::Left
+            || self.formant_lock.is_none()
+            || !self.chart_area.contains((col, row).into())
+        {
+            return None;
+        }
+        let mark = self.chart_marks().into_iter().find(|m| m.2 == (col, row));
+        if let Some((_, v, _)) = mark {
+            self.vowel(v);
+            return Some(Grab::Chart(true));
+        }
+        Some(Grab::Chart(false))
+    }
+
+    /// Arrow keys under Formant Lock: move F2 (left is higher, as on the
+    /// chart) and F1 (up is lower) by [`NUDGE`]. `false` if the key is not
+    /// one of them or the lock is off.
+    fn nudge(&mut self, code: KeyCode) -> bool {
+        if self.formant_lock.is_none() {
+            return false;
+        }
+        let Some((f1, f2)) = self.lock_formants() else {
+            return false;
+        };
+        let (f1, f2) = match code {
+            KeyCode::Left => (f1, f2 * NUDGE),
+            KeyCode::Right => (f1, f2 / NUDGE),
+            KeyCode::Up => (f1 / NUDGE, f2),
+            KeyCode::Down => (f1 * NUDGE, f2),
+            _ => return false,
+        };
+        self.steer(f1, f2, true);
+        true
+    }
+
+    /// A vowel was chosen (number key, landmark or chart mark): under
+    /// Formant Lock the chart follows it.
+    fn lock_follow_vowel(&mut self, v: Phoneme) {
+        if self.formant_lock.is_none() {
+            return;
+        }
+        if let Some((name, s)) = chart_vowel(v) {
+            self.formant_lock = Some(s);
+            if let Some((f1, f2)) = self.shape_formants(&s) {
+                self.status = format!("{name} ({}) · F1 {f1:.0} Hz · F2 {f2:.0} Hz", v.symbol());
+            }
+        }
+    }
+
+    /// The tongue was moved some other way (its handle or meter): under
+    /// Formant Lock the chart follows it.
+    fn lock_follow_tongue(&mut self) {
+        if let Some(s) = &mut self.formant_lock {
+            (s.tongue_index, s.tongue_diameter) = self.tongue;
+        }
+    }
+
+    /// The engine changed: Formant Lock only works on the physical one.
+    fn lock_engine_changed(&mut self) {
+        if self.engine != Engine::Physical && self.formant_lock.take().is_some() {
+            self.status = format!(
+                "engine: {} · formant lock off (it needs the physical engine)",
+                engine_name(self.engine)
+            );
         }
     }
 }
@@ -1289,5 +1675,338 @@ mod tests {
         assert_eq!(app.mode, Mode::Type);
         click(&mut app, Control::Mode);
         assert_eq!(app.mode, Mode::Play);
+    }
+
+    // ----- Formant Lock -------------------------------------------------
+
+    use synthie_trombone::Trombone;
+
+    /// `laid_out()` with Formant Lock on and a vowel chart the size a
+    /// 120×34 terminal draws it (26×9 cells), clear of the other areas.
+    fn locked() -> (App, Receiver<Cmd>) {
+        let (mut app, rx) = laid_out();
+        app.key(key('/', KeyKind::Press));
+        app.chart_area = Rect::new(93, 40, 26, 9);
+        sent(&rx);
+        (app, rx)
+    }
+
+    fn arrow(code: KeyCode) -> Key {
+        Key {
+            code,
+            ..key(' ', KeyKind::Press)
+        }
+    }
+
+    /// The shapes among `cmds`.
+    fn shapes(cmds: &[Cmd]) -> Vec<Shape> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                Cmd::Shape(s) => Some(*s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// F1 and F2 of a shape for the app's voice, as the babble map has it.
+    fn heard(app: &App, s: &Shape) -> (f32, f32) {
+        app.shape_formants(s).expect("the map knows the shape")
+    }
+
+    /// Larger relative error of two `(F1, F2)` pairs.
+    fn error(a: (f32, f32), b: (f32, f32)) -> f32 {
+        (a.0 / b.0 - 1.0).abs().max((a.1 / b.1 - 1.0).abs())
+    }
+
+    /// Press and let go at a cell; what was sent.
+    fn click_at(app: &mut App, rx: &Receiver<Cmd>, at: (u16, u16)) -> Vec<Cmd> {
+        mouse(app, DOWN, at, PLAIN);
+        mouse(app, UP, at, PLAIN);
+        sent(rx)
+    }
+
+    /// Every cell of the chart.
+    fn chart_cells(app: &App) -> Vec<(u16, u16)> {
+        let a = app.chart_area;
+        (a.y..a.bottom())
+            .flat_map(|r| (a.x..a.right()).map(move |c| (c, r)))
+            .collect()
+    }
+
+    #[test]
+    fn formant_lock_toggles_on_the_physical_engine() {
+        let (mut app, rx) = laid_out();
+        assert_eq!(app.engine, Engine::Classic);
+        // On the classic engine it switches to the physical one and says so.
+        app.key(key('/', KeyKind::Press));
+        assert_eq!(app.engine, Engine::Physical);
+        assert!(app.formant_lock.is_some());
+        assert!(app.status.contains("physical engine"), "{}", app.status);
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Model(Engine::Physical), Cmd::Shape(_)]),
+            "{cmds:?}"
+        );
+        // Off again: the tract stays where it is.
+        app.key(key('/', KeyKind::Press));
+        assert!(app.formant_lock.is_none());
+        assert_eq!(app.engine, Engine::Physical);
+        assert!(sent(&rx).is_empty());
+        // The button does the same.
+        app.controls
+            .push((Rect::new(108, 39, 9, 1), Control::FormantLock));
+        click_at(&mut app, &rx, (110, 39));
+        assert!(app.formant_lock.is_some());
+        assert!(matches!(sent(&rx)[..], []));
+        // Leaving the physical engine leaves the lock.
+        app.key(key('\\', KeyKind::Press));
+        assert_eq!(app.engine, Engine::Classic);
+        assert!(app.formant_lock.is_none());
+        assert!(app.status.contains("formant lock off"), "{}", app.status);
+        // Arrow keys move the tongue again.
+        sent(&rx);
+        app.key(arrow(KeyCode::Left));
+        assert!(matches!(sent(&rx)[..], [Cmd::Tongue(..)]));
+    }
+
+    #[test]
+    fn a_press_on_the_chart_steers_the_voice_there() {
+        let (mut app, rx) = locked();
+        let length = app.settings.tract_length;
+        let (mut worst, mut pressed) = (0.0f32, 0);
+        for at in chart_cells(&app) {
+            let target = app.chart_point(at.0, at.1).unwrap();
+            if !inverse::reachable_for(target.0, target.1, length) {
+                continue;
+            }
+            let cmds = click_at(&mut app, &rx, at);
+            if matches!(cmds[..], [Cmd::Vowel(_)]) {
+                continue; // a vowel mark
+            }
+            let [Cmd::Shape(s)] = cmds[..] else {
+                panic!("{at:?}: {cmds:?}");
+            };
+            let e = error(heard(&app, &s), target);
+            assert!(e < 0.03, "{at:?}: {target:?} → {:?}", heard(&app, &s));
+            worst = worst.max(e);
+            pressed += 1;
+            // The tongue handle and the arrow keys start from the solved shape.
+            assert_eq!(app.tongue, (s.tongue_index, s.tongue_diameter));
+            assert_eq!(app.formant_lock, Some(s));
+        }
+        println!("{pressed} reachable cells, largest formant error {worst:.4}");
+        assert!(pressed > 40, "{pressed}");
+    }
+
+    /// The largest change of any shape coordinate between consecutive
+    /// shapes.
+    fn largest_step(path: &[Shape]) -> f32 {
+        path.windows(2)
+            .map(|w| {
+                let (a, b) = (w[0].coordinates(), w[1].coordinates());
+                (0..5).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max)
+            })
+            .fold(0.0, f32::max)
+    }
+
+    /// Drag on the chart from the /i/ mark to the /ɑ/ mark, cell by cell;
+    /// the shapes the voice went through.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn drag_i_to_a(app: &mut App, rx: &Receiver<Cmd>) -> Vec<Shape> {
+        let mark = |app: &App, v| {
+            app.chart_marks()
+                .into_iter()
+                .find(|m| m.1 == v)
+                .map(|m| m.2)
+                .unwrap()
+        };
+        let (from, to) = (mark(app, Phoneme::Iy), mark(app, Phoneme::Aa));
+        mouse(app, DOWN, from, PLAIN);
+        assert!(matches!(sent(rx)[..], [Cmd::Vowel(Phoneme::Iy)]));
+        let mut path = vec![app.formant_lock.unwrap()];
+        let steps = from.0.abs_diff(to.0).max(from.1.abs_diff(to.1));
+        for k in 1..=steps {
+            let t = f32::from(k) / f32::from(steps);
+            let lerp =
+                |a: u16, b: u16| (f32::from(a) + t * (f32::from(b) - f32::from(a))).round() as u16;
+            mouse(app, DRAG, (lerp(from.0, to.0), lerp(from.1, to.1)), PLAIN);
+        }
+        mouse(app, UP, to, PLAIN);
+        path.extend(shapes(&sent(rx)));
+        assert_eq!(path.len(), usize::from(steps) + 1);
+        let end = app.chart_point(to.0, to.1).unwrap();
+        assert!(error(heard(app, path.last().unwrap()), end) < 0.03);
+        path
+    }
+
+    #[test]
+    fn dragging_from_i_to_a_moves_the_shape_smoothly() {
+        // As large as a 120×34 terminal draws the chart.
+        let (mut app, rx) = locked();
+        let path = drag_i_to_a(&mut app, &rx);
+        let coarse = largest_step(&path);
+        // A chart three times finer: the steps shrink with it, so there is
+        // no jump in the path, only the size of a terminal cell.
+        app.chart_area = Rect::new(0, 40, 78, 27);
+        let path_fine = drag_i_to_a(&mut app, &rx);
+        let fine = largest_step(&path_fine);
+        println!(
+            "i → ɑ: {} steps, largest coordinate step {coarse:.3}; {} steps on a 3× finer chart, {fine:.3}",
+            path.len() - 1,
+            path_fine.len() - 1
+        );
+        // Near /i/ the narrowing opens fast as F1 rises (about 0.15 of its
+        // range per step, over several steps), but no single step jumps:
+        // in particular the first step off the vowel's own shape is small.
+        assert!(coarse < 0.25, "{coarse}: {path:?}");
+        assert!(fine < 0.2, "{fine}: {path_fine:?}");
+        let first = largest_step(&path_fine[..2]);
+        println!("first step off the /i/ mark: {first:.3}");
+        assert!(first < 0.1, "{first}: {path_fine:?}");
+    }
+
+    #[test]
+    fn a_press_out_of_reach_is_held_at_the_edge() {
+        let (mut app, rx) = locked();
+        let length = app.settings.tract_length;
+        // Low F2 with a wide-open F1 (bottom right) is out of reach.
+        let a = app.chart_area;
+        let at = (a.right() - 1, a.bottom() - 1);
+        let target = app.chart_point(at.0, at.1).unwrap();
+        assert!(!inverse::reachable_for(target.0, target.1, length));
+        let edge = inverse::nearest_reachable_for(target.0, target.1, length);
+        assert!(error(edge, target) > 0.05, "{edge:?} {target:?}");
+        let cmds = click_at(&mut app, &rx, at);
+        let [Cmd::Shape(s)] = cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        let got = heard(&app, &s);
+        println!("out of reach: {target:?} → edge {edge:?}, voice {got:?}");
+        assert!(error(got, edge) < 0.03, "{got:?} vs {edge:?}");
+        assert!(app.status.contains("out of reach"), "{}", app.status);
+        // A drag that leaves the chart is held at its edge as well.
+        let inside = (a.x + 3, a.y + 2);
+        mouse(&mut app, DOWN, inside, PLAIN);
+        mouse(&mut app, DRAG, (a.x, a.y + 30), PLAIN);
+        mouse(&mut app, UP, (a.x, a.y + 30), PLAIN);
+        let cmds = sent(&rx);
+        assert_eq!(shapes(&cmds).len(), 2, "{cmds:?}");
+    }
+
+    #[test]
+    fn the_chart_is_in_the_hz_of_the_voice_in_use() {
+        let (mut app, rx) = locked();
+        let native = app.chart_range();
+        app.set_dial(0, 0.8);
+        let length = app.settings.tract_length;
+        assert!((length - 0.8).abs() < 1e-3, "{length}");
+        assert!(app.formant_lock.is_some());
+        sent(&rx);
+        let small = app.chart_range();
+        assert_eq!(small, ChartRange::for_length(length));
+        assert!(small.f2.1 > native.f2.1 * 1.15, "{small:?} {native:?}");
+        assert!(small.f1.0 > native.f1.0 * 1.1, "{small:?} {native:?}");
+        // A press lands where it was made, in this voice's Hz…
+        let a = app.chart_area;
+        let at = (a.x + 12, a.y + 4);
+        let target = app.chart_point(at.0, at.1).unwrap();
+        assert!(inverse::reachable_for(target.0, target.1, length));
+        let cmds = click_at(&mut app, &rx, at);
+        let [Cmd::Shape(s)] = cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        let got = heard(&app, &s);
+        assert!(error(got, target) < 0.03, "{got:?} vs {target:?}");
+        // …which a tract of native length would not make.
+        let n = inverse::predict(&s).unwrap();
+        assert!(error((n[0], n[1]), target) > 0.12, "{n:?} vs {target:?}");
+        // The vowels move with the voice: /i/ sits further left.
+        let iy = CHART_VOWELS[0].2;
+        let small_i = heard(&app, &iy);
+        app.set_dial(0, 1.0);
+        let native_i = heard(&app, &iy);
+        assert!(small_i.1 > native_i.1 * 1.15, "{small_i:?} {native_i:?}");
+    }
+
+    #[test]
+    fn arrow_keys_nudge_f1_and_f2() {
+        let (mut app, rx) = locked();
+        let a = app.chart_area;
+        click_at(&mut app, &rx, (a.x + 12, a.y + 4));
+        for (code, df1, df2) in [
+            (KeyCode::Left, 1.0, NUDGE),
+            (KeyCode::Right, 1.0, 1.0 / NUDGE),
+            (KeyCode::Up, 1.0 / NUDGE, 1.0),
+            (KeyCode::Down, NUDGE, 1.0),
+        ] {
+            let (f1, f2) = app.lock_formants().unwrap();
+            app.key(arrow(code));
+            let cmds = sent(&rx);
+            let [Cmd::Shape(s)] = cmds[..] else {
+                panic!("{code:?}: {cmds:?}");
+            };
+            let (g1, g2) = heard(&app, &s);
+            println!("{code:?}: F1 ×{:.4}, F2 ×{:.4}", g1 / f1, g2 / f2);
+            assert!(
+                (g1 / f1 / df1 - 1.0).abs() < 0.006 && (g2 / f2 / df2 - 1.0).abs() < 0.006,
+                "{code:?}: ({f1}, {f2}) → ({g1}, {g2})"
+            );
+        }
+    }
+
+    #[test]
+    fn vowel_marks_on_the_chart_and_vowel_keys_move_the_cursor() {
+        let (mut app, rx) = locked();
+        let marks = app.chart_marks();
+        assert!(marks.len() >= 8, "{marks:?}");
+        let &(_, v, at) = marks.iter().find(|m| m.1 == Phoneme::Uw).unwrap();
+        let cmds = click_at(&mut app, &rx, at);
+        assert!(matches!(cmds[..], [Cmd::Vowel(Phoneme::Uw)]), "{cmds:?}");
+        assert_eq!(app.formant_lock, chart_vowel(v).map(|(_, s)| s));
+        let (f1, f2) = app.lock_formants().unwrap();
+        assert_eq!(app.chart_cell(f1, f2), Some(at));
+        // A number key is a vowel too: the chart follows.
+        app.key(key('5', KeyKind::Press));
+        assert_eq!(app.formant_lock, chart_vowel(Phoneme::Aa).map(|(_, s)| s));
+        // So does the tongue, moved by its meter.
+        sent(&rx);
+        let r = app
+            .controls
+            .iter()
+            .find(|(_, c)| *c == Control::Tongue)
+            .unwrap()
+            .0;
+        click_at(&mut app, &rx, (r.x + 2, r.y));
+        assert_eq!(
+            app.formant_lock
+                .map(|s| (s.tongue_index, s.tongue_diameter)),
+            Some(app.tongue)
+        );
+    }
+
+    #[test]
+    fn chart_vowels_are_the_physical_engines_vowels() {
+        for (name, v, s) in CHART_VOWELS {
+            let mut said = Trombone::new(48_000.0);
+            let mut held = Trombone::new(48_000.0);
+            for voice in [&mut said, &mut held] {
+                voice.set_engine(Engine::Physical);
+            }
+            said.articulate_phoneme(v);
+            held.set_shape(&s);
+            let mut buf = [0.0; 256];
+            said.render(&mut buf);
+            held.render(&mut buf);
+            assert_eq!(said.tongue(), held.tongue(), "{name}");
+            for (k, (a, b)) in said
+                .target_diameters()
+                .iter()
+                .zip(held.target_diameters())
+                .enumerate()
+            {
+                assert!((a - b).abs() < 1e-4, "{name} cell {k}: {a} vs {b}");
+            }
+            assert!(predict_near(&s).is_some(), "{name}");
+        }
     }
 }
