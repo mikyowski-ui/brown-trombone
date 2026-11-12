@@ -80,6 +80,9 @@ pub enum Fallback {
 /// displays. All zero while the classic engine is in use.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Gauges {
+    /// The mouth is shut somewhere in front of the pharynx, as the sound
+    /// sees it (it follows the articulators by up to one parameter block).
+    pub mouth_shut: bool,
     /// Air flow through the glottis, cm³/s.
     pub glottal_flow: f32,
     /// Pressure just below the vocal folds, cmH2O.
@@ -787,9 +790,19 @@ impl Trombone {
             jet_noise: g.jet / CM_H2O,
             jet_speed: g.jet_speed,
             jet_cell: g.jet_cell,
+            mouth_shut: g.shut,
             gap_nudge: self.tract.nudges().0,
             vowel_relief: self.tract.nudges().1,
         }
+    }
+
+    /// Whether the mouth is shut somewhere in front of the pharynx right now
+    /// (physical engine; see [`Gauges::mouth_shut`]). The speech front end
+    /// times the larynx from it: the voice stops as a voiceless stop shuts
+    /// and comes back a voice onset time after it opens.
+    #[must_use]
+    pub fn mouth_shut(&self) -> bool {
+        self.engine == Engine::Physical && self.phys.gauge.shut
     }
 
     /// Air pressure in tract cell `cell` (`0` at the glottis), cmH2O, in

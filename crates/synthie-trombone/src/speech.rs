@@ -108,6 +108,12 @@ pub struct Gesture {
     /// Pitch added at the start of the segment, Hz, decaying over the
     /// voice's [`Tuning::kick_time`].
     pub kick: f32,
+    /// For the breath after a voiceless stop's release: how long after the
+    /// mouth actually opens the voice comes back, seconds (a voice onset
+    /// time, less the folds' own few milliseconds). The release is the
+    /// instant the tract stops being shut, however early or late the
+    /// articulators get there.
+    pub hold: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -212,7 +218,23 @@ pub struct Speaker {
     /// The shape of the pause being spoken is still to be sent (physical
     /// engine; see [`PAUSE_HOLD`]).
     pause_pending: bool,
+    /// Seconds since the utterance began.
+    clock: f32,
+    /// The mouth was shut at the last sample (physical engine).
+    was_shut: bool,
+    /// When the voice comes back after a voiceless stop's release, on
+    /// `clock`, while it is still held off.
+    voice_at: Option<f32>,
+    /// Time on `clock` the pitch kick of the segment counts from.
+    kick_from: f32,
+    /// A voiceless stop has begun but the mouth is not shut yet: the voice
+    /// stops when it is, or at this time on `clock` at the latest.
+    devoice_at: Option<f32>,
 }
+
+/// Longest a voiceless stop waits for the mouth to shut before the voice
+/// is let go anyway, seconds.
+const DEVOICE_WAIT: f32 = 0.025;
 
 /// How long a voiced sound before a pause keeps its shape once the voice
 /// has been let go, seconds (physical engine): the voice dies away first and
@@ -244,6 +266,11 @@ impl Speaker {
         self.ahead = false;
         self.larynx_ahead = false;
         self.pause_pending = false;
+        self.clock = 0.0;
+        self.was_shut = false;
+        self.voice_at = None;
+        self.kick_from = 0.0;
+        self.devoice_at = None;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -290,6 +317,7 @@ impl Speaker {
     }
 
     /// Advance one output sample and render it.
+    #[allow(clippy::too_many_lines)] // one sample of every channel's timing
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
         if let Some(&seg) = self.utterance.segments.get(self.index) {
             let physical = voice.engine() == Engine::Physical;
@@ -306,22 +334,45 @@ impl Speaker {
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
-                voice.set_voiced(seg.voiced);
-                voice.set_tenseness(seg.tenseness);
+                self.kick_from = self.clock;
+                // A voice still held off after a voiceless release waits.
+                let held = self.voice_at.is_some_and(|t| t > self.clock);
+                if !held {
+                    self.voice_at = None;
+                }
+                // Into a voiceless stop the voice goes on until the mouth
+                // shuts (see `time_larynx`).
+                let defer = physical
+                    && !seg.voiced
+                    && matches!(seg.phoneme.manner(), Manner::Stop | Manner::Affricate)
+                    && voice.is_voiced()
+                    && !voice.mouth_shut();
+                self.devoice_at = defer.then_some(self.clock + DEVOICE_WAIT);
+                if !defer {
+                    voice.set_voiced(seg.voiced && !held);
+                    voice.set_tenseness(seg.tenseness);
+                }
                 if voice.engine() == Engine::Physical {
                     let g = &seg.gesture;
-                    voice.set_glottal_spread(g.spread);
+                    if (!held || !seg.voiced) && !defer {
+                        voice.set_glottal_spread(g.spread);
+                    }
                     voice.set_fold_slack(g.slack);
                     voice.set_cavity_expansion(g.expansion);
                 }
             }
             let t = (self.elapsed / seg.duration).min(1.0);
             let mut hz = lerp(seg.pitch.0, seg.pitch.1, t);
-            if seg.gesture.kick.abs() > 0.0 {
-                hz += seg.gesture.kick * exp(-self.elapsed / self.utterance.kick_time);
+            if seg.gesture.kick.abs() > 0.0 && self.clock >= self.kick_from {
+                hz += seg.gesture.kick
+                    * exp(-(self.clock - self.kick_from) / self.utterance.kick_time);
             }
             voice.set_frequency(hz);
+            if physical {
+                self.time_larynx(voice, &seg);
+            }
             self.elapsed += 1.0 / voice.sample_rate();
+            self.clock += 1.0 / voice.sample_rate();
             if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
                 voice.articulate(&seg.articulation);
                 self.pause_pending = false;
@@ -348,15 +399,18 @@ impl Speaker {
                     self.ahead = true;
                 }
             }
-            // Into a voiceless consonant the larynx moves a little ahead
-            // too, so the voice stops as the tract shuts rather than
-            // carrying on into the closure.
+            // Into a voiceless fricative the larynx moves a little ahead
+            // too, so the voice stops as the tract narrows rather than
+            // carrying on into the hiss. Into a voiceless stop it stops as
+            // the mouth shuts (see `time_larynx`): letting go earlier blew
+            // the open glottis's breath through the closing gap, a hiss
+            // before every /t/.
             if !self.larynx_ahead
                 && seg.voiced
                 && physical
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
                 && !next.voiced
-                && is_obstruent(next.phoneme)
+                && next.phoneme.manner() == Manner::Fricative
                 && self.elapsed
                     >= seg.duration - self.utterance.devoicing_lead.min(0.5 * seg.duration)
             {
@@ -378,6 +432,74 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Time the larynx from what the mouth does (physical engine): the
+    /// voice stops the moment a voiceless stop shuts the mouth, and after
+    /// its release it comes back the segment's `hold` after the mouth
+    /// opens. Timed from the segments alone, both drifted with the
+    /// articulators: a slower tongue body or a longer vowel moved the
+    /// closure and the release against the segment boundaries, and with
+    /// them the voice onset time and the voicing left in a closure.
+    fn time_larynx(&mut self, voice: &mut Trombone, seg: &Segment) {
+        let shut = voice.mouth_shut();
+        let next = self.utterance.segments.get(self.index + 1).copied();
+        let closing = !matches!(
+            seg.phoneme.manner(),
+            Manner::Stop | Manner::Affricate | Manner::Nasal
+        );
+        if shut
+            && !self.was_shut
+            && seg.voiced
+            && closing
+            && !self.larynx_ahead
+            && let Some(n) = next.filter(|n| {
+                !n.voiced && matches!(n.phoneme.manner(), Manner::Stop | Manner::Affricate)
+            })
+        {
+            voice.set_voiced(false);
+            voice.set_glottal_spread(n.gesture.spread);
+            self.larynx_ahead = true;
+        }
+        if !shut && self.was_shut && self.voice_at.is_none() && !seg.voiced {
+            // The aspiration after this release: this segment, or the one
+            // after a closure.
+            let hold = if seg.gesture.hold > 0.0 {
+                seg.gesture.hold
+            } else {
+                next.filter(|n| n.phoneme == seg.phoneme)
+                    .map_or(0.0, |n| n.gesture.hold)
+            };
+            if hold > 0.0 {
+                self.voice_at = Some(self.clock + hold);
+            }
+        }
+        if let Some(t) = self.devoice_at
+            && (shut || self.clock >= t)
+        {
+            self.devoice_at = None;
+            voice.set_voiced(false);
+            voice.set_tenseness(seg.tenseness);
+            voice.set_glottal_spread(seg.gesture.spread);
+        }
+        self.was_shut = shut;
+        if let Some(t) = self.voice_at
+            && self.clock >= t
+        {
+            self.voice_at = None;
+            if seg.voiced {
+                voice.set_voiced(true);
+                voice.set_glottal_spread(seg.gesture.spread);
+                self.kick_from = self.clock;
+            } else if seg.gesture.hold > 0.0
+                && let Some(n) = next.filter(|n| n.voiced)
+            {
+                // Released early: the voice comes during the breath.
+                voice.set_tenseness(n.tenseness);
+                voice.set_voiced(true);
+                voice.set_glottal_spread(n.gesture.spread);
+            }
+        }
     }
 
     /// Render a block.
@@ -1179,6 +1301,7 @@ fn expand(
                 } * if stressed { 1.0 } else { timing.unstressed_vot };
                 let mut asp = with(draft(p, a, hold / rate, false), voiceless);
                 asp.aspiration = true;
+                asp.gesture.hold = hold / rate;
                 out.push(asp);
             }
         }

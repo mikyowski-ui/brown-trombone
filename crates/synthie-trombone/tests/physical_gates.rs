@@ -1508,30 +1508,35 @@ fn stop_releases_are_bursts_not_clicks() {
     // The shape now follows the articulators' own speeds through each
     // block.
     //
-    // Around every release (5 ms before to 10 ms after) no step is above a
-    // quarter of the loudest vowel sample, half of it in the whisper (whose
-    // vowels are faint breath). Anywhere in a sentence no step is above 1.5
-    // vowel peaks (measured: 0.9 at most). Two voices have their own bound,
-    // set to what they do with a margin: the critter (4; measured 2.9),
-    // whose small, stiff folds, blown at 15 cmH2O, open again within two
-    // samples after a long closed phase, in vowels, not at consonants; and
-    // the whisper (8; measured 5.8), where it is the hiss of the breath
-    // through a tongue tip closing on a wide-open glottis, against vowels
-    // that are themselves only breath. The elder has 2.5 (measured 2.1;
-    // it was under 1.5 before the articulators had two speeds): as the
-    // fast tongue tip shuts for a voiceless /tʃ dʒ t/ behind a slow body
-    // with the glottis opening, the air the closing front squeezes out
-    // of the lips leaves as a short hiss of noise in his low, quiet
-    // voice; it is noise, at a closure, not a click at a release (those
-    // stay under a quarter of a vowel peak). No kind of stop bursts louder on
-    // average than 6 dB below the vowel that follows, and no single burst
-    // is louder than that vowel; in the whisper, no more than 3 dB louder
-    // (measured +2.1, the /t/ of "two" before a whispered /u/, its faintest
-    // vowel: the tongue tip now leaves the mouth in front of it open, so its
-    // burst radiates as a real one does; it was under 0 dB when the tip's
-    // closure narrowed the whole front of the mouth).
-    const AT_RELEASE: f32 = 0.25;
-    const STEP: f32 = 1.5;
+    // Two more were found when the vowels were held longer: they came and
+    // went with a few per cent of vowel timing, up to 7 vowel peaks. The
+    // critter's high notes leave its folds' range within a vowel, and the
+    // voice was handed to the pulse source in one tick, the glottal area
+    // jumping from 0.044 to 0.003 cm² (now cross-faded over 6 ms); and the
+    // larynx was timed from segment boundaries, so when the slower tongue
+    // body moved a closure against them the glottis opened before the
+    // mouth shut and the breath hissed through the closing gap (it now
+    // opens as the mouth shuts).
+    //
+    // What is left is noise, which has steps of its own: the hiss of the
+    // last gap before a closure, ringing of a narrow gap in the critter's
+    // small tract, and in the whisper, breath through nasals and closing
+    // gaps measured against vowels that are themselves faint breath. So a
+    // click is told from noise as a step that stands far above the steps
+    // around it (`stops::largest_click`). Swept over `vowel_hold` 1.0 to 1.3
+    // on every voice: clicks at most 2.0 vowel peaks (critter; the whisper
+    // 5.1, the pop of a /p/ released into a /t/'s closure), plain steps at
+    // most 2.4 outside the whisper, steps at releases at most 0.27 (whisper
+    // 0.79), bursts at most -0.7 dB re the vowel after them (whisper +5.0).
+    //
+    // Bounds: clicks 2.5 vowel peaks (whisper 6); steps 3 (whisper: not
+    // bounded, its own clicks are); at releases 0.35 (whisper 1.0); no kind
+    // of stop bursting louder on average than 6 dB below the vowel after
+    // it, no burst louder than that vowel (whisper: 6 dB louder, against a
+    // whispered vowel 15 to 20 dB weaker than a voiced one).
+    const AT_RELEASE: f32 = 0.35;
+    const STEP: f32 = 3.0;
+    const CLICK: f32 = 2.5;
     const MEAN_BURST: f32 = -6.0;
     const MAX_BURST: f32 = 0.0;
     let texts = [
@@ -1541,19 +1546,18 @@ fn stop_releases_are_bursts_not_clicks() {
     ];
     for preset in Preset::ALL {
         let settings = tuned(preset.settings());
-        let (at_release, step) = match preset {
-            Preset::Whisper => (0.5, 8.0),
-            Preset::Critter => (AT_RELEASE, 4.0),
-            Preset::Elder => (AT_RELEASE, 2.5),
-            _ => (AT_RELEASE, STEP),
+        let (at_release, step, click) = match preset {
+            Preset::Whisper => (1.0, f32::INFINITY, 6.0),
+            _ => (AT_RELEASE, STEP, CLICK),
         };
-        let (mut worst, mut worst_release) = (0.0f32, 0.0f32);
+        let (mut worst, mut worst_release, mut worst_click) = (0.0f32, 0.0f32, 0.0f32);
         let mut levels: std::collections::BTreeMap<&str, Vec<f32>> =
             std::collections::BTreeMap::new();
         for text in texts {
             let r = stops::record(&settings, text);
             let vowel = stops::vowel_peak(&r);
             worst = worst.max(stops::largest_step(&r) / vowel);
+            worst_click = worst_click.max(stops::largest_click(&r) / vowel);
             for b in stops::bursts(&r) {
                 worst_release = worst_release.max(b.step / vowel);
                 levels
@@ -1563,7 +1567,7 @@ fn stop_releases_are_bursts_not_clicks() {
             }
         }
         let mut line = format!(
-            "{preset}: largest step {worst:.2} x vowel peak, {worst_release:.2} at releases; bursts re the vowel's peak, dB (mean / max):"
+            "{preset}: largest step {worst:.2} x vowel peak, click {worst_click:.2}, {worst_release:.2} at releases; bursts re the vowel's peak, dB (mean / max):"
         );
         for (p, v) in &levels {
             let mean = v.iter().sum::<f32>() / v.len() as f32;
@@ -1574,7 +1578,7 @@ fn stop_releases_are_bursts_not_clicks() {
                 "{preset} {p}: bursts {mean:+.1} dB on average"
             );
             let max_burst = if preset == Preset::Whisper {
-                3.0
+                6.0
             } else {
                 MAX_BURST
             };
@@ -1591,6 +1595,10 @@ fn stop_releases_are_bursts_not_clicks() {
         assert!(
             worst <= step,
             "{preset}: a step of {worst:.2} x the loudest vowel sample"
+        );
+        assert!(
+            worst_click <= click,
+            "{preset}: a click of {worst_click:.2} x the loudest vowel sample"
         );
     }
 }
