@@ -206,7 +206,17 @@ pub struct Speaker {
     ahead: bool,
     /// The larynx has already let go of the voice for the next segment.
     larynx_ahead: bool,
+    /// The shape of the pause being spoken is still to be sent (physical
+    /// engine; see [`PAUSE_HOLD`]).
+    pause_pending: bool,
 }
+
+/// How long a voiced sound before a pause keeps its shape once the voice
+/// has been let go, seconds (physical engine): the voice dies away first and
+/// the mouth opens after, as a speaker's does at the end of a phrase.
+/// Opening it with the voice still sounding would end every phrase on a
+/// vowel nobody asked for (`... bowls-uh`).
+const PAUSE_HOLD: f32 = 0.04;
 
 // On the physical engine the articulators get a head start on each sound
 // (`Tuning::lead`): their tissue has inertia there, and people begin moving
@@ -230,6 +240,7 @@ impl Speaker {
         self.started = false;
         self.ahead = false;
         self.larynx_ahead = false;
+        self.pause_pending = false;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -278,9 +289,16 @@ impl Speaker {
     /// Advance one output sample and render it.
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
         if let Some(seg) = self.utterance.segments.get(self.index) {
+            let physical = voice.engine() == Engine::Physical;
             if !self.started {
                 self.started = true;
-                if !self.ahead {
+                let voiced_before = self
+                    .index
+                    .checked_sub(1)
+                    .and_then(|k| self.utterance.segments.get(k))
+                    .is_some_and(|p| p.voiced && p.phoneme != Phoneme::Sil);
+                self.pause_pending = physical && seg.phoneme == Phoneme::Sil && voiced_before;
+                if !self.ahead && !self.pause_pending {
                     voice.articulate(&seg.articulation);
                 }
                 self.ahead = false;
@@ -301,9 +319,14 @@ impl Speaker {
             }
             voice.set_frequency(hz);
             self.elapsed += 1.0 / voice.sample_rate();
+            if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
+                voice.articulate(&seg.articulation);
+                self.pause_pending = false;
+            }
             if !self.ahead
-                && voice.engine() == Engine::Physical
+                && physical
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
+                && !(seg.voiced && next.phoneme == Phoneme::Sil)
             {
                 let closed = matches!(
                     seg.phoneme.manner(),
@@ -327,7 +350,7 @@ impl Speaker {
             // carrying on into the closure.
             if !self.larynx_ahead
                 && seg.voiced
-                && voice.engine() == Engine::Physical
+                && physical
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
                 && !next.voiced
                 && is_obstruent(next.phoneme)
@@ -988,7 +1011,12 @@ fn expand(
             tail.accent = 0.0;
             out.push(tail);
         }
-        Manner::Stop if a.voiced => out.push(with(draft(p, a, dur, true), voiced_stop)),
+        Manner::Stop if a.voiced => {
+            out.push(with(draft(p, a, dur, true), voiced_stop));
+            if context.next.is_none() {
+                out.push(final_release(p, rate, voiceless));
+            }
+        }
         Manner::Stop => {
             // After /s/ the glottis has been open through the hiss and is
             // closing again by the release: no aspiration, and a short
@@ -1005,7 +1033,9 @@ fn expand(
             let released_into = context
                 .next
                 .filter(|&(n, _, same)| same && (is_vowel(n) || n.manner() == Manner::Approximant));
-            if let Some((n, n_stressed, _)) = released_into
+            if context.next.is_none() {
+                out.push(final_release(p, rate, voiceless));
+            } else if let Some((n, n_stressed, _)) = released_into
                 && !after_s
             {
                 let stressed = if is_vowel(n) {
@@ -1043,6 +1073,32 @@ fn expand(
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
         _ => out.push(draft(p, a, dur, a.voiced)),
+    }
+}
+
+/// How long the breath goes on through the release of a stop at the end
+/// of a phrase, seconds (physical engine).
+const FINAL_RELEASE: f32 = 0.04;
+
+/// The release of a stop that ends a phrase (physical engine): the mouth
+/// opens towards the vowel before it with the glottis spread and the lungs
+/// still pushing, so the closure ends in an audible burst and a breath
+/// rather than fading out shut. Word-final stops are often unreleased in
+/// running speech, but a listener hearing no release hears no stop.
+fn final_release(p: Phoneme, rate: f32, voiceless: Gesture) -> Draft {
+    Draft {
+        phoneme: p,
+        articulation: Articulation {
+            voiced: false,
+            ..Phoneme::Hh.articulation()
+        },
+        duration: FINAL_RELEASE / rate,
+        voiced: false,
+        tenseness: None,
+        accent: 0.0,
+        vowel: false,
+        gesture: voiceless,
+        aspiration: false,
     }
 }
 
