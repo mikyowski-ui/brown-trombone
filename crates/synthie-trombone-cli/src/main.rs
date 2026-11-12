@@ -3,11 +3,15 @@
 
 mod app;
 mod audio;
+mod record;
 mod sing;
+mod take;
 mod ui;
 
 #[cfg(test)]
 mod screenshots;
+#[cfg(test)]
+mod take_tests;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -23,7 +27,7 @@ use crossterm::{
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, panic, time::Duration};
+use std::{io, panic, path::PathBuf, time::Duration};
 use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
@@ -41,7 +45,7 @@ struct Cli {
     /// Voice profile to lay over the voice: a JSON file as written by the
     /// tuner or by `match_voice.py`.
     #[arg(long)]
-    profile: Option<std::path::PathBuf>,
+    profile: Option<PathBuf>,
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
@@ -63,6 +67,11 @@ struct Cli {
     /// system's default, then a sound server, are tried otherwise).
     #[arg(long, requires = "mimic")]
     mic: Option<String>,
+    /// Directory for takes: F5 starts and stops recording one (the
+    /// commands as the voice carried them out, and its sound), numbered
+    /// take-001, take-002, … Created on the first take.
+    #[arg(long, value_name = "DIR", default_value = "takes")]
+    record: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -124,11 +133,10 @@ fn main() -> Result<()> {
             // A profile may name its own sound model.
             tui(
                 base.engine,
-                preset,
-                base,
-                persona,
+                (preset, base, persona),
                 cli.mimic,
                 cli.mic.as_deref(),
+                cli.record,
             )
         }
     }
@@ -136,11 +144,10 @@ fn main() -> Result<()> {
 
 fn tui(
     engine: Engine,
-    preset: Preset,
-    base: VoiceSettings,
-    persona: Persona,
+    (preset, base, persona): (Preset, VoiceSettings, Persona),
     mimic: bool,
     microphone: Option<&str>,
+    takes: PathBuf,
 ) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -148,7 +155,7 @@ fn tui(
         original_hook(info);
     }));
 
-    let (streams, link) = audio::start(mimic, microphone)?;
+    let (streams, link) = audio::start(mimic, microphone, takes)?;
     let _streams = streams;
 
     enable_raw_mode()?;
@@ -182,6 +189,8 @@ fn tui(
         app.set_voice(preset, base, persona);
     }
     let result = run(&mut terminal, &mut app);
+    // A take still recording is saved while the sound still runs.
+    app.finish();
 
     if release {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);

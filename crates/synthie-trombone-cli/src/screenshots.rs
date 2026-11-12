@@ -31,6 +31,7 @@ fn app() -> (App, Receiver<Cmd>) {
         sample_rate: SR,
         microphone: false,
         microphone_name: None,
+        recorder: None,
     };
     (App::new(link, true, synthie_trombone::Engine::Classic), rx)
 }

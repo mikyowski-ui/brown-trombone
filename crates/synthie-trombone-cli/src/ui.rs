@@ -16,7 +16,7 @@ use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
 use synthie_trombone::inverse;
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
-use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, YELLOW, bold, fg};
+use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, RED, YELLOW, bold, fg};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
 
 const NOTE_NAMES: [&str; 12] = [
@@ -71,6 +71,44 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &mut App) {
     ));
     spans.push(Span::styled(format!("  {}", app.status), fg(DIM)));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    // While a take is recorded, its marker goes over the right end of the
+    // status, clear of the mode badge.
+    if let Some(marker) = rec_marker(app) {
+        let room = area.width.saturating_sub(before + width + 1);
+        let fits = [
+            marker.clone(),
+            marker.replace(" REC ", " "),
+            " ● REC ".to_string(),
+            "●".to_string(),
+        ]
+        .into_iter()
+        .find(|m| u16::try_from(m.chars().count()).is_ok_and(|n| n <= room));
+        if let Some(m) = fits {
+            let n = u16::try_from(m.chars().count()).unwrap_or(0);
+            let r = Rect::new(area.right() - n, area.y, n, 1);
+            let style = Style::default().fg(BG).bg(RED).add_modifier(Modifier::BOLD);
+            frame.render_widget(Paragraph::new(Span::styled(m, style)), r);
+        }
+    }
+}
+
+/// The recording marker, `● REC take-007 0:03`, while a take is recorded
+/// (with `!` once anything was lost on the way to the disk).
+fn rec_marker(app: &App) -> Option<String> {
+    let name = app.recording()?;
+    let clock = app.snap.take.unwrap_or_default();
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    let seconds = (clock.samples as f64 / f64::from(app.sample_rate())) as u64;
+    let lost = if clock.dropped > 0 { " !" } else { "" };
+    Some(format!(
+        " ● REC {name} {}:{:02}{lost} ",
+        seconds / 60,
+        seconds % 60
+    ))
 }
 
 fn amp_color(a: f32) -> Color {
@@ -449,6 +487,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 v.push(Span::styled(format!(" {}  ", p.symbol()), fg(DIM)));
             }
             let settings = key_hints(&[
+                ("F5", "record"),
                 ("v V", "voice"),
                 ("- =", "vibrato"),
                 ("m", "wobble"),
@@ -465,6 +504,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             ("↑↓", "history"),
             ("[HH AH0 L OW1]", "ARPAbet"),
             ("Esc", "back"),
+            ("F5", "record"),
         ])],
     };
     frame.render_widget(Paragraph::new(line), area);
@@ -666,6 +706,7 @@ mod tests {
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
+            recorder: None,
         };
         let mut app = App::new(link, true, synthie_trombone::Engine::Classic);
         app.preset = synthie_trombone::Preset::Critter;
@@ -744,6 +785,7 @@ mod tests {
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
+            recorder: None,
         };
         let mut app = App::new(link, true, synthie_trombone::Engine::Physical);
         app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Char('3')));
@@ -801,6 +843,73 @@ mod tests {
             "{text}"
         );
         assert_eq!(app.chart_area, Rect::default());
+    }
+
+    /// While a take is recorded the header ends in its marker, even at
+    /// 80×24, and nothing else on screen moves.
+    #[test]
+    fn the_recording_marker_fits_at_80_by_24() {
+        use crate::app::RECORD_KEY;
+        use crate::record::{Clock, Recorder};
+        let dir = std::env::temp_dir().join(format!("synthie-takes-{}-marker", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A recorder whose writer never reads: the files are created, and
+        // nothing is written to them.
+        let (events, _unread) = bounded(16);
+        let (_saved_tx, saved) = bounded(1);
+        let (cmd, _cmd_rx) = bounded::<Cmd>(1024);
+        let (_snap_tx, snapshots) = bounded(1);
+        let (_trash_tx, trash) = bounded(1);
+        let link = Link {
+            cmd,
+            snapshots,
+            trash,
+            sample_rate: 48_000.0,
+            microphone: false,
+            microphone_name: None,
+            recorder: Some(Recorder::new(dir.clone(), events, saved)),
+        };
+        let mut app = App::new(link, true, synthie_trombone::Engine::Classic);
+        let rows = |app: &mut App, w: u16, h: u16| -> Vec<String> {
+            app.status = "hold a piano key to sing".into();
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, app)).unwrap();
+            frame_text(&term).lines().map(str::to_string).collect()
+        };
+        let idle = rows(&mut app, 80, 24);
+        assert!(!idle[0].contains("REC"), "{}", idle[0]);
+        assert!(idle.iter().any(|r| r.contains(" F5  record")), "{idle:?}");
+
+        app.key(synthie_ui::Key::press(RECORD_KEY));
+        assert_eq!(app.recording(), Some("take-001"));
+        app.snap.take = Some(Clock {
+            samples: 3 * 48_000 + 2_400,
+            dropped: 0,
+        });
+        let rec = rows(&mut app, 80, 24);
+        println!("{}", rec.join("\n"));
+        assert!(rec[0].ends_with(" ● REC take-001 0:03 "), "{}", rec[0]);
+        assert_eq!(rec[0].chars().count(), 80);
+        assert!(
+            rec[0].contains("P I N K") && rec[0].contains(" PLAY "),
+            "{}",
+            rec[0]
+        );
+        assert_eq!(idle[1..], rec[1..], "the layout moved");
+        // Anything lost on the way to the disk is flagged.
+        app.snap.take = Some(Clock {
+            samples: 75 * 48_000,
+            dropped: 2,
+        });
+        let lost = rows(&mut app, 80, 24);
+        assert!(lost[0].ends_with(" ● REC take-001 1:15 ! "), "{}", lost[0]);
+        // Narrower, the marker shortens rather than cover the mode badge.
+        for w in [70, 64, 60] {
+            let narrow = rows(&mut app, w, 24);
+            assert!(narrow[0].contains(" PLAY "), "{w}: {}", narrow[0]);
+            assert!(narrow[0].contains("●"), "{w}: {}", narrow[0]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Rows of the tract view with dots of one wall in column `col`, the
@@ -931,6 +1040,7 @@ mod tests {
                 sample_rate: 48_000.0,
                 microphone: false,
                 microphone_name: None,
+                recorder: None,
             };
             let mut app = App::new(link, true, engine);
             for length in [shortest, 1.0, longest] {

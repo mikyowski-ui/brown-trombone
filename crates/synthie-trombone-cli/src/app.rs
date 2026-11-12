@@ -1,9 +1,12 @@
 //! UI state and input handling.
 
 use crate::audio::{Cmd, Link, Snapshot};
+use crate::record::Recorder;
 use crossbeam_channel::Sender;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use serde_json::json;
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 use synthie_trombone::inverse::{self, Shape};
 use synthie_trombone::speech::{Prosody, Utterance};
@@ -56,6 +59,14 @@ pub const LOUD_RANGE: (f32, f32) = (2.0, 20.0);
 /// or glottis meter made while nothing else was sounding, so that the
 /// change can be heard.
 const PREVIEW_HOLD: Duration = Duration::from_millis(400);
+
+/// The key that starts and stops recording a take, in either mode.
+pub const RECORD_KEY: KeyCode = KeyCode::F(5);
+/// How long a command that must arrive (to start or stop a take) may wait
+/// for room in the queue to the audio thread.
+const MUST_ARRIVE: Duration = Duration::from_millis(200);
+/// How long leaving the app waits for the take being recorded to be saved.
+const SAVE_WAIT: Duration = Duration::from_secs(3);
 
 /// Vowels marked on the tract view; a click sets them.
 pub const LANDMARKS: [(&str, Phoneme); 5] = [
@@ -407,6 +418,9 @@ impl App {
             self.snap = s;
         }
         while self.link.trash.try_recv().is_ok() {}
+        if let Some(saved) = self.link.recorder.as_ref().and_then(Recorder::poll) {
+            self.status = saved_status(&saved);
+        }
         if self.mimic == Some(true)
             && let Some(h) = self.snap.heard
         {
@@ -457,6 +471,12 @@ impl App {
 
     /// Handle a key; returns `true` to quit.
     pub fn key(&mut self, key: Key) -> bool {
+        if key.code == RECORD_KEY {
+            if key.kind == KeyKind::Press {
+                self.toggle_recording();
+            }
+            return false;
+        }
         let quit = if key.ctrl && key.code == KeyCode::Char('c') {
             true
         } else {
@@ -737,7 +757,13 @@ impl App {
         self.status = format!("“{text}” · {:.1} s", u.duration());
         // Speech takes over the voice; a dial being heard stops first.
         self.end_preview();
-        self.send(Cmd::Speak(u));
+        // A take logs what was said, so that it can be said again.
+        let id = self
+            .link
+            .recorder
+            .as_mut()
+            .map_or(0, |r| r.said(text, &prosody));
+        self.send(Cmd::Speak(u, id));
     }
 
     fn vowel(&mut self, v: Phoneme) {
@@ -1106,6 +1132,127 @@ impl App {
             Control::FormantLock => self.toggle_lock(),
             _ => {}
         }
+    }
+}
+
+// ----- recording takes ----------------------------------------------------
+
+/// What the status line says about a saved take.
+fn saved_status(saved: &crate::record::Saved) -> String {
+    let mut status = format!(
+        "saved {} · {:.1} s · {} commands",
+        saved.log_path.display(),
+        saved.seconds(),
+        saved.commands
+    );
+    if saved.dropped_commands > 0 || saved.dropped_samples > 0 {
+        let _ = write!(
+            status,
+            " · LOST {} commands, {} samples (the disk did not keep up)",
+            saved.dropped_commands, saved.dropped_samples
+        );
+    }
+    if let Some(e) = &saved.error {
+        let _ = write!(status, " · write failed: {e}");
+    }
+    status
+}
+
+/// Send a command that must arrive, waiting up to [`MUST_ARRIVE`] for
+/// room in the queue. It tries again rather than waits on the queue: a
+/// sender waiting there would make the audio thread take a lock to wake
+/// it. Whether it was sent.
+fn send_surely(tx: &Sender<Cmd>, cmd: Cmd) -> bool {
+    let start = Instant::now();
+    let mut cmd = cmd;
+    loop {
+        match tx.try_send(cmd) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::TrySendError::Full(c)) if start.elapsed() < MUST_ARRIVE => {
+                cmd = c;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+impl App {
+    /// The take being recorded.
+    #[must_use]
+    pub fn recording(&self) -> Option<&str> {
+        self.link.recorder.as_ref().and_then(Recorder::current)
+    }
+
+    /// Start recording a take, or stop the one being recorded.
+    fn toggle_recording(&mut self) {
+        let info = self.take_info();
+        let rate = self.sample_rate();
+        let Some(recorder) = self.link.recorder.as_mut() else {
+            self.status = "recording is not available".into();
+            return;
+        };
+        if let Some(name) = recorder.close() {
+            send_surely(&self.cmd, Cmd::Record(false));
+            self.status = format!("saving {name}…");
+            return;
+        }
+        match recorder.open(rate, info) {
+            Ok(name) => {
+                if send_surely(&self.cmd, Cmd::Record(true)) {
+                    self.status = format!(
+                        "recording {name} into {} · F5 stops",
+                        recorder.dir().display()
+                    );
+                } else {
+                    recorder.cancel();
+                    self.status = "cannot record: the audio thread is not answering".into();
+                }
+            }
+            Err(e) => self.status = format!("cannot record: {e}"),
+        }
+    }
+
+    /// Before leaving: stop the take being recorded and wait (a little)
+    /// for it to be saved.
+    pub fn finish(&mut self) {
+        if self.recording().is_none() {
+            return;
+        }
+        self.toggle_recording();
+        if let Some(saved) = self.link.recorder.as_ref().and_then(|r| r.wait(SAVE_WAIT)) {
+            self.status = saved_status(&saved);
+        }
+    }
+
+    /// What the app knows about the voice, for a take's header: the
+    /// preset, profile and persona it was made from, and the app's own
+    /// view of the controls. For reading; a replay needs only the state
+    /// the audio thread reports.
+    fn take_info(&self) -> serde_json::Value {
+        let value = |x: Result<serde_json::Value, _>| x.unwrap_or_default();
+        crate::take::tidied(json!({
+            "preset": self.preset.name(),
+            "base": value(serde_json::to_value(self.base)),
+            "persona": value(serde_json::to_value(self.persona)),
+            "settings": value(serde_json::to_value(self.settings)),
+            "engine": engine_name(self.engine),
+            "note": self.note,
+            "octave": self.octave,
+            "held": self.held.is_some(),
+            "speech_rate": self.rate,
+            "tongue": [self.tongue.0, self.tongue.1],
+            "tenseness": self.tenseness,
+            "vibrato": self.vibrato,
+            "wobble": self.wobble,
+            "drone": self.drone,
+            "nasal": self.nasal,
+            "reverb": self.reverb,
+            "loud": self.loud,
+            "mimic": self.mimic,
+            "formant_lock": self.formant_lock.as_ref().map(crate::take::shape_json),
+            "keyboard_release": self.keyboard_release,
+        }))
     }
 }
 
@@ -1480,6 +1627,7 @@ mod tests {
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
+            recorder: None,
         };
         let app = App::new(link, release, Engine::Classic);
         while rx.try_recv().is_ok() {}
