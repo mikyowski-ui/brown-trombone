@@ -16,7 +16,9 @@
 //!   predictor polynomial (Aberth–Ehrlich, warm-started from the previous
 //!   frame). The three lowest resonances narrower than 700 Hz are F1–F3; a
 //!   broader one counts only where it continues a formant just measured.
-//!   A median over the last three frames removes single-frame slips.
+//!   A frame whose F2 is smeared into a broad resonance (F1 and F3 still
+//!   in place) holds the formants instead, and a median over the last
+//!   three frames removes other single-frame slips.
 //!   Nothing assumes a speaker size: men, women and children are measured
 //!   the same way.
 //! - **Level, hiss and brightness** from smoothed energies at the input
@@ -82,6 +84,21 @@ const MAX_BW_TRACKED: f32 = 1_600.0;
 /// How close (relative) a broad resonance must be to a formant just
 /// measured to continue it.
 const TRACK_REACH: f32 = 0.15;
+/// Widest bandwidth of a resonance that shows a formant smeared rather
+/// than gone, Hz.
+const MAX_BW_SMEARED: f32 = 2_000.0;
+/// How far (as a ratio) a smeared resonance must lie from its sharp
+/// neighbours to count as one.
+const GAP_EDGE: f32 = 1.15;
+/// How far (as a ratio less one) the lowest sharp resonance may lie from
+/// the F1 just measured for a smeared frame to be held.
+const F1_REACH: f32 = 0.5;
+/// How far (as a ratio less one) the next sharp resonance may lie from
+/// the F3 just measured for a smeared frame to be held.
+const F3_REACH: f32 = 0.2;
+/// Most measurements in a row that smeared frames hold the formants
+/// (40 ms); after that the frame is used as it is.
+const MAX_DISTURBED: usize = 8;
 
 /// YIN integration window, analysis samples (20 ms).
 const YIN_W: usize = 240;
@@ -226,6 +243,8 @@ pub struct Listener {
     /// this vowel, newest last, and how many are valid.
     history: [[f32; 3]; ROLLBACK + 1],
     history_len: usize,
+    /// Measurements in a row held because a formant seemed to vanish.
+    disturbed: usize,
     /// Latest voiced pitch, Hz (sets the lag window).
     last_pitch: f32,
 }
@@ -277,6 +296,7 @@ impl Listener {
             recent_len: 0,
             history: [[0.0; 3]; ROLLBACK + 1],
             history_len: 0,
+            disturbed: 0,
             last_pitch: DEFAULT_PITCH,
         };
         s.reset();
@@ -314,6 +334,7 @@ impl Listener {
         self.formants = [0.0; 3];
         self.recent = [[0.0; 3]; 3];
         self.recent_len = 0;
+        self.disturbed = 0;
         self.history = [[0.0; 3]; ROLLBACK + 1];
         self.history_len = 0;
         self.last_pitch = DEFAULT_PITCH;
@@ -433,6 +454,7 @@ impl Listener {
             }
             self.recent_len = 0;
             self.history_len = 0;
+            self.disturbed = 0;
         }
 
         // Hiss: the share above the hiss edge, less its periodic part.
@@ -597,6 +619,8 @@ impl Listener {
         let mut n = 0;
         let mut broad = [0.0f32; ORDER];
         let mut nb = 0;
+        let mut gap = [0.0f32; ORDER];
+        let mut ng = 0;
         for z in &self.roots {
             if z.im <= 0.0 {
                 continue;
@@ -610,9 +634,37 @@ impl Listener {
             if bw < MAX_BW {
                 cand[n] = hz;
                 n += 1;
-            } else if bw < MAX_BW_TRACKED {
-                broad[nb] = hz;
-                nb += 1;
+            } else if bw < MAX_BW_SMEARED {
+                gap[ng] = hz;
+                ng += 1;
+                if bw < MAX_BW_TRACKED {
+                    broad[nb] = hz;
+                    nb += 1;
+                }
+            }
+        }
+        // A frame with a broad resonance between its two lowest sharp
+        // ones, F1 about where it was and the next sharp one where F3 was,
+        // shows F2 smeared, not a new vowel: a voice disturbed for a moment
+        // (a few cycles in which the folds do not close lift F1 and smear
+        // F2, as in the physical engine's /u/ every 50 ms or so). Ranking
+        // what is left would make F3 into F2, and a run of such frames gets
+        // past the median: hold the formants instead, for a while at most.
+        if self.recent_len > 0 && self.disturbed < MAX_DISTURBED {
+            let mut sharp = cand;
+            let sharp = &mut sharp[..n];
+            sharp.sort_unstable_by(f32::total_cmp);
+            let [f1, _, f3] = self.formants;
+            let within = |a: f32, b: f32, reach: f32| b > 0.0 && (a / b).max(b / a) < 1.0 + reach;
+            let smeared = n >= 2
+                && within(sharp[0], f1, F1_REACH)
+                && within(sharp[1], f3, F3_REACH)
+                && gap[..ng]
+                    .iter()
+                    .any(|&b| b > GAP_EDGE * sharp[0] && GAP_EDGE * b < sharp[1]);
+            if smeared {
+                self.disturbed += 1;
+                return None;
             }
         }
         if self.recent_len > 0 {
@@ -633,6 +685,7 @@ impl Listener {
         }
         let cand = &mut cand[..n];
         cand.sort_unstable_by(f32::total_cmp);
+        self.disturbed = 0;
         Some([
             cand[0],
             cand[1],
