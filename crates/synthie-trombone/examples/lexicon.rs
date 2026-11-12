@@ -16,7 +16,7 @@
 //! * `--core-bytes N` (default 32000): size of the always-present part.
 //!
 //! A word is added when the front end, given the entries chosen so far,
-//! says it differently from CMUdict (ignoring unaccented-vowel quality and
+//! says it differently from `CMUdict` (ignoring unaccented-vowel quality and
 //! other notation that does not change the word). Passes repeat until
 //! nothing changes, since a new entry can change how other words are taken
 //! apart. The hand-written `src/speech/manual.txt` comes first and wins.
@@ -25,7 +25,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use synthie_trombone::Phoneme;
 use synthie_trombone::speech::{Token, phonemize_with};
 
 /// Same table as the front end's `CODES`.
@@ -105,7 +104,11 @@ fn main() {
         .take(top)
         .map(String::from)
         .collect();
-    let rank: HashMap<&str, usize> = ranked.iter().enumerate().map(|(k, w)| (w.as_str(), k)).collect();
+    let rank: HashMap<&str, usize> = ranked
+        .iter()
+        .enumerate()
+        .map(|(k, w)| (w.as_str(), k))
+        .collect();
 
     // Chosen entries, as ARPAbet with 1 on the accent.
     let mut chosen: HashMap<String, String> = manual.iter().cloned().collect();
@@ -129,7 +132,10 @@ fn main() {
                 removed += 1;
             }
         }
-        println!("pass {pass}: {} entries (+{added} -{removed})", chosen.len());
+        println!(
+            "pass {pass}: {} entries (+{added} -{removed})",
+            chosen.len()
+        );
         if added == 0 && removed == 0 {
             break;
         }
@@ -139,7 +145,10 @@ fn main() {
     let mut entries: Vec<(&String, &String)> = chosen.iter().collect();
     entries.sort_by_key(|(w, _)| {
         let manual_first = !manual.iter().any(|(m, _)| m == *w);
-        (manual_first, rank.get(w.as_str()).copied().unwrap_or(usize::MAX))
+        (
+            manual_first,
+            rank.get(w.as_str()).copied().unwrap_or(usize::MAX),
+        )
     });
     let mut core = Vec::new();
     let mut extra = Vec::new();
@@ -188,9 +197,17 @@ fn read_cmudict(path: &str) -> HashMap<String, Vec<Sym>> {
         }
         let syms: Vec<Sym> = it
             .map(|p| {
-                let digit = p.bytes().last().filter(u8::is_ascii_digit).map(|d| d - b'0');
+                let digit = p
+                    .bytes()
+                    .last()
+                    .filter(u8::is_ascii_digit)
+                    .map(|d| d - b'0');
                 let base = p.trim_end_matches(|c: char| c.is_ascii_digit());
-                let base = if base == "AH" && digit == Some(0) { "AX" } else { base };
+                let base = if base == "AH" && digit == Some(0) {
+                    "AX"
+                } else {
+                    base
+                };
                 (base.to_string(), digit)
             })
             .collect();
@@ -202,7 +219,13 @@ fn read_cmudict(path: &str) -> HashMap<String, Vec<Sym>> {
 /// ARPAbet with `1` on the primary accent only.
 fn arpabet(syms: &[Sym]) -> String {
     syms.iter()
-        .map(|(p, d)| if *d == Some(1) { format!("{p}1") } else { p.clone() })
+        .map(|(p, d)| {
+            if *d == Some(1) {
+                format!("{p}1")
+            } else {
+                p.clone()
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -214,7 +237,11 @@ fn encode(arpabet: &str) -> String {
         if sym.ends_with('1') {
             out.push('\'');
         }
-        let c = CODES.iter().find(|(_, s)| *s == base).unwrap_or_else(|| panic!("no code for {sym}")).0;
+        let c = CODES
+            .iter()
+            .find(|(_, s)| *s == base)
+            .unwrap_or_else(|| panic!("no code for {sym}"))
+            .0;
         let _ = write!(out, "{c}");
     }
     out
@@ -226,8 +253,14 @@ fn say(word: &str, entries: &HashMap<String, String>) -> Vec<Sym> {
         .into_iter()
         .filter_map(|t| match t {
             Token::Phone { phoneme, stressed } => {
-                let vowel = matches!(phoneme.manner(), synthie_trombone::Manner::Vowel | synthie_trombone::Manner::Diphthong);
-                Some((phoneme.symbol().to_string(), vowel.then_some(u8::from(stressed))))
+                let vowel = matches!(
+                    phoneme.manner(),
+                    synthie_trombone::Manner::Vowel | synthie_trombone::Manner::Diphthong
+                );
+                Some((
+                    phoneme.symbol().to_string(),
+                    vowel.then_some(u8::from(stressed)),
+                ))
             }
             _ => None,
         })
@@ -241,7 +274,11 @@ fn canonical(syms: &[Sym]) -> Vec<Sym> {
     for (k, s) in syms.iter().enumerate() {
         let next = syms.get(k + 1).map(|(p, _)| p.as_str());
         let mut s = s.clone();
-        if s.0 == "R" && out.last().is_some_and(|(p, _)| matches!(p.as_str(), "ER" | "AX" | "AH")) {
+        if s.0 == "R"
+            && out
+                .last()
+                .is_some_and(|(p, _)| matches!(p.as_str(), "ER" | "AX" | "AH"))
+        {
             out.last_mut().unwrap().0 = "ER".into();
             continue;
         }
@@ -277,28 +314,21 @@ fn same(a: &Sym, b: &Sym) -> bool {
         || pair("IY", "IH")
         || pair("AA", "AO")
         // Unaccented vowel quality varies between dictionaries.
-        || reduced && (pair("EH", "IH") || pair("EH", "AX") || pair("UH", "AX") || pair("UW", "AX") || pair("UH", "UW") || pair("IY", "AX") || pair("OW", "AX"))
+        || reduced && (pair("EH", "IH") || pair("EH", "AX") || pair("UH", "AX") || pair("UH", "UW") || pair("IY", "AX"))
 }
 
 /// Whether the front end's `said` is a different word from `reference`.
 fn differs(reference: &[Sym], said: &[Sym]) -> bool {
-    let (r, s) = (canonical(reference), canonical(said));
-    let (n, m) = (r.len(), s.len());
-    let mut d = vec![vec![0usize; m + 1]; n + 1];
-    for (i, row) in d.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for j in 0..=m {
-        d[0][j] = j;
-    }
-    for i in 1..=n {
-        for j in 1..=m {
-            let cost = usize::from(!same(&r[i - 1], &s[j - 1]));
-            d[i][j] = (d[i - 1][j - 1] + cost).min(d[i - 1][j] + 1).min(d[i][j - 1] + 1);
+    let (refs, hyps) = (canonical(reference), canonical(said));
+    // Edit distance, one row at a time.
+    let mut prev: Vec<usize> = (0..=hyps.len()).collect();
+    for (row, r) in refs.iter().enumerate() {
+        let mut cur = vec![row + 1; hyps.len() + 1];
+        for (col, h) in hyps.iter().enumerate() {
+            let cost = usize::from(!same(r, h));
+            cur[col + 1] = (prev[col] + cost).min(prev[col + 1] + 1).min(cur[col] + 1);
         }
+        prev = cur;
     }
-    d[n][m] > 0
+    prev[hyps.len()] > 0
 }
-
-#[allow(dead_code)]
-fn unused(_: Phoneme) {}

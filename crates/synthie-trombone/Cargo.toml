@@ -22,8 +22,8 @@ std     = ["alloc"]
 libm    = ["dep:libm"]
 ## Text-to-speech front end ([`speech`]): needs an allocator to compile text.
 alloc   = []
-## The front end's larger pronouncing dictionary (about 80 KB of less
-## frequent irregular words); a small core is always built in.
+## The front end's larger pronouncing dictionary (about 24 KB, 1300 less
+## frequent irregular words); a 32 KB core of 2000 is always built in.
 dictionary = []
 ## `Serialize`/`Deserialize` for `VoiceSettings`, `Preset` and `Prosody`.
 serde   = ["dep:serde"]

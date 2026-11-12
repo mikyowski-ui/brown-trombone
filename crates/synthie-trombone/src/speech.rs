@@ -814,7 +814,7 @@ mod tests {
         assert_eq!(phones("night"), vec![P::N, P::Ay, P::T]);
         assert_eq!(phones("city"), vec![P::S, P::Ih, P::T, P::Iy]);
         assert_eq!(phones("sing"), vec![P::S, P::Ih, P::Ng]);
-        assert_eq!(phones("nation"), vec![P::N, P::Ae, P::Sh, P::Ax, P::N]);
+        assert_eq!(phones("nation"), vec![P::N, P::Ey, P::Sh, P::Ax, P::N]);
         assert_eq!(phones("dogs"), vec![P::D, P::Aa, P::G, P::Z]);
         assert_eq!(phones("bell"), vec![P::B, P::Eh, P::L]);
         assert_eq!(phones("knight"), vec![P::N, P::Ay, P::T]);
