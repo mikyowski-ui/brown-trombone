@@ -55,6 +55,10 @@ pub(crate) const FLOW_AVERAGING: f32 = 0.001;
 /// Corner of the high-pass that removes rumble from the breath's noise at
 /// the glottis, Hz; it excites every formant of the sound it leads into.
 const RUMBLE_CORNER: f32 = 400.0;
+/// Frequency above which the breath's noise has less and less energy, Hz
+/// at the native size (the jets in the mouth have their own corner,
+/// `Tuning::hiss_corner`).
+const BREATH_CORNER: f32 = 4500.0;
 
 /// High-pass coefficient, low-pass coefficient and the gain that brings
 /// white noise through them back to unit variance, for a high-pass corner
@@ -236,7 +240,7 @@ impl Turbulence {
     pub(crate) fn set_rate(&mut self, dt: f32, size: f32) {
         (self.r, self.k, self.gain) = shaping(self.low_corner / size, self.corner / size, dt);
         (self.r_breath, self.k_breath, self.gain_breath) =
-            shaping(RUMBLE_CORNER, self.corner / size, dt);
+            shaping(RUMBLE_CORNER, BREATH_CORNER / size, dt);
     }
 
     pub(crate) fn reset(&mut self) {

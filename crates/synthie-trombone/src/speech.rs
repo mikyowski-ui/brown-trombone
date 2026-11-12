@@ -366,6 +366,9 @@ impl Speaker {
                 if let Some(next) = segments.iter().find(|s| s.phoneme != Phoneme::Sil) {
                     voice.articulate(&next.articulation);
                     voice.settle();
+                    // What little still rings in the tract belongs to the
+                    // old shape; let it go with it.
+                    voice.reset();
                     self.ahead = true;
                 }
                 self.pause_pending = false;

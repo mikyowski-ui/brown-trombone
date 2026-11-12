@@ -132,7 +132,9 @@ tuning! {
     teeth_gain = 0.28, 0.07..=1.0, A;
     /// Efficiency of the jet between the folds (breath noise).
     glottal_efficiency = 0.043, 0.01..=0.15, A;
-    /// Frequency above which turbulence has less and less energy, Hz.
+    /// Frequency above which the turbulence of jets in the mouth has less
+    /// and less energy, Hz (a speaker's /s/ has its energy up to 8 kHz and
+    /// beyond; the breath at the glottis keeps a corner of 4.5 kHz).
     hiss_corner = 7000.0, 2500.0..=10000.0, A;
 
     // ----- A: gaps ------------------------------------------------------

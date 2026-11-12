@@ -150,6 +150,16 @@ fn main() -> std::io::Result<()> {
         start = end;
     }
 
+    let (at, top) = audio
+        .iter()
+        .enumerate()
+        .fold((0, 0.0f32), |(k, m), (i, v)| if v.abs() > m { (i, v.abs()) } else { (k, m) });
+    println!(
+        "\nloudest sample {top:.3} at {:.3} s in {}",
+        at as f32 / SR,
+        name(index[at])
+    );
+
     // Steps steeper than 20 dB in 10 ms, and dips below -30 dB inside the
     // sentence.
     let lag = 4;
