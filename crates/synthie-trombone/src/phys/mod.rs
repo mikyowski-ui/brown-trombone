@@ -119,8 +119,6 @@ const BLEED_TAU: f32 = 0.002;
 
 /// Loss multiplier for the nasal passages (large wetted surface).
 const NASAL_LOSS: f32 = 3.0;
-/// Velopharyngeal port fully open, cm² (both sides together).
-const VELAR_PORT: f32 = 0.8;
 /// One nasal passage, cm², from the port (cell 0, set by the velum) to the
 /// nostril: half the nasopharynx, the main cavity, the narrow nasal valve
 /// and the nostril. Rounded from MRI area functions (Dang, Honda & Suzuki
@@ -236,6 +234,8 @@ pub(crate) struct Phys {
     adot_smooth: f32,
     /// Seconds left of a release bleed.
     bleed: f32,
+    /// Velar port fully open, cm² (both sides together).
+    nasal_port: f32,
 
     sub_r: [f32; NS],
     sub_l: [f32; NS],
@@ -291,6 +291,7 @@ impl Phys {
             adot_target: [0.0; N],
             adot_smooth: 0.0,
             bleed: 0.0,
+            nasal_port: crate::Tuning::DEFAULT.nasal_port,
             sub_r: [0.0; NS],
             sub_l: [0.0; NS],
             sub_y: [0.0; NS],
@@ -353,9 +354,20 @@ impl Phys {
         self.primed = false;
     }
 
+    /// Take the noise and nasal settings of a voice.
+    pub(crate) fn set_tuning(&mut self, tuning: &crate::Tuning) {
+        self.nasal_port = tuning.nasal_port;
+        self.turbulence.set_tuning(tuning);
+        self.turbulence.set_rate(self.dt);
+    }
+
     /// Seed the turbulence. Equal seeds give equal sound.
     pub(crate) fn seed(&mut self, seed: u32) {
+        let old = self.turbulence.clone();
         self.turbulence = Turbulence::new(seed);
+        self.turbulence.jet_eff = old.jet_eff;
+        self.turbulence.teeth_eff = old.teeth_eff;
+        self.turbulence.glottal_eff = old.glottal_eff;
         self.turbulence.set_rate(self.dt);
     }
 
@@ -472,7 +484,7 @@ impl Phys {
         }
         // A velum resting on the back wall is shut, not a pinhole.
         let open = if velum > 0.01 { velum.min(1.0) } else { 0.0 };
-        let port = 0.5 * VELAR_PORT * self.len * self.len * open;
+        let port = 0.5 * self.nasal_port * self.len * self.len * open;
         for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
             nose.set_port(port * factor);
         }
@@ -654,11 +666,11 @@ impl Phys {
             // that strikes the teeth does so far more efficiently.
             let mut pn = 0.0;
             if self.noisy {
-                pn = hiss * jet_noise(self.flow[j], inv[i], inv[j], 1.0);
+                pn = hiss * jet_noise(self.flow[j], inv[i], inv[j], self.turbulence.jet_eff);
                 if j == TEETH_AT && self.jet_cell + 1 < TEETH_AT {
                     let c = self.jet_cell;
                     pn += hiss_teeth
-                        * jet_noise(self.flow[c + 1], inv[c], inv[j], noise::OBSTACLE_GAIN);
+                        * jet_noise(self.flow[c + 1], inv[c], inv[j], self.turbulence.teeth_eff);
                 }
             }
             let s = solve(
@@ -710,7 +722,7 @@ impl Phys {
             joint.y2 = load.y;
             joint.k_fwd = load.k_out;
             if self.noisy {
-                joint.pn = hiss * jet_noise(self.flow[N], inv[i], 0.0, 1.0);
+                joint.pn = hiss * jet_noise(self.flow[N], inv[i], 0.0, self.turbulence.jet_eff);
             }
             let s = solve(&joint, self.r[i], load.b);
             nl[i] = s.out_left;
@@ -771,7 +783,13 @@ impl Phys {
         let inv_g = 1.0 / area.max(A_MIN);
         let k = 0.5 * RHO * GLOTTAL_KT * inv_g * inv_g;
         let pn = if self.noisy && !sealed {
-            self.turbulence.breath() * glottal_noise(self.flow[0], inv_g, FOLD_LENGTH * self.len)
+            self.turbulence.breath()
+                * glottal_noise(
+                    self.flow[0],
+                    inv_g,
+                    FOLD_LENGTH * self.len,
+                    self.turbulence.glottal_eff,
+                )
         } else {
             0.0
         };

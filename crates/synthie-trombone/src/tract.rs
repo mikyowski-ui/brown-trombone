@@ -7,6 +7,7 @@
 
 use crate::INTERNAL_RATE;
 use crate::math::{cos, exp, lerp, move_towards, powf};
+use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
 /// Cells in the oral tract, glottis (0) to lips (`N - 1`).
@@ -40,14 +41,10 @@ const VELUM_OPEN: f32 = 0.4;
 const FRICATIVE_ATTACK: f32 = 0.1;
 const MAX_TRANSIENTS: usize = 8;
 const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
-/// Natural frequency, rad/s, of a damped articulator at the original's
-/// movement speed.
-const DAMPED_RATE: f32 = 40.0;
-/// Speed at which a closure lets go, as a share of `w·distance`. A spring
-/// like these peaks at 0.37 of that; a release starts there.
-const RELEASE_SPEED: f32 = 0.37;
-/// How far past contact a closing articulator aims (diameter units).
-const CLOSURE_OVERSHOOT: f32 = 0.3;
+// The damped articulators' natural frequency, how much faster they close
+// than open, the speed at which a closure lets go (a spring like these
+// peaks at 0.37 of `w·distance`; a release starts there) and how far past
+// contact a closing articulator aims come from the voice's `Tuning`.
 
 /// How cells move towards their targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +127,8 @@ pub(crate) struct Tract {
     pub(crate) velum_target: f32,
     pub(crate) movement_speed: f32,
     pub(crate) dynamics: Dynamics,
+    /// How the damped articulators move (the speeds of the voice's tuning).
+    pub(crate) motion: Tuning,
     velocity: [f32; N],
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
@@ -172,6 +171,7 @@ impl Tract {
             velum_target: VELUM_CLOSED,
             movement_speed: MOVEMENT_SPEED,
             dynamics: Dynamics::Linear,
+            motion: Tuning::DEFAULT,
             velocity: [0.0; N],
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
@@ -337,7 +337,7 @@ impl Tract {
         }
         let floor = match self.dynamics {
             Dynamics::Linear => 0.0,
-            Dynamics::Damped => -CLOSURE_OVERSHOOT,
+            Dynamics::Damped => -self.motion.closure_overshoot,
         };
         for s in self.slots.iter().flatten().filter(|s| s.alive) {
             carve(&mut self.target, s.c, floor);
@@ -417,7 +417,7 @@ impl Tract {
     /// solution over `dt`, so it is stable for any block length.
     #[allow(clippy::cast_precision_loss)]
     fn move_damped(&mut self, dt: f32) {
-        let base = self.movement_speed * (DAMPED_RATE / MOVEMENT_SPEED);
+        let base = self.movement_speed * (self.motion.articulation_rate / MOVEMENT_SPEED);
         for i in 0..N {
             // The back of the tract is slower than the tip and lips.
             let region = if i < NOSE_START {
@@ -429,13 +429,19 @@ impl Tract {
             };
             let e0 = self.diameter[i] - self.target[i];
             // Closing is twice as fast as opening, as in the original.
-            let w = base * region * if e0 > 0.0 { 2.0 } else { 1.0 };
+            let w = base
+                * region
+                * if e0 > 0.0 {
+                    self.motion.closing_ratio
+                } else {
+                    1.0
+                };
             let mut v0 = self.velocity[i];
             if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {
                 // Letting go of a closure: surfaces pressed together spring
                 // apart (and the air behind them pushes), so the release
                 // starts at speed instead of from rest.
-                v0 = RELEASE_SPEED * w * -e0;
+                v0 = self.motion.release_speed * w * -e0;
             }
             let decay = exp(-w * dt);
             let c = v0 + w * e0;

@@ -24,7 +24,7 @@
 
 use crate::math::lerp;
 use crate::phoneme::{Articulation, Manner, Phoneme};
-use crate::{Engine, Trombone};
+use crate::{Engine, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -45,6 +45,9 @@ pub struct Prosody {
     /// Velum opening during vowels and approximants (`0` oral, `1` very
     /// nasal).
     pub nasality: f32,
+    /// How long sounds last and how early the articulators start for the
+    /// next one (the timing fields of the voice's [`Tuning`]).
+    pub tuning: Tuning,
 }
 
 impl Default for Prosody {
@@ -55,6 +58,7 @@ impl Default for Prosody {
             rate: 1.0,
             tenseness: 0.65,
             nasality: 0.0,
+            tuning: Tuning::DEFAULT,
         }
     }
 }
@@ -80,6 +84,10 @@ pub struct Segment {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Utterance {
     segments: Vec<Segment>,
+    /// Head start the articulators get on each sound, and out of a
+    /// closure, seconds (physical engine).
+    lead: f32,
+    release_lead: f32,
 }
 
 /// A phoneme with its lexical context, the output of [`phonemize`].
@@ -121,7 +129,11 @@ impl Utterance {
     /// An utterance from hand-made segments (see [`crate::sing`]).
     #[must_use]
     pub fn from_segments(segments: Vec<Segment>) -> Self {
-        Self { segments }
+        Self {
+            segments,
+            lead: Tuning::DEFAULT.lead,
+            release_lead: Tuning::DEFAULT.release_lead,
+        }
     }
 
     /// Compile a token stream (see [`phonemize`]).
@@ -160,14 +172,12 @@ pub struct Speaker {
     ahead: bool,
 }
 
-/// Head start, in seconds, the physical engine's articulators get on each
-/// sound. Their tissue has inertia there, and people begin moving towards
-/// a sound before it is due; without the head start every shape arrives
-/// late and speech slurs.
-const LEAD: f32 = 0.03;
-/// The head start out of a closure. Stops and nasals need their closure
-/// held, and the release should fall on the boundary, so it is short.
-const RELEASE_LEAD: f32 = 0.008;
+// On the physical engine the articulators get a head start on each sound
+// (`Tuning::lead`): their tissue has inertia there, and people begin moving
+// towards a sound before it is due; without it every shape arrives late
+// and speech slurs. Out of a closure the head start is short
+// (`Tuning::release_lead`): stops and nasals need their closure held, and
+// the release should fall on the boundary.
 
 impl Speaker {
     /// An idle speaker.
@@ -251,7 +261,11 @@ impl Speaker {
                     .articulation
                     .constriction
                     .is_some_and(|c| c.diameter <= 0.3);
-                let lead = if closed { RELEASE_LEAD } else { LEAD };
+                let lead = if closed {
+                    self.utterance.release_lead
+                } else {
+                    self.utterance.lead
+                };
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
                     voice.articulate(&next.articulation);
                     self.ahead = true;
@@ -857,24 +871,28 @@ fn is_voiced_letter(c: u8) -> bool {
 // ===== tokens → timed segments ============================================
 
 /// Base durations in seconds at rate 1.
-fn base_duration(p: Phoneme, stressed: bool) -> f32 {
+fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     let d = match p.manner() {
-        Manner::Vowel => 0.085,
-        Manner::Diphthong => 0.15,
-        Manner::Stop | Manner::Affricate => 0.06,
-        Manner::Nasal => 0.065,
+        Manner::Vowel => timing.vowel_length,
+        Manner::Diphthong => timing.diphthong_length,
+        Manner::Stop | Manner::Affricate => timing.stop_length,
+        Manner::Nasal => timing.nasal_length,
         Manner::Fricative => {
             if p.is_voiced() {
-                0.07
+                timing.voiced_fricative_length
             } else {
-                0.1
+                timing.fricative_length
             }
         }
-        Manner::Approximant => 0.055,
-        Manner::Aspirate => 0.06,
+        Manner::Approximant => timing.approximant_length,
+        Manner::Aspirate => timing.aspirate_length,
         Manner::Pause => 0.1,
     };
-    if stressed && is_vowel(p) { d * 1.5 } else { d }
+    if stressed && is_vowel(p) {
+        d * timing.stress_stretch
+    } else {
+        d
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -895,6 +913,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let expr = prosody.expressiveness.clamp(0.0, 2.0);
     let tense = prosody.tenseness.clamp(0.0, 1.0);
     let nasality = prosody.nasality.clamp(0.0, 1.0);
+    let timing = prosody.tuning.clamped();
 
     // Split into phrases at breaks; each phrase gets its own contour.
     let mut drafts: Vec<Draft> = Vec::new();
@@ -915,7 +934,14 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                         _ => None,
                     })
                     .is_some_and(|p| is_vowel(p) || p.manner() == Manner::Approximant);
-                expand(phoneme, stressed, next_vowel_or_approx, rate, &mut drafts);
+                expand(
+                    phoneme,
+                    stressed,
+                    next_vowel_or_approx,
+                    rate,
+                    &timing,
+                    &mut drafts,
+                );
             }
             Token::WordBreak => {}
             Token::Break(b) => {
@@ -983,7 +1009,11 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     {
         s.duration = 0.05;
     }
-    Utterance { segments }
+    Utterance {
+        segments,
+        lead: timing.lead,
+        release_lead: timing.release_lead,
+    }
 }
 
 fn silence(duration: f32) -> Draft {
@@ -998,9 +1028,16 @@ fn silence(duration: f32) -> Draft {
     }
 }
 
-fn expand(p: Phoneme, stressed: bool, before_vowel: bool, rate: f32, out: &mut Vec<Draft>) {
+fn expand(
+    p: Phoneme,
+    stressed: bool,
+    before_vowel: bool,
+    rate: f32,
+    timing: &Tuning,
+    out: &mut Vec<Draft>,
+) {
     let a = p.articulation();
-    let dur = base_duration(p, stressed) / rate;
+    let dur = base_duration(p, stressed, timing) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {
         phoneme,
@@ -1029,7 +1066,7 @@ fn expand(p: Phoneme, stressed: bool, before_vowel: bool, rate: f32, out: &mut V
                 // Aspiration after the burst: open tract, breathy folds.
                 let mut asp = Phoneme::Hh.articulation();
                 asp.tongue = a.tongue;
-                out.push(draft(p, asp, 0.035 / rate, true));
+                out.push(draft(p, asp, timing.aspiration / rate, true));
             }
         }
         Manner::Affricate => {

@@ -68,6 +68,8 @@ mod noise;
 mod phoneme;
 mod phys;
 mod preset;
+#[cfg(feature = "profile")]
+mod profile;
 #[cfg(feature = "alloc")]
 pub mod sing;
 #[cfg(feature = "alloc")]
@@ -75,6 +77,7 @@ pub mod speech;
 #[cfg(feature = "alloc")]
 mod talker;
 mod tract;
+mod tuning;
 mod voice;
 
 /// LPC formant estimation, shared with the examples.
@@ -84,13 +87,16 @@ mod lpc;
 
 pub use math::midi_to_hz;
 pub use phoneme::{Articulation, Manner, Phoneme};
-pub use preset::{Preset, VoiceSettings};
+pub use preset::{Persona, Preset, VoiceSettings};
+#[cfg(feature = "profile")]
+pub use profile::{ProfileError, tuning_parameters};
 #[cfg(feature = "alloc")]
 pub use talker::{Talker, bake, normalize};
 pub use tract::{
     BLADE_START, Constriction, LIP_START, MAX_CONSTRICTIONS, N, NOSE_LEN, NOSE_START, TIP_START,
     TONGUE_DIAMETER, TONGUE_INDEX,
 };
+pub use tuning::{Field, Pass, Tuning};
 pub use voice::{Engine, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
 /// Rate at which the glottis runs; the tract runs at twice this.

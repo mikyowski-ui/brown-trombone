@@ -24,10 +24,17 @@ libm    = ["dep:libm"]
 alloc   = []
 ## `Serialize`/`Deserialize` for `VoiceSettings`, `Preset` and `Prosody`.
 serde   = ["dep:serde"]
+## Voice profiles as JSON files (`VoiceSettings::with_profile`).
+profile = ["std", "serde", "dep:serde_json"]
 
 [dependencies]
-libm  = { workspace = true, optional = true }
-serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+libm       = { workspace = true, optional = true }
+serde      = { version = "1", default-features = false, features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+# The examples and tests read and write voice profiles.
+synthie-trombone = { path = ".", features = ["profile"] }
 
 [[example]]
 name = "vowels"

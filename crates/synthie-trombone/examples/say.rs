@@ -10,6 +10,12 @@
 //! `--engine physical` uses the physical sound model; add `--source pulse`
 //! to drive it with a prescribed glottal pulse instead of the
 //! self-oscillating folds, and `--out file.wav` to choose the file.
+//!
+//! A voice can be described instead of dialled: `--size 0.8 --effort 0.7
+//! --breathiness 0.2 --clarity 0.8` (see `Persona`), or loaded from a JSON
+//! profile with `--profile voice.json` (see `VoiceSettings::with_profile`).
+//! `--dump-profile` prints the voice that results; `--dump-parameters`
+//! prints every tunable number with its range.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -21,14 +27,18 @@
 mod wav;
 
 use std::time::Instant;
-use synthie_trombone::{Engine, GlottalSource, Preset, Talker, normalize};
+use synthie_trombone::{Engine, GlottalSource, Persona, Preset, Talker, normalize};
 
+#[allow(clippy::too_many_lines)] // one flat argument loop
 fn main() -> std::io::Result<()> {
     const SR: u32 = 48_000;
     let mut settings = Preset::Deep.settings();
     let mut engine = Engine::Classic;
     let mut source = GlottalSource::Folds;
     let mut path = String::from("say.wav");
+    let mut persona = Persona::NEUTRAL;
+    let mut profile: Option<String> = None;
+    let mut dump = false;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -60,6 +70,26 @@ fn main() -> std::io::Result<()> {
                 };
             }
             "--out" => path = value("--out"),
+            "--size" => persona.size = value("--size").parse().expect("--size needs a number"),
+            "--effort" => {
+                persona.effort = value("--effort").parse().expect("--effort needs a number");
+            }
+            "--breathiness" => {
+                persona.breathiness = value("--breathiness")
+                    .parse()
+                    .expect("--breathiness needs a number");
+            }
+            "--clarity" => {
+                persona.clarity = value("--clarity")
+                    .parse()
+                    .expect("--clarity needs a number");
+            }
+            "--profile" => profile = Some(value("--profile")),
+            "--dump-profile" => dump = true,
+            "--dump-parameters" => {
+                println!("{}", synthie_trombone::tuning_parameters());
+                return Ok(());
+            }
             "--pitch" => settings.pitch = value("--pitch").parse().expect("--pitch needs Hz"),
             "--rate" => settings.rate = value("--rate").parse().expect("--rate needs a number"),
             "--expr" => {
@@ -74,7 +104,19 @@ fn main() -> std::io::Result<()> {
         text.join(" ")
     };
 
-    let mut talker = Talker::new(SR as f32, settings.with_engine(engine));
+    let mut settings = settings.with_engine(engine).with_persona(&persona);
+    if let Some(file) = profile {
+        let json = std::fs::read_to_string(&file)?;
+        settings = settings
+            .with_profile(&json)
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
+    }
+    if dump {
+        println!("{}", settings.to_profile());
+        return Ok(());
+    }
+
+    let mut talker = Talker::new(SR as f32, settings);
     talker.voice_mut().set_glottal_source(source);
     let utterance = talker.compile(&text);
     for s in utterance.segments() {

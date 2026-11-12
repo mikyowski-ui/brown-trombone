@@ -23,17 +23,17 @@ use super::folds::{FoldParams, Folds};
 use super::{CM_H2O, Gauge};
 use crate::glottis::Glottis;
 use crate::math::{cos, exp, ln};
+use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
-/// Default lung pressure while speaking, cmH2O.
-pub(crate) const LUNG_PRESSURE: f32 = 8.0;
 /// Seconds for lung pressure to build or fall.
 const LUNG_TIME: f32 = 0.03;
-/// Seconds for the folds to come together or part.
-const ADDUCTION_TIME: f32 = 0.008;
+// Lung pressure, the time the folds take to come together or part, the
+// attack's depth and hold, the modal and posterior gaps and the opening
+// for voiceless sounds come from the voice's `Tuning`.
 /// When voicing begins the folds are first pressed together, this far past
 /// touching (cm), and held until they are together and there has been
-/// enough pressure across them for `ATTACK_HOLD` seconds; then they relax to where
+/// enough pressure across them for a moment (`attack_hold`); then they relax to where
 /// the tenseness holds them. Speakers do this (a glottal attack). Without
 /// it, folds brought together in a stream that is already flowing (after an
 /// /s/, or behind lips that are still parting) find a quiet resting place
@@ -44,8 +44,6 @@ const ADDUCTION_TIME: f32 = 0.008;
 /// It also gives stops their timing for free: after /b/ the folds are
 /// already together and start within a few milliseconds of the release;
 /// after /p/ they first have to come together.
-const ATTACK_DEPTH: f32 = 0.04;
-const ATTACK_HOLD: f32 = 0.003;
 /// Seconds for pressed folds to come back to touching once the attack
 /// lets go (much quicker than bringing them together from apart).
 const ATTACK_RELEASE_TIME: f32 = 0.002;
@@ -73,8 +71,6 @@ const STALL_SWING: f32 = 0.03;
 const VIBRATION_AREA: f32 = 0.14;
 /// Standing leak of a fully breathy voice (kinematic source), cm².
 const BREATHY_LEAK: f32 = 0.12;
-/// Glottal opening for voiceless sounds and breathing, cm².
-const ABDUCTED_AREA: f32 = 0.25;
 /// Point in the open phase where the kinematic area peaks.
 const PEAK: f32 = 0.62;
 
@@ -85,11 +81,8 @@ const PEAK: f32 = 0.62;
 /// while voicing. Breathiness beyond that does not come from
 /// holding the edges further apart (they would stop vibrating) but, as in
 /// a real larynx, from a gap left open between the cartilages behind them.
-const MODAL_GAP: f32 = 0.012;
 const MODAL_TENSENESS: f32 = 0.65;
 const WIDEST_GAP: f32 = 0.014;
-/// Area of that posterior gap at tenseness 0, cm².
-const POSTERIOR_GAP: f32 = 0.25;
 /// Below this tenseness the edges themselves part and voicing gives way
 /// to a whisper.
 const WHISPER_TENSENESS: f32 = 0.12;
@@ -180,6 +173,8 @@ pub(crate) struct Source {
     lung_target: f32,
     /// Lung pressure asked for while sounding, dyn/cm².
     lung_base: f32,
+    /// The voice's settings for the breath and the folds.
+    tuning: Tuning,
     /// Standing opening: an area for the kinematic source, a half-width for
     /// the folds.
     leak: f32,
@@ -245,11 +240,12 @@ impl Source {
             phase: 0.0,
             lung: 0.0,
             lung_target: 0.0,
-            lung_base: LUNG_PRESSURE * CM_H2O,
-            leak: ABDUCTED_AREA,
-            leak_target: ABDUCTED_AREA,
-            gap: ABDUCTED_AREA / (2.0 * 1.4),
-            gap_target: ABDUCTED_AREA / (2.0 * 1.4),
+            lung_base: Tuning::DEFAULT.lung_pressure * CM_H2O,
+            tuning: Tuning::DEFAULT,
+            leak: Tuning::DEFAULT.abducted_area,
+            leak_target: Tuning::DEFAULT.abducted_area,
+            gap: Tuning::DEFAULT.abducted_area / (2.0 * 1.4),
+            gap_target: Tuning::DEFAULT.abducted_area / (2.0 * 1.4),
             chink: 0.0,
             chink_target: 0.0,
             fold_share: 1.0,
@@ -290,10 +286,11 @@ impl Source {
         let (size, kind) = (self.size, self.kind);
         let overrides = (self.tension_override, self.gap_override);
         let muscles = self.muscle_override;
-        let lung_base = self.lung_base;
+        let (lung_base, tuning) = (self.lung_base, self.tuning);
         *self = Self::new();
         self.kind = kind;
         self.lung_base = lung_base;
+        self.tuning = tuning;
         (self.tension_override, self.gap_override) = overrides;
         self.muscle_override = muscles;
         self.set_size(size);
@@ -310,6 +307,13 @@ impl Source {
         self.watch_lo = f32::INFINITY;
         self.watch_hi = 0.0;
         self.watch_for = 0.0;
+    }
+
+    /// Take the breath and fold settings of a voice (lung pressure
+    /// included).
+    pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
+        self.tuning = *tuning;
+        self.lung_base = tuning.lung_pressure * CM_H2O;
     }
 
     /// Lung pressure while sounding, cmH2O.
@@ -382,9 +386,9 @@ impl Source {
             * if voicing {
                 BREATHY_LEAK * slack * slack
             } else {
-                ABDUCTED_AREA
+                self.tuning.abducted_area
             };
-        let abducted = ABDUCTED_AREA / (2.0 * 1.4);
+        let abducted = self.tuning.abducted_area / (2.0 * 1.4);
         self.gap_target = self.size
             * if !voicing {
                 abducted
@@ -394,13 +398,13 @@ impl Source {
                 // Letting go: the edges part and the voice turns to breath.
                 WIDEST_GAP + (abducted - WIDEST_GAP) * (1.0 - self.tense1 / WHISPER_TENSENESS)
             } else {
-                let gap = (MODAL_GAP * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
+                let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
                 let (tension, _) = tension_from_table(f1 * self.size, gap);
                 gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
             };
         let loose = (slack - 0.3).max(0.0) / 0.7;
         self.chink_target = if voicing && self.gap_override.is_none() {
-            area_scale * POSTERIOR_GAP * loose * loose
+            area_scale * self.tuning.posterior_gap * loose * loose
         } else {
             0.0
         };
@@ -446,19 +450,20 @@ impl Source {
     #[inline]
     pub(crate) fn tick(&mut self, lambda: f32, dt: f32) -> (f32, f32) {
         self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
-        self.leak += (self.leak_target - self.leak) * (dt / ADDUCTION_TIME);
+        let adduction = self.tuning.adduction_time;
+        self.leak += (self.leak_target - self.leak) * (dt / adduction);
         let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
-            -ATTACK_DEPTH * self.size
+            -self.tuning.attack_depth * self.size
         } else {
             self.gap_target
         };
         let time = if !self.pressing && self.gap < 0.0 {
             ATTACK_RELEASE_TIME
         } else {
-            ADDUCTION_TIME
+            adduction
         };
         self.gap += (gap_target - self.gap) * (dt / time);
-        self.chink += (self.chink_target - self.chink) * (dt / ADDUCTION_TIME);
+        self.chink += (self.chink_target - self.chink) * (dt / adduction);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
         if self.active() == SourceKind::Folds {
@@ -514,7 +519,7 @@ impl Source {
             // hair open for as long as it likes.
             if self.gap <= 0.0 && self.across > START_PRESSURE {
                 self.pressed_for += dt;
-                if self.pressed_for >= ATTACK_HOLD {
+                if self.pressed_for >= self.tuning.attack_hold {
                     self.pressing = false;
                     self.restart_watch();
                 }
