@@ -1,0 +1,111 @@
+id	set	text	expected	ortho	meta
+voicing_pb_initial_pat	voicing	[P AE1 T]	P AE T	pat	pair=P/B;pos=initial;slot=0;target=P;twin=B AE T;voicing=voiceless;lex=word
+voicing_pb_initial_bat	voicing	[B AE1 T]	B AE T	bat	pair=P/B;pos=initial;slot=0;target=B;twin=P AE T;voicing=voiced;lex=word
+voicing_pb_initial_pin	voicing	[P IH1 N]	P IH N	pin	pair=P/B;pos=initial;slot=0;target=P;twin=B IH N;voicing=voiceless;lex=word
+voicing_pb_initial_bin	voicing	[B IH1 N]	B IH N	bin	pair=P/B;pos=initial;slot=0;target=B;twin=P IH N;voicing=voiced;lex=word
+voicing_pb_initial_pole	voicing	[P OW1 L]	P OW L	pole	pair=P/B;pos=initial;slot=0;target=P;twin=B OW L;voicing=voiceless;lex=word
+voicing_pb_initial_bowl	voicing	[B OW1 L]	B OW L	bowl	pair=P/B;pos=initial;slot=0;target=B;twin=P OW L;voicing=voiced;lex=word
+voicing_pb_medial_rapid	voicing	[R AE1 P IH D]	R AE P IH D	rapid	pair=P/B;pos=medial;slot=2;target=P;twin=R AE B IH D;voicing=voiceless;lex=word
+voicing_pb_medial_rabid	voicing	[R AE1 B IH D]	R AE B IH D	rabid	pair=P/B;pos=medial;slot=2;target=B;twin=R AE P IH D;voicing=voiced;lex=word
+voicing_pb_medial_ample	voicing	[AE1 M P AX L]	AE M P AX L	ample	pair=P/B;pos=medial;slot=2;target=P;twin=AE M B AX L;voicing=voiceless;lex=word
+voicing_pb_medial_amble	voicing	[AE1 M B AX L]	AE M B AX L	amble	pair=P/B;pos=medial;slot=2;target=B;twin=AE M P AX L;voicing=voiced;lex=word
+voicing_pb_final_rope	voicing	[R OW1 P]	R OW P	rope	pair=P/B;pos=final;slot=2;target=P;twin=R OW B;voicing=voiceless;lex=word
+voicing_pb_final_robe	voicing	[R OW1 B]	R OW B	robe	pair=P/B;pos=final;slot=2;target=B;twin=R OW P;voicing=voiced;lex=word
+voicing_pb_final_cap	voicing	[K AE1 P]	K AE P	cap	pair=P/B;pos=final;slot=2;target=P;twin=K AE B;voicing=voiceless;lex=word
+voicing_pb_final_cab	voicing	[K AE1 B]	K AE B	cab	pair=P/B;pos=final;slot=2;target=B;twin=K AE P;voicing=voiced;lex=word
+voicing_pb_final_mop	voicing	[M AA1 P]	M AA P	mop	pair=P/B;pos=final;slot=2;target=P;twin=M AA B;voicing=voiceless;lex=word
+voicing_pb_final_mob	voicing	[M AA1 B]	M AA B	mob	pair=P/B;pos=final;slot=2;target=B;twin=M AA P;voicing=voiced;lex=word
+voicing_td_initial_tie	voicing	[T AY1]	T AY	tie	pair=T/D;pos=initial;slot=0;target=T;twin=D AY;voicing=voiceless;lex=word
+voicing_td_initial_die	voicing	[D AY1]	D AY	die	pair=T/D;pos=initial;slot=0;target=D;twin=T AY;voicing=voiced;lex=word
+voicing_td_initial_tip	voicing	[T IH1 P]	T IH P	tip	pair=T/D;pos=initial;slot=0;target=T;twin=D IH P;voicing=voiceless;lex=word
+voicing_td_initial_dip	voicing	[D IH1 P]	D IH P	dip	pair=T/D;pos=initial;slot=0;target=D;twin=T IH P;voicing=voiced;lex=word
+voicing_td_initial_ten	voicing	[T EH1 N]	T EH N	ten	pair=T/D;pos=initial;slot=0;target=T;twin=D EH N;voicing=voiceless;lex=word
+voicing_td_initial_den	voicing	[D EH1 N]	D EH N	den	pair=T/D;pos=initial;slot=0;target=D;twin=T EH N;voicing=voiced;lex=word
+voicing_td_medial_a_tie	voicing	[AX T AY1]	AX T AY	a tie	pair=T/D;pos=medial;slot=1;target=T;twin=AX D AY;voicing=voiceless;lex=word
+voicing_td_medial_a_die	voicing	[AX D AY1]	AX D AY	a die	pair=T/D;pos=medial;slot=1;target=D;twin=AX T AY;voicing=voiced;lex=word
+voicing_td_medial_a_ten	voicing	[AX T EH1 N]	AX T EH N	a ten	pair=T/D;pos=medial;slot=1;target=T;twin=AX D EH N;voicing=voiceless;lex=word
+voicing_td_medial_a_den	voicing	[AX D EH1 N]	AX D EH N	a den	pair=T/D;pos=medial;slot=1;target=D;twin=AX T EH N;voicing=voiced;lex=word
+voicing_td_final_bat	voicing	[B AE1 T]	B AE T	bat	pair=T/D;pos=final;slot=2;target=T;twin=B AE D;voicing=voiceless;lex=word
+voicing_td_final_bad	voicing	[B AE1 D]	B AE D	bad	pair=T/D;pos=final;slot=2;target=D;twin=B AE T;voicing=voiced;lex=word
+voicing_td_final_seat	voicing	[S IY1 T]	S IY T	seat	pair=T/D;pos=final;slot=2;target=T;twin=S IY D;voicing=voiceless;lex=word
+voicing_td_final_seed	voicing	[S IY1 D]	S IY D	seed	pair=T/D;pos=final;slot=2;target=D;twin=S IY T;voicing=voiced;lex=word
+voicing_td_final_write	voicing	[R AY1 T]	R AY T	write	pair=T/D;pos=final;slot=2;target=T;twin=R AY D;voicing=voiceless;lex=word
+voicing_td_final_ride	voicing	[R AY1 D]	R AY D	ride	pair=T/D;pos=final;slot=2;target=D;twin=R AY T;voicing=voiced;lex=word
+voicing_kg_initial_coat	voicing	[K OW1 T]	K OW T	coat	pair=K/G;pos=initial;slot=0;target=K;twin=G OW T;voicing=voiceless;lex=word
+voicing_kg_initial_goat	voicing	[G OW1 T]	G OW T	goat	pair=K/G;pos=initial;slot=0;target=G;twin=K OW T;voicing=voiced;lex=word
+voicing_kg_initial_cold	voicing	[K OW1 L D]	K OW L D	cold	pair=K/G;pos=initial;slot=0;target=K;twin=G OW L D;voicing=voiceless;lex=word
+voicing_kg_initial_gold	voicing	[G OW1 L D]	G OW L D	gold	pair=K/G;pos=initial;slot=0;target=G;twin=K OW L D;voicing=voiced;lex=word
+voicing_kg_initial_curl	voicing	[K ER1 L]	K ER L	curl	pair=K/G;pos=initial;slot=0;target=K;twin=G ER L;voicing=voiceless;lex=word
+voicing_kg_initial_girl	voicing	[G ER1 L]	G ER L	girl	pair=K/G;pos=initial;slot=0;target=G;twin=K ER L;voicing=voiced;lex=word
+voicing_kg_medial_bicker	voicing	[B IH1 K ER]	B IH K ER	bicker	pair=K/G;pos=medial;slot=2;target=K;twin=B IH G ER;voicing=voiceless;lex=word
+voicing_kg_medial_bigger	voicing	[B IH1 G ER]	B IH G ER	bigger	pair=K/G;pos=medial;slot=2;target=G;twin=B IH K ER;voicing=voiced;lex=word
+voicing_kg_medial_decree	voicing	[D IH K R IY1]	D IH K R IY	decree	pair=K/G;pos=medial;slot=2;target=K;twin=D IH G R IY;voicing=voiceless;lex=word
+voicing_kg_medial_degree	voicing	[D IH G R IY1]	D IH G R IY	degree	pair=K/G;pos=medial;slot=2;target=G;twin=D IH K R IY;voicing=voiced;lex=word
+voicing_kg_final_back	voicing	[B AE1 K]	B AE K	back	pair=K/G;pos=final;slot=2;target=K;twin=B AE G;voicing=voiceless;lex=word
+voicing_kg_final_bag	voicing	[B AE1 G]	B AE G	bag	pair=K/G;pos=final;slot=2;target=G;twin=B AE K;voicing=voiced;lex=word
+voicing_kg_final_pick	voicing	[P IH1 K]	P IH K	pick	pair=K/G;pos=final;slot=2;target=K;twin=P IH G;voicing=voiceless;lex=word
+voicing_kg_final_pig	voicing	[P IH1 G]	P IH G	pig	pair=K/G;pos=final;slot=2;target=G;twin=P IH K;voicing=voiced;lex=word
+voicing_kg_final_duck	voicing	[D AH1 K]	D AH K	duck	pair=K/G;pos=final;slot=2;target=K;twin=D AH G;voicing=voiceless;lex=word
+voicing_kg_final_dug	voicing	[D AH1 G]	D AH G	dug	pair=K/G;pos=final;slot=2;target=G;twin=D AH K;voicing=voiced;lex=word
+voicing_sz_initial_sip	voicing	[S IH1 P]	S IH P	sip	pair=S/Z;pos=initial;slot=0;target=S;twin=Z IH P;voicing=voiceless;lex=word
+voicing_sz_initial_zip	voicing	[Z IH1 P]	Z IH P	zip	pair=S/Z;pos=initial;slot=0;target=Z;twin=S IH P;voicing=voiced;lex=word
+voicing_sz_initial_sue	voicing	[S UW1]	S UW	sue	pair=S/Z;pos=initial;slot=0;target=S;twin=Z UW;voicing=voiceless;lex=word
+voicing_sz_initial_zoo	voicing	[Z UW1]	Z UW	zoo	pair=S/Z;pos=initial;slot=0;target=Z;twin=S UW;voicing=voiced;lex=word
+voicing_sz_initial_seal	voicing	[S IY1 L]	S IY L	seal	pair=S/Z;pos=initial;slot=0;target=S;twin=Z IY L;voicing=voiceless;lex=word
+voicing_sz_initial_zeal	voicing	[Z IY1 L]	Z IY L	zeal	pair=S/Z;pos=initial;slot=0;target=Z;twin=S IY L;voicing=voiced;lex=word
+voicing_sz_medial_racer	voicing	[R EY1 S ER]	R EY S ER	racer	pair=S/Z;pos=medial;slot=2;target=S;twin=R EY Z ER;voicing=voiceless;lex=word
+voicing_sz_medial_razor	voicing	[R EY1 Z ER]	R EY Z ER	razor	pair=S/Z;pos=medial;slot=2;target=Z;twin=R EY S ER;voicing=voiced;lex=word
+voicing_sz_medial_fussy	voicing	[F AH1 S IY]	F AH S IY	fussy	pair=S/Z;pos=medial;slot=2;target=S;twin=F AH Z IY;voicing=voiceless;lex=word
+voicing_sz_medial_fuzzy	voicing	[F AH1 Z IY]	F AH Z IY	fuzzy	pair=S/Z;pos=medial;slot=2;target=Z;twin=F AH S IY;voicing=voiced;lex=word
+voicing_sz_final_bus	voicing	[B AH1 S]	B AH S	bus	pair=S/Z;pos=final;slot=2;target=S;twin=B AH Z;voicing=voiceless;lex=word
+voicing_sz_final_buzz	voicing	[B AH1 Z]	B AH Z	buzz	pair=S/Z;pos=final;slot=2;target=Z;twin=B AH S;voicing=voiced;lex=word
+voicing_sz_final_rice	voicing	[R AY1 S]	R AY S	rice	pair=S/Z;pos=final;slot=2;target=S;twin=R AY Z;voicing=voiceless;lex=word
+voicing_sz_final_rise	voicing	[R AY1 Z]	R AY Z	rise	pair=S/Z;pos=final;slot=2;target=Z;twin=R AY S;voicing=voiced;lex=word
+voicing_sz_final_place	voicing	[P L EY1 S]	P L EY S	place	pair=S/Z;pos=final;slot=3;target=S;twin=P L EY Z;voicing=voiceless;lex=word
+voicing_sz_final_plays	voicing	[P L EY1 Z]	P L EY Z	plays	pair=S/Z;pos=final;slot=3;target=Z;twin=P L EY S;voicing=voiced;lex=word
+voicing_fv_initial_fan	voicing	[F AE1 N]	F AE N	fan	pair=F/V;pos=initial;slot=0;target=F;twin=V AE N;voicing=voiceless;lex=word
+voicing_fv_initial_van	voicing	[V AE1 N]	V AE N	van	pair=F/V;pos=initial;slot=0;target=V;twin=F AE N;voicing=voiced;lex=word
+voicing_fv_initial_fine	voicing	[F AY1 N]	F AY N	fine	pair=F/V;pos=initial;slot=0;target=F;twin=V AY N;voicing=voiceless;lex=word
+voicing_fv_initial_vine	voicing	[V AY1 N]	V AY N	vine	pair=F/V;pos=initial;slot=0;target=V;twin=F AY N;voicing=voiced;lex=word
+voicing_fv_initial_fat	voicing	[F AE1 T]	F AE T	fat	pair=F/V;pos=initial;slot=0;target=F;twin=V AE T;voicing=voiceless;lex=word
+voicing_fv_initial_vat	voicing	[V AE1 T]	V AE T	vat	pair=F/V;pos=initial;slot=0;target=V;twin=F AE T;voicing=voiced;lex=word
+voicing_fv_medial_rifle	voicing	[R AY1 F AX L]	R AY F AX L	rifle	pair=F/V;pos=medial;slot=2;target=F;twin=R AY V AX L;voicing=voiceless;lex=word
+voicing_fv_medial_rival	voicing	[R AY1 V AX L]	R AY V AX L	rival	pair=F/V;pos=medial;slot=2;target=V;twin=R AY F AX L;voicing=voiced;lex=word
+voicing_fv_medial_safer	voicing	[S EY1 F ER]	S EY F ER	safer	pair=F/V;pos=medial;slot=2;target=F;twin=S EY V ER;voicing=voiceless;lex=word
+voicing_fv_medial_saver	voicing	[S EY1 V ER]	S EY V ER	saver	pair=F/V;pos=medial;slot=2;target=V;twin=S EY F ER;voicing=voiced;lex=word
+voicing_fv_final_leaf	voicing	[L IY1 F]	L IY F	leaf	pair=F/V;pos=final;slot=2;target=F;twin=L IY V;voicing=voiceless;lex=word
+voicing_fv_final_leave	voicing	[L IY1 V]	L IY V	leave	pair=F/V;pos=final;slot=2;target=V;twin=L IY F;voicing=voiced;lex=word
+voicing_fv_final_safe	voicing	[S EY1 F]	S EY F	safe	pair=F/V;pos=final;slot=2;target=F;twin=S EY V;voicing=voiceless;lex=word
+voicing_fv_final_save	voicing	[S EY1 V]	S EY V	save	pair=F/V;pos=final;slot=2;target=V;twin=S EY F;voicing=voiced;lex=word
+voicing_fv_final_half	voicing	[HH AE1 F]	HH AE F	half	pair=F/V;pos=final;slot=2;target=F;twin=HH AE V;voicing=voiceless;lex=word
+voicing_fv_final_halve	voicing	[HH AE1 V]	HH AE V	halve	pair=F/V;pos=final;slot=2;target=V;twin=HH AE F;voicing=voiced;lex=word
+voicing_pb_vcv_aa_p	voicing	[AA P AA1]	AA P AA		pair=P/B;pos=vcv;slot=1;target=P;twin=AA B AA;voicing=voiceless;lex=vcv
+voicing_pb_vcv_aa_b	voicing	[AA B AA1]	AA B AA		pair=P/B;pos=vcv;slot=1;target=B;twin=AA P AA;voicing=voiced;lex=vcv
+voicing_pb_vcv_iy_p	voicing	[IY P IY1]	IY P IY		pair=P/B;pos=vcv;slot=1;target=P;twin=IY B IY;voicing=voiceless;lex=vcv
+voicing_pb_vcv_iy_b	voicing	[IY B IY1]	IY B IY		pair=P/B;pos=vcv;slot=1;target=B;twin=IY P IY;voicing=voiced;lex=vcv
+voicing_pb_vcv_uw_p	voicing	[UW P UW1]	UW P UW		pair=P/B;pos=vcv;slot=1;target=P;twin=UW B UW;voicing=voiceless;lex=vcv
+voicing_pb_vcv_uw_b	voicing	[UW B UW1]	UW B UW		pair=P/B;pos=vcv;slot=1;target=B;twin=UW P UW;voicing=voiced;lex=vcv
+voicing_td_vcv_aa_t	voicing	[AA T AA1]	AA T AA		pair=T/D;pos=vcv;slot=1;target=T;twin=AA D AA;voicing=voiceless;lex=vcv
+voicing_td_vcv_aa_d	voicing	[AA D AA1]	AA D AA		pair=T/D;pos=vcv;slot=1;target=D;twin=AA T AA;voicing=voiced;lex=vcv
+voicing_td_vcv_iy_t	voicing	[IY T IY1]	IY T IY		pair=T/D;pos=vcv;slot=1;target=T;twin=IY D IY;voicing=voiceless;lex=vcv
+voicing_td_vcv_iy_d	voicing	[IY D IY1]	IY D IY		pair=T/D;pos=vcv;slot=1;target=D;twin=IY T IY;voicing=voiced;lex=vcv
+voicing_td_vcv_uw_t	voicing	[UW T UW1]	UW T UW		pair=T/D;pos=vcv;slot=1;target=T;twin=UW D UW;voicing=voiceless;lex=vcv
+voicing_td_vcv_uw_d	voicing	[UW D UW1]	UW D UW		pair=T/D;pos=vcv;slot=1;target=D;twin=UW T UW;voicing=voiced;lex=vcv
+voicing_kg_vcv_aa_k	voicing	[AA K AA1]	AA K AA		pair=K/G;pos=vcv;slot=1;target=K;twin=AA G AA;voicing=voiceless;lex=vcv
+voicing_kg_vcv_aa_g	voicing	[AA G AA1]	AA G AA		pair=K/G;pos=vcv;slot=1;target=G;twin=AA K AA;voicing=voiced;lex=vcv
+voicing_kg_vcv_iy_k	voicing	[IY K IY1]	IY K IY		pair=K/G;pos=vcv;slot=1;target=K;twin=IY G IY;voicing=voiceless;lex=vcv
+voicing_kg_vcv_iy_g	voicing	[IY G IY1]	IY G IY		pair=K/G;pos=vcv;slot=1;target=G;twin=IY K IY;voicing=voiced;lex=vcv
+voicing_kg_vcv_uw_k	voicing	[UW K UW1]	UW K UW		pair=K/G;pos=vcv;slot=1;target=K;twin=UW G UW;voicing=voiceless;lex=vcv
+voicing_kg_vcv_uw_g	voicing	[UW G UW1]	UW G UW		pair=K/G;pos=vcv;slot=1;target=G;twin=UW K UW;voicing=voiced;lex=vcv
+voicing_sz_vcv_aa_s	voicing	[AA S AA1]	AA S AA		pair=S/Z;pos=vcv;slot=1;target=S;twin=AA Z AA;voicing=voiceless;lex=vcv
+voicing_sz_vcv_aa_z	voicing	[AA Z AA1]	AA Z AA		pair=S/Z;pos=vcv;slot=1;target=Z;twin=AA S AA;voicing=voiced;lex=vcv
+voicing_sz_vcv_iy_s	voicing	[IY S IY1]	IY S IY		pair=S/Z;pos=vcv;slot=1;target=S;twin=IY Z IY;voicing=voiceless;lex=vcv
+voicing_sz_vcv_iy_z	voicing	[IY Z IY1]	IY Z IY		pair=S/Z;pos=vcv;slot=1;target=Z;twin=IY S IY;voicing=voiced;lex=vcv
+voicing_sz_vcv_uw_s	voicing	[UW S UW1]	UW S UW		pair=S/Z;pos=vcv;slot=1;target=S;twin=UW Z UW;voicing=voiceless;lex=vcv
+voicing_sz_vcv_uw_z	voicing	[UW Z UW1]	UW Z UW		pair=S/Z;pos=vcv;slot=1;target=Z;twin=UW S UW;voicing=voiced;lex=vcv
+voicing_fv_vcv_aa_f	voicing	[AA F AA1]	AA F AA		pair=F/V;pos=vcv;slot=1;target=F;twin=AA V AA;voicing=voiceless;lex=vcv
+voicing_fv_vcv_aa_v	voicing	[AA V AA1]	AA V AA		pair=F/V;pos=vcv;slot=1;target=V;twin=AA F AA;voicing=voiced;lex=vcv
+voicing_fv_vcv_iy_f	voicing	[IY F IY1]	IY F IY		pair=F/V;pos=vcv;slot=1;target=F;twin=IY V IY;voicing=voiceless;lex=vcv
+voicing_fv_vcv_iy_v	voicing	[IY V IY1]	IY V IY		pair=F/V;pos=vcv;slot=1;target=V;twin=IY F IY;voicing=voiced;lex=vcv
+voicing_fv_vcv_uw_f	voicing	[UW F UW1]	UW F UW		pair=F/V;pos=vcv;slot=1;target=F;twin=UW V UW;voicing=voiceless;lex=vcv
+voicing_fv_vcv_uw_v	voicing	[UW V UW1]	UW V UW		pair=F/V;pos=vcv;slot=1;target=V;twin=UW F UW;voicing=voiced;lex=vcv

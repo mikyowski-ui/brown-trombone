@@ -12,7 +12,10 @@ committed, so normal runs only read them.  Columns:
 * ``ortho``    -- the written word/sentence for Whisper (empty for VCVs).
 
 Sets: ``vcv``, ``pair``, ``word``, ``sentence_tune``, ``sentence_heldout``
-and ``human`` (written by ``anchors.py``).
+and ``human`` (written by ``anchors.py``); the probe sets ``vowel`` and
+``voicing`` (``probes.py``) have a sixth column, ``meta``: ``key=value``
+pairs separated by ``;`` (the scored slot, the intended vowel, the
+minimal-pair twin ...).
 """
 
 from __future__ import annotations
@@ -28,8 +31,11 @@ import arpabet as A  # noqa: E402
 HERE = Path(__file__).resolve().parent
 MATERIAL_DIR = HERE / "material"
 SYNTH_SETS = ["vcv", "pair", "word", "sentence_tune", "sentence_heldout"]
-ALL_SETS = SYNTH_SETS + ["human"]
+#: Targeted sets for ``probes.py`` (not part of the default scoreboard).
+PROBE_SETS = ["vowel", "voicing"]
+ALL_SETS = SYNTH_SETS + ["human"] + PROBE_SETS
 HEADER = ["id", "set", "text", "expected", "ortho"]
+META = "meta"
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,11 @@ class Item:
     text: str
     expected: tuple[str, ...]
     ortho: str = ""
+    meta: str = ""  # probe sets: "key=value;key=value"
+
+    def info(self) -> dict[str, str]:
+        """The ``meta`` column as a dict."""
+        return dict(kv.split("=", 1) for kv in self.meta.split(";") if kv)
 
 
 # --------------------------------------------------------------------------
@@ -149,6 +160,101 @@ SENTENCES_HELDOUT = [
     "The girl at the booth sold fifty bonds.",
 ]
 
+# --- vowel probe ----------------------------------------------------------
+
+#: Every English monophthong and diphthong, in the order of the report.
+VOWEL_TARGETS = ["IY", "IH", "EH", "AE", "AH", "AA", "AO", "UH", "UW", "ER", "AX", "EY", "AY", "OW", "AW", "OY"]
+
+#: Frames for the stressed vowels: the vowel alone, then five CVC frames.
+VOWEL_FRAMES = [
+    ("iso", "{}1"),
+    ("hvd", "HH {}1 D"),
+    ("bvd", "B {}1 D"),
+    ("bvt", "B {}1 T"),
+    ("svt", "S {}1 T"),
+    ("dvd", "D {}1 D"),
+]
+
+#: Real English words for (frame, vowel); every other frame item is labelled
+#: nonsense (the engine is given phonemes either way).
+VOWEL_WORDS = {
+    "hvd": {"IY": "heed", "IH": "hid", "EH": "head", "AE": "had", "AH": "hud", "AA": "hod", "AO": "hawed",
+            "UH": "hood", "UW": "who'd", "ER": "heard", "EY": "hayed", "AY": "hide", "OW": "hoed", "AW": "how'd"},
+    "bvd": {"IY": "bead", "IH": "bid", "EH": "bed", "AE": "bad", "AH": "bud", "AO": "bawd", "UW": "booed",
+            "ER": "bird", "EY": "bayed", "AY": "bide", "OW": "bode", "AW": "bowed"},
+    "bvt": {"IY": "beat", "IH": "bit", "EH": "bet", "AE": "bat", "AH": "but", "AA": "bot", "AO": "bought",
+            "UW": "boot", "EY": "bait", "AY": "bite", "OW": "boat", "AW": "bout"},
+    "svt": {"IY": "seat", "IH": "sit", "EH": "set", "AE": "sat", "AA": "sot", "AO": "sought", "UH": "soot",
+            "UW": "suit", "EY": "sate", "AY": "site"},
+    "dvd": {"IY": "deed", "IH": "did", "EH": "dead", "AE": "dad", "AH": "dud", "UW": "dude", "AY": "died"},
+}  # fmt: skip
+
+#: AX is never stressed, so besides the isolated vowel it gets real words
+#: where it is the unstressed syllable: (word, ARPAbet, index of the AX).
+AX_WORDS = [
+    ("sofa", "S OW1 F AX", 3),
+    ("about", "AX B AW1 T", 0),
+    ("comma", "K AA1 M AX", 3),
+    ("panda", "P AE1 N D AX", 4),
+    ("ago", "AX G OW1", 0),
+]
+
+# --- voicing probe ---------------------------------------------------------
+
+#: Voiceless/voiced obstruent pairs.  F/V is reported separately.
+VOICING_PAIRS = [("P", "B"), ("T", "D"), ("K", "G"), ("S", "Z"), ("F", "V")]
+
+#: Real minimal pairs: (pair, position, voiceless word, ARPAbet, voiced
+#: word, ARPAbet).  The pair differs in exactly one phoneme.  Medial /t d/
+#: has no real pair here: American English flaps it ("latter"/"ladder" are
+#: both DX), so it is "a tie"/"a die" with the stop before a stressed vowel.
+VOICING_WORDS = [
+    ("P/B", "initial", "pat", "P AE1 T", "bat", "B AE1 T"),
+    ("P/B", "initial", "pin", "P IH1 N", "bin", "B IH1 N"),
+    ("P/B", "initial", "pole", "P OW1 L", "bowl", "B OW1 L"),
+    ("P/B", "medial", "rapid", "R AE1 P IH D", "rabid", "R AE1 B IH D"),
+    ("P/B", "medial", "ample", "AE1 M P AX L", "amble", "AE1 M B AX L"),
+    ("P/B", "final", "rope", "R OW1 P", "robe", "R OW1 B"),
+    ("P/B", "final", "cap", "K AE1 P", "cab", "K AE1 B"),
+    ("P/B", "final", "mop", "M AA1 P", "mob", "M AA1 B"),
+    ("T/D", "initial", "tie", "T AY1", "die", "D AY1"),
+    ("T/D", "initial", "tip", "T IH1 P", "dip", "D IH1 P"),
+    ("T/D", "initial", "ten", "T EH1 N", "den", "D EH1 N"),
+    ("T/D", "medial", "a tie", "AX T AY1", "a die", "AX D AY1"),
+    ("T/D", "medial", "a ten", "AX T EH1 N", "a den", "AX D EH1 N"),
+    ("T/D", "final", "bat", "B AE1 T", "bad", "B AE1 D"),
+    ("T/D", "final", "seat", "S IY1 T", "seed", "S IY1 D"),
+    ("T/D", "final", "write", "R AY1 T", "ride", "R AY1 D"),
+    ("K/G", "initial", "coat", "K OW1 T", "goat", "G OW1 T"),
+    ("K/G", "initial", "cold", "K OW1 L D", "gold", "G OW1 L D"),
+    ("K/G", "initial", "curl", "K ER1 L", "girl", "G ER1 L"),
+    ("K/G", "medial", "bicker", "B IH1 K ER", "bigger", "B IH1 G ER"),
+    ("K/G", "medial", "decree", "D IH K R IY1", "degree", "D IH G R IY1"),
+    ("K/G", "final", "back", "B AE1 K", "bag", "B AE1 G"),
+    ("K/G", "final", "pick", "P IH1 K", "pig", "P IH1 G"),
+    ("K/G", "final", "duck", "D AH1 K", "dug", "D AH1 G"),
+    ("S/Z", "initial", "sip", "S IH1 P", "zip", "Z IH1 P"),
+    ("S/Z", "initial", "sue", "S UW1", "zoo", "Z UW1"),
+    ("S/Z", "initial", "seal", "S IY1 L", "zeal", "Z IY1 L"),
+    ("S/Z", "medial", "racer", "R EY1 S ER", "razor", "R EY1 Z ER"),
+    ("S/Z", "medial", "fussy", "F AH1 S IY", "fuzzy", "F AH1 Z IY"),
+    ("S/Z", "final", "bus", "B AH1 S", "buzz", "B AH1 Z"),
+    ("S/Z", "final", "rice", "R AY1 S", "rise", "R AY1 Z"),
+    ("S/Z", "final", "place", "P L EY1 S", "plays", "P L EY1 Z"),
+    ("F/V", "initial", "fan", "F AE1 N", "van", "V AE1 N"),
+    ("F/V", "initial", "fine", "F AY1 N", "vine", "V AY1 N"),
+    ("F/V", "initial", "fat", "F AE1 T", "vat", "V AE1 T"),
+    ("F/V", "medial", "rifle", "R AY1 F AX L", "rival", "R AY1 V AX L"),
+    ("F/V", "medial", "safer", "S EY1 F ER", "saver", "S EY1 V ER"),
+    ("F/V", "final", "leaf", "L IY1 F", "leave", "L IY1 V"),
+    ("F/V", "final", "safe", "S EY1 F", "save", "S EY1 V"),
+    ("F/V", "final", "half", "HH AE1 F", "halve", "HH AE1 V"),
+]
+
+#: Nonsense VCV syllables for every pair (the consonant is the onset of the
+#: stressed second vowel, as in the ``vcv`` set).
+VOICING_VCV_VOWELS = ["AA", "IY", "UW"]
+
 
 # --------------------------------------------------------------------------
 # Build
@@ -197,25 +303,97 @@ def build_sentences(name: str, sentences: list[str]) -> list[Item]:
     ]
 
 
+def _meta(**kv) -> str:
+    return ";".join(f"{k}={v}" for k, v in kv.items())
+
+
+def build_vowel() -> list[Item]:
+    """Every vowel alone and in five CVC frames (AX: alone and in five
+    words where it is unstressed).  ``slot`` is the index of the vowel in
+    ``expected``."""
+    items = []
+    for v in VOWEL_TARGETS:
+        if v == "AX":
+            arpa = "AX"
+            items.append(Item("vowel_iso_ax", "vowel", _bracket(arpa), ("AX",), "",
+                              _meta(target="AX", slot=0, frame="iso", lex="isolated")))  # fmt: skip
+            for word, arpa, slot in AX_WORDS:
+                items.append(
+                    Item(f"vowel_word_ax_{word}", "vowel", _bracket(arpa), tuple(A.parse_arpabet(arpa)), word,
+                         _meta(target="AX", slot=slot, frame="word", lex="word"))  # fmt: skip
+                )
+            continue
+        for frame, pattern in VOWEL_FRAMES:
+            arpa = pattern.format(v)
+            phones = A.parse_arpabet(arpa)
+            word = VOWEL_WORDS.get(frame, {}).get(v, "")
+            lex = "isolated" if frame == "iso" else ("word" if word else "nonsense")
+            items.append(
+                Item(f"vowel_{frame}_{v.lower()}", "vowel", _bracket(arpa), tuple(phones), word,
+                     _meta(target=v, slot=phones.index(v), frame=frame, lex=lex))  # fmt: skip
+            )
+    return items
+
+
+def _swap(phones: list[str], slot: int, sym: str) -> list[str]:
+    out = list(phones)
+    out[slot] = sym
+    return out
+
+
+def build_voicing() -> list[Item]:
+    """Real minimal pairs in three positions plus VCV syllables, both members
+    of every pair.  ``twin`` is the other member's phonemes (one phoneme
+    different, at ``slot``)."""
+    voiced_of = dict(VOICING_PAIRS)
+    items = []
+
+    def add(group: str, pos: str, word: str, arpa: str, lex: str, ident: str):
+        phones = A.parse_arpabet(arpa)
+        pair = group.split("/")
+        slot = next(k for k, p in enumerate(phones) if p in pair)
+        target = phones[slot]
+        other = pair[1] if target == pair[0] else pair[0]
+        voicing = "voiceless" if target in voiced_of else "voiced"
+        meta = _meta(pair=group, pos=pos, slot=slot, target=target, twin=" ".join(_swap(phones, slot, other)),
+                     voicing=voicing, lex=lex)  # fmt: skip
+        items.append(Item(ident, "voicing", _bracket(arpa), tuple(phones), word if lex == "word" else "", meta))
+
+    for group, pos, w1, a1, w2, a2 in VOICING_WORDS:
+        tag = group.replace("/", "").lower()
+        for w, a in ((w1, a1), (w2, a2)):
+            add(group, pos, w, a, "word", f"voicing_{tag}_{pos}_{w.replace(' ', '_')}")
+    for vl, vd in VOICING_PAIRS:
+        group = f"{vl}/{vd}"
+        tag = group.replace("/", "").lower()
+        for v in VOICING_VCV_VOWELS:
+            for c in (vl, vd):
+                add(group, "vcv", "", f"{v} {c} {v}1", "vcv", f"voicing_{tag}_vcv_{v.lower()}_{c.lower()}")
+    return items
+
+
 def write_tsv(path: Path, items: list[Item]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["\t".join(HEADER)]
+    with_meta = any(it.meta for it in items)
+    lines = ["\t".join(HEADER + ([META] if with_meta else []))]
     for it in items:
-        for field in (it.id, it.text, it.ortho):
+        for field in (it.id, it.text, it.ortho, it.meta):
             assert "\t" not in field and "\n" not in field, field
-        lines.append("\t".join([it.id, it.set, it.text, " ".join(it.expected), it.ortho]))
+        row = [it.id, it.set, it.text, " ".join(it.expected), it.ortho] + ([it.meta] if with_meta else [])
+        lines.append("\t".join(row))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def read_tsv(path: Path) -> list[Item]:
     rows = path.read_text(encoding="utf-8").splitlines()
-    assert rows[0].split("\t") == HEADER, f"{path}: unexpected header"
+    head = rows[0].split("\t")
+    assert head in (HEADER, HEADER + [META]), f"{path}: unexpected header"
     items = []
     for row in rows[1:]:
         if not row.strip():
             continue
-        f = row.split("\t") + [""] * 5
-        items.append(Item(f[0], f[1], f[2], tuple(f[3].split()), f[4]))
+        f = row.split("\t") + [""] * 6
+        items.append(Item(f[0], f[1], f[2], tuple(f[3].split()), f[4], f[5]))
     return items
 
 
@@ -238,6 +416,8 @@ def build() -> None:
         "word": build_word(),
         "sentence_tune": build_sentences("sentence_tune", SENTENCES_TUNE),
         "sentence_heldout": build_sentences("sentence_heldout", SENTENCES_HELDOUT),
+        "vowel": build_vowel(),
+        "voicing": build_voicing(),
     }
     for name, items in sets.items():
         write_tsv(MATERIAL_DIR / f"{name}.tsv", items)

@@ -1,0 +1,97 @@
+id	set	text	expected	ortho	meta
+vowel_iso_iy	vowel	[IY1]	IY		target=IY;slot=0;frame=iso;lex=isolated
+vowel_hvd_iy	vowel	[HH IY1 D]	HH IY D	heed	target=IY;slot=1;frame=hvd;lex=word
+vowel_bvd_iy	vowel	[B IY1 D]	B IY D	bead	target=IY;slot=1;frame=bvd;lex=word
+vowel_bvt_iy	vowel	[B IY1 T]	B IY T	beat	target=IY;slot=1;frame=bvt;lex=word
+vowel_svt_iy	vowel	[S IY1 T]	S IY T	seat	target=IY;slot=1;frame=svt;lex=word
+vowel_dvd_iy	vowel	[D IY1 D]	D IY D	deed	target=IY;slot=1;frame=dvd;lex=word
+vowel_iso_ih	vowel	[IH1]	IH		target=IH;slot=0;frame=iso;lex=isolated
+vowel_hvd_ih	vowel	[HH IH1 D]	HH IH D	hid	target=IH;slot=1;frame=hvd;lex=word
+vowel_bvd_ih	vowel	[B IH1 D]	B IH D	bid	target=IH;slot=1;frame=bvd;lex=word
+vowel_bvt_ih	vowel	[B IH1 T]	B IH T	bit	target=IH;slot=1;frame=bvt;lex=word
+vowel_svt_ih	vowel	[S IH1 T]	S IH T	sit	target=IH;slot=1;frame=svt;lex=word
+vowel_dvd_ih	vowel	[D IH1 D]	D IH D	did	target=IH;slot=1;frame=dvd;lex=word
+vowel_iso_eh	vowel	[EH1]	EH		target=EH;slot=0;frame=iso;lex=isolated
+vowel_hvd_eh	vowel	[HH EH1 D]	HH EH D	head	target=EH;slot=1;frame=hvd;lex=word
+vowel_bvd_eh	vowel	[B EH1 D]	B EH D	bed	target=EH;slot=1;frame=bvd;lex=word
+vowel_bvt_eh	vowel	[B EH1 T]	B EH T	bet	target=EH;slot=1;frame=bvt;lex=word
+vowel_svt_eh	vowel	[S EH1 T]	S EH T	set	target=EH;slot=1;frame=svt;lex=word
+vowel_dvd_eh	vowel	[D EH1 D]	D EH D	dead	target=EH;slot=1;frame=dvd;lex=word
+vowel_iso_ae	vowel	[AE1]	AE		target=AE;slot=0;frame=iso;lex=isolated
+vowel_hvd_ae	vowel	[HH AE1 D]	HH AE D	had	target=AE;slot=1;frame=hvd;lex=word
+vowel_bvd_ae	vowel	[B AE1 D]	B AE D	bad	target=AE;slot=1;frame=bvd;lex=word
+vowel_bvt_ae	vowel	[B AE1 T]	B AE T	bat	target=AE;slot=1;frame=bvt;lex=word
+vowel_svt_ae	vowel	[S AE1 T]	S AE T	sat	target=AE;slot=1;frame=svt;lex=word
+vowel_dvd_ae	vowel	[D AE1 D]	D AE D	dad	target=AE;slot=1;frame=dvd;lex=word
+vowel_iso_ah	vowel	[AH1]	AH		target=AH;slot=0;frame=iso;lex=isolated
+vowel_hvd_ah	vowel	[HH AH1 D]	HH AH D	hud	target=AH;slot=1;frame=hvd;lex=word
+vowel_bvd_ah	vowel	[B AH1 D]	B AH D	bud	target=AH;slot=1;frame=bvd;lex=word
+vowel_bvt_ah	vowel	[B AH1 T]	B AH T	but	target=AH;slot=1;frame=bvt;lex=word
+vowel_svt_ah	vowel	[S AH1 T]	S AH T		target=AH;slot=1;frame=svt;lex=nonsense
+vowel_dvd_ah	vowel	[D AH1 D]	D AH D	dud	target=AH;slot=1;frame=dvd;lex=word
+vowel_iso_aa	vowel	[AA1]	AA		target=AA;slot=0;frame=iso;lex=isolated
+vowel_hvd_aa	vowel	[HH AA1 D]	HH AA D	hod	target=AA;slot=1;frame=hvd;lex=word
+vowel_bvd_aa	vowel	[B AA1 D]	B AA D		target=AA;slot=1;frame=bvd;lex=nonsense
+vowel_bvt_aa	vowel	[B AA1 T]	B AA T	bot	target=AA;slot=1;frame=bvt;lex=word
+vowel_svt_aa	vowel	[S AA1 T]	S AA T	sot	target=AA;slot=1;frame=svt;lex=word
+vowel_dvd_aa	vowel	[D AA1 D]	D AA D		target=AA;slot=1;frame=dvd;lex=nonsense
+vowel_iso_ao	vowel	[AO1]	AO		target=AO;slot=0;frame=iso;lex=isolated
+vowel_hvd_ao	vowel	[HH AO1 D]	HH AO D	hawed	target=AO;slot=1;frame=hvd;lex=word
+vowel_bvd_ao	vowel	[B AO1 D]	B AO D	bawd	target=AO;slot=1;frame=bvd;lex=word
+vowel_bvt_ao	vowel	[B AO1 T]	B AO T	bought	target=AO;slot=1;frame=bvt;lex=word
+vowel_svt_ao	vowel	[S AO1 T]	S AO T	sought	target=AO;slot=1;frame=svt;lex=word
+vowel_dvd_ao	vowel	[D AO1 D]	D AO D		target=AO;slot=1;frame=dvd;lex=nonsense
+vowel_iso_uh	vowel	[UH1]	UH		target=UH;slot=0;frame=iso;lex=isolated
+vowel_hvd_uh	vowel	[HH UH1 D]	HH UH D	hood	target=UH;slot=1;frame=hvd;lex=word
+vowel_bvd_uh	vowel	[B UH1 D]	B UH D		target=UH;slot=1;frame=bvd;lex=nonsense
+vowel_bvt_uh	vowel	[B UH1 T]	B UH T		target=UH;slot=1;frame=bvt;lex=nonsense
+vowel_svt_uh	vowel	[S UH1 T]	S UH T	soot	target=UH;slot=1;frame=svt;lex=word
+vowel_dvd_uh	vowel	[D UH1 D]	D UH D		target=UH;slot=1;frame=dvd;lex=nonsense
+vowel_iso_uw	vowel	[UW1]	UW		target=UW;slot=0;frame=iso;lex=isolated
+vowel_hvd_uw	vowel	[HH UW1 D]	HH UW D	who'd	target=UW;slot=1;frame=hvd;lex=word
+vowel_bvd_uw	vowel	[B UW1 D]	B UW D	booed	target=UW;slot=1;frame=bvd;lex=word
+vowel_bvt_uw	vowel	[B UW1 T]	B UW T	boot	target=UW;slot=1;frame=bvt;lex=word
+vowel_svt_uw	vowel	[S UW1 T]	S UW T	suit	target=UW;slot=1;frame=svt;lex=word
+vowel_dvd_uw	vowel	[D UW1 D]	D UW D	dude	target=UW;slot=1;frame=dvd;lex=word
+vowel_iso_er	vowel	[ER1]	ER		target=ER;slot=0;frame=iso;lex=isolated
+vowel_hvd_er	vowel	[HH ER1 D]	HH ER D	heard	target=ER;slot=1;frame=hvd;lex=word
+vowel_bvd_er	vowel	[B ER1 D]	B ER D	bird	target=ER;slot=1;frame=bvd;lex=word
+vowel_bvt_er	vowel	[B ER1 T]	B ER T		target=ER;slot=1;frame=bvt;lex=nonsense
+vowel_svt_er	vowel	[S ER1 T]	S ER T		target=ER;slot=1;frame=svt;lex=nonsense
+vowel_dvd_er	vowel	[D ER1 D]	D ER D		target=ER;slot=1;frame=dvd;lex=nonsense
+vowel_iso_ax	vowel	[AX]	AX		target=AX;slot=0;frame=iso;lex=isolated
+vowel_word_ax_sofa	vowel	[S OW1 F AX]	S OW F AX	sofa	target=AX;slot=3;frame=word;lex=word
+vowel_word_ax_about	vowel	[AX B AW1 T]	AX B AW T	about	target=AX;slot=0;frame=word;lex=word
+vowel_word_ax_comma	vowel	[K AA1 M AX]	K AA M AX	comma	target=AX;slot=3;frame=word;lex=word
+vowel_word_ax_panda	vowel	[P AE1 N D AX]	P AE N D AX	panda	target=AX;slot=4;frame=word;lex=word
+vowel_word_ax_ago	vowel	[AX G OW1]	AX G OW	ago	target=AX;slot=0;frame=word;lex=word
+vowel_iso_ey	vowel	[EY1]	EY		target=EY;slot=0;frame=iso;lex=isolated
+vowel_hvd_ey	vowel	[HH EY1 D]	HH EY D	hayed	target=EY;slot=1;frame=hvd;lex=word
+vowel_bvd_ey	vowel	[B EY1 D]	B EY D	bayed	target=EY;slot=1;frame=bvd;lex=word
+vowel_bvt_ey	vowel	[B EY1 T]	B EY T	bait	target=EY;slot=1;frame=bvt;lex=word
+vowel_svt_ey	vowel	[S EY1 T]	S EY T	sate	target=EY;slot=1;frame=svt;lex=word
+vowel_dvd_ey	vowel	[D EY1 D]	D EY D		target=EY;slot=1;frame=dvd;lex=nonsense
+vowel_iso_ay	vowel	[AY1]	AY		target=AY;slot=0;frame=iso;lex=isolated
+vowel_hvd_ay	vowel	[HH AY1 D]	HH AY D	hide	target=AY;slot=1;frame=hvd;lex=word
+vowel_bvd_ay	vowel	[B AY1 D]	B AY D	bide	target=AY;slot=1;frame=bvd;lex=word
+vowel_bvt_ay	vowel	[B AY1 T]	B AY T	bite	target=AY;slot=1;frame=bvt;lex=word
+vowel_svt_ay	vowel	[S AY1 T]	S AY T	site	target=AY;slot=1;frame=svt;lex=word
+vowel_dvd_ay	vowel	[D AY1 D]	D AY D	died	target=AY;slot=1;frame=dvd;lex=word
+vowel_iso_ow	vowel	[OW1]	OW		target=OW;slot=0;frame=iso;lex=isolated
+vowel_hvd_ow	vowel	[HH OW1 D]	HH OW D	hoed	target=OW;slot=1;frame=hvd;lex=word
+vowel_bvd_ow	vowel	[B OW1 D]	B OW D	bode	target=OW;slot=1;frame=bvd;lex=word
+vowel_bvt_ow	vowel	[B OW1 T]	B OW T	boat	target=OW;slot=1;frame=bvt;lex=word
+vowel_svt_ow	vowel	[S OW1 T]	S OW T		target=OW;slot=1;frame=svt;lex=nonsense
+vowel_dvd_ow	vowel	[D OW1 D]	D OW D		target=OW;slot=1;frame=dvd;lex=nonsense
+vowel_iso_aw	vowel	[AW1]	AW		target=AW;slot=0;frame=iso;lex=isolated
+vowel_hvd_aw	vowel	[HH AW1 D]	HH AW D	how'd	target=AW;slot=1;frame=hvd;lex=word
+vowel_bvd_aw	vowel	[B AW1 D]	B AW D	bowed	target=AW;slot=1;frame=bvd;lex=word
+vowel_bvt_aw	vowel	[B AW1 T]	B AW T	bout	target=AW;slot=1;frame=bvt;lex=word
+vowel_svt_aw	vowel	[S AW1 T]	S AW T		target=AW;slot=1;frame=svt;lex=nonsense
+vowel_dvd_aw	vowel	[D AW1 D]	D AW D		target=AW;slot=1;frame=dvd;lex=nonsense
+vowel_iso_oy	vowel	[OY1]	OY		target=OY;slot=0;frame=iso;lex=isolated
+vowel_hvd_oy	vowel	[HH OY1 D]	HH OY D		target=OY;slot=1;frame=hvd;lex=nonsense
+vowel_bvd_oy	vowel	[B OY1 D]	B OY D		target=OY;slot=1;frame=bvd;lex=nonsense
+vowel_bvt_oy	vowel	[B OY1 T]	B OY T		target=OY;slot=1;frame=bvt;lex=nonsense
+vowel_svt_oy	vowel	[S OY1 T]	S OY T		target=OY;slot=1;frame=svt;lex=nonsense
+vowel_dvd_oy	vowel	[D OY1 D]	D OY D		target=OY;slot=1;frame=dvd;lex=nonsense
