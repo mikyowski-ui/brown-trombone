@@ -330,11 +330,17 @@ def score_slots(
     sentence: bool = False,
     batch_size: int = 8,
     margins: bool = True,
+    intended: list[list[str] | None] | None = None,
 ) -> list[ItemResult]:
-    """Recognise every item once and score the slots of ``metric``."""
+    """Recognise every item once and score the slots of ``metric``.
+
+    ``intended``: the phonemes the engine says it spoke, per item; a slot
+    where they differ from the reference gets ``meta["frontend_ok"] =
+    False`` (the engine's text front end, not its sound, missed it)."""
     lps = pj.log_probs(audios, batch_size=batch_size)
     out = []
-    for item, lp in zip(items, lps):
+    intended = intended or [None] * len(items)
+    for item, lp, said in zip(items, lps, intended):
         toks = pj.decode(lp)
         heard, heard_tok = heard_with_tokens(toks)
         ref = A.canonical(list(item.expected))
@@ -342,10 +348,13 @@ def score_slots(
         res = ItemResult(
             item.id, item.set, ref, heard, toks, sum(1 for o in ops if o[0] != "ok"), pj.ref_loglik(lp, list(item.expected)), []
         )
+        said_c = A.canonical(said) if said is not None else None
         for slot, info in item_slots(item, metric, sentence):
             target = ref[slot]
             op, h, j = slot_heard_at(ref, heard, slot)
             s = Slot(item.id, item.set, ref, slot, target, h, op, meta=dict(info), token=heard_tok[j] if j is not None else None)
+            if said_c is not None:
+                s.meta["frontend_ok"] = slot_heard(ref, said_c, slot)[0] == "ok"
             if margins and metric == "vowels":
                 s.margin, s.rival, _ = choice_margin(lp, ref, slot, vowel_rivals(target), pj.unit_ids, pj.blank)
             elif margins and metric == "voicing":
@@ -474,9 +483,13 @@ def summarize_vowels(results: list[ItemResult]) -> dict:
     pairs = Counter((s.target, s.heard or DELETED) for s in slots if not ok(s))
     # Heard as AA: the open front token a/aː (between AE and AA) or the back ɑ/ɑː?
     as_aa = Counter(s.token for s in slots if s.heard == "AA" and s.target != "AA")
+    fe = [s for s in slots if s.meta.get("frontend_ok") is not False]
     return {
         "items": len(results),
         "slots": len(slots),
+        "slots_frontend_ok": len(fe),
+        "vowel_error_frontend_ok": 1 - (_rate(ok(s) for s in fe) or 0),
+        "margin_frontend_ok": _mean(s.margin for s in fe),
         "heard_aa_tokens": dict(as_aa.most_common()),
         "vowel_error": 1 - (_rate(ok(s) for s in slots) or 0),
         "vowel_error_merged": 1 - (_rate(okm(s) for s in slots) or 0),
@@ -541,6 +554,7 @@ def summarize_voicing(results: list[ItemResult]) -> dict:
         "slots": len(slots),
         "per": set_per(results),
         "headline": _voicing_stats(head),
+        "headline_frontend_ok": _voicing_stats([s for s in head if s.meta.get("frontend_ok") is not False]),
         "fv": _voicing_stats(fv),
         "by_pair": _voicing_breakdown(slots, lambda s: s.meta.get("pair", "")),
         "by_position": _voicing_breakdown(head, lambda s: s.meta.get("pos", "")),
@@ -571,11 +585,14 @@ def summarize_confusions(results: list[ItemResult]) -> dict:
     slots = [s for r in results for s in r.slots]
     voi = {c: voicing_of(c) for c in A.CONSONANTS + [A.FLAP]}
     pairs = Counter((s.target, s.heard or DELETED) for s in slots if not A.same(s.target, s.heard or ""))
+    fe = [s for s in slots if s.meta.get("frontend_ok") is not False]
     return {
         "items": len(results),
         "slots": len(slots),
         "per": set_per(results),
         "accuracy": _rate(A.same(s.target, s.heard or "") for s in slots),
+        "slots_frontend_ok": len(fe),
+        "accuracy_frontend_ok": _rate(A.same(s.target, s.heard or "") for s in fe),
         "place_accuracy": _rate(PLACE.get(s.heard or "") == PLACE[s.target] for s in slots),
         "manner_accuracy": _rate(MANNER.get(s.heard or "") == MANNER[s.target] for s in slots),
         "voicing_accuracy": _rate(
@@ -793,7 +810,8 @@ def run(
         t1 = time.perf_counter()
     t_load = time.perf_counter() - t1 if own and not cut else 0.0
     t2 = time.perf_counter()
-    results = score_slots(pj, items, audios, metric, sentence=sentence, batch_size=batch_size)
+    said = [r.engine_phones for r in rendered] if not cut and system in render.ENGINE_SYSTEMS else None
+    results = score_slots(pj, items, audios, metric, sentence=sentence, batch_size=batch_size, intended=said)
     t_judge = time.perf_counter() - t2
     if own:
         pj.close()
@@ -842,6 +860,17 @@ def summary_line(res: dict) -> str:
     s, m, name = res["summary"], res["metric"], res["name"]
     t = res["seconds"]
     tt = f"render {t['render']:.1f} s, judge {t['judge']:.1f} s"
+    fe = ""
+    if s.get("slots_frontend_ok", s["slots"]) != s["slots"]:
+        if m == "vowels":
+            fe = f"; front end right: {pct(s['vowel_error_frontend_ok'])}% on {s['slots_frontend_ok']}"
+        elif m == "voicing":
+            fe = f"; front end right: forced {pct(s['headline_frontend_ok']['forced'])}%"
+        else:
+            fe = f"; front end right: {pct(s['accuracy_frontend_ok'])}% on {s['slots_frontend_ok']}"
+    elif m == "voicing" and s.get("headline_frontend_ok", {}).get("n", s["headline"]["n"]) != s["headline"]["n"]:
+        fe = f"; front end right: forced {pct(s['headline_frontend_ok']['forced'])}%"
+    tt += fe
     if m == "vowels":
         return (
             f"vowels {name}: vowel error {pct(s['vowel_error'])}% (AA=AO {pct(s['vowel_error_merged'])}%), "
@@ -956,13 +985,16 @@ def probe_report(
         L += [Path(notes).read_text(encoding="utf-8").rstrip(), ""]
 
     get = load
-    L += ["## Vowels", "", "| run | set | vowel error % | AA=AO error % | PER % | margin (nats) | intended wins % | slots |",
-          "|---|---|---:|---:|---:|---:|---:|---:|"]  # fmt: skip
+    L += ["## Vowels", "", "`front end right`: only the slots where the engine's own phonemes (first line of `say`) match the "
+          "reference, i.e. without its text-to-phoneme mistakes (sentences only).", "",
+          "| run | set | vowel error % | AA=AO error % | front end right: error % (slots) | PER % | margin (nats) | intended wins % | slots |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|"]  # fmt: skip
     for n in allnames:
         d = get("vowels", n)
         if d:
             s = d["summary"]
-            L.append(f"| {n} | {d['set']} | {pct(s['vowel_error'])} | {pct(s['vowel_error_merged'])} | {pct(s['per'])} | "
+            fe = f"{pct(s['vowel_error_frontend_ok'])} ({s['slots_frontend_ok']})" if s.get("slots_frontend_ok", s["slots"]) != s["slots"] else ""
+            L.append(f"| {n} | {d['set']} | {pct(s['vowel_error'])} | {pct(s['vowel_error_merged'])} | {fe} | {pct(s['per'])} | "
                      f"{num(s['margin'])} | {pct(s['won'])} | {s['slots']} |")  # fmt: skip
     L += ["", "Vowel error by vowel (%):", ""]
     L += ["| run | " + " | ".join(VOWELS) + " |", "|---|" + "---:|" * len(VOWELS)]
@@ -986,16 +1018,19 @@ def probe_report(
 
     pairs = [f"{a}/{b}" for a, b in material.VOICING_PAIRS]
     L += ["", "## Voicing", "", "Forced choice accuracy % (intended beats its voicing twin); free = recognised consonant has the intended voicing.", "",
-          "| run | set | forced % | voiceless % | voiced % | margin | free % | " + " | ".join(f"{p} forced" for p in pairs) + " |",
-          "|---|---|---:|---:|---:|---:|---:|" + "---:|" * len(pairs)]  # fmt: skip
+          "| run | set | forced % | voiceless % | voiced % | front end right: forced % | margin | free % | free voiceless % | free voiced % | " + " | ".join(f"{p} forced" for p in pairs) + " |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|" + "---:|" * len(pairs)]  # fmt: skip
     for n in allnames:
         d = get("voicing", n)
         if d:
             s = d["summary"]
             h = s["headline"]
+            hf = s.get("headline_frontend_ok", h)
+            fe = f"{pct(hf['forced'])} ({hf['n']})" if hf["n"] != h["n"] else ""
             bp = s["by_pair"]
-            L.append(f"| {n} | {d['set']} | {pct(h['forced'])} | {pct(h['forced_voiceless'])} | {pct(h['forced_voiced'])} | "
-                     f"{num(h['margin'])} | {pct(h['free'])} | " + " | ".join(pct(bp[p]["forced"]) if p in bp else "" for p in pairs) + " |")  # fmt: skip
+            L.append(f"| {n} | {d['set']} | {pct(h['forced'])} | {pct(h['forced_voiceless'])} | {pct(h['forced_voiced'])} | {fe} | "
+                     f"{num(h['margin'])} | {pct(h['free'])} | {pct(h['free_voiceless'])} | {pct(h['free_voiced'])} | "
+                     + " | ".join(pct(bp[p]["forced"]) if p in bp else "" for p in pairs) + " |")  # fmt: skip
     L += ["", "By position (P/B T/D K/G S/Z), forced % / free %:", "",
           "| run | initial | medial | final | vcv | sentence |", "|---|---:|---:|---:|---:|---:|"]  # fmt: skip
     for n in allnames:
@@ -1005,13 +1040,15 @@ def probe_report(
             L.append(f"| {n} | " + " | ".join(f"{pct(bp[p]['forced'])} / {pct(bp[p]['free'])}" if p in bp else ""
                                               for p in ("initial", "medial", "final", "vcv", "sentence")) + " |")  # fmt: skip
 
-    L += ["", "## Consonants (VCV)", "", "| run | set | consonant % | place % | manner % | voicing % | slots |",
-          "|---|---|---:|---:|---:|---:|---:|"]  # fmt: skip
+    L += ["", "## Consonants (VCV; in sentences every consonant)", "",
+          "| run | set | consonant % | front end right: % (slots) | place % | manner % | voicing % | slots |",
+          "|---|---|---:|---:|---:|---:|---:|---:|"]  # fmt: skip
     for n in allnames:
         d = get("confusions", n)
         if d:
             s = d["summary"]
-            L.append(f"| {n} | {d['set']} | {pct(s['accuracy'])} | {pct(s['place_accuracy'])} | {pct(s['manner_accuracy'])} | "
+            fe = f"{pct(s['accuracy_frontend_ok'])} ({s['slots_frontend_ok']})" if s.get("slots_frontend_ok", s["slots"]) != s["slots"] else ""
+            L.append(f"| {n} | {d['set']} | {pct(s['accuracy'])} | {fe} | {pct(s['place_accuracy'])} | {pct(s['manner_accuracy'])} | "
                      f"{pct(s['voicing_accuracy'])} | {s['slots']} |")  # fmt: skip
     L += ["", "Worst consonant confusions:", ""]
     for n in allnames:
