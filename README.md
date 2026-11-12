@@ -72,6 +72,12 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | click `[-]` `[+]`, `wobble`, `drone`, `engine` | octave and the toggles |
 | click `[/ vowels]` under the scope; left-drag on the vowel chart | Formant Lock on or off; steer the vowel by its formants, or click a vowel mark |
 
+Turning a persona dial or a meter while nothing is sounding plays the
+current note for as long as you keep turning (and 0.4 s after), so you
+hear what the change does; while a note, the drone, speech or mimic is
+sounding, the change is heard in that instead. The tongue handle stays
+inside the mouth and follows the voice's size, like the vowel marks.
+
 **Formant Lock** (`/`, or `[/ vowels]` under the scope) lets you find
 vowels by how they sound rather than by where the tongue goes. The scope
 gives way to a vowel chart, drawn the way phoneticians draw it: F2 across,
@@ -221,9 +227,25 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the thirty numbers of `Tuning`: lung pressure and how the
-folds start, the efficiency and colour of hiss, the width of consonant
-gaps, how long each kind of sound lasts and how fast the articulators move.
+Underneath sit the sixty-three numbers of `Tuning`, each with a default and
+a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
+`say --dump-parameters` prints them). The classic engine reads twelve of
+them (the lengths of sounds, stress and the gaps); the physical engine
+reads the rest as well:
+
+| Group | Fields |
+|---|---|
+| breath and folds | `lung_pressure`, `adduction_time`, `attack_depth`, `attack_hold`, `modal_gap`, `posterior_gap`, `abducted_area` |
+| noise | `jet_efficiency`, `teeth_gain`, `glottal_efficiency`, `hiss_corner` |
+| gaps | `fricative_gap`, `approximant_gap`, `nasal_port` |
+| larynx in consonants | `abduction_time`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `voiced_stop_slack`, `cavity_expansion`, `onset_kick`, `kick_time` |
+| lengths | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `voiced_sibilant_length`, `approximant_length`, `aspirate_length`, `aspiration`, `stress_stretch`, `vowel_hold` |
+| voicing timing | `vot_labial`, `vot_alveolar`, `vot_velar`, `devoicing_lead`, `unstressed_vot`, `fortis_closure`, `prefortis_clip`, `prelenis_stretch` |
+| articulators | `lead`, `release_lead`, `articulation_rate`, `body_rate`, `dorsum_rate`, `closing_ratio`, `release_speed`, `closure_overshoot` |
+| breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
+| hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
+| intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
+
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
 
@@ -239,6 +261,17 @@ A voice with its persona and tuning can be kept as a JSON profile (feature
 cargo run --release -p synthie-trombone --example say -- --engine physical --profile my-voice.json "Hello there."
 cargo run --release -p synthie-trombone --example say -- --dump-profile     # the voice in use, as a profile
 cargo run --release -p synthie-trombone-cli -- --engine physical --profile my-voice.json
+```
+
+A profile read by the `say` example may also carry a `"vowels"` object of
+F1, F2 and F3 targets (adult man, Hz) keyed by vowel (`IH`, and `AY<` /
+`AY>` for the start and end of a diphthong): `say` solves their shapes
+through the babble map when it starts, so other vowel targets can be heard
+without regenerating the vowel table. The library's own profiles do not
+read it.
+
+```json
+{ "engine": "Physical", "vowels": { "IH": [410, 2050, 2700], "AY>": [400, 2100, 2800] } }
 ```
 
 ## The physical engine
@@ -313,6 +346,49 @@ keeps the pulse out altogether, `GlottalSource::Pulse` uses nothing
 else, `Trombone::fold_range` gives the range and `Gauges::sounding`
 says which is singing. Body-cover folds under muscle control (Titze &
 Story 2002) are implemented and tested but not yet what sets the pitch.
+
+### How it speaks
+
+Speech on the physical engine is made the way a speaker makes it, as far
+as the model goes:
+
+- **The voice.** In modal speech the folds close on every cycle, so the
+  voice keeps a steady H1–H2 instead of drifting breathy, and the folds
+  carry every sentence of the default voices; the pulse only takes notes
+  out of their range (above).
+- **Voiced and voiceless.** For /p t k f s/ the arytenoids spread the
+  glottis behind the folds, slower than the folds themselves move, and the
+  voice stops at the moment the mouth actually shuts (the larynx is timed
+  from `Trombone::mouth_shut`, not from a script). After a /p t k/ the
+  glottis stays open for a voice onset time that grows from the lips to the
+  velum, and the voice comes back a little high. In /b d g/ the throat and
+  cheeks widen so the air the voice sends into the shut mouth has
+  somewhere to go, and the voice carries on through the closure. A vowel
+  is shorter before a voiceless consonant that ends its syllable and
+  longer before a voiced one, as in English.
+- **Stops** build pressure behind the closure and burst by themselves,
+  without a click at the release.
+- **Two speeds of articulator.** The tongue body and the jaw are heavy and
+  slow, so the vowel shape glides from vowel to vowel underneath the
+  consonants; the tongue tip, blade and lips are light and quick and make
+  the consonants on top of it, and the back of the tongue is in between. A
+  consonant is made on the body of the vowel it leads into.
+- **Vowels** are the averages for the 45 men of Hillenbrand, Getty, Clark
+  & Wheeler (1995), solved into shapes through the babble map, with lip
+  protrusion and a jaw; six of them were moved by a few per cent against
+  the speech recognizer (`src/vowel_targets.rs` says which and by how
+  much). They are held longer than the classic engine's, since the slow
+  tongue body needs the time to get there.
+- **Phrases.** The lungs build their pressure up over the start of a
+  phrase, run down over it and let go over its last vowel, so a sentence
+  swells in and dies away. Each stressed vowel gets a pitch accent that
+  sinks back, the pitch declines over the phrase, and a statement falls at
+  its end.
+- **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
+  broader and lower, with rounded but open lips.
+
+Each of these has its numbers in `Tuning` (below) and its gate in
+`tests/physical_gates.rs` or `tests/natural_gate.rs`.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
 two-mass folds; Story & Titze (1995) and Titze & Story (2002) for the
@@ -428,18 +504,29 @@ audio path.
 
 ## When the pronunciation is off
 
-Text goes through English letter-to-sound rules (digraphs, the silent *e*,
-soft *c* and *g*, unstressed vowels) and a dictionary of about a hundred
-common and irregular words, and numbers are spelled out. Consonants take the
-tongue position of the next vowel, stops get a closure, a burst and a
-breath, and the pitch drifts down over a phrase, falls at `.` and rises at
-`?`. Rules get some English spellings wrong; when a word comes out odd, you
-can write its phonemes in ARPAbet in square brackets (a `1` marks the
-stressed vowel):
+Text is looked up in a pronouncing dictionary first: a core of about 2,000
+common and irregular words is always built in, and the `dictionary`
+feature (on by default, about 22 KB) adds 1,200 less frequent ones. A word
+it does not know is taken apart into a known stem and a regular ending
+(`-s`, `-ed`, `-ing`, `-ly` ...), and otherwise spelled out by English
+letter-to-sound rules (digraphs, the silent *e*, soft *c* and *g*,
+unstressed vowels); numbers are spelled out. On the judge's material the
+front end now agrees with eSpeak on nearly every word
+(`tools/judge/frontend_check.py`). Consonants take the tongue position of
+the next vowel, stops get a closure, a burst and a breath, and the pitch
+drifts down over a phrase, falls at `.` and rises at `?`. When a word
+comes out odd, you can write its phonemes in ARPAbet in square brackets (a
+`1` marks the stressed vowel):
 
 ```text
 [HH AX L OW1], pink trombone!
 ```
+
+Or give the front end your own words: `speech::phonemize_with(text,
+&lexicon)` consults `lexicon` (a lower-case word to ARPAbet such as
+`"K AX N UW1"`) in place of the built-in dictionary and spells out
+everything else as `phonemize` does; `&|_| None` hears the spelling rules
+alone.
 
 ## A trombone walks into a synthesizer
 
