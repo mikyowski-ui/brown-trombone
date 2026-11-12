@@ -776,6 +776,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        lean_on_vowels(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
     }
 
@@ -810,6 +811,31 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         release_lead: timing.release_lead,
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
+    }
+}
+
+/// The physical engine makes consonants on the tongue body of the vowel
+/// they lead into (of the one before, at the end of an utterance): each
+/// consonant is told which vowel shape that is, so that its tongue tip, lips
+/// or tongue back act on that vowel's body instead of moving the whole
+/// tongue to a body of their own (see `Articulation::leaning_on`).
+fn lean_on_vowels(drafts: &mut [Draft]) {
+    let leans = |d: &Draft| !d.vowel && d.phoneme != Phoneme::Sil && d.articulation.vowel.is_none();
+    let mut next = None;
+    for d in drafts.iter_mut().rev() {
+        if d.vowel {
+            next = d.articulation.vowel;
+        } else if leans(d) {
+            d.articulation.vowel = next;
+        }
+    }
+    let mut prev = None;
+    for d in drafts.iter_mut() {
+        if d.vowel {
+            prev = d.articulation.vowel;
+        } else if leans(d) {
+            d.articulation.vowel = prev;
+        }
     }
 }
 

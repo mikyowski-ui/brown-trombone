@@ -309,6 +309,10 @@ pub(crate) struct Tract {
     /// (physical engine), and which articulator moves each cell.
     body: [f32; N],
     mover: [Mover; N],
+    /// The tongue body is being held by a consonant of its own (/k g ŋ l
+    /// r/): it moves at the back of the tongue's speed, until it is back
+    /// with the vowels.
+    pub(crate) quick_body: bool,
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
@@ -364,6 +368,7 @@ impl Tract {
             velocity: [0.0; N],
             body: [0.0; N],
             mover: [Mover::Body; N],
+            quick_body: false,
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             trim: [0.0; N / PLACE],
@@ -617,7 +622,13 @@ impl Tract {
                 c.diameter += self.trim[place(c.index)];
             }
             let before = self.target;
-            carve_consonant(&mut self.target, c, floor);
+            if intent(k, c.diameter) == Intent::Open {
+                // An approximant (/l r/) shapes the tongue as a whole, as
+                // the original's did.
+                carve(&mut self.target, c, floor);
+            } else {
+                carve_consonant(&mut self.target, c, floor);
+            }
             for i in 0..N {
                 if self.target[i] < before[i] - CARVED * 0.1 {
                     by[i] = Some(mover_of(c.index));
@@ -629,6 +640,8 @@ impl Tract {
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
+            } else if self.quick_body {
+                self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
             {

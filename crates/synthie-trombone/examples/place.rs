@@ -239,10 +239,24 @@ fn clusters(settings: &VoiceSettings) {
     }
 }
 
+fn tongues() {
+    println!("== physical tongue body (index, diameter) of each vowel");
+    for &p in Phoneme::ALL {
+        if let Some((i, d)) = p.tongue(synthie_trombone::Engine::Physical)
+            && matches!(p.manner(), Manner::Vowel | Manner::Diphthong)
+        {
+            println!("{p:>3}: {i:5.2} {d:5.2}");
+        }
+    }
+}
+
 fn main() {
     let settings = stops::judge_voice();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let wants = |s: &str| args.is_empty() || args.iter().any(|a| a == s);
+    if wants("tongues") {
+        tongues();
+    }
     if wants("loci") {
         loci(&settings);
     }
