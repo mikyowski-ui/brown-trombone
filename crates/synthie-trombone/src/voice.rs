@@ -246,6 +246,7 @@ impl Trombone {
             Engine::Classic => Dynamics::Linear,
             Engine::Physical => Dynamics::Damped,
         };
+        self.tract.jaw = engine == Engine::Physical;
         self.reset();
     }
 

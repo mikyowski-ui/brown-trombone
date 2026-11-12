@@ -12,8 +12,8 @@
 //! moves smoothly. Lips and narrowing are never tighter than the tightest
 //! [physical vowels](crate::Phoneme), so solved shapes do not hiss.
 //!
-//! The engine reaches F1 from about 250 to 700 Hz and F2 from about 550 to
-//! 2500 Hz, in the vowel-triangle shaped region that [`reachable`] knows;
+//! The engine reaches F1 from about 250 to 760 Hz and F2 from about 550 to
+//! 2700 Hz, in the vowel-triangle shaped region that [`reachable`] knows;
 //! [`nearest_reachable`] clamps a target into it. Measured back through the
 //! engine, solved shapes land within about 2 % of the F1 and F2 asked for
 //! (`tests/inverse_gate.rs`). For other tract lengths use [`solve_for`].
@@ -58,8 +58,10 @@ const LIPS: (f32, f32) = (0.65, 3.3);
 const LIPS_KNEE: f32 = 1.8;
 /// Lip coordinate of [`LIPS_KNEE`].
 const LIPS_KNEE_AT: f32 = 0.75;
-/// Where along the tongue a narrowing can sit.
-const NARROWING_AT: (f32, f32) = (14.0, 34.0);
+/// Where along the tract a narrowing can sit: from the lower pharynx (a
+/// tongue root pulled back narrows it for /a/, which is what lifts F1 past
+/// 700 Hz) to behind the teeth.
+const NARROWING_AT: (f32, f32) = (8.0, 34.0);
 /// Narrowing, touch diameter: from the narrowest that does not hiss (that
 /// of /i/) to wider than the tract ever is.
 const NARROWING: (f32, f32) = (0.7, 3.0);

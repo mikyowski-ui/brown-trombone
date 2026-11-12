@@ -1,13 +1,16 @@
 //! Phonemes as articulations: where the tongue sits, what closes the tract,
 //! whether the velum is open and the folds vibrate.
 //!
-//! The set follows ARPAbet. Vowel positions were fitted by grid search to
-//! Peterson & Barney's (1952) male F1/F2 averages (see the `tune_vowels`
-//! example); consonants follow the original's tract diagram.
+//! The set follows ARPAbet. Vowel positions of the classic engine were
+//! fitted by grid search to Peterson & Barney's (1952) male F1/F2 averages
+//! (see the `tune_vowels` example); consonants follow the original's tract
+//! diagram. The physical engine shapes its vowels from the formant targets
+//! in [`vowel_targets`](crate::vowel_targets) instead.
 
 use crate::tract::Constriction;
 use crate::voice::Engine;
 use crate::vowel_size;
+use crate::vowel_targets::{self, VowelKey};
 
 /// How a phoneme is produced; drives timing in the speech front end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -48,6 +51,12 @@ pub struct Articulation {
     pub voiced: bool,
     /// Glottal tenseness override; low values make breathy noise.
     pub tenseness: Option<f32>,
+    /// The vowel shape of the physical engine this articulation stands for
+    /// (see [`vowel_targets`](crate::vowel_targets)): set on vowels, the
+    /// glides `W` and `Y`, and both ends of a diphthong, which the physical
+    /// engine shapes for that diphthong rather than as the vowel the
+    /// classic engine uses there. The classic engine ignores it.
+    pub vowel: Option<VowelKey>,
 }
 
 impl Articulation {
@@ -59,7 +68,14 @@ impl Articulation {
             velum: 0.0,
             voiced: true,
             tenseness: None,
+            vowel: None,
         }
+    }
+
+    /// The same articulation, standing for the physical vowel shape `key`.
+    const fn standing_for(mut self, key: VowelKey) -> Self {
+        self.vowel = Some(key);
+        self
     }
 
     const fn rounded(mut self, lips: f32) -> Self {
@@ -75,6 +91,7 @@ impl Articulation {
             velum: 0.0,
             voiced,
             tenseness: None,
+            vowel: None,
         }
     }
 
@@ -101,9 +118,16 @@ const POSTALVEOLAR: f32 = 33.0;
 const VELAR: f32 = 21.0;
 /// Closed.
 const SHUT: f32 = 0.0;
+/// Tongue body of /k g ŋ/ (classic engine).
+const VELAR_TONGUE: (f32, f32) = (VELAR, 2.1);
+/// Tongue body of /k g ŋ/ on the physical engine: forward of the closure,
+/// leaving the throat behind it open, so that the walls there can take up
+/// the air of a voiced /g/ and its voice lasts into the closure. (Where
+/// the classic body sits, right on the closure, the cavity behind it is so
+/// small that /g/ goes voiceless within 10 ms.)
+const PHYSICAL_VELAR_TONGUE: (f32, f32) = (25.0, 2.05);
 /// Narrow enough to hiss.
 const HISS: f32 = 0.45;
-
 macro_rules! phonemes {
     ($( $(#[$doc:meta])* $name:ident = $arpa:literal, $manner:ident; )*) => {
         /// An English phoneme (ARPAbet names).
@@ -249,20 +273,26 @@ impl Phoneme {
     /// The vowel shape the physical engine holds for this sound at
     /// `tract_length` (as given to
     /// [`Trombone::set_tract_length`](crate::Trombone::set_tract_length)):
-    /// tongue body, lip rounding and narrowing along the tongue. Its F1
-    /// and F2 are those of the native-length shape divided by the length.
-    /// Diphthongs give the shape they start from; `None` for sounds that
+    /// tongue body, lip rounding and narrowing along the tongue, solved so
+    /// that its formants are its [target's](crate::vowel_targets) for that
+    /// size. Diphthongs give the shape they start from (see
+    /// [`glide_end`](Self::glide_end) for the other); `None` for sounds that
     /// are not vowels or glides.
     #[must_use]
     pub fn physical_shape(self, tract_length: f32) -> Option<crate::inverse::Shape> {
-        let (a, narrowing) = self.articulation().physical(tract_length);
-        let ((tongue_index, tongue_diameter), narrowing) = (a.tongue?, narrowing?);
-        Some(crate::inverse::Shape {
-            tongue_index,
-            tongue_diameter,
-            lips: a.lips.map(|c| c.diameter),
-            narrowing: Some((narrowing.index, narrowing.diameter)),
-        })
+        self.articulation().physical_shape(tract_length)
+    }
+
+    /// Where a diphthong glides to: the classic engine's articulation of
+    /// its second vowel (see [`glide`](Self::glide)), standing for the
+    /// diphthong's own end shape on the physical engine. `None` for
+    /// everything that is not a diphthong.
+    #[must_use]
+    pub const fn glide_end(self) -> Option<Articulation> {
+        match self.glide() {
+            Some((_, to)) => Some(to.classic().standing_for(VowelKey::End(self))),
+            None => None,
+        }
     }
 
     /// Whether the vocal folds vibrate.
@@ -274,8 +304,21 @@ impl Phoneme {
     /// Target tract configuration. Diphthongs return the shape they start
     /// from (for `OW` a pure /o/, which no ARPAbet monophthong covers).
     #[must_use]
-    #[allow(clippy::match_same_arms)] // a lookup table
     pub const fn articulation(self) -> Articulation {
+        let a = self.classic();
+        match self.manner() {
+            Manner::Vowel => a.standing_for(VowelKey::Vowel(self)),
+            Manner::Diphthong => a.standing_for(VowelKey::Start(self)),
+            _ if matches!(self, Phoneme::W | Phoneme::Y) => a.standing_for(VowelKey::Vowel(self)),
+            _ => a,
+        }
+    }
+
+    /// [`articulation`](Self::articulation) without the
+    /// [vowel shape](Articulation::vowel) it stands for: what the classic
+    /// engine plays.
+    #[allow(clippy::match_same_arms)] // a lookup table
+    const fn classic(self) -> Articulation {
         use Phoneme as P;
         match self {
             P::Iy => Articulation::vowel(28.0, 2.15).rounded(1.3),
@@ -291,23 +334,25 @@ impl Phoneme {
             P::Er => Articulation::vowel(19.0, 2.6)
                 .rounded(1.1)
                 .with_constriction(30.0, 0.75),
-            P::Ay => Phoneme::Aa.articulation(),
-            P::Aw => Phoneme::Ae.articulation(),
-            P::Ey => Phoneme::Eh.articulation(),
+            P::Ay => Phoneme::Aa.classic(),
+            P::Aw => Phoneme::Ae.classic(),
+            P::Ey => Phoneme::Eh.classic(),
             // /o/, fitted to Hillenbrand et al. (1995): the "oh" in "go".
             P::Ow => Articulation::vowel(16.0, 2.25).rounded(0.95),
-            P::Oy => Phoneme::Ao.articulation(),
+            P::Oy => Phoneme::Ao.classic(),
 
             P::P => Articulation::consonant(LIPS, SHUT, false),
             P::B => Articulation::consonant(LIPS, SHUT, true),
             P::T => Articulation::consonant(ALVEOLAR, SHUT, false),
             P::D => Articulation::consonant(ALVEOLAR, SHUT, true),
-            P::K => Articulation::consonant(VELAR, SHUT, false).with_tongue(VELAR, 2.1),
-            P::G => Articulation::consonant(VELAR, SHUT, true).with_tongue(VELAR, 2.1),
+            P::K => Articulation::consonant(VELAR, SHUT, false)
+                .with_tongue(VELAR_TONGUE.0, VELAR_TONGUE.1),
+            P::G => Articulation::consonant(VELAR, SHUT, true)
+                .with_tongue(VELAR_TONGUE.0, VELAR_TONGUE.1),
             P::M => Articulation::consonant(LIPS, SHUT, true).nasal(),
             P::N => Articulation::consonant(ALVEOLAR, SHUT, true).nasal(),
             P::Ng => Articulation::consonant(VELAR, SHUT, true)
-                .with_tongue(VELAR, 2.1)
+                .with_tongue(VELAR_TONGUE.0, VELAR_TONGUE.1)
                 .nasal(),
             P::F => Articulation::consonant(TEETH + 1.5, HISS + 0.05, false),
             P::V => Articulation::consonant(TEETH + 1.5, HISS + 0.05, true),
@@ -332,6 +377,7 @@ impl Phoneme {
                 velum: 0.0,
                 voiced: true,
                 tenseness: Some(0.0),
+                vowel: None,
             },
             P::Sil => Articulation {
                 tongue: None,
@@ -340,71 +386,81 @@ impl Phoneme {
                 velum: 0.0,
                 voiced: false,
                 tenseness: None,
+                vowel: None,
             },
         }
     }
 }
 
-/// A vowel with its physical-engine shape (see [`PHYSICAL_VOWELS`]).
-type PhysicalVowel = (Phoneme, (f32, f32), Option<f32>, (f32, f32));
-
-/// Vowel shapes for the physical engine: tongue body `(index, diameter)`,
-/// lip rounding, and a narrowing along the tongue `(cell, diameter)`.
-///
-/// The physical tract has yielding walls, losses, side cavities and a real
-/// lip load, so the classic shapes land on different formants there. These
-/// were fitted with `examples/tune_physical.rs` to Peterson & Barney's
-/// (1952) F1, F2 *and* F3 for men; the extra narrowing is what lets F3 be
-/// placed at all. Lips and narrowing are kept wide enough not to hiss.
-const PHYSICAL_VOWELS: &[PhysicalVowel] = &[
-    (Phoneme::Iy, (28.08, 2.05), Some(0.86), (34.0, 0.7)),
-    (Phoneme::Ih, (28.67, 3.053), Some(0.944), (32.33, 0.832)),
-    (Phoneme::Eh, (21.83, 2.912), None, (30.69, 0.942)),
-    (Phoneme::Ae, (12.57, 3.339), None, (28.82, 1.4)),
-    (Phoneme::Ah, (12.0, 2.39), None, (24.02, 1.015)),
-    (Phoneme::Aa, (14.36, 2.65), None, (14.0, 1.028)),
-    (Phoneme::Ao, (12.0, 2.08), Some(1.348), (22.96, 1.315)),
-    (Phoneme::Uh, (19.55, 2.273), Some(0.739), (32.28, 0.887)),
-    (Phoneme::Uw, (25.06, 2.05), Some(0.65), (23.13, 0.7)),
-    (Phoneme::Ow, (16.1, 2.1), Some(1.108), (26.95, 0.955)),
-    (Phoneme::Er, (13.86, 2.696), Some(1.173), (30.15, 0.727)),
-    (Phoneme::Ax, (20.34, 3.28), Some(0.961), (30.78, 1.214)),
-    // The glides are their vowels, a little closer.
-    (Phoneme::W, (25.06, 2.05), Some(0.65), (23.13, 0.7)),
-    (Phoneme::Y, (28.08, 2.05), Some(0.86), (33.0, 0.7)),
-];
+impl VowelKey {
+    /// The articulation that stands for this shape.
+    const fn articulation(self) -> Option<Articulation> {
+        match self {
+            VowelKey::Vowel(p) | VowelKey::Start(p) => Some(p.articulation()),
+            VowelKey::End(p) => p.glide_end(),
+        }
+    }
+}
 
 impl Articulation {
     /// The same articulation as the physical engine needs it, plus the
-    /// narrowing along the tongue that belongs to its vowel shape. Shapes
-    /// are stored for the classic engine; here a vowel's tongue and lips
-    /// are replaced by the ones fitted to the physical tract, and a
-    /// consonant that borrowed a vowel's tongue position gets that vowel's
-    /// physical tongue position.
+    /// narrowing along the tongue that belongs to its vowel shape.
+    /// Articulations are stored for the classic engine; here a vowel's
+    /// tongue and lips are replaced by the shape solved for its
+    /// [target](crate::vowel_targets), and a consonant that borrowed a
+    /// vowel's tongue position gets that vowel's physical tongue position.
     ///
     /// The shapes are those for a voice of `tract_length` (see
-    /// [`vowel_size`](crate::vowel_size)): at `1.0` exactly the fitted
-    /// ones, at other lengths changed so that the formants scale as
-    /// `1 / length`.
+    /// [`vowel_size`](crate::vowel_size)), so the formants follow the size.
     pub(crate) fn physical(self, tract_length: f32) -> (Self, Option<Constriction>) {
-        for &(p, tongue, lips, narrow) in PHYSICAL_VOWELS {
-            let classic = p.articulation();
-            if self.tongue != classic.tongue {
-                continue;
+        // The vowel this stands for, or else the first one whose tongue it
+        // borrowed. Not /w/'s: its classic tongue is also that of /k g ŋ/,
+        // which get their own (see `PHYSICAL_VELAR_TONGUE`).
+        let key = self.vowel.or_else(|| {
+            vowel_targets::TARGETS
+                .iter()
+                .map(|t| t.key)
+                .filter(|k| k.phoneme() != Phoneme::W)
+                .find(|k| k.articulation().is_some_and(|a| a.tongue == self.tongue))
+        });
+        let Some((key, own)) = key.and_then(|k| Some((k, k.articulation()?))) else {
+            if self.tongue == Some(VELAR_TONGUE) {
+                let mut a = self;
+                a.tongue = Some(PHYSICAL_VELAR_TONGUE);
+                return (a, None);
             }
-            let (tongue, lips, narrow) =
-                vowel_size::at_length(p, (tongue, lips, narrow), tract_length);
-            let mut a = self;
-            a.tongue = Some(tongue);
-            if self.constriction == classic.constriction && self.lips == classic.lips {
-                // The vowel itself, not a consonant leaning on it.
-                a.constriction = None;
-                a.lips = lips.map(|d| Constriction::new(LIPS, d));
-                return (a, Some(Constriction::new(narrow.0, narrow.1)));
-            }
-            return (a, None);
+            return (self, None);
+        };
+        let Some((tongue, lips, narrow)) = vowel_size::shape(key, tract_length) else {
+            return (self, None);
+        };
+        let mut a = self;
+        a.tongue = Some(tongue);
+        if self.tongue == own.tongue
+            && self.constriction == own.constriction
+            && self.lips == own.lips
+        {
+            // The vowel itself, not a consonant leaning on it.
+            a.constriction = None;
+            a.lips = lips.map(|d| Constriction::new(LIPS, d));
+            return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        (self, None)
+        (a, None)
+    }
+
+    /// The vowel shape the physical engine holds for this articulation in
+    /// a voice of `tract_length` (see [`Phoneme::physical_shape`]), or
+    /// `None` if it is not a vowel's.
+    #[must_use]
+    pub fn physical_shape(self, tract_length: f32) -> Option<crate::inverse::Shape> {
+        let (a, narrowing) = self.physical(tract_length);
+        let ((tongue_index, tongue_diameter), narrowing) = (a.tongue?, narrowing?);
+        Some(crate::inverse::Shape {
+            tongue_index,
+            tongue_diameter,
+            lips: a.lips.map(|c| c.diameter),
+            narrowing: Some((narrowing.index, narrowing.diameter)),
+        })
     }
 
     const fn with_constriction(mut self, index: f32, diameter: f32) -> Self {
@@ -451,20 +507,35 @@ mod tests {
     }
 
     #[test]
-    fn physical_vowels_follow_the_tract_length() {
-        for &(p, tongue, lips, narrow) in PHYSICAL_VOWELS {
-            let native = p.physical_shape(1.0).unwrap();
-            // Exactly the fitted shape at the native length.
-            assert_eq!(native.tongue_index.to_bits(), tongue.0.to_bits(), "{p}");
-            assert_eq!(native.tongue_diameter.to_bits(), tongue.1.to_bits(), "{p}");
-            assert_eq!(native.lips.map(f32::to_bits), lips.map(f32::to_bits), "{p}");
-            let n = native.narrowing.unwrap();
+    fn every_vowel_target_has_a_physical_shape_for_every_size() {
+        for t in vowel_targets::TARGETS {
+            let a = t.key.articulation().unwrap();
+            let native = a.physical_shape(1.0).unwrap_or_else(|| panic!("{}", t.key));
             assert_eq!(
-                (n.0.to_bits(), n.1.to_bits()),
-                (narrow.0.to_bits(), narrow.1.to_bits())
+                native.lips.is_some(),
+                t.lips == vowel_targets::Lips::Rounded,
+                "{}",
+                t.key
             );
             // Another shape for a child.
-            assert_ne!(p.physical_shape(0.6), Some(native), "{p}");
+            assert_ne!(a.physical_shape(0.6), Some(native), "{}", t.key);
+        }
+    }
+
+    #[test]
+    fn diphthongs_start_and_end_on_their_own_shapes() {
+        for &p in Phoneme::ALL {
+            let Some(end) = p.glide_end() else { continue };
+            let (from, to) = p.glide().unwrap();
+            // The classic engine plays the vowels it is spelled with...
+            assert_eq!(end.tongue, to.articulation().tongue, "{p}");
+            if p != Phoneme::Ow {
+                assert_eq!(p.articulation().tongue, from.articulation().tongue, "{p}");
+            }
+            // ...the physical engine the diphthong's own ends.
+            assert_eq!(end.vowel, Some(VowelKey::End(p)));
+            assert_eq!(p.articulation().vowel, Some(VowelKey::Start(p)));
+            assert!(end.physical_shape(1.0).is_some(), "{p}");
         }
     }
 

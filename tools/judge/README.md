@@ -61,11 +61,100 @@ Material sets (`material/*.tsv`, built by `material.py build`):
 | `sentence_tune` | 10 | Harvard sentences, lists 1 and 2: tuning |
 | `sentence_heldout` | 10 | Harvard sentences: held out, never tuned on |
 | `human` | 16 | LibriSpeech dev-clean sentences. The `human` system plays the recordings; every other system synthesizes the transcript, so all systems are compared on the same text (shown as `librispeech` in the report). |
+| `vowel` | 96 | probe set (not in the default scoreboard): every vowel alone and in five CVC frames |
+| `voicing` | 110 | probe set: P/B T/D K/G S/Z F/V minimal pairs (initial, medial, final) and VCVs |
+
+The probe sets have a sixth column, `meta` (`key=value;...`): the scored
+slot, the intended phoneme, the frame, the minimal-pair twin and so on.
 
 `vcv`, `pair` and `word` are given to the engine as bracketed ARPAbet
 (`[B AE1 T]`), so the expected phonemes are exactly what it was told to say.
 Sentences are plain text, and the expected phonemes come from eSpeak NG
 (`espeak-ng -v en-us --ipa`, folded).
+
+### Probes: vowels, voicing, consonant confusions
+
+Targeted measurements for the vowel, voicing and consonant-place stages
+(`probes.py`, run through `judge.py`):
+
+```sh
+uv run python judge.py vowels physical --profile ../../profiles/tuned-r3.json   # -> physical-tuned-r3
+uv run python judge.py voicing espeak
+uv run python judge.py confusions classic --name classic-x
+uv run python judge.py vowels physical --set human          # the same slots inside the LibriSpeech sentences
+uv run python judge.py vowels human                         # human ceiling, in-sentence
+uv run python judge.py vowels human --cut                   # human words cut out of the recordings
+uv run python judge.py probe-report r4-physical r4-classic --refs r4-espeak,human-cut \
+    --scores r4-physical --out report/probes.md             # one page, side by side
+uv run python frontend_check.py                             # engine text front end vs eSpeak
+```
+
+Each takes a system (`espeak`, `classic`, `physical`, and `human` for the
+references), `--profile`, `--name` (default: the system, or
+`system-<profile stem>`; `-insent` / `-cut` is appended for `--set human` /
+`--cut`), honours `SAY_BIN`, uses the render cache (`--fresh` renders into a
+scratch folder instead, for timing), writes `out/<probe>-<name>.json` (every
+item and slot) and `report/<probe>-<name>.md`, and prints one summary line.
+
+| probe | material | metrics |
+|---|---|---|
+| `vowels` | `vowel`: 96 items, the 16 vowels (IY IH EH AE AH AA AO UH UW ER AX EY AY OW AW OY) alone and in hVd, bVd, bVt, sVt, dVd (AX: alone and unstressed in five words); 50 real words, the rest labelled nonsense or isolated | **vowel error rate**: share of items whose vowel slot, after aligning the transcription to the reference, is not the intended vowel (AH = AX: the model writes the same vowel ʌ stressed and ə unstressed; a second rate also merges AA/AO, the cot-caught merger); **PER** on the set; a **confusion table** (intended x heard in the slot, with the model tokens); the **margin** (below) per vowel and frame |
+| `voicing` | `voicing`: 110 items, P/B T/D K/G S/Z F/V as real minimal pairs in initial, medial and final position (medial T/D as "a tie"/"a die": American English flaps "latter"/"ladder") plus VCV syllables, both members of every pair | **forced choice**: CTC log P(intended) - log P(minimal-pair twin); accuracy = share where the intended member wins, and the mean margin; **free recognition**: the consonant heard in the slot has the intended voicing (a flap counts half for T/D; a sonorant, vowel or deletion is wrong). Broken down by pair, position, pair x position, intended consonant and intended voicing. Every pair and position has as many voiced as voiceless items, so voicing everything scores 50 %. The headline is P/B T/D K/G S/Z; F/V is reported separately. |
+| `confusions` | `vcv` (the consonant of every `V C V`) | consonant accuracy; full consonant x consonant table; tables by place (bilabial, labiodental, dental, alveolar, postalveolar, palatal, velar, glottal), manner (stop, nasal, fricative, affricate, approximant) and voicing; heard-side columns for vowel, other and deletion |
+
+**The margin** (`vowels`, and the forced choice of `voicing`) is computed
+from the phoneme model's frame posteriors: the CTC log-probability of the
+reference string minus that of the best competing string, where a competitor
+is the reference with the slot replaced (by any other vowel; by the voicing
+twin), every model token that folds to a phoneme pooled for it, as for the
+CTC log-likelihood. In nats; positive means the intended phoneme wins; it
+moves smoothly before the transcription flips, so a tuner can use it. Capped
+at ±30 nats; 0 when the audio is too short to carry either string.
+
+```python
+import probes
+pj = probes.ProbeJudge()                                  # loads the phoneme model once
+r = pj.vowel("x.wav", ["B", "IY1", "D"])                  # slot: the first vowel by default
+r["margin"], r["rival"], r["heard"], r["correct"]
+rs = pj.vowels([a1, a2], [ref1, ref2], [slot1, slot2])    # wav paths or 16 kHz float arrays, batched
+pj.voicing("y.wav", ["P", "AE", "T"], 0)["margin"]        # vs B AE T
+```
+
+**Human and in-sentence references.** `--set human` scores the same slots in
+the 16 LibriSpeech sentences (every vowel, with stressed/unstressed from
+eSpeak; every P B T D K G S Z F V against its twin; every consonant), for
+the recordings (`human`) or any synthesizer saying the transcripts. `--cut`
+(human only) force-aligns each recording to its reference (Viterbi CTC
+path) and cuts out every word (eSpeak's word boundaries, halfway between the
+spikes of neighbouring words, 10 ms fades, 0.15 s of silence each side);
+each word is scored as an isolated item, the human counterpart of the
+synthetic material. For the engine reading sentences, slots where its own
+phonemes (the first line of `say`) differ from the reference are flagged
+`frontend_ok: false`, and every in-sentence summary is repeated without them
+("front end right"), so the engine's text-to-phoneme mistakes can be told
+from its sound. Cutting three-phoneme excerpts was tried first and was
+unusable (the excerpts spill into their neighbours and the model answers in
+other languages).
+
+`frontend_check.py` compares the engine's own text-to-phoneme output (the
+first line of `say`) with eSpeak's for every word of the material, ignores
+notation-only differences (AX/AH/IH, IY/IH, AA/AO, flap) and a short list of
+eSpeak errors and US variants, and writes `report/frontend.md`.
+
+#### What the probes can and cannot tell
+
+- The judge is harsh on isolated items, also with real speech: stressed
+  vowels in words cut out of the LibriSpeech recordings get about 35 % vowel
+  error (about 4.5 % for the same vowels heard in their sentences), and eSpeak
+  saying the `vowel` set gets 57 %. On isolated items the model drifts to
+  non-English tokens (`a`, `aː`, `ɑ` without length, even Mandarin finals),
+  which `arpabet.py` folds to AA, so "heard as AA" on isolated items is partly
+  the judge: `report/vowels-*.md` lists the model tokens, and
+  `heard_aa_tokens` in the JSON counts them.
+- So read the isolated-item numbers against eSpeak's and the cut-word human
+  scores, not against zero; the in-sentence numbers (`--set human`) are
+  closer to what a listener hears, but mix in the engine's text front end.
+  `report/round4-baseline.md` gives the ceilings.
 
 ### The gate
 
@@ -125,7 +214,9 @@ Whisper check.
 | `material.py` | builds and loads `material/*.tsv`. |
 | `anchors.py` | fetches the LibriSpeech anchors (`fetch`). |
 | `render.py` | renders a material set through a system (`classic`, `physical`, `espeak`, `human`); renders are cached under `out/render/` by binary, voice, profile and text. |
-| `judge.py` | the judge: `score`, `report`, `items`. |
+| `judge.py` | the judge: `score`, `report`, `items`, and the probes `vowels`, `voicing`, `confusions`, `probe-report`. |
+| `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
+| `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
 | `tune.py` | the CMA-ES tuner. |
 | `params.json` | the 30 tuning parameters: `lo`, `hi`, `default`, `pass` (same content as `bin/say --dump-parameters`). |
 | `data/w2v_vocab.json` | the phoneme model's tokenizer vocabulary (bundled; checked against the model at load). |

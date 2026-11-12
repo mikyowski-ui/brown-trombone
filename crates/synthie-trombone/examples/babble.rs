@@ -42,7 +42,7 @@ use survey::{Lcg, Meter};
 use synthie_trombone::inverse::Shape;
 
 /// Grid nodes along each coordinate.
-const DIMS: [usize; 5] = [11, 7, 9, 11, 8];
+const DIMS: [usize; 5] = [11, 7, 9, 14, 8];
 /// Node combinations of narrowing place and opening; "no narrowing" is one.
 const JOINT: usize = DIMS[3] * (DIMS[4] - 1) + 1;
 /// Points measured inside every cell to check it.
@@ -245,7 +245,7 @@ fn inside(cell: [usize; 5], frac: [f32; 5]) -> [f32; 5] {
     [0, 1, 2, 3, 4].map(|d| (cell[d] as f32 + frac[d]) / (DIMS[d] - 1) as f32)
 }
 
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+_";
 
 /// A byte string literal of `chars`, wrapped at 100 columns.
 fn literal(chars: &[u8]) -> String {
