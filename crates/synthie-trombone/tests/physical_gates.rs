@@ -493,16 +493,14 @@ fn stops_build_pressure_and_burst_by_themselves() {
         p.burst
     );
     // A voiceless stop has no voicing in the closure; a voiced one keeps
-    // it for 30 ms or more: with the pharynx widening, for all of the
-    // 120 ms closure here (it ends when the gesture's 15 cm³ are used up).
+    // it for 30 ms or more before the mouth fills (with the pharynx
+    // widening, most of the 120 ms closure here).
     assert!(p.voicing < 15.0, "/p/ voiced for {} ms", p.voicing);
     assert!(b.voicing >= 30.0, "/b/ voiced for only {} ms", b.voicing);
     // Less room behind the tongue tip than behind the lips: /d/ loses its
-    // voice no later than /b/ (within a 5 ms frame and a half: with the
-    // pharynx widening both keep it for most of the closure, and which
-    // stalls first is down to a cycle or so).
+    // voice no later than /b/.
     assert!(
-        d.voicing <= b.voicing + 7.5,
+        d.voicing <= b.voicing,
         "/d/ {} ms, /b/ {} ms",
         d.voicing,
         b.voicing
