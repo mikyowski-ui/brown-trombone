@@ -252,7 +252,19 @@ fn hold(c: &Condition, sw: Switches, seconds: f32) -> Held {
     let mut sorted = span.to_vec();
     sorted.sort_by(f32::total_cmp);
     let peak = sorted[(sorted.len() as f32 * 0.95) as usize].max(1e-6);
-    let found = troughs(span, SWING * peak);
+    // One trough per cycle: a notch in the open phase (closer than half a
+    // period to the trough before it) is merged with it, the deeper kept.
+    let mut found: Vec<(usize, f32)> = Vec::new();
+    for t in troughs(span, SWING * peak) {
+        match found.last_mut() {
+            Some(last) if ((t.0 - last.0) as f32) < 0.5 * SR / hz => {
+                if t.1 < last.1 {
+                    *last = t;
+                }
+            }
+            _ => found.push(t),
+        }
+    }
     let mut open = Vec::new();
     let mut periods = Vec::new();
     let mut stalled = 0.0;

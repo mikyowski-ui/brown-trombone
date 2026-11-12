@@ -86,7 +86,10 @@ for s in &mut buf {
 `Engine::Classic` (the default) is Pink Trombone's own model.
 `Engine::Physical` runs the same tract in real units: self-oscillating
 vocal folds under lung pressure, frequency-dependent losses, yielding
-walls, side cavities and airflow-driven noise. Choose it per voice with
+walls, side cavities and airflow-driven noise. Notes outside the folds'
+range (`Trombone::fold_range`) are sung by a prescribed pulse unless
+`set_fallback(Fallback::Never)`; `Gauges::sounding` says which source is
+singing. Choose it per voice with
 `VoiceSettings::with_engine`, or on a `Trombone` with `set_engine`. The
 repository README has the details and the measurements it is held to.
 

@@ -55,6 +55,11 @@ const ATTACK_RELEASE_TIME: f32 = 0.002;
 /// are sung that way, and it is what keeps slack folds vibrating under a
 /// close vowel, where they otherwise stall below about 75 Hz.
 const SLACK_TENSION: f32 = 0.8;
+/// Lung pressure, dyn/cm², below which the edges are held closer in
+/// proportion: softly blown folds swing less, and held as far apart as for
+/// a full voice they stop meeting (at 5 cmH2O on close vowels and high
+/// notes about half the cycles stayed open).
+const SOFT_VOICE: f32 = 8.0 * CM_H2O;
 const CLOSEST: f32 = 0.3;
 /// Longest the glottis stays open in each pulse of the pulse source,
 /// seconds. Below about 100 Hz this turns the pulse into vocal fry: short
@@ -84,11 +89,13 @@ const PEAK: f32 = 0.62;
 /// modal tenseness 0.65 (Steinecke & Herzel's standard is 0.018, which
 /// these folds cannot sustain under every vowel), closing in proportion
 /// to zero (pressed) at tenseness 1 and never wider than `WIDEST_GAP`
-/// while voicing. Breathiness beyond that does not come from
+/// while voicing (it was 0.014 cm: held that far apart, the slack edges
+/// of the elder voice did not meet on close vowels and higher notes).
+/// Breathiness beyond that does not come from
 /// holding the edges further apart (they would stop vibrating) but, as in
 /// a real larynx, from a gap left open between the cartilages behind them.
 const MODAL_TENSENESS: f32 = 0.65;
-const WIDEST_GAP: f32 = 0.014;
+const WIDEST_GAP: f32 = 0.012;
 /// Below this tenseness the edges themselves part and voicing gives way
 /// to a whisper.
 pub(crate) const WHISPER_TENSENESS: f32 = 0.12;
@@ -416,7 +423,8 @@ impl Source {
     /// modal voice at pitch `hz` and tenseness `tense`.
     fn modal_gap(&self, hz: f32, tense: f32) -> f32 {
         let slack = 1.0 - tense;
-        let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
+        let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP)
+            * (self.lung_base / SOFT_VOICE).min(1.0);
         let (tension, _) = tension_from_table(hz * self.size, gap);
         gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
     }
