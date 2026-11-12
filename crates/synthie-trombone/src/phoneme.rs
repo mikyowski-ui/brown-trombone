@@ -134,6 +134,11 @@ const HISS: f32 = 0.45;
 /// Tongue body a tongue-tip consonant drags the body towards: forward and
 /// fairly high, where the blade behind a raised tip holds it.
 const TIP_BODY: (f32, f32) = (26.5, 2.5);
+/// How much narrower the physical engine makes /l r/ (touch diameter).
+const APPROXIMANT_NARROWING: f32 = 0.08;
+/// Widest consonant constriction that is an approximant's (touch
+/// diameter); wider ones only shade a vowel.
+const APPROXIMANT_WIDEST: f32 = 1.3;
 /// Share of the way to [`TIP_BODY`] that alveolars (/t d n s z/) and
 /// postalveolars (/ʃ ʒ tʃ dʒ/) take the body: the alveolar F2 locus near
 /// 1800 Hz comes from a body held forward by the tip.
@@ -432,6 +437,22 @@ impl Articulation {
     /// The shapes are those for a voice of `tract_length` (see
     /// [`vowel_size`](crate::vowel_size)), so the formants follow the size.
     pub(crate) fn physical(self, tract_length: f32) -> (Self, Option<Constriction>) {
+        let (mut a, narrowing) = self.physical_shape_of(tract_length);
+        // /l r/ are narrower on the physical engine: with the classic
+        // engine's gap their F1 stood near 550 Hz, a vowel's, where an /l/
+        // has 350 to 400.
+        if narrowing.is_none()
+            && let Some(c) = a.constriction
+            && c.diameter > HISS + 0.3
+            && c.diameter < APPROXIMANT_WIDEST
+        {
+            a.constriction = Some(Constriction::new(c.index, c.diameter - APPROXIMANT_NARROWING));
+        }
+        (a, narrowing)
+    }
+
+    /// [`physical`](Self::physical) before the approximants are narrowed.
+    fn physical_shape_of(self, tract_length: f32) -> (Self, Option<Constriction>) {
         // The vowel this stands for, or else the first one whose tongue it
         // borrowed. Not /w/'s: its classic tongue is also that of /k g ŋ/,
         // which get their own (see `PHYSICAL_VELAR_TONGUE`).

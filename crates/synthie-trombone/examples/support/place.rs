@@ -335,6 +335,47 @@ pub fn cluster_openings(s: &Spoken, open: f32) -> Vec<(Phoneme, Phoneme, f32, f3
     out
 }
 
+/// Words with consonant clusters, for the check that nothing is heard
+/// between their consonants that was not asked for.
+pub const CLUSTER_WORDS: [&str; 10] = [
+    "slid", "smooth", "planks", "glue", "blue", "flame", "street", "spring", "breeze", "crossed",
+];
+
+/// Vowel-like moments between two consonants that follow one another: for
+/// each such pair, the frames from the middle of the first to the middle
+/// of the second in which the tract's transfer function has its first
+/// resonance above `f1` Hz, as a vowel's (or an /l/'s) is; a consonant's
+/// constriction holds F1 low. `s` must have been spoken with formants.
+#[must_use]
+pub fn cluster_vowel_frames(s: &Spoken, f1: f32) -> Vec<(Phoneme, Phoneme, usize)> {
+    let consonant = |p: Phoneme| {
+        matches!(
+            p.manner(),
+            Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Approximant
+        )
+    };
+    let mut out = Vec::new();
+    for k in 0..s.phonemes.len().saturating_sub(1) {
+        let (a, b) = (s.phonemes[k], s.phonemes[k + 1]);
+        if a == b || !consonant(a) || !consonant(b) {
+            continue;
+        }
+        let (a0, a1) = s.ranges[k];
+        let (b0, b1) = s.ranges[k + 1];
+        if a0 == usize::MAX || b0 == usize::MAX {
+            continue;
+        }
+        let from = Spoken::frame_of(usize::midpoint(a0, a1));
+        let to = Spoken::frame_of(usize::midpoint(b0, b1)).min(s.frames.len());
+        let n = s.frames[from..to.max(from)]
+            .iter()
+            .filter(|f| f.formants.is_some_and(|x| x[0] > f1))
+            .count();
+        out.push((a, b, n));
+    }
+    out
+}
+
 /// Share of the frames of each segment within `near` (RMS diameter) of its
 /// target, summed over the utterance per manner: (manner, frames near,
 /// frames).

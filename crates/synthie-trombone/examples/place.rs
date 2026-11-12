@@ -150,7 +150,7 @@ fn murmur(settings: &VoiceSettings) {
         for v in [Phoneme::Iy, Phoneme::Aa, Phoneme::Uw] {
             let notches = place::murmur(settings, nasal, v);
             let mut line = format!("{nasal:>3} after {v}:");
-            for n in notches.iter().take(4) {
+            for n in notches.iter().filter(|n| n.depth >= 8.0).take(8) {
                 line += &format!(" {:5.0} ({:4.1})", n.hz, n.depth);
             }
             println!("{line}");
@@ -235,6 +235,21 @@ fn clusters(settings: &VoiceSettings) {
         println!("{line}");
     }
     println!("clusters that open wider than 0.8: {wide} of {total}");
+    println!("== cluster words: frames between two consonants with F1 above 400 Hz");
+    let words = parallel(&place::CLUSTER_WORDS, |w| place::speak(settings, w, true));
+    for (w, s) in place::CLUSTER_WORDS.iter().zip(&words) {
+        let mut line = format!("{w:>8}:");
+        for (a, b, n) in place::cluster_vowel_frames(s, 400.0) {
+            line += &format!(" {a}-{b} {n}");
+        }
+        let f1: Vec<String> = s
+            .frames
+            .iter()
+            .map(|f| f.formants.map_or("-".into(), |x| format!("{:.0}", x[0])))
+            .collect();
+        line += &format!("   F1: {}", f1.join(" "));
+        println!("{line}");
+    }
     println!("== time near target (RMS shape error <= 0.25), by manner");
     let mut sums: Vec<(Manner, usize, usize)> = Vec::new();
     for s in &spoken {
