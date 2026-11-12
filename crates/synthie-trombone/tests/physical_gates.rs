@@ -568,7 +568,10 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
     // high: 4.3 dB louder than the default voice's /a/ (3.8 dB with the
     // /a/ fitted to Peterson & Barney, whose F1 was 10 % lower and met the
     // harmonics of the high voice elsewhere). No gap width changes that,
-    // and neither does the jaw, so the bound here is 7.5 dB.
+    // and neither does the jaw, so the bound was 7.5 dB. With the folds
+    // closing firmly the /s/ of size 0.6 sits at most 6.2 dB from the
+    // default's against its vowel (at 8 cmH2O), and the bound is 6.5 dB
+    // again.
     let vowels = [
         Phoneme::Iy,
         Phoneme::Ih,
@@ -613,7 +616,7 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
                 s - s0,
                 sh - sh0
             );
-            if (s - s0).abs() > 7.5 {
+            if (s - s0).abs() > 6.5 {
                 failures.push(format!("s at size {size}, {lung} cmH2O: {:+.1} dB", s - s0));
             }
             if hiss > -26.0 {
@@ -972,6 +975,25 @@ fn troughs(a: &[f32], swing: f32) -> Vec<(usize, f32)> {
     out
 }
 
+/// One trough per cycle: a notch within the open phase (a dip closer than
+/// `shortest` samples to the trough before it) is merged with that trough,
+/// the deeper one kept. Without this a notch in a child's /u/ was counted
+/// as a cycle 0.4 ms long that never closed.
+fn cycles(found: &[(usize, f32)], shortest: f32) -> Vec<(usize, f32)> {
+    let mut out: Vec<(usize, f32)> = Vec::with_capacity(found.len());
+    for &t in found {
+        match out.last_mut() {
+            Some(last) if ((t.0 - last.0) as f32) < shortest => {
+                if t.1 < last.1 {
+                    *last = t;
+                }
+            }
+            _ => out.push(t),
+        }
+    }
+    out
+}
+
 /// Strongest component of `x` within ±8 % of `hz`, under a Hann window.
 #[allow(clippy::many_single_char_names)]
 fn harmonic(x: &[f32], hz: f32) -> f32 {
@@ -1028,8 +1050,8 @@ fn hold_closure(settings: VoiceSettings, vowel: Phoneme) -> Closure {
     let mut sorted = edge.clone();
     sorted.sort_by(f32::total_cmp);
     let peak = sorted[n * 95 / 100].max(1e-6);
-    let found = troughs(&edge, 0.15 * peak);
     let expected = SR / settings.pitch;
+    let found = cycles(&troughs(&edge, 0.15 * peak), 0.5 * expected);
     let longest = found
         .windows(2)
         .map(|w| (w[1].0 - w[0].0) as f32 / expected)
@@ -1091,7 +1113,8 @@ fn the_folds_close_on_every_cycle_and_h1_h2_holds_steady() {
     // other cycle stayed open), elder's /i/ and /u/ missed cycles, and
     // H1-H2 stepped by up to 19.2 dB between frames (range 20.9 dB); the
     // default voice at size 1.4 was sung by the pulse. Now no cycle stays
-    // open, and the worst step is 1.3 dB, the worst range 1.5 dB.
+    // open, and the worst step is 1.3 dB, the worst range 1.5 dB (3.2 and
+    // 3.8 dB on the vowels solved from Hillenbrand's formants).
     /// Largest H1-H2 step between neighbouring frames, and range, dB.
     const STEP: f32 = 4.0;
     const RANGE: f32 = 5.0;
