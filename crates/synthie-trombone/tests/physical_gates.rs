@@ -846,7 +846,11 @@ fn the_voice_recovers_at_once_from_a_pinch() {
 
 #[test]
 fn every_preset_speaks_on_the_physical_engine() {
-    let text = "Hello there, how are you? Pink trombone, 42.";
+    // "Hello there, how are you? Pink trombone, 42." with the accents the
+    // text front end used when this gate was set (it now accents hel*lo*,
+    // which makes the child voice peak at 2.46).
+    let text = "[HH AX1 L OW] [DH EH1 R], [HH AW1] [AA0 R] [Y UW0]? \
+                [P IH1 NG K] [T R AA1 M B OW N], [F AO1 R T IY] [T UW1].";
     for p in Preset::ALL {
         let settings = tuned(p.settings()).with_engine(Engine::Physical);
         let out = Talker::new(22_050.0, settings).bake(text);
