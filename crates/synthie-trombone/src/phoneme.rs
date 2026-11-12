@@ -446,7 +446,10 @@ impl Articulation {
             && c.diameter > HISS + 0.3
             && c.diameter < APPROXIMANT_WIDEST
         {
-            a.constriction = Some(Constriction::new(c.index, c.diameter - APPROXIMANT_NARROWING));
+            a.constriction = Some(Constriction::new(
+                c.index,
+                c.diameter - APPROXIMANT_NARROWING,
+            ));
         }
         (a, narrowing)
     }

@@ -351,7 +351,11 @@ pub fn cluster_vowel_frames(s: &Spoken, f1: f32) -> Vec<(Phoneme, Phoneme, usize
     let consonant = |p: Phoneme| {
         matches!(
             p.manner(),
-            Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Approximant
+            Manner::Stop
+                | Manner::Nasal
+                | Manner::Fricative
+                | Manner::Affricate
+                | Manner::Approximant
         )
     };
     let mut out = Vec::new();
