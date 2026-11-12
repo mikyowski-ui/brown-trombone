@@ -494,7 +494,9 @@ impl Articulation {
             a.constriction = Some(Constriction::new(velar_place(index), c.diameter));
         } else if self.own_body() {
             // /l r/: their own body, as stored.
-        } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) {
+        } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0 {
+            // (An /n/ leaves the body be: drawn up and forward behind a
+            // nasal closure it is heard as /ŋ/.)
             let w = if c.index < ALVEOLAR - 1.0 {
                 POSTALVEOLAR_PULL
             } else {

@@ -40,6 +40,9 @@ const GRID_OFFSET: f32 = 1.7;
 const VELUM_CLOSED: f32 = 0.01;
 const VELUM_OPEN: f32 = 0.4;
 const FRICATIVE_ATTACK: f32 = 0.1;
+/// How fast the velum shuts on the physical engine, in the units of the
+/// original's `0.1` (diameter per unit of articulator movement).
+const VELUM_SHUTTING: f32 = 0.25;
 const MAX_TRANSIENTS: usize = 8;
 const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
 /// The slot that holds lip rounding: a shaping of the vowel, never meant to
@@ -933,11 +936,15 @@ impl Tract {
         self.last_obstruction = None;
 
         let amount = dt * self.movement_speed;
+        // The velum shuts as fast as it opens (the original's took two
+        // and a half times longer): after a nasal, a stop at the same
+        // place (/nd/ in "and", "round") must have the nose shut by its
+        // release, or it builds no pressure and is not heard at all.
         self.nose_diameter[0] = move_towards(
             self.nose_diameter[0],
             self.velum_target,
             amount * 0.25,
-            amount * 0.1,
+            amount * VELUM_SHUTTING,
         );
         self.calculate_reflections();
     }
