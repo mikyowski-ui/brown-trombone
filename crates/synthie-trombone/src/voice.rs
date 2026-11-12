@@ -509,6 +509,20 @@ impl Trombone {
         self.articulate(&p.articulation());
     }
 
+    /// Hold a vowel shape of the physical engine, such as one found by
+    /// [`inverse::solve`](crate::inverse::solve): tongue body, lip rounding
+    /// (in [`SLOT_LIPS`]) and the narrowing along the tongue. The other
+    /// constriction slots, the velum and the voice are left alone.
+    pub fn set_shape(&mut self, shape: &crate::inverse::Shape) {
+        self.set_tongue(shape.tongue_index, shape.tongue_diameter);
+        let lips = shape
+            .lips
+            .map(|d| Constriction::new(crate::inverse::LIP_CELL, d));
+        self.tract.set_constriction(SLOT_LIPS, lips);
+        self.tract
+            .set_narrowing(shape.narrowing.map(|(at, d)| Constriction::new(at, d)));
+    }
+
     // ----- inspection --------------------------------------------------
 
     /// Current oral tract diameters, glottis to lips.
