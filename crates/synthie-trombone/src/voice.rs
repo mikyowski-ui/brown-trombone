@@ -908,6 +908,7 @@ impl Trombone {
             }
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
+                self.phys.set_motion(self.tract.velocity());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),

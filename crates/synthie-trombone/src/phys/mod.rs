@@ -308,6 +308,17 @@ pub(crate) struct Phys {
     att: [f32; N],
     /// Attenuation at the start of the block (it is interpolated like the area).
     att0: [f32; N],
+    /// Each cell's diameter (articulation units) at the start and end of
+    /// the block, and its rate of change there in diameter per block: the
+    /// shape moves through the block on the cubic these fix, so its speed
+    /// carries on smoothly from one block to the next.
+    d0: [f32; N],
+    d1: [f32; N],
+    m0: [f32; N],
+    m1: [f32; N],
+    /// The articulators' speeds at the end of the coming block, diameter
+    /// units per second (see [`Phys::set_motion`]).
+    speed: [f32; N],
     visc: f32,
 
     /// Wall surface of each cell, cm²: now, and at the start and end of
@@ -388,6 +399,11 @@ impl Phys {
             a1: [0.0; N],
             att: [1.0; N],
             att0: [1.0; N],
+            d0: [0.0; N],
+            d1: [0.0; N],
+            m0: [0.0; N],
+            m1: [0.0; N],
+            speed: [0.0; N],
             visc: 0.0,
             wall_s: [0.0; N],
             wall_s0: [0.0; N],
@@ -657,6 +673,13 @@ impl Phys {
         }
     }
 
+    /// How fast each cell's diameter will be changing at the end of the
+    /// coming block, diameter units per second (the articulators' own
+    /// speeds). Call before [`begin_block`](Self::begin_block).
+    pub(crate) fn set_motion(&mut self, speed: &[f32; N]) {
+        self.speed = *speed;
+    }
+
     /// Take the articulation model's shape for the coming block. `velum` is
     /// how far the velar port is open (`0‥1`), `block_dt` the block length,
     /// `voiced` whether the voice is wanted (see `BLEED_TIME`).
@@ -668,8 +691,12 @@ impl Phys {
         voiced: bool,
     ) {
         self.a0 = self.a1;
+        self.d0 = self.d1;
+        self.m0 = self.m1;
         for (i, &d) in diameter.iter().enumerate() {
             self.a1[i] = self.area_of(d);
+            self.d1[i] = d;
+            self.m1[i] = self.speed[i] * block_dt;
         }
         if voiced && self.primed && (0..N).any(|i| self.a0[i] < A_MIN && self.a1[i] >= A_MIN) {
             self.bleed = BLEED_TIME;
@@ -683,6 +710,9 @@ impl Phys {
         let first = !self.primed;
         if first {
             self.a0 = self.a1;
+            self.d0 = self.d1;
+            self.m0 = [0.0; N];
+            self.m1 = [0.0; N];
             for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
                 nose.set_port(port * factor);
             }
@@ -699,6 +729,9 @@ impl Phys {
     /// further motion, no displaced air (for measuring a moving tract).
     pub(crate) fn freeze(&mut self) {
         self.a0 = self.a1;
+        self.d0 = self.d1;
+        self.m0 = [0.0; N];
+        self.m1 = [0.0; N];
         self.wall_s0 = self.wall_s1;
         self.adot = [0.0; N];
         self.adot_target = [0.0; N];
@@ -707,6 +740,7 @@ impl Phys {
     /// Jump straight to a shape, with no motion (for measurements).
     pub(crate) fn snap(&mut self, diameter: &[f32; N], velum: f32) {
         self.primed = false;
+        self.speed = [0.0; N];
         self.begin_block(diameter, velum, 1.0, false);
         self.adot = [0.0; N];
     }
@@ -809,9 +843,22 @@ impl Phys {
         } else {
             1.0
         };
+        // The shape follows the cubic through the block's ends and the
+        // articulators' speeds there (Hermite), not straight lines between
+        // block ends: a cell closing on a line changed its speed of closing
+        // at once at every block boundary, and in a narrow gap that sudden
+        // change of the air squeezed out of it went out as a click.
+        let (l2, l3) = (lambda * lambda, lambda * lambda * lambda);
+        let (h00, h10, h01, h11) = (
+            2.0 * l3 - 3.0 * l2 + 1.0,
+            l3 - 2.0 * l2 + lambda,
+            3.0 * l2 - 2.0 * l3,
+            l3 - l2,
+        );
         for i in 0..N {
             self.wall_y[i] *= keep;
-            let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
+            let d = h00 * self.d0[i] + h10 * self.m0[i] + h01 * self.d1[i] + h11 * self.m1[i];
+            let a = self.area_of(d);
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);
             self.wall_s[i] = self.wall_s0[i] + (self.wall_s1[i] - self.wall_s0[i]) * lambda;

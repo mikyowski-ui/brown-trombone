@@ -1463,6 +1463,28 @@ fn the_folds_carry_running_speech() {
 }
 
 #[test]
+fn affricates_release_into_full_frication() {
+    // An affricate's closure opens into the fricative of its place: its
+    // hiss is that of /sh/ or /zh/ (within 3 dB). The noise takes 10 to
+    // 15 ms to build, so the 10 ms after the release that the burst gate
+    // reads hold only its start.
+    let settings = speech_voice();
+    for (affricate, fricative) in [(Phoneme::Ch, Phoneme::Sh), (Phoneme::Jh, Phoneme::Zh)] {
+        let a = stops::fricative(&settings, &stops::context(affricate, "vcv"), affricate);
+        let f = stops::fricative(&settings, &stops::context(fricative, "vcv"), fricative);
+        println!(
+            "{affricate}: hiss {:.1} dB, {fricative}: {:.1} dB re the vowel",
+            a.hiss, f.hiss
+        );
+        assert!(
+            (a.hiss - f.hiss).abs() <= 3.0,
+            "{affricate} hiss {:.1} dB",
+            a.hiss
+        );
+    }
+}
+
+#[test]
 fn stop_releases_are_bursts_not_clicks() {
     // A stop is released as a short burst of noise shaped by the cavity in
     // front of the closure, some 10 to 20 dB below the vowel that follows
@@ -1475,16 +1497,27 @@ fn stop_releases_are_bursts_not_clicks() {
     // vowel sample in the default voice, 8 to 9 in the elder's and the
     // giant's, 85 in the whisper's; up to 0.9 of it at a release.
     //
+    // A third cause was the shape itself: it moved on straight lines
+    // between articulator blocks, so a closing cell changed its speed at
+    // once every 10.7 ms, and in a narrow gap the change in the air
+    // squeezed out of it was a step (up to 3.2 vowel peaks in the elder).
+    // The shape now follows the articulators' own speeds through each
+    // block.
+    //
     // Around every release (5 ms before to 10 ms after) no step is above a
-    // quarter of the loudest vowel sample (the whisper's vowels are faint
-    // breath, so there the release may step up to that sample). Anywhere
-    // in a sentence no step is above 3 vowel peaks (12 in the whisper):
-    // what is left are closures of the tongue back made at full speed and
-    // the sharpest glottal closures. No kind of stop bursts louder on
+    // quarter of the loudest vowel sample, half of it in the whisper (whose
+    // vowels are faint breath). Anywhere in a sentence no step is above 1.5
+    // vowel peaks (measured: 0.9 at most). Two voices have their own bound,
+    // set to what they do with a margin: the critter (4; measured 2.9),
+    // whose small, stiff folds, blown at 15 cmH2O, open again within two
+    // samples after a long closed phase, in vowels, not at consonants; and
+    // the whisper (8; measured 5.8), where it is the hiss of the breath
+    // through a tongue tip closing on a wide-open glottis, against vowels
+    // that are themselves only breath. No kind of stop bursts louder on
     // average than 6 dB below the vowel that follows, and no single burst
     // is louder than that vowel.
     const AT_RELEASE: f32 = 0.25;
-    const STEP: f32 = 3.0;
+    const STEP: f32 = 1.5;
     const MEAN_BURST: f32 = -6.0;
     const MAX_BURST: f32 = 0.0;
     let texts = [
@@ -1495,7 +1528,8 @@ fn stop_releases_are_bursts_not_clicks() {
     for preset in Preset::ALL {
         let settings = tuned(preset.settings());
         let (at_release, step) = match preset {
-            Preset::Whisper => (1.0, 12.0),
+            Preset::Whisper => (0.5, 8.0),
+            Preset::Critter => (AT_RELEASE, 4.0),
             _ => (AT_RELEASE, STEP),
         };
         let (mut worst, mut worst_release) = (0.0f32, 0.0f32);

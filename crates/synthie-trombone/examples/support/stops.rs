@@ -332,11 +332,12 @@ pub struct FricativeMeasure {
     pub hiss: f32,
 }
 
-/// Measure the fricative `p` (its first segment) in `text`.
+/// Measure the fricative `p` in `text`: its last segment (for an
+/// affricate, the frication after the closure).
 #[must_use]
 pub fn fricative(settings: &VoiceSettings, text: &str, p: Phoneme) -> FricativeMeasure {
     let r = record(settings, text);
-    let Some(k) = r.phonemes.iter().position(|&q| q == p) else {
+    let Some(k) = r.phonemes.iter().rposition(|&q| q == p) else {
         return FricativeMeasure::default();
     };
     let (s, e) = span(&r, k);
@@ -386,12 +387,13 @@ pub const STOPS: [(Phoneme, Phoneme); 3] = [
     (Phoneme::K, Phoneme::G),
 ];
 
-/// The fricative pairs.
-pub const FRICATIVES: [(Phoneme, Phoneme); 4] = [
+/// The fricative pairs, and the affricates (measured on their frication).
+pub const FRICATIVES: [(Phoneme, Phoneme); 5] = [
     (Phoneme::S, Phoneme::Z),
     (Phoneme::F, Phoneme::V),
     (Phoneme::Th, Phoneme::Dh),
     (Phoneme::Sh, Phoneme::Zh),
+    (Phoneme::Ch, Phoneme::Jh),
 ];
 
 /// Text for a consonant in a position: `initial` before a stressed vowel,
