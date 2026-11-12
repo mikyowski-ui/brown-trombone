@@ -642,28 +642,14 @@ fn number_words(digits: &str) -> String {
 // ===== tokens → timed segments ============================================
 
 /// How long vowel or diphthong `p` lasts against others of its kind, on
-/// the physical engine (pass C of the tuning). English vowels have
-/// lengths of their own: lax /ɪ ɛ ʌ ʊ/ are about two thirds as long as
-/// tense /i æ ɑ ɔ u/.
+/// the physical engine (pass C of the tuning): lax vowels are shorter than
+/// long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
 fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
-        P::Iy => timing.iy_length,
-        P::Ih => timing.ih_length,
-        P::Eh => timing.eh_length,
-        P::Ae => timing.ae_length,
-        P::Ah => timing.ah_length,
-        P::Aa => timing.aa_length,
-        P::Ao => timing.ao_length,
-        P::Uh => timing.uh_length,
-        P::Uw => timing.uw_length,
-        P::Er => timing.er_length,
-        P::Ax => timing.ax_length,
-        P::Ey => timing.ey_length,
-        P::Ay => timing.ay_length,
-        P::Ow => timing.ow_length,
-        P::Aw => timing.aw_length,
-        P::Oy => timing.oy_length,
+        P::Ih | P::Eh | P::Ah | P::Uh => timing.lax_length,
+        P::Ae | P::Aa | P::Ao | P::Er => timing.long_length,
+        P::Ay | P::Aw | P::Oy => timing.wide_diphthong_length,
         _ => 1.0,
     }
 }
@@ -816,7 +802,6 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                     context,
                     rate,
                     &timing,
-                    physical,
                     &mut drafts,
                 );
             }
@@ -968,11 +953,10 @@ fn expand(
     context: Option<Context>,
     rate: f32,
     timing: &Tuning,
-    physical: bool,
     out: &mut Vec<Draft>,
 ) {
     let a = p.articulation();
-    let mut dur = base_duration(p, stressed, timing, physical) / rate;
+    let mut dur = base_duration(p, stressed, timing, context.is_some()) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {
         phoneme,
@@ -1074,9 +1058,9 @@ fn expand(
             // Held, then on the way to where the vowel drifts: lax vowels
             // towards the middle of the mouth, tense ones further out.
             let end = p.drift_end().expect("a vowel");
-            let drift = timing.vowel_drift;
-            out.push(draft(p, a, dur * (1.0 - drift), true));
-            let mut tail = draft(p, end, dur * drift, true);
+            let share = timing.vowel_drift;
+            out.push(draft(p, a, dur * (1.0 - share), true));
+            let mut tail = draft(p, end, dur * share, true);
             tail.part = Part::Drift;
             out.push(tail);
         }
@@ -1327,6 +1311,66 @@ mod tests {
         assert!(buf.iter().all(|s| s.is_finite()));
         let energy: f32 = buf.iter().map(|s| s * s).sum();
         assert!(energy > 1.0, "{energy}");
+    }
+
+    #[test]
+    fn physical_vowels_have_lengths_of_their_own() {
+        let length = |engine: Engine, text: &str, p: Phoneme| {
+            let prosody = Prosody {
+                engine,
+                ..Prosody::default()
+            };
+            Utterance::from_text(text, &prosody)
+                .segments()
+                .iter()
+                .filter(|s| s.phoneme == p)
+                .map(|s| s.duration)
+                .sum::<f32>()
+        };
+        // Lax /ɪ/ is shorter than tense /i/ on the physical engine...
+        let (bit, beat) = (
+            length(Engine::Physical, "[S IH1 L] [AX0]", P::Ih),
+            length(Engine::Physical, "[S IY1 L] [AX0]", P::Iy),
+        );
+        assert!(bit < 0.95 * beat, "{bit} {beat}");
+        // ...and the classic engine keeps them alike.
+        let (bit, beat) = (
+            length(Engine::Classic, "[S IH1 L] [AX0]", P::Ih),
+            length(Engine::Classic, "[S IY1 L] [AX0]", P::Iy),
+        );
+        assert!((bit - beat).abs() < 1e-6, "{bit} {beat}");
+    }
+
+    #[test]
+    fn a_glide_slows_the_articulators_only_while_it_lasts() {
+        let mut voice = Trombone::new(16_000.0);
+        voice.set_engine(Engine::Physical);
+        Speaker::prepare(&mut voice);
+        let speed = voice.articulation_speed();
+        let prosody = Prosody {
+            engine: Engine::Physical,
+            ..Prosody::default()
+        };
+        let u = Utterance::from_text("[B AY1 T]", &prosody);
+        let glide_at = u
+            .segments()
+            .iter()
+            .position(|s| s.articulation.vowel == Some(VowelKey::End(P::Ay)))
+            .expect("a glide");
+        let mut sp = Speaker::new();
+        sp.speak(u);
+        let mut slowest = speed;
+        while sp.is_speaking() {
+            sp.process(&mut voice);
+            if sp.current().is_some_and(|(i, _)| i == glide_at) {
+                slowest = slowest.min(voice.articulation_speed());
+            }
+        }
+        assert!(
+            (slowest - speed * Tuning::DEFAULT.glide_rate).abs() < 1e-4,
+            "{slowest} vs {speed}"
+        );
+        assert!((voice.articulation_speed() - speed).abs() < 1e-6);
     }
 
     #[test]

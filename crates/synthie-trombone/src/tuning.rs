@@ -241,55 +241,26 @@ tuning! {
     /// How far past contact a closing articulator aims (diameter units).
     closure_overshoot = 0.3, 0.1..=0.5, B;
 
-    // ----- C: each vowel's length, against `vowel_length` -----------------
+    // ----- C: vowel lengths ----------------------------------------------
     //
     // English vowels have lengths of their own. In the hVd words of
-    // Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.8 of
-    // their mean (233 ms over the ten monophthongs, 266 ms for /eɪ oʊ/)
-    // and tense /æ ɑ ɔ ɝ/ 1.1 to 1.2. Running speech holds these apart
-    // less than words said one by one, so each length here is half-way
-    // between 1 and Hillenbrand's ratio (the full ratios also shorten the
-    // vowels around stops enough to move their bursts and voice onsets
-    // past `tests/physical_gates.rs`). They did not record schwa or /aɪ
-    // aʊ ɔɪ/: schwa keeps `vowel_length` (it is reduced by being
-    // unstressed), and those three are a little longer than /eɪ oʊ/, as
-    // Peterson & Lehiste (1960) found them.
+    // Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.81 of
+    // their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1).
+    // Running speech holds these apart less than words said one by one, so
+    // the factors here are half-way between 1 and those ratios (the full
+    // ratios also shortened the vowels around stops enough to move their
+    // bursts and voice onsets past `tests/physical_gates.rs`). Of the
+    // diphthongs, /aɪ aʊ ɔɪ/ are longer than /eɪ oʊ/ (Peterson & Lehiste
+    // 1960).
 
-    /// Length of /i/ ("beat") against `vowel_length` (physical engine).
-    iy_length = 1.02, 0.5..=2.0, C;
-    /// Length of /ɪ/ ("bit") against `vowel_length` (physical engine).
-    ih_length = 0.91, 0.5..=2.0, C;
-    /// Length of /ɛ/ ("bet") against `vowel_length` (physical engine).
-    eh_length = 0.905, 0.5..=2.0, C;
-    /// Length of /æ/ ("bat") against `vowel_length` (physical engine).
-    ae_length = 1.095, 0.5..=2.0, C;
-    /// Length of /ʌ/ ("but") against `vowel_length` (physical engine).
-    ah_length = 0.905, 0.5..=2.0, C;
-    /// Length of /ɑ/ ("father") against `vowel_length` (physical engine).
-    aa_length = 1.07, 0.5..=2.0, C;
-    /// Length of /ɔ/ ("thought") against `vowel_length` (physical engine).
-    ao_length = 1.105, 0.5..=2.0, C;
-    /// Length of /ʊ/ ("book") against `vowel_length` (physical engine).
-    uh_length = 0.91, 0.5..=2.0, C;
-    /// Length of /u/ ("boot") against `vowel_length` (physical engine).
-    uw_length = 1.01, 0.5..=2.0, C;
-    /// Length of /ɝ/ ("bird") against `vowel_length` (physical engine).
-    er_length = 1.065, 0.5..=2.0, C;
-    /// Length of schwa ("about") against `vowel_length` (physical engine).
-    ax_length = 1.0, 0.5..=2.0, C;
-
-    // ----- C: each diphthong's length, against `diphthong_length` ---------
-
-    /// Length of /eɪ/ ("bait") against `diphthong_length` (physical engine).
-    ey_length = 0.975, 0.5..=2.0, C;
-    /// Length of /aɪ/ ("bite") against `diphthong_length` (physical engine).
-    ay_length = 1.025, 0.5..=2.0, C;
-    /// Length of /oʊ/ ("boat") against `diphthong_length` (physical engine).
-    ow_length = 0.975, 0.5..=2.0, C;
-    /// Length of /aʊ/ ("bout") against `diphthong_length` (physical engine).
-    aw_length = 1.05, 0.5..=2.0, C;
-    /// Length of /ɔɪ/ ("boy") against `diphthong_length` (physical engine).
-    oy_length = 1.05, 0.5..=2.0, C;
+    /// Length of the lax vowels /ɪ ɛ ʌ ʊ/ against `vowel_length` (physical
+    /// engine).
+    lax_length = 0.905, 0.5..=1.5, C;
+    /// Length of the long tense vowels /æ ɑ ɔ ɝ/ against `vowel_length`
+    /// (physical engine).
+    long_length = 1.085, 0.7..=2.0, C;
+    /// Length of /aɪ aʊ ɔɪ/ against `diphthong_length` (physical engine).
+    wide_diphthong_length = 1.05, 0.7..=2.0, C;
 
     // ----- C: movement ----------------------------------------------------
 
@@ -334,20 +305,11 @@ mod tests {
     }
 
     #[test]
-    fn every_vowel_has_a_length_in_pass_c() {
-        for p in crate::Phoneme::ALL {
-            if matches!(p.manner(), crate::Manner::Vowel | crate::Manner::Diphthong) {
-                let f = Tuning::FIELDS
-                    .iter()
-                    .find(|f| {
-                        f.name
-                            .strip_suffix("_length")
-                            .is_some_and(|v| v.eq_ignore_ascii_case(p.symbol()))
-                    })
-                    .unwrap_or_else(|| panic!("{p}"));
-                assert_eq!(f.pass, Pass::C, "{p}");
-            }
-        }
+    fn vowel_lengths_keep_their_order() {
+        let t = Tuning::DEFAULT;
+        assert!(t.lax_length < 1.0 && t.long_length > 1.0 && t.wide_diphthong_length > 1.0);
+        let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
+        assert_eq!(c, 6);
     }
 
     #[test]

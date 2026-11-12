@@ -27,8 +27,8 @@ def test_params_file_matches_brief():
     assert sum(p["pass"] == "b" for p in params.values()) == 16
     # Pass c: each vowel's length and movement, tuned by vowel_tune.py's
     # material, not by tune.py.
-    assert sum(p["pass"] == "c" for p in params.values()) == 19
-    assert len(params) == 49
+    assert sum(p["pass"] == "c" for p in params.values()) == 6
+    assert len(params) == 36
 
 
 def test_space_round_trip_and_penalty():
