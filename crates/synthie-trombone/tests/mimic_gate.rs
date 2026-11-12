@@ -82,10 +82,12 @@ fn a_sung_vowel_sequence_is_followed() {
     for p in vowels {
         // The listener hears the physical /i/ and /u/ (F1 348 and 386 Hz,
         // Hillenbrand's, between the 3rd and 4th harmonic of 110 Hz) with
-        // F1 15-17 % high, and /ɔ/ 7 % high (see `listen_gate`), and the
-        // copy makes what it hears: those are held to 20 %.
-        let tolerance = if matches!(p, Phoneme::Iy | Phoneme::Uw | Phoneme::Ao) {
-            20.0
+        // F1 12-13 % high, although the sung harmonics peak where the tract
+        // does (see `listen_gate`, KNOWN_MISSES), and the copy makes what it
+        // hears: 13.9 and 14.0 % now, held to 16 % (were 20 %, with /ɔ/,
+        // which is now within 6 %).
+        let tolerance = if matches!(p, Phoneme::Iy | Phoneme::Uw) {
+            16.0
         } else {
             10.0
         };
