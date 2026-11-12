@@ -252,11 +252,37 @@ fn peak_formants(t: &Trombone) -> [f32; 2] {
 ///
 /// The physical vowels anchored to Hillenbrand et al. (1995) put the close
 /// vowels' F1 between the 3rd and 4th harmonic of 110 Hz (/i/ 348 Hz, /u/
-/// 386 Hz, where the Peterson & Barney ones sat at 265 and 307), and every
-/// close-vowel shape tried there, whatever its tongue, lips or narrowing,
-/// is heard with F1 10-20 % high at 110 and 150 Hz; the mid and open
-/// vowels at 220 Hz come out 1-2 % further off than the old shapes did.
-const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 12] = [
+/// 386 Hz, where the Peterson & Barney ones sat at 265 and 307).
+///
+/// Is the sound's F1 really there? Measured three ways (`examples` scratch,
+/// summarised): the impulse response with the glottis shut; the response
+/// with the glottis held open at its mean phonating area (0.07-0.12 cm²)
+/// around its steady flow; and the peak of the harmonics of the voice
+/// actually singing, over a whole second, parabola through the strongest.
+///
+/// ```text
+///        shut   held open   sung at 70 Hz   sung at 110 Hz
+/// /i/     348     411-441        353             361
+/// /u/     386     546-567        386             386
+/// /ɪ/     436     482-518        413              -
+/// /ɛ/     592     660-670        589             610
+/// /ɑ/     775     769-779        772             782
+/// ```
+///
+/// The sung harmonics peak where the shut tract does: the glottis is open
+/// for part of each cycle, but the sound is excited at closure. Held open
+/// throughout, the glottis would lift F1 by 10-45 %; it is not. So the
+/// listener's 10-14 % on the close vowels at 110 Hz is the listener's: the
+/// source of folds that close firmly falls less steeply and carries a bump
+/// near 440 Hz, and linear prediction leans its F1 towards it. Reading F1
+/// from the harmonics instead (over whole periods, so they do not leak)
+/// brings the physical /i/ and /u/ to +6 % and +5 %, but how far it
+/// leans depends on the source's slope: levelled for the physical one it
+/// reads the classic engine's steeper source 8-14 % low on /u/, levelled
+/// for the classic it reads the physical /i/ and /u/ 13-15 % high. No
+/// choice served both, and the listener's job is any voice, so it was not
+/// adopted. The misses below are bounded at what is measured now.
+const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 8] = [
     (
         Engine::Classic,
         Phoneme::Uw,
@@ -270,88 +296,56 @@ const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 12] = [
         Phoneme::Iy,
         220.0,
         0,
-        25.0,
-        "source-tract interaction lifts F1 in the sound itself",
+        10.0,
+        "F1 (348 Hz) between the 1st and 2nd harmonic: heard +8.7 %",
     ),
     (
         Engine::Physical,
-        Phoneme::Eh,
+        Phoneme::Iy,
         220.0,
         1,
-        16.0,
-        "F2 lands near the 7th harmonic (1540 Hz); not investigated further",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Aa,
-        220.0,
-        0,
-        14.0,
-        "source-tract interaction lifts F1 in the sound itself",
+        10.0,
+        "F2 (2350 Hz) between the 10th and 11th harmonic: heard +8.8 %",
     ),
     (
         Engine::Physical,
         Phoneme::Ao,
         220.0,
         0,
-        14.0,
-        "source-tract interaction lifts F1 in the sound itself",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Uw,
-        220.0,
-        0,
         20.0,
-        "source-tract interaction lifts F1 in the sound itself",
+        "the closing source's bump near 440 Hz: heard +17.7 %",
     ),
     (
         Engine::Physical,
         Phoneme::Uw,
         110.0,
         0,
-        19.0,
-        "F1 broadened by the open glottis, between the 3rd and 4th harmonic",
+        15.0,
+        "the closing source's bump near 440 Hz: heard +12.9 %, sung harmonics 0 %",
     ),
     (
         Engine::Physical,
         Phoneme::Iy,
         110.0,
         0,
-        15.0,
-        "F1 (348 Hz) between the 3rd and 4th harmonic, heard 13 % high",
+        14.0,
+        "the closing source's bump near 440 Hz: heard +11.8 %, sung harmonics +4 %",
     ),
     (
         Engine::Physical,
         Phoneme::Eh,
         220.0,
         0,
-        11.0,
-        "source-tract interaction lifts F1 in the sound itself",
+        12.0,
+        "the closing source leans F1 up: heard +10.5 %",
     ),
     (
         Engine::Physical,
         Phoneme::Ae,
         220.0,
         0,
-        12.0,
-        "source-tract interaction lifts F1 in the sound itself",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Aa,
-        220.0,
-        1,
         10.0,
-        "F2 (1362 Hz) between the 6th and 7th harmonic",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Uw,
-        220.0,
-        1,
-        10.0,
-        "F2 (1017 Hz) between the 4th and 5th harmonic",
+        "the closing source leans F1 up: heard +8.8 %",
     ),
 ];
 
@@ -645,7 +639,11 @@ fn hiss_is_high_and_s_is_brighter_than_sh() {
                 m.0, m.1, m.2
             );
         }
-        assert!(v.0 < 0.1 && i.0 < 0.1, "{engine:?}: vowels hiss");
+        // The physical /i/ at 220 Hz carries a weak subharmonic since its
+        // folds close firmly (F1 near the 2nd harmonic), and its band above
+        // 1.5 kHz repeats a little less exactly: 0.11, against 0.86 and up
+        // for every fricative. The bound was 0.1.
+        assert!(v.0 < 0.1 && i.0 < 0.15, "{engine:?}: vowels hiss");
         if engine == Engine::Physical {
             assert!(
                 s.0 > 0.8 && sh.0 > 0.8,

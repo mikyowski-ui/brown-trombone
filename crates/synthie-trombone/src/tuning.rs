@@ -1,4 +1,4 @@
-//! [`Tuning`]: the thirty numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the forty-five numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -144,6 +144,31 @@ tuning! {
     /// Velar port fully open, cm² (how strongly nasals couple the nose).
     nasal_port = 0.8, 0.3..=1.6, A;
 
+    // ----- A: the larynx and the walls in consonants (physical engine) --
+
+    /// Seconds for the arytenoids to open or close the glottis behind the
+    /// folds (much slower than the folds meeting).
+    abduction_time = 0.02, 0.008..=0.05, A;
+    /// Glottal opening added behind the folds for a voiceless stop or
+    /// fricative and its aspiration, cm² at native size (on top of
+    /// `abducted_area`).
+    voiceless_spread = 0.12, 0.0..=0.4, A;
+    /// Opening left behind the vibrating folds in a voiced fricative, cm²
+    /// at native size: air for the hiss without stopping the voice.
+    voiced_fricative_spread = 0.02, 0.0..=0.12, A;
+    /// Share by which the fold cover slackens in a voiced stop (it lowers
+    /// the pressure the folds need to keep going).
+    voiced_stop_slack = 0.08, 0.0..=0.25, A;
+    /// Rate at which the pharynx and cheeks are actively widened during a
+    /// voiced closure, cm³/s; the air the voice sends into the shut mouth
+    /// goes there, so the voice lasts through the closure.
+    cavity_expansion = 150.0, 0.0..=300.0, A;
+    /// Pitch raised at the start of a vowel after a voiceless consonant, Hz
+    /// at native size (stiff folds after the glottis was spread).
+    onset_kick = 12.0, 0.0..=25.0, A;
+    /// Seconds over which that raise decays.
+    kick_time = 0.03, 0.01..=0.08, A;
+
     // ----- B: timing ----------------------------------------------------
 
     /// Head start the articulators get on each sound, s (physical engine).
@@ -166,10 +191,37 @@ tuning! {
     approximant_length = 0.055, 0.04..=0.1, B;
     /// Length of an `h`, s.
     aspirate_length = 0.06, 0.04..=0.1, B;
-    /// Breath after a voiceless stop's burst, before the vowel, s.
+    /// Breath after a voiceless stop's burst, before the vowel, s (classic
+    /// engine; the physical one holds the glottis open for `vot_*`).
     aspiration = 0.035, 0.015..=0.07, B;
     /// How much longer a stressed vowel is than an unstressed one.
     stress_stretch = 1.5, 1.2..=1.9, B;
+
+    // ----- B: voicing timing (physical engine) -------------------------
+
+    /// How long the glottis stays open after a /p/ is released before a
+    /// stressed vowel, s (the voice follows a few milliseconds later).
+    /// The physical engine uses these three in place of `aspiration`.
+    vot_labial = 0.04, 0.015..=0.08, B;
+    /// The same after /t/, s.
+    vot_alveolar = 0.045, 0.015..=0.08, B;
+    /// The same after /k/, s.
+    vot_velar = 0.05, 0.015..=0.09, B;
+    /// How long before a voiceless consonant the voice is let go and the
+    /// glottis starts to open, s: with the tract, which starts closing
+    /// `lead` ahead, so the voice stops as the tract shuts.
+    devoicing_lead = 0.012, 0.0..=0.03, B;
+    /// Share of that hold before an unstressed vowel.
+    unstressed_vot = 0.5, 0.2..=1.0, B;
+    /// How much longer the closure of a voiceless stop is than a voiced
+    /// one's.
+    fortis_closure = 1.25, 1.0..=1.6, B;
+    /// Length of a vowel before a voiceless consonant that ends its
+    /// syllable, relative to before a sonorant (pre-fortis clipping).
+    prefortis_clip = 0.85, 0.6..=1.0, B;
+    /// Length of a vowel before a voiced obstruent that ends its syllable,
+    /// relative to before a sonorant.
+    prelenis_stretch = 1.2, 1.0..=1.5, B;
 
     // ----- B: speeds ----------------------------------------------------
 
@@ -204,10 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fourteen_and_sixteen() {
+    fn two_passes_of_twenty_one_and_twenty_four() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (14, 16));
+        assert_eq!((a, b), (21, 24));
     }
 
     #[test]

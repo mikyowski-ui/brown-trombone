@@ -172,6 +172,7 @@ impl VoiceSettings {
             tenseness: self.tenseness,
             nasality: self.nasality,
             tuning: self.tuning,
+            engine: self.engine,
         }
     }
 

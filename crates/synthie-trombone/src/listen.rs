@@ -65,6 +65,10 @@ const PI: f32 = core::f32::consts::PI;
 const ORDER: usize = 12;
 /// Linear prediction window, analysis samples (20 ms).
 const LPC_WIN: usize = 240;
+/// A dip of YIN's normalised difference this deep at a whole fraction of
+/// the chosen period is taken for the period itself (a voice's own period
+/// sits under 0.15; half the period of a clear voice, above 0.29).
+const SUBPERIOD_DIP: f32 = 0.2;
 /// Pre-emphasis coefficient.
 const PRE: f32 = 0.97;
 /// Width of the Gaussian lag window, as a fraction of the pitch.
@@ -514,7 +518,7 @@ impl Listener {
             }
             tau += 1;
         }
-        let tau = best.unwrap_or_else(|| {
+        let mut tau = best.unwrap_or_else(|| {
             let mut m = TAU_MIN;
             for t in TAU_MIN..=TAU_MAX {
                 if self.cmndf[t] < self.cmndf[m] {
@@ -523,6 +527,28 @@ impl Listener {
             }
             m
         });
+        // A dip at a whole number of periods can be deeper than the one at
+        // the period itself: a voice whose second harmonic stands on F1
+        // can carry a weak subharmonic (the physical /i/ at 170 Hz: 0.04
+        // at two periods, 0.10-0.15 at one), and a listener still hears
+        // the period. Take the shortest whole fraction of the chosen period
+        // whose dip is still clearly a period's.
+        for k in [3, 2] {
+            let near = tau / k;
+            if near < TAU_MIN + 2 {
+                continue;
+            }
+            let mut d = near - 2;
+            for t in near - 2..=near + 2 {
+                if self.cmndf[t] < self.cmndf[d] {
+                    d = t;
+                }
+            }
+            if self.cmndf[d] < SUBPERIOD_DIP {
+                tau = d;
+                break;
+            }
+        }
         let aperiodicity = self.cmndf[tau];
         // The normalised difference leans towards short periods where its
         // dip is broad; place the period by the normalised

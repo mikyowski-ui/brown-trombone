@@ -22,7 +22,7 @@
 //! starts late after a voiceless stop, and stops below a threshold lung
 //! pressure. None of that is scripted.
 
-use super::{Gauge, RHO};
+use super::{Gauge, MU, RHO};
 use crate::math::{exp, sqrt};
 use core::f32::consts::PI;
 
@@ -307,15 +307,30 @@ impl Folds {
         // Pressure on each piece. Upstream of the narrowest point the air
         // has sped up and its pressure has dropped (Bernoulli); past it the
         // jet has left the wall and the pressure is that of the tract.
+        //
+        // In a narrow slit the air also loses pressure to viscosity on its
+        // way through (Poiseuille: 12·μ·thickness·u / (length·width³)),
+        // and the tract solver charges the glottis with that loss, so the
+        // flow `u` it hands over is less than Bernoulli alone would pass.
+        // The folds must feel the same loss: each piece sees the pressure
+        // at its middle, after the drop along the slit up to there. Without
+        // it a nearly shut glottis, where viscosity is most of the drop,
+        // felt almost the whole lung pressure pushing it open, and under
+        // vowels that load the folds heavily (a close vowel, a pitch near
+        // F1, a breathy or a soft voice) the edges stopped meeting.
         let (p1, p2) = if a1 <= 0.0 {
             (0.0, pe)
         } else if a2 <= 0.0 {
             (ps, pe)
         } else {
             let head = 0.5 * RHO * u * u;
-            let p1 = (ps - head / (a1 * a1)).max(pe.min(ps));
+            let slit = 12.0 * MU * p.length * p.length * u;
+            let (cube1, cube2) = (a1 * a1 * a1, a2 * a2 * a2);
+            let drop1 = slit * 0.5 * p.d1 / cube1;
+            let drop2 = slit * (p.d1 / cube1 + 0.5 * p.d2 / cube2);
+            let p1 = (ps - head / (a1 * a1) - drop1).max(pe.min(ps));
             let p2 = if a2 <= a1 {
-                (ps - head / (a2 * a2)).max(pe.min(ps))
+                (ps - head / (a2 * a2) - drop2).max(pe.min(ps))
             } else {
                 pe
             };

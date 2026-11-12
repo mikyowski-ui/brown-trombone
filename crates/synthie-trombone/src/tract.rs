@@ -667,6 +667,12 @@ impl Tract {
         self.hissing = 0.0;
     }
 
+    /// How fast each cell's diameter is changing, diameter units per
+    /// second (damped articulators; zero for the classic ones).
+    pub(crate) fn velocity(&self) -> &[f32; N] {
+        &self.velocity
+    }
+
     /// The largest widening of a fricative gap in use, and how far the
     /// vowel shape is being opened.
     pub(crate) fn nudges(&self) -> (f32, f32) {

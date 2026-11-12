@@ -63,8 +63,13 @@ pub enum GlottalSource {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Fallback {
-    /// Notes outside the folds' range are sung by the pulse: below it as
-    /// vocal fry, above it as a falsetto the folds have no register for.
+    /// Notes outside the folds' range ([`Trombone::fold_range`]) are sung
+    /// by the pulse: below it as vocal fry, above it as a falsetto the
+    /// folds have no register for. Inside it the folds sing every note,
+    /// even one they keep stalling on. The range is about 56 to 288 Hz for
+    /// the native-size voice at modal tenseness and scales with the
+    /// inverse of the size, so a small voice speaking high (the critter
+    /// preset, up to about 520 Hz) is sung by the pulse at its peaks.
     #[default]
     Auto,
     /// The folds sing everything; a note they cannot hold is not sung.
@@ -425,6 +430,42 @@ impl Trombone {
         self.glottis.voiced
     }
 
+    /// Hold the glottis open behind the folds by `cm2` (cm² at native size,
+    /// `0‥1`), as a speaker spreads it for a voiceless consonant: on top of
+    /// whatever the voicing gate does, and moving at the arytenoids' pace
+    /// ([`Tuning::abduction_time`]). With the gate on, a small opening
+    /// leaves the folds vibrating beside a stream of breath (a voiced
+    /// fricative); a large one with the gate off is the wide glottis of an
+    /// aspirated stop. Physical engine only; `0` (the default) leaves the
+    /// glottis to the voicing gate.
+    pub fn set_glottal_spread(&mut self, cm2: f32) {
+        if cm2.is_finite() {
+            self.source.spread_target = cm2.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Slacken the cover of the folds by `share` (`0‥0.5`) of its tension,
+    /// as a speaker does in a voiced stop: they then keep vibrating with
+    /// less pressure across them, and their pitch dips a little. Physical
+    /// engine only; `0` by default.
+    pub fn set_fold_slack(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.slack_target = share.clamp(0.0, 0.5);
+        }
+    }
+
+    /// Widen the pharynx actively at `cm3_per_s` (cm³/s at native size,
+    /// `0‥500`), as a speaker does to keep the voice going through a voiced
+    /// closure: the air the folds send into the shut tract is taken up
+    /// there, so the pressure across the folds holds. Stops by itself after
+    /// 15 cm³ until it is set to `0` again. Physical engine only; `0` by
+    /// default.
+    pub fn set_cavity_expansion(&mut self, cm3_per_s: f32) {
+        if cm3_per_s.is_finite() {
+            self.phys.expansion_target = cm3_per_s.clamp(0.0, 500.0);
+        }
+    }
+
     /// Phonate continuously, ignoring the gate, like the original web toy.
     pub fn set_always_voice(&mut self, on: bool) {
         self.glottis.always_voice = on;
@@ -752,6 +793,45 @@ impl Trombone {
             .snap(&self.tract.diameter, self.tract.velum_openness());
     }
 
+    /// The physical tract's response with the glottis held open at `area`
+    /// (cm²) and the lungs at `lung` (cmH2O): the change in the flow at
+    /// the lips, nostrils and skin, one value per tick, after a pressure
+    /// impulse at the lungs (per dyn/cm²), once the steady flow has settled.
+    /// It is the transfer function as the open glottis loads it, around the
+    /// flow it passes. For measuring; the classic engine gives zeros.
+    #[doc(hidden)]
+    pub fn impulse_response_open(&self, area: f32, lung: f32, out: &mut [f32]) {
+        out.fill(0.0);
+        if self.engine != Engine::Physical {
+            return;
+        }
+        let mut quiet = self.phys.clone();
+        quiet.reset();
+        quiet.freeze();
+        let lung = lung * CM_H2O;
+        // Long enough for the flow to settle: walls, trachea and all.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let settle = (0.8 * self.internal_rate) as usize;
+        for _ in 0..settle {
+            quiet.tick(1.0, Drive::Glottis { area, lung });
+        }
+        let mut kicked = quiet.clone();
+        for (n, o) in out.iter_mut().enumerate() {
+            let a = quiet.tick(1.0, Drive::Glottis { area, lung });
+            // A kick of 0.1 cmH2O: small next to the lungs, large next to
+            // the rounding of the flows it is told from.
+            let kick = if n == 0 { 0.1 * CM_H2O } else { 0.0 };
+            let b = kicked.tick(
+                1.0,
+                Drive::Glottis {
+                    area,
+                    lung: lung + kick,
+                },
+            );
+            *o = (b - a) / (0.1 * CM_H2O);
+        }
+    }
+
     /// The tract's response to a unit flow impulse at a closed glottis, as
     /// flow at the lips and nostrils, one value per tick (see
     /// [`tick_rate`](Self::tick_rate)). Its spectrum is the vocal tract
@@ -828,6 +908,7 @@ impl Trombone {
             }
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
+                self.phys.set_motion(self.tract.velocity());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),

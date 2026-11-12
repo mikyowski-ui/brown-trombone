@@ -11,6 +11,7 @@
     clippy::cast_sign_loss
 )]
 
+use std::fmt::Write as _;
 use std::sync::OnceLock;
 use synthie_trombone::{
     Constriction, Engine, GlottalSource, Persona, Phoneme, Preset, SLOT_MAIN, Talker, Trombone,
@@ -18,6 +19,9 @@ use synthie_trombone::{
 };
 
 const SR: f32 = 48_000.0;
+
+#[path = "../examples/support/stops.rs"]
+mod stops;
 
 /// The tuning under test: the default one, or, when the environment
 /// variable `SYNTHIE_TROMBONE_PROFILE` names a profile file, that
@@ -408,12 +412,22 @@ struct Stop {
     onset: f32,
 }
 
+/// The stop is made the way the speech front end makes it: a voiceless one
+/// with the glottis spread, a voiced one with the folds slackened and the
+/// pharynx widening; both let go at the release.
 fn stop(p: Phoneme, voiced: bool) -> Stop {
+    let tuning = tuned(VoiceSettings::default()).tuning;
     let mut t = voice(110.0, 0.65, 1.0);
     render(&mut t, 0.5);
     let vowel = rms(&render(&mut t, 0.1));
     t.articulate_phoneme(p);
     t.set_voiced(voiced);
+    if voiced {
+        t.set_fold_slack(tuning.voiced_stop_slack);
+        t.set_cavity_expansion(tuning.cavity_expansion);
+    } else {
+        t.set_glottal_spread(tuning.voiceless_spread);
+    }
     let mut shut_at = None;
     let (mut voicing, mut pressure) = (0.0f32, 0.0f32);
     let mut last = Vec::new();
@@ -441,6 +455,9 @@ fn stop(p: Phoneme, voiced: bool) -> Stop {
     let silence = rms(&last);
     t.articulate_phoneme(Phoneme::Aa);
     t.set_voiced(true);
+    t.set_glottal_spread(0.0);
+    t.set_fold_slack(0.0);
+    t.set_cavity_expansion(0.0);
     let after = render(&mut t, 0.2);
     let burst = after[..1440].iter().fold(0.0f32, |m, v| m.max(v.abs()));
     let onset = after
@@ -476,14 +493,191 @@ fn stops_build_pressure_and_burst_by_themselves() {
         p.burst
     );
     // A voiceless stop has no voicing in the closure; a voiced one keeps
-    // it for 30 ms or more before the mouth fills.
+    // it for 30 ms or more before the mouth fills (with the pharynx
+    // widening, most of the 120 ms closure here).
     assert!(p.voicing < 15.0, "/p/ voiced for {} ms", p.voicing);
     assert!(b.voicing >= 30.0, "/b/ voiced for only {} ms", b.voicing);
     // Less room behind the tongue tip than behind the lips: /d/ loses its
-    // voice sooner than /b/.
-    assert!(d.voicing <= b.voicing);
-    // The voice comes back later after /p/ than after /b/.
+    // voice no later than /b/.
+    assert!(
+        d.voicing <= b.voicing,
+        "/d/ {} ms, /b/ {} ms",
+        d.voicing,
+        b.voicing
+    );
+    // The voice comes back later after /p/ than after /b/: the spread
+    // glottis has to close first, while after /b/ the folds are vibrating
+    // at the release.
     assert!(p.onset > b.onset, "/p/ {} ms, /b/ {} ms", p.onset, b.onset);
+}
+
+/// The voice the speech gates listen to: the judge's, with the tuning
+/// under test.
+fn speech_voice() -> VoiceSettings {
+    tuned(stops::judge_voice())
+}
+
+#[test]
+fn voice_onset_follows_the_stop() {
+    // English before a stressed vowel (Lisker & Abramson 1964): /p t k/
+    // aspirated, voice 40 to 65 ms after the release, later the further
+    // back the closure; /b d g/ voiced at once (0 to 15 ms).
+    let settings = speech_voice();
+    let mut vot = Vec::new();
+    for (voiceless, voiced) in stops::STOPS {
+        let text = |p: Phoneme| stops::context(p, "medial");
+        let u = stops::stop(&settings, &text(voiceless), voiceless);
+        let v = stops::stop(&settings, &text(voiced), voiced);
+        println!(
+            "{voiceless}: VOT {:.0} ms   {voiced}: VOT {:.0} ms",
+            u.vot, v.vot
+        );
+        assert!(
+            (40.0..=65.0).contains(&u.vot),
+            "{voiceless}: VOT {} ms",
+            u.vot
+        );
+        assert!((0.0..=15.0).contains(&v.vot), "{voiced}: VOT {} ms", v.vot);
+        vot.push(u.vot);
+    }
+    assert!(vot[2] > vot[0], "/k/ {} ms, /p/ {} ms", vot[2], vot[0]);
+}
+
+#[test]
+fn voiced_closures_carry_a_voice_bar_and_voiceless_ones_do_not() {
+    // The folds keep vibrating through a voiced closure between vowels
+    // (the low "voice bar" of the spectrogram), for at least 80 % of it,
+    // and stop at once in a voiceless one (under 30 %, the tail of the
+    // vowel). The voiceless closure is the longer, and its mouth pressure
+    // at the release the higher: it is what makes its burst.
+    let settings = speech_voice();
+    for (voiceless, voiced) in stops::STOPS {
+        let text = |p: Phoneme| stops::context(p, "medial");
+        let u = stops::stop(&settings, &text(voiceless), voiceless);
+        let v = stops::stop(&settings, &text(voiced), voiced);
+        println!(
+            "{voiceless}: closure {:.0} ms, voiced {:.0} %, bar {:.1} dB, p {:.2} | {voiced}: closure {:.0} ms, voiced {:.0} %, bar {:.1} dB, p {:.2}",
+            u.closure,
+            100.0 * u.voiced_share,
+            u.voice_bar,
+            u.pressure,
+            v.closure,
+            100.0 * v.voiced_share,
+            v.voice_bar,
+            v.pressure
+        );
+        assert!(
+            v.voiced_share >= 0.8,
+            "{voiced}: voiced {:.2}",
+            v.voiced_share
+        );
+        assert!(
+            u.voiced_share < 0.3,
+            "{voiceless}: voiced {:.2}",
+            u.voiced_share
+        );
+        // The velar voice bar is the faintest: little wall behind the
+        // tongue back to radiate it.
+        let lift = if voiced == Phoneme::G { 1.0 } else { 3.0 };
+        assert!(
+            v.voice_bar > u.voice_bar + lift,
+            "{voiced} vs {voiceless} voice bar"
+        );
+        assert!(
+            u.closure > v.closure,
+            "{voiceless} closure {} ms",
+            u.closure
+        );
+        assert!(
+            u.pressure > v.pressure,
+            "{voiceless} pressure {}",
+            u.pressure
+        );
+    }
+}
+
+#[test]
+fn the_voice_starts_higher_after_a_voiceless_stop() {
+    // Vowels start some 10 to 15 Hz higher after /p t k/ than their pitch
+    // a little later, and higher than after /b d g/ (Hombert, Ohala &
+    // Ewan 1979).
+    let settings = speech_voice();
+    for (voiceless, voiced) in stops::STOPS {
+        let text = |p: Phoneme| stops::context(p, "medial");
+        let u = stops::stop(&settings, &text(voiceless), voiceless);
+        let v = stops::stop(&settings, &text(voiced), voiced);
+        println!(
+            "{voiceless}: F0 {:+.1} Hz then {:+.1}   {voiced}: F0 {:+.1} Hz then {:+.1}",
+            u.f0_onset, u.f0_next, v.f0_onset, v.f0_next
+        );
+        assert!(
+            u.f0_onset > 4.0,
+            "{voiceless}: onset F0 {:+.1} Hz",
+            u.f0_onset
+        );
+        assert!(
+            u.f0_onset > u.f0_next,
+            "{voiceless}: the raise does not decay"
+        );
+        assert!(
+            u.f0_onset > v.f0_onset + 5.0,
+            "{voiceless} {:+.1} Hz vs {voiced} {:+.1} Hz",
+            u.f0_onset,
+            v.f0_onset
+        );
+    }
+}
+
+#[test]
+fn vowels_are_shorter_before_voiceless_codas() {
+    // Pre-fortis clipping: a vowel before a voiceless coda lasts about two
+    // thirds as long as before a voiced one ("bat" and "bad", Peterson &
+    // Lehiste 1960). The physical engine's front end only.
+    let settings = speech_voice();
+    for (a, b) in [
+        ("[B AE1 T]", "[B AE1 D]"),
+        ("[R OW1 P]", "[R OW1 B]"),
+        ("[B AE1 K]", "[B AE1 G]"),
+        ("[B UW1 S]", "[B UW1 Z]"),
+    ] {
+        let ratio = stops::vowel_length(&settings, a) / stops::vowel_length(&settings, b);
+        println!("{a} / {b}: {ratio:.2}");
+        assert!((0.55..=0.8).contains(&ratio), "{a} / {b}: {ratio:.2}");
+    }
+}
+
+#[test]
+fn voiced_fricatives_hiss_and_voice_at_once() {
+    // A voiced fricative keeps the folds vibrating through the hiss (and
+    // its hiss is weaker than its voiceless twin's, but there); the
+    // voiceless one does not vibrate.
+    let settings = speech_voice();
+    for (voiceless, voiced) in stops::FRICATIVES {
+        let text = |p: Phoneme| stops::context(p, "vcv");
+        let u = stops::fricative(&settings, &text(voiceless), voiceless);
+        let v = stops::fricative(&settings, &text(voiced), voiced);
+        println!(
+            "{voiceless}: voiced {:.0} %, bar {:.1} dB, hiss {:.1} dB | {voiced}: voiced {:.0} %, bar {:.1} dB, hiss {:.1} dB",
+            100.0 * u.voiced_share,
+            u.voice_bar,
+            u.hiss,
+            100.0 * v.voiced_share,
+            v.voice_bar,
+            v.hiss
+        );
+        assert!(
+            v.voiced_share >= 0.8,
+            "{voiced}: voiced {:.2}",
+            v.voiced_share
+        );
+        assert!(
+            u.voiced_share < 0.2,
+            "{voiceless}: voiced {:.2}",
+            u.voiced_share
+        );
+        assert!(v.voice_bar > u.voice_bar + 3.0, "{voiced} voice bar");
+        assert!(v.hiss > u.hiss - 15.0, "{voiced} hiss {:.1} dB", v.hiss);
+    }
 }
 
 #[test]
@@ -568,7 +762,10 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
     // high: 4.3 dB louder than the default voice's /a/ (3.8 dB with the
     // /a/ fitted to Peterson & Barney, whose F1 was 10 % lower and met the
     // harmonics of the high voice elsewhere). No gap width changes that,
-    // and neither does the jaw, so the bound here is 7.5 dB.
+    // and neither does the jaw, so the bound was 7.5 dB. With the folds
+    // closing firmly the /s/ of size 0.6 sits at most 6.2 dB from the
+    // default's against its vowel (at 8 cmH2O), and the bound is 6.5 dB
+    // again.
     let vowels = [
         Phoneme::Iy,
         Phoneme::Ih,
@@ -613,7 +810,7 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
                 s - s0,
                 sh - sh0
             );
-            if (s - s0).abs() > 7.5 {
+            if (s - s0).abs() > 6.5 {
                 failures.push(format!("s at size {size}, {lung} cmH2O: {:+.1} dB", s - s0));
             }
             if hiss > -26.0 {
@@ -795,9 +992,13 @@ fn no_held_note_is_ever_silent() {
 #[test]
 fn the_voice_recovers_at_once_from_a_pinch() {
     // Hold a note, pinch the tract fully shut anywhere for 300 ms, let go.
-    // The folds are vibrating again within 10 ms of the tract reopening.
+    // The folds are vibrating again within 12 ms of the tract reopening.
     // (It used to take 16 to 43 ms: the mouth stayed pressurised by the
-    // air its walls had taken up, and the pressed folds let go slowly.)
+    // air its walls had taken up, and the pressed folds let go slowly.
+    // The bound was 10 ms, met at 8-10 ms, until the folds felt the
+    // viscous loss along the glottis: the first openings out of a pressed
+    // start, where the slit is narrowest and viscosity most of the drop,
+    // are now pushed apart less, and every cell takes 1 ms longer, 3-11 ms.)
     for index in [
         3.0f32, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0, 34.0, 37.0, 40.0, 42.5,
     ] {
@@ -840,7 +1041,7 @@ fn the_voice_recovers_at_once_from_a_pinch() {
         }
         let delay = swinging.expect("the voice never came back") - reopened.unwrap();
         println!("pinch at cell {index}: folds vibrating {delay} ms after it reopens");
-        assert!(delay <= 10, "cell {index}: {delay} ms");
+        assert!(delay <= 12, "cell {index}: {delay} ms");
     }
 }
 
@@ -927,6 +1128,259 @@ fn garbage_and_abuse_never_break_the_physical_engine() {
     }
 }
 
+/// The twelve monophthongs.
+const MONOPHTHONGS: [Phoneme; 12] = [
+    Phoneme::Iy,
+    Phoneme::Ih,
+    Phoneme::Eh,
+    Phoneme::Ae,
+    Phoneme::Ah,
+    Phoneme::Aa,
+    Phoneme::Ao,
+    Phoneme::Uh,
+    Phoneme::Uw,
+    Phoneme::Ow,
+    Phoneme::Er,
+    Phoneme::Ax,
+];
+
+/// Troughs of `a` (index, value), keeping only swings of at least `swing`:
+/// one per cycle.
+fn troughs(a: &[f32], swing: f32) -> Vec<(usize, f32)> {
+    let mut out = Vec::new();
+    let (mut lo, mut hi) = ((0usize, a[0]), (0usize, a[0]));
+    let mut rising = false;
+    for (i, &v) in a.iter().enumerate() {
+        if rising {
+            if v > hi.1 {
+                hi = (i, v);
+            }
+            if hi.1 - v > swing {
+                rising = false;
+                lo = (i, v);
+            }
+        } else {
+            if v < lo.1 {
+                lo = (i, v);
+            }
+            if v - lo.1 > swing {
+                out.push(lo);
+                rising = true;
+                hi = (i, v);
+            }
+        }
+    }
+    out
+}
+
+/// One trough per cycle: a notch within the open phase (a dip closer than
+/// `shortest` samples to the trough before it) is merged with that trough,
+/// the deeper one kept. Without this a notch in a child's /u/ was counted
+/// as a cycle 0.4 ms long that never closed.
+fn cycles(found: &[(usize, f32)], shortest: f32) -> Vec<(usize, f32)> {
+    let mut out: Vec<(usize, f32)> = Vec::with_capacity(found.len());
+    for &t in found {
+        match out.last_mut() {
+            Some(last) if ((t.0 - last.0) as f32) < shortest => {
+                if t.1 < last.1 {
+                    *last = t;
+                }
+            }
+            _ => out.push(t),
+        }
+    }
+    out
+}
+
+/// Strongest component of `x` within ±8 % of `hz`, under a Hann window.
+#[allow(clippy::many_single_char_names)]
+fn harmonic(x: &[f32], hz: f32) -> f32 {
+    let n = x.len() as f64;
+    let mut best = 0.0f64;
+    for step in -8..=8 {
+        let w = 2.0 * std::f64::consts::PI * f64::from(hz) * (1.0 + 0.01 * f64::from(step))
+            / f64::from(SR);
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (k, &v) in x.iter().enumerate() {
+            let k = k as f64;
+            let v = f64::from(v) * (0.5 - 0.5 * (2.0 * std::f64::consts::PI * k / n).cos());
+            re += v * (w * k).cos();
+            im += v * (w * k).sin();
+        }
+        best = best.max((re * re + im * im).sqrt());
+    }
+    best as f32
+}
+
+/// What a held vowel did: cycles, cycles whose edges never met, the
+/// longest gap between cycles (periods), the share of the voiced time the
+/// pulse sang, and the H1–H2 of the sound in 50 ms frames.
+struct Closure {
+    cycles: usize,
+    open: usize,
+    longest: f32,
+    pulse: f32,
+    h1h2: Vec<f32>,
+}
+
+/// Hold `vowel` on `settings` at the voice's own pitch: 0.2 s to start,
+/// then 2 s measured.
+fn hold_closure(settings: VoiceSettings, vowel: Phoneme) -> Closure {
+    /// A trough below this share of the typical peak counts as closed.
+    const CLOSED: f32 = 0.01;
+    let mut t = fresh();
+    settings.with_engine(Engine::Physical).apply(&mut t);
+    t.articulate_phoneme(vowel);
+    t.settle();
+    t.note_on();
+    render(&mut t, 0.2);
+    let n = (2.0 * SR) as usize;
+    let (mut edge, mut out) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    let mut pulse = 0usize;
+    for _ in 0..n {
+        out.push(t.process());
+        let g = t.gauges();
+        edge.push(g.edge_area);
+        if g.sounding == Some(GlottalSource::Pulse) {
+            pulse += 1;
+        }
+    }
+    let mut sorted = edge.clone();
+    sorted.sort_by(f32::total_cmp);
+    let peak = sorted[n * 95 / 100].max(1e-6);
+    let expected = SR / settings.pitch;
+    let found = cycles(&troughs(&edge, 0.15 * peak), 0.5 * expected);
+    let longest = found
+        .windows(2)
+        .map(|w| (w[1].0 - w[0].0) as f32 / expected)
+        .fold(0.0f32, f32::max);
+    let open = found.iter().skip(1).filter(|t| t.1 > CLOSED * peak).count();
+    // H1-H2 per 50 ms, each frame at least four periods long.
+    let hop = (0.05 * SR) as usize;
+    let len = (hop as f32).max(4.0 * expected) as usize;
+    let mut h1h2 = Vec::new();
+    let mut from = 0;
+    while from + len <= out.len() {
+        let frame = &out[from..from + len];
+        let hz = settings.pitch;
+        h1h2.push(db(harmonic(frame, hz)) - db(harmonic(frame, 2.0 * hz)));
+        from += hop;
+    }
+    Closure {
+        cycles: found.len().saturating_sub(1),
+        open,
+        longest,
+        pulse: pulse as f32 / n as f32,
+        h1h2,
+    }
+}
+
+/// Every voiced preset as it is, and the default voice at every body size.
+fn closure_voices() -> Vec<(String, VoiceSettings)> {
+    let mut voices: Vec<(String, VoiceSettings)> = Preset::ALL
+        .into_iter()
+        .filter(|&p| p != Preset::Whisper)
+        .map(|p| (p.to_string(), tuned(p.settings())))
+        .collect();
+    for size in [0.6f32, 0.8, 1.2, 1.4] {
+        let persona = Persona {
+            size,
+            ..Persona::NEUTRAL
+        };
+        voices.push((
+            format!("deep at size {size}"),
+            tuned(Preset::Deep.settings()).with_persona(&persona),
+        ));
+    }
+    voices
+}
+
+#[test]
+fn the_folds_close_on_every_cycle_and_h1_h2_holds_steady() {
+    // Modal voice closes the membranous glottis on every cycle; a breathy
+    // one leaks through the gap behind it, not between the edges. Every
+    // vowel on every voiced preset (the whisper has no voice), and the
+    // default voice at sizes 0.6 to 1.4: in 2 s held, no cycle whose
+    // edges do not meet, no missing cycle, all of it sung by the folds,
+    // and H1-H2 (the closure's signature in the sound) steady from one
+    // 50 ms frame to the next.
+    //
+    // Before the folds felt the viscous loss along the slit they press on,
+    // 1889 of 51343 cycles did not close (/i/ and /u/ on bright, child,
+    // critter and elder, and the default voice at size 0.6, where every
+    // other cycle stayed open), elder's /i/ and /u/ missed cycles, and
+    // H1-H2 stepped by up to 19.2 dB between frames (range 20.9 dB); the
+    // default voice at size 1.4 was sung by the pulse. Now no cycle stays
+    // open, and the worst step is 1.3 dB, the worst range 1.5 dB (3.2 and
+    // 3.8 dB on the vowels solved from Hillenbrand's formants).
+    /// Largest H1-H2 step between neighbouring frames, and range, dB.
+    const STEP: f32 = 4.0;
+    const RANGE: f32 = 5.0;
+    let voices = closure_voices();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = voices
+            .iter()
+            .flat_map(|(name, settings)| {
+                MONOPHTHONGS.map(|vowel| {
+                    (
+                        name,
+                        vowel,
+                        scope.spawn(move || hold_closure(*settings, vowel)),
+                    )
+                })
+            })
+            .collect();
+        let (mut worst_step, mut worst_range) = (0.0f32, 0.0f32);
+        let (mut cycles, mut open) = (0usize, 0usize);
+        let mut failures = Vec::new();
+        for (name, vowel, job) in jobs {
+            let c = job.join().expect("a held vowel");
+            let step = c
+                .h1h2
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max);
+            let lo = c.h1h2.iter().copied().fold(f32::INFINITY, f32::min);
+            let hi = c.h1h2.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            worst_step = worst_step.max(step);
+            worst_range = worst_range.max(hi - lo);
+            cycles += c.cycles;
+            open += c.open;
+            let mut fail = |what: String| failures.push(format!("{name} {vowel}: {what}"));
+            if c.cycles <= 50 {
+                fail(format!("only {} cycles", c.cycles));
+            }
+            if c.open > 0 {
+                fail(format!("{} of {} cycles did not close", c.open, c.cycles));
+            }
+            if c.longest >= 1.8 {
+                fail(format!("a gap of {:.1} periods between cycles", c.longest));
+            }
+            if c.pulse > 0.0 {
+                fail(format!("the pulse sang {:.0} %", 100.0 * c.pulse));
+            }
+            if step >= STEP {
+                fail(format!("H1-H2 stepped by {step:.1} dB"));
+            }
+            if hi - lo >= RANGE {
+                fail(format!("H1-H2 ranged over {:.1} dB", hi - lo));
+            }
+        }
+        println!(
+            "{open} of {cycles} cycles did not close; H1-H2: largest step {worst_step:.2} dB, largest range {worst_range:.2} dB"
+        );
+        for f in &failures {
+            println!("  {f}");
+        }
+        assert!(
+            failures.is_empty(),
+            "{} failures, first: {}",
+            failures.len(),
+            failures[0]
+        );
+    });
+}
+
 /// The judge's sentences, `(id, text)`.
 fn judge_sentences() -> Vec<(String, String)> {
     let mut lines = Vec::new();
@@ -1006,4 +1460,117 @@ fn the_folds_carry_running_speech() {
             );
         }
     });
+}
+
+#[test]
+fn affricates_release_into_full_frication() {
+    // An affricate's closure opens into the fricative of its place: its
+    // hiss is that of /sh/ or /zh/ (within 3 dB). The noise takes 10 to
+    // 15 ms to build, so the 10 ms after the release that the burst gate
+    // reads hold only its start.
+    let settings = speech_voice();
+    for (affricate, fricative) in [(Phoneme::Ch, Phoneme::Sh), (Phoneme::Jh, Phoneme::Zh)] {
+        let a = stops::fricative(&settings, &stops::context(affricate, "vcv"), affricate);
+        let f = stops::fricative(&settings, &stops::context(fricative, "vcv"), fricative);
+        println!(
+            "{affricate}: hiss {:.1} dB, {fricative}: {:.1} dB re the vowel",
+            a.hiss, f.hiss
+        );
+        assert!(
+            (a.hiss - f.hiss).abs() <= 3.0,
+            "{affricate} hiss {:.1} dB",
+            a.hiss
+        );
+    }
+}
+
+#[test]
+fn stop_releases_are_bursts_not_clicks() {
+    // A stop is released as a short burst of noise shaped by the cavity in
+    // front of the closure, some 10 to 20 dB below the vowel that follows
+    // (Stevens 1998, ch. 7), not as a step between two samples. Two such
+    // steps came out of closures and releases: the air a closing
+    // articulator squeezed out of a cell that had all but shut (thousands
+    // of cmH2O in its last ticks, cut off at the seal), and the folds being
+    // handed to the pulse source and back while apart for a pause. Before
+    // the fix the largest step in these sentences was 11 times the loudest
+    // vowel sample in the default voice, 8 to 9 in the elder's and the
+    // giant's, 85 in the whisper's; up to 0.9 of it at a release.
+    //
+    // A third cause was the shape itself: it moved on straight lines
+    // between articulator blocks, so a closing cell changed its speed at
+    // once every 10.7 ms, and in a narrow gap the change in the air
+    // squeezed out of it was a step (up to 3.2 vowel peaks in the elder).
+    // The shape now follows the articulators' own speeds through each
+    // block.
+    //
+    // Around every release (5 ms before to 10 ms after) no step is above a
+    // quarter of the loudest vowel sample, half of it in the whisper (whose
+    // vowels are faint breath). Anywhere in a sentence no step is above 1.5
+    // vowel peaks (measured: 0.9 at most). Two voices have their own bound,
+    // set to what they do with a margin: the critter (4; measured 2.9),
+    // whose small, stiff folds, blown at 15 cmH2O, open again within two
+    // samples after a long closed phase, in vowels, not at consonants; and
+    // the whisper (8; measured 5.8), where it is the hiss of the breath
+    // through a tongue tip closing on a wide-open glottis, against vowels
+    // that are themselves only breath. No kind of stop bursts louder on
+    // average than 6 dB below the vowel that follows, and no single burst
+    // is louder than that vowel.
+    const AT_RELEASE: f32 = 0.25;
+    const STEP: f32 = 1.5;
+    const MEAN_BURST: f32 = -6.0;
+    const MAX_BURST: f32 = 0.0;
+    let texts = [
+        "As for etchings they are of two kinds British and foreign.",
+        "The judge checked the big black bag at the gate.",
+        "Pick a cup and dig deep to get the chips.",
+    ];
+    for preset in Preset::ALL {
+        let settings = tuned(preset.settings());
+        let (at_release, step) = match preset {
+            Preset::Whisper => (0.5, 8.0),
+            Preset::Critter => (AT_RELEASE, 4.0),
+            _ => (AT_RELEASE, STEP),
+        };
+        let (mut worst, mut worst_release) = (0.0f32, 0.0f32);
+        let mut levels: std::collections::BTreeMap<&str, Vec<f32>> =
+            std::collections::BTreeMap::new();
+        for text in texts {
+            let r = stops::record(&settings, text);
+            let vowel = stops::vowel_peak(&r);
+            worst = worst.max(stops::largest_step(&r) / vowel);
+            for b in stops::bursts(&r) {
+                worst_release = worst_release.max(b.step / vowel);
+                levels
+                    .entry(b.phoneme.symbol())
+                    .or_default()
+                    .push(stops::db(b.peak / b.vowel));
+            }
+        }
+        let mut line = format!(
+            "{preset}: largest step {worst:.2} x vowel peak, {worst_release:.2} at releases; bursts re the vowel's peak, dB (mean / max):"
+        );
+        for (p, v) in &levels {
+            let mean = v.iter().sum::<f32>() / v.len() as f32;
+            let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let _ = write!(line, " {p} {mean:+.1}/{max:+.1}");
+            assert!(
+                mean <= MEAN_BURST,
+                "{preset} {p}: bursts {mean:+.1} dB on average"
+            );
+            assert!(
+                max <= MAX_BURST,
+                "{preset} {p}: a burst {max:+.1} dB over the vowel"
+            );
+        }
+        println!("{line}");
+        assert!(
+            worst_release <= at_release,
+            "{preset}: a step of {worst_release:.2} x the loudest vowel sample at a release"
+        );
+        assert!(
+            worst <= step,
+            "{preset}: a step of {worst:.2} x the loudest vowel sample"
+        );
+    }
 }

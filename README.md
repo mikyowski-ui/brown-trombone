@@ -234,9 +234,17 @@ against. A few of the figures:
 - /s/ and /sh/ come out 15 to 20 dB louder than /f/ and /th/.
 
 It costs more: about 6 times faster than real time on one core at the
-native tract length, against 170 for the classic engine. Notes outside the
-folds' range (above about 400 Hz for the native tract) are sung with a
-prescribed glottal pulse. Body-cover folds under muscle control (Titze &
+native tract length, against 170 for the classic engine. With the default
+`Fallback::Auto`, notes outside the folds' range are sung with a
+prescribed glottal pulse instead: below it as vocal fry, above it as a
+falsetto the folds have no register for. For the native-size voice at
+modal tenseness that range is about 56 to 288 Hz, and it scales with the
+inverse of the size (the critter voice's is 93 to 488 Hz, so the peaks
+of its lively speech, 490 to 520 Hz, are sung by the pulse). Inside the
+range the folds sing every note, stalls included; `Fallback::Never`
+keeps the pulse out altogether, `GlottalSource::Pulse` uses nothing
+else, `Trombone::fold_range` gives the range and `Gauges::sounding`
+says which is singing. Body-cover folds under muscle control (Titze &
 Story 2002) are implemented and tested but not yet what sets the pitch.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
