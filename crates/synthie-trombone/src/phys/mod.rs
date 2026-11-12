@@ -82,6 +82,16 @@ const WALL_LAYER_MASS: f32 = 0.8;
 /// Seconds over which displaced-air flow is smoothed (articulators are
 /// updated in blocks; their velocity must not step).
 const DISPLACEMENT_SMOOTHING: f32 = 0.004;
+/// Lumen, cm², below which a closing (or opening) cell displaces less and
+/// less air, in proportion to what is left of it. The articulators move a
+/// whole block at a steady speed, so a cell that shuts would otherwise go
+/// on squeezing out air at full rate through a gap that has all but gone:
+/// in the last ticks before the seal the pressure in it rose to thousands
+/// of cmH2O and was cut off at the seal, and every closure and release
+/// clicked. Real tissue slows as it meets; the air it squeezes out at the
+/// end goes sideways, which a tube cannot. Over the last 0.03 cm² the
+/// volume lost is a few thousandths of a cm³.
+const SQUEEZE_AREA: f32 = 0.03;
 
 /// Cells in the subglottal tube (trachea), lungs at `0`.
 pub(crate) const NS: usize = 33;
@@ -116,6 +126,26 @@ const JET_REACH: usize = 9;
 /// whose burst and aspiration are that very air.
 const BLEED_TIME: f32 = 0.012;
 const BLEED_TAU: f32 = 0.002;
+
+/// Cells (glottis end first) whose walls a speaker widens to keep a voiced
+/// closure voiced: the pharynx, behind every place of closure. Lowering the
+/// larynx, pushing the tongue root forward and lifting the soft palate all
+/// enlarge it (Westbury 1983).
+const EXPANDING: core::ops::Range<usize> = 2..15;
+/// Seconds for that widening to get going or stop.
+const EXPANSION_TIME: f32 = 0.01;
+/// Most the pharynx can be widened by, cm³ at native size; once that much
+/// has been taken up the widening stops until the gesture is let go.
+const EXPANSION_LIMIT: f32 = 15.0;
+/// The widening yields to the air rather than sucking at it: it goes at
+/// full rate once the pressure in the pharynx is this high, dyn/cm², and in
+/// proportion below (none below the outside air's). A relaxed, pulled-out
+/// wall, in effect, not a pump: the mouth never goes below atmospheric.
+const EXPANSION_PRESSURE: f32 = 2.0 * CM_H2O;
+/// Cell whose pressure the widening yields to, and the seconds over which
+/// that pressure is averaged (so the yield is slow, not an audio-rate load).
+const EXPANSION_PROBE: usize = 8;
+const EXPANSION_PRESSURE_TIME: f32 = 0.004;
 
 /// Loss multiplier for the nasal passages (large wetted surface).
 const NASAL_LOSS: f32 = 3.0;
@@ -236,6 +266,8 @@ pub(crate) struct Phys {
     a0: [f32; N],
     a1: [f32; N],
     att: [f32; N],
+    /// Attenuation at the start of the block (it is interpolated like the area).
+    att0: [f32; N],
     visc: f32,
 
     /// Wall surface of each cell, cm²: now, and at the start and end of
@@ -257,6 +289,14 @@ pub(crate) struct Phys {
     adot_smooth: f32,
     /// Seconds left of a release bleed.
     bleed: f32,
+    /// Active widening of the pharynx the speaker asks for, cm³/s at native
+    /// size; the rate it is happening at, cm³/s; and the volume taken up so
+    /// far, cm³.
+    pub(crate) expansion_target: f32,
+    expansion: f32,
+    expanded: f32,
+    /// Pressure in the pharynx, averaged, dyn/cm².
+    pharynx_pressure: f32,
     /// Velar port fully open, cm² (both sides together).
     nasal_port: f32,
 
@@ -307,6 +347,7 @@ impl Phys {
             a0: [0.0; N],
             a1: [0.0; N],
             att: [1.0; N],
+            att0: [1.0; N],
             visc: 0.0,
             wall_s: [0.0; N],
             wall_s0: [0.0; N],
@@ -323,6 +364,10 @@ impl Phys {
             adot_target: [0.0; N],
             adot_smooth: 0.0,
             bleed: 0.0,
+            expansion_target: 0.0,
+            expansion: 0.0,
+            expanded: 0.0,
+            pharynx_pressure: 0.0,
             nasal_port: crate::Tuning::DEFAULT.nasal_port,
             sub_r: [0.0; NS],
             sub_l: [0.0; NS],
@@ -490,6 +535,9 @@ impl Phys {
         self.wall_w = [0.0; N];
         self.adot = [0.0; N];
         self.bleed = 0.0;
+        self.expansion = 0.0;
+        self.expanded = 0.0;
+        self.pharynx_pressure = 0.0;
         self.sub_r = [0.0; NS];
         self.sub_l = [0.0; NS];
         for b in &mut self.nose {
@@ -609,6 +657,7 @@ impl Phys {
 
     fn refresh(&mut self, block_dt: f32) {
         self.wall_s0 = self.wall_s1;
+        self.att0 = self.att;
         for i in 0..N {
             // A cell that is shutting during this block is still open for
             // most of it: its losses and wall are those of the wider end.
@@ -656,19 +705,20 @@ impl Phys {
             .sum()
     }
 
-    /// The wall of cell `i` as a shunt on the node at its right end, plus
-    /// the air the moving wall displaces.
+    /// The wall of cell `i` (lumen `area`, cm²) as a shunt on the node at
+    /// its right end, plus the air the moving articulators displace.
     #[inline]
-    fn wall_shunt(&self, i: usize) -> Shunt {
+    fn wall_shunt(&self, i: usize, area: f32) -> Shunt {
         let s = self.wall_s[i];
         if s == 0.0 {
             return Shunt::NONE;
         }
         let rest = self.wall_cv
             * (self.wall_v[i] - self.wall_ck * self.wall_y[i] + self.wall_cw * self.wall_w[i]);
+        let squeeze = (area / (SQUEEZE_AREA * self.len * self.len)).min(1.0);
         Shunt {
             g: s * self.wall_cg,
-            h: s * rest + self.dx * self.adot[i],
+            h: s * rest + self.dx * self.adot[i] * squeeze,
         }
     }
 
@@ -713,6 +763,7 @@ impl Phys {
         }
         let mut nr = [0.0f32; N];
         let mut nl = [0.0f32; N];
+        let widen = self.widening();
 
         match drive {
             Drive::Flow(u) => {
@@ -737,7 +788,10 @@ impl Phys {
         let mut jet = (0.0f32, 0usize);
         for j in 1..N {
             let i = j - 1;
-            let mut shunt = self.wall_shunt(i);
+            let mut shunt = self.wall_shunt(i, y[i] * RHO_C);
+            if EXPANDING.contains(&i) {
+                shunt.add(0.0, widen);
+            }
             let nose_here = j == NOSE_START;
             if nose_here {
                 for b in &self.nose {
@@ -817,7 +871,7 @@ impl Phys {
 
         // Lips.
         let i = N - 1;
-        let shunt = self.wall_shunt(i);
+        let shunt = self.wall_shunt(i, y[i] * RHO_C);
         let lip_area = y[i] * RHO_C;
         let mut u_lips = 0.0;
         let mut joint = Joint {
@@ -863,8 +917,9 @@ impl Phys {
         let u_skin = SKIN_RADIATION * u_skin;
 
         for i in 0..N {
-            self.r[i] = nr[i] * self.att[i];
-            self.l[i] = nl[i] * self.att[i];
+            let att = self.att0[i] + (self.att[i] - self.att0[i]) * lambda;
+            self.r[i] = nr[i] * att;
+            self.l[i] = nl[i] * att;
         }
         self.gauge.u_lips = u_lips;
         self.gauge.u_nose = u_nose;
@@ -873,6 +928,31 @@ impl Phys {
         self.gauge.jet_cell = jet.1;
         self.gauge.jet_speed = (self.flow[jet.1 + 1] * inv[jet.1]).max(0.0);
         u_lips + u_nose + u_skin
+    }
+
+    /// Advance the active widening of the pharynx by one tick; returns the
+    /// flow each widening cell takes up, cm³/s.
+    #[inline]
+    fn widening(&mut self) -> f32 {
+        let size = self.len * self.len * self.len;
+        let target = if self.expansion_target > 0.0 && self.expanded < EXPANSION_LIMIT * size {
+            self.expansion_target * size
+        } else {
+            0.0
+        };
+        if self.expansion_target <= 0.0 {
+            self.expanded = 0.0;
+        }
+        self.expansion += (target - self.expansion) * (self.dt / EXPANSION_TIME).min(1.0);
+        let p = self.pressure(EXPANSION_PROBE);
+        self.pharynx_pressure +=
+            (p - self.pharynx_pressure) * (self.dt / EXPANSION_PRESSURE_TIME).min(1.0);
+        let yielding = (self.pharynx_pressure / EXPANSION_PRESSURE).clamp(0.0, 1.0);
+        let rate = self.expansion * yielding;
+        self.expanded += rate * self.dt;
+        #[allow(clippy::cast_precision_loss)]
+        let cells = EXPANDING.len() as f32;
+        rate / cells
     }
 
     /// The lungs, trachea and glottis. Returns the wave sent up into the
