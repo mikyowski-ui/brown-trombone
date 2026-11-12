@@ -55,6 +55,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `[` `]`, `-` `=` | tenseness, vibrato |
 | `m`, `r`, `c` | pitch wobble, reverb amount, clear constrictions |
 | `\` | switch between the classic and the physical engine |
+| `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
 | `Tab` | type a line; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
@@ -67,6 +68,24 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | click in the nose; drag in the gap under it | open or shut the velum; set how far it hangs open |
 | click or drag a meter | tenseness, tongue, velum, vibrato, reverb, loudness (lung pressure, physical engine), and the four persona dials |
 | click `[-]` `[+]`, `wobble`, `drone`, `engine` | octave and the toggles |
+| click `[/ vowels]` under the scope; left-drag on the vowel chart | Formant Lock on or off; steer the vowel by its formants, or click a vowel mark |
+
+**Formant Lock** (`/`, or `[/ vowels]` under the scope) lets you find
+vowels by how they sound rather than by where the tongue goes. The scope
+gives way to a vowel chart, drawn the way phoneticians draw it: F2 across,
+high on the left, and F1 down, low at the top. The shaded region is what
+this voice's tract can reach (it moves with the persona's size and the
+voice's tract length), the IPA letters mark where this voice makes the
+English vowels, and `◆` is where the voice is now, with its F1 and F2 in the
+panel's title. Press or drag inside the chart and the physical engine's
+babble map ([`inverse`](crates/synthie-trombone/src/inverse.rs)) finds the
+tongue, lips and narrowing that give those formants; the tract view above
+shows them move. A point out of reach is held at the nearest one in reach,
+clicking a letter takes that vowel, and the arrow keys nudge F2 (left
+raises it, as on the chart) and F1 (up lowers it) by 2 %. Formant Lock
+belongs to the physical engine, so turning it on switches to it, and
+switching to the classic engine turns it off; turning it off brings the
+scope back and leaves the tract as it is.
 
 Notes stop when you let go of the key in terminals that report key releases
 (kitty, WezTerm, foot, Ghostty). In other terminals a note holds until you

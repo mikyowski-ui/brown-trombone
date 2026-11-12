@@ -44,6 +44,8 @@ pub enum Cmd {
     StopSpeaking,
     /// Copy what the microphone hears (physical engine), or stop.
     Mimic(bool),
+    /// Hold a vowel shape of the physical engine (Formant Lock).
+    Shape(synthie_trombone::inverse::Shape),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -221,6 +223,7 @@ impl Engine {
                 let _ = self.trash_tx.try_send(old);
             }
             Cmd::StopSpeaking => self.stop_speaking(),
+            Cmd::Shape(shape) => v.set_shape(&shape),
             Cmd::Mimic(on) => {
                 self.mimicking = on && self.ear_rx.is_some();
                 self.heard = None;
