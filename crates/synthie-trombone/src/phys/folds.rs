@@ -91,7 +91,7 @@ impl FoldParams {
     /// layer depths from strain, fibre stress in mucosa, ligament and
     /// muscle from strain, and from those the masses and stiffnesses of
     /// the cover and body. The tissue constants are the ones in Brad
-    /// Story's LeTalker 1.22, which implements that paper.
+    /// Story's `LeTalker` 1.22, which implements that paper.
     pub(crate) fn from_muscles(ct: f32, ta: f32, lc: f32) -> Self {
         /// Shear modulus of cover and body, dyn/cm².
         const SHEAR: f32 = 5000.0;
