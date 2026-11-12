@@ -173,8 +173,10 @@ tuning! {
 
     /// Head start the articulators get on each sound, s (physical engine).
     lead = 0.03, 0.0..=0.06, B;
-    /// The head start out of a closure, s: short, so stops stay shut.
-    release_lead = 0.008, 0.0..=0.03, B;
+    /// The head start out of a closure, s: short, so stops stay shut. A
+    /// little over one articulation block (10.7 ms), so the release falls
+    /// before the next sound starts whatever the phase of the blocks.
+    release_lead = 0.011, 0.0..=0.03, B;
     /// Length of an unstressed vowel, s.
     vowel_length = 0.085, 0.06..=0.14, B;
     /// Length of a diphthong, s.
@@ -202,11 +204,11 @@ tuning! {
     /// How long the glottis stays open after a /p/ is released before a
     /// stressed vowel, s (the voice follows a few milliseconds later).
     /// The physical engine uses these three in place of `aspiration`.
-    vot_labial = 0.04, 0.015..=0.08, B;
+    vot_labial = 0.035, 0.015..=0.08, B;
     /// The same after /t/, s.
     vot_alveolar = 0.045, 0.015..=0.08, B;
     /// The same after /k/, s.
-    vot_velar = 0.05, 0.015..=0.09, B;
+    vot_velar = 0.047, 0.015..=0.09, B;
     /// How long before a voiceless consonant the voice is let go and the
     /// glottis starts to open, s: with the tract, which starts closing
     /// `lead` ahead, so the voice stops as the tract shuts.

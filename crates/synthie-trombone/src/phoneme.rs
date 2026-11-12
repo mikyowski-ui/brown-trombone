@@ -464,7 +464,7 @@ impl Articulation {
             a.lips = lips.map(|d| Constriction::new(LIPS, d));
             return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        (self.leaning_on(tongue), None)
+        (self.leaning_on(tongue, tract_length), None)
     }
 
     /// A consonant made on top of a vowel's tongue body `body` (physical
@@ -474,11 +474,12 @@ impl Articulation {
     /// way: the locus transitions. Alveolar and postalveolar tongue-tip
     /// sounds draw the body a little forward and up with the tip.
     ///
-    /// Consonants with a tongue body of their own (/k g ŋ l r/, see
+    /// Consonants with a tongue body of their own (/k g ŋ l r/; /r/ that of
+    /// /ɚ/; see
     /// [`own_body`](Self::own_body)) keep it: the back of the tongue is
     /// their articulator. /k g ŋ/ close a little further forward before
     /// front vowels and further back before back ones ([`velar_place`]).
-    fn leaning_on(self, body: (f32, f32)) -> Self {
+    fn leaning_on(self, body: (f32, f32), tract_length: f32) -> Self {
         let mut a = self;
         let (index, diameter) = body;
         // `w` of the way from the vowel's body to `(i0, d0)`.
@@ -493,7 +494,13 @@ impl Articulation {
             a.tongue = Some(PHYSICAL_VELAR_TONGUE);
             a.constriction = Some(Constriction::new(velar_place(index), c.diameter));
         } else if self.own_body() {
-            // /l r/: their own body, as stored.
+            // /l r/: their own body. /r/'s is that of /ɚ/ (the classic
+            // engine gives both the same), as the physical engine shapes it.
+            if self.tongue == Phoneme::R.classic().tongue
+                && let Some((er, _, _)) = vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
+            {
+                a.tongue = Some(er);
+            }
         } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0 {
             // (An /n/ leaves the body be: drawn up and forward behind a
             // nasal closure it is heard as /ŋ/.)
@@ -515,10 +522,13 @@ impl Articulation {
     /// `Tuning::dorsum_rate`), not at the vowel shape's.
     #[must_use]
     pub(crate) fn own_body(self) -> bool {
+        // By the tongue alone: a consonant before /ɚ/ (whose classic tongue
+        // is /r/'s) is drawn into its r-colouring by the back of the
+        // tongue too.
+        let own = |p: Phoneme| self.tongue == p.classic().tongue;
         self.constriction.is_some()
-            && (self.tongue == Some(VELAR_TONGUE)
-                || self.tongue == Phoneme::L.classic().tongue
-                || self.tongue == Phoneme::R.classic().tongue)
+            && (own(Phoneme::K) || own(Phoneme::L)
+                || own(Phoneme::R))
     }
 
     /// The vowel shape the physical engine holds for this articulation in

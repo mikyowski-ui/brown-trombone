@@ -904,6 +904,10 @@ fn lean_on_vowels(drafts: &mut [Draft]) {
     }
 }
 
+/// Length of the frication of /tʃ/, as a share of a voiceless
+/// fricative's (physical engine).
+const AFFRICATE_FRICATION: f32 = 0.8;
+
 /// The dental closure an /ð/ starts with after a pause, seconds (physical
 /// engine).
 const DENTAL_ONSET: f32 = 0.025;
@@ -1030,6 +1034,15 @@ fn expand(
         spread: timing.voiced_fricative_spread,
         ..Gesture::default()
     };
+    // Inside a word /ʒ/ (and /z/, with less air) is a long, loud hiss with
+    // the voice under it all the way: air behind the folds, and the
+    // pharynx widened a little, as for a voiced stop, so the mouth does not
+    // fill and stop the voice before the hiss is over.
+    let medial_zh = Gesture {
+        spread: timing.voiced_sibilant_spread,
+        expansion: SIBILANT_EXPANSION * timing.cavity_expansion,
+        ..Gesture::default()
+    };
     let with = |mut d: Draft, g: Gesture| {
         d.gesture = g;
         d
@@ -1065,7 +1078,7 @@ fn expand(
         Manner::Stop if a.voiced => {
             out.push(with(draft(p, a, dur, true), voiced_stop));
             if context.next.is_none() {
-                out.push(final_release(p, rate, voiceless));
+                out.push(final_release(p, rate));
             }
         }
         Manner::Stop => {
@@ -1085,7 +1098,7 @@ fn expand(
                 .next
                 .filter(|&(n, _, same)| same && (is_vowel(n) || n.manner() == Manner::Approximant));
             if context.next.is_none() {
-                out.push(final_release(p, rate, voiceless));
+                out.push(final_release(p, rate));
             } else if let Some((n, n_stressed, _)) = released_into
                 && !after_s
             {
@@ -1107,13 +1120,23 @@ fn expand(
         Manner::Affricate => {
             let fric = if a.voiced { Phoneme::Zh } else { Phoneme::Sh };
             let g = if a.voiced { voiced_stop } else { voiceless };
+            // The frication of /dʒ/ comes straight out of the closure, with
+            // the folds still pressed for its voice.
             let fg = if a.voiced {
-                voiced_fricative
+                Gesture::default()
             } else {
                 voiceless
             };
             out.push(with(draft(p, a, dur * 0.6, a.voiced), g));
-            out.push(with(draft(p, fric.articulation(), dur, a.voiced), fg));
+            // The frication of /tʃ/ is nearly as long as a fricative's (70
+            // to 100 ms in English), or its hiss has no time to build after
+            // the release; that of /dʒ/ is shorter.
+            let frication = if a.voiced {
+                dur
+            } else {
+                (AFFRICATE_FRICATION * timing.fricative_length / rate).max(dur)
+            };
+            out.push(with(draft(p, fric.articulation(), frication, a.voiced), fg));
         }
         Manner::Fricative => {
             let word_final = context.next.is_none_or(|(_, _, same)| !same);
@@ -1124,15 +1147,12 @@ fn expand(
                     spread: timing.voiced_sibilant_spread,
                     ..Gesture::default()
                 }
-            } else if matches!(p, Phoneme::Z | Phoneme::Zh) {
-                // Inside a word, a long, loud hiss with the voice under it
-                // all the way: the pharynx widened a little, as for a
-                // voiced stop, so the mouth does not fill and stop the
-                // voice before the hiss is over.
+            } else if p == Phoneme::Zh {
+                medial_zh
+            } else if p == Phoneme::Z {
                 Gesture {
                     spread: 0.5 * (timing.voiced_fricative_spread + timing.voiced_sibilant_spread),
-                    expansion: SIBILANT_EXPANSION * timing.cavity_expansion,
-                    ..Gesture::default()
+                    ..medial_zh
                 }
             } else if a.voiced {
                 voiced_fricative
@@ -1162,7 +1182,7 @@ fn expand(
 }
 
 /// Share of a voiced stop's widening of the pharynx (`Tuning::cavity_expansion`)
-/// that /z ʒ/ make (physical engine).
+/// that /z ʒ/ make inside a word (physical engine).
 const SIBILANT_EXPANSION: f32 = 0.5;
 
 /// How long the breath goes on through the release of a stop at the end
@@ -1170,11 +1190,11 @@ const SIBILANT_EXPANSION: f32 = 0.5;
 const FINAL_RELEASE: f32 = 0.04;
 
 /// The release of a stop that ends a phrase (physical engine): the mouth
-/// opens towards the vowel before it with the glottis spread and the lungs
-/// still pushing, so the closure ends in an audible burst and a breath
-/// rather than fading out shut. Word-final stops are often unreleased in
-/// running speech, but a listener hearing no release hears no stop.
-fn final_release(p: Phoneme, rate: f32, voiceless: Gesture) -> Draft {
+/// opens towards the vowel before it on the air still pent up behind the
+/// closure, so the closure ends in an audible burst rather than fading out
+/// shut. Word-final stops are often unreleased in running speech, but a
+/// listener hearing no release hears no stop.
+fn final_release(p: Phoneme, rate: f32) -> Draft {
     Draft {
         phoneme: p,
         articulation: Articulation {
@@ -1186,7 +1206,7 @@ fn final_release(p: Phoneme, rate: f32, voiceless: Gesture) -> Draft {
         tenseness: None,
         accent: 0.0,
         vowel: false,
-        gesture: voiceless,
+        gesture: Gesture::default(),
         aspiration: false,
     }
 }

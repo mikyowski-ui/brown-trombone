@@ -111,6 +111,9 @@ const LIP_PLACE: f32 = 40.0;
 /// A cell is being shaped by a consonant when the consonant takes this
 /// much off what the vowel shape alone would give it, diameter units.
 const CARVED: f32 = 0.05;
+/// Widest constriction that is a consonant's rather than a shading of the
+/// vowel (touch diameter): approximants included.
+const CONSONANT_WIDEST: f32 = 1.3;
 /// A cell a consonant has let go is back with the tongue body once it is
 /// this close to where the body wants it, diameter units.
 const RETURNED: f32 = 0.08;
@@ -617,10 +620,24 @@ impl Tract {
     /// consonant carved into it with the shoulder of the articulator that
     /// makes it, and every cell assigned the articulator that moves it.
     fn compute_shaped_targets(&mut self, floor: f32) {
+        // Lip rounding that belongs to a consonant (/ʃ ʒ tʃ dʒ r/) is the
+        // lips' own gesture and moves at their speed; a vowel's moves with
+        // the vowel shape.
+        let consonant = self.slots.iter().enumerate().any(|(k, s)| {
+            k != ROUNDING_SLOT && s.is_some_and(|s| s.alive && s.c.diameter < CONSONANT_WIDEST)
+        });
         if let Some(Some(s)) = self.slots.get(ROUNDING_SLOT)
             && s.alive
         {
+            let before = self.target;
             carve(&mut self.target, s.c, floor);
+            if consonant {
+                for i in LIP_START..N {
+                    if self.target[i] < before[i] - CARVED {
+                        self.mover[i] = Mover::Tip;
+                    }
+                }
+            }
         }
         if let Some(c) = self.narrowing {
             carve(&mut self.target, c, floor);

@@ -303,7 +303,7 @@ pub fn cluster_openings(s: &Spoken, open: f32) -> Vec<(Phoneme, Phoneme, f32, f3
     let consonant = |p: Phoneme| {
         matches!(
             p.manner(),
-            Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate
+            Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Approximant
         )
     };
     let mut out = Vec::new();
