@@ -64,6 +64,7 @@ mod glottis;
 pub mod inverse;
 pub mod listen;
 mod math;
+pub mod mimic;
 #[cfg(feature = "alloc")]
 pub mod midi;
 mod noise;
