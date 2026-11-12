@@ -542,12 +542,16 @@ impl Trombone {
     }
 
     /// Move to an articulation. Uses [`SLOT_MAIN`] and [`SLOT_LIPS`]; leaves
-    /// voicing and pitch alone (see [`Articulation::voiced`]).
+    /// voicing and pitch alone (see [`Articulation::voiced`]). On the
+    /// physical engine a vowel takes the shape that suits the current
+    /// [tract length](Self::set_tract_length), so its formants scale with
+    /// the speaker's size; after changing the size, articulate again.
     pub fn articulate(&mut self, a: &Articulation) {
         // Vowel shapes are tuned per engine.
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),
-            Engine::Physical => a.physical(),
+            // Physical vowel shapes also follow the speaker's size.
+            Engine::Physical => a.physical(self.tract_length),
         };
         self.tract.set_narrowing(narrowing);
         if let Some((index, diameter)) = a.tongue {

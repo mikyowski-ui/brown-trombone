@@ -82,6 +82,7 @@ mod talker;
 mod tract;
 mod tuning;
 mod voice;
+mod vowel_size;
 
 /// LPC formant estimation, shared with the examples.
 #[cfg(test)]
