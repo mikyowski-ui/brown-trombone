@@ -218,6 +218,10 @@ fn draw_glottis(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!(" {:6.1} Hz", s.frequency), fg(FG)),
             Span::styled(format!("  oct {}  {vowel}  ", app.octave), fg(DIM)),
             Span::styled(app.preset.name(), bold(MAGENTA)),
+            Span::styled(
+                format!("  {}", crate::app::engine_name(app.engine)),
+                fg(DIM),
+            ),
         ]),
         row(
             "voice",
@@ -366,6 +370,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("r", "reverb"),
                 (", .", "speech rate"),
                 ("c", "clear"),
+                ("\\", "engine"),
             ]);
             vec![l, Line::from(v), settings]
         }
@@ -407,7 +412,7 @@ mod tests {
             trash,
             sample_rate: 48_000.0,
         };
-        let mut app = App::new(link, true);
+        let mut app = App::new(link, true, synthie_trombone::Engine::Classic);
         app.preset = synthie_trombone::Preset::Critter;
 
         // Drive a real voice into an interesting state.

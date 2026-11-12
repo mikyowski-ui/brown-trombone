@@ -7,7 +7,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use synthie::audio::fx::Reverb;
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::{Constriction, MAX_CONSTRICTIONS, N, NOSE_LEN, Trombone, VoiceSettings};
+use synthie_trombone::{
+    Constriction, Engine as SoundModel, MAX_CONSTRICTIONS, N, NOSE_LEN, Phoneme, Trombone,
+    VoiceSettings,
+};
 
 /// Samples kept for the oscilloscope.
 pub const SCOPE_LEN: usize = 1024;
@@ -27,6 +30,10 @@ pub enum Cmd {
     Drone(bool),
     Reverb(f32),
     Voice(VoiceSettings),
+    /// Switch the sound model.
+    Model(SoundModel),
+    /// Move to a vowel's shape, as the current sound model tunes it.
+    Vowel(Phoneme),
     Speak(Utterance),
     StopSpeaking,
 }
@@ -178,6 +185,11 @@ impl Engine {
             Cmd::Voice(settings) => {
                 settings.apply(v);
                 self.instrument.tenseness = settings.tenseness;
+            }
+            Cmd::Model(model) => v.set_engine(model),
+            Cmd::Vowel(p) => {
+                v.articulate_phoneme(p);
+                v.set_velum(self.instrument.velum);
             }
             Cmd::Speak(u) => {
                 Speaker::prepare(&mut self.voice);

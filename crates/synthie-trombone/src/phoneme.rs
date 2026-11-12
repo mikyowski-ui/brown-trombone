@@ -300,6 +300,9 @@ impl Phoneme {
     }
 }
 
+/// A vowel with its physical-engine shape (see [`PHYSICAL_VOWELS`]).
+type PhysicalVowel = (Phoneme, (f32, f32), Option<f32>, (f32, f32));
+
 /// Vowel shapes for the physical engine: tongue body `(index, diameter)`,
 /// lip rounding, and a narrowing along the tongue `(cell, diameter)`.
 ///
@@ -308,7 +311,7 @@ impl Phoneme {
 /// were fitted with `examples/tune_physical.rs` to Peterson & Barney's
 /// (1952) F1, F2 *and* F3 for men; the extra narrowing is what lets F3 be
 /// placed at all. Lips and narrowing are kept wide enough not to hiss.
-const PHYSICAL_VOWELS: &[(Phoneme, (f32, f32), Option<f32>, (f32, f32))] = &[
+const PHYSICAL_VOWELS: &[PhysicalVowel] = &[
     (Phoneme::Iy, (28.08, 2.05), Some(0.86), (34.0, 0.7)),
     (Phoneme::Ih, (28.67, 3.053), Some(0.944), (32.33, 0.832)),
     (Phoneme::Eh, (21.83, 2.912), None, (30.69, 0.942)),
@@ -344,10 +347,7 @@ impl Articulation {
             if self.constriction == classic.constriction && self.lips == classic.lips {
                 // The vowel itself, not a consonant leaning on it.
                 a.constriction = None;
-                a.lips = match lips {
-                    Some(d) => Some(Constriction::new(LIPS, d)),
-                    None => None,
-                };
+                a.lips = lips.map(|d| Constriction::new(LIPS, d));
                 return (a, Some(Constriction::new(narrow.0, narrow.1)));
             }
             return (a, None);

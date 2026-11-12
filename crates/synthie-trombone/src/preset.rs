@@ -155,6 +155,7 @@ impl Preset {
 
     /// The preset's settings.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // a table
     pub const fn settings(self) -> VoiceSettings {
         let base = VoiceSettings {
             pitch: 105.0,

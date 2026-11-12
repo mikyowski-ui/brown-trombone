@@ -190,6 +190,7 @@ pub(crate) struct Gauge {
 
 /// The physical tract.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)] // independent switches
 pub(crate) struct Phys {
     dt: f32,
     dx: f32,
@@ -465,7 +466,9 @@ impl Phys {
 
     fn refresh(&mut self, block_dt: f32) {
         for i in 0..N {
-            let a = self.a1[i];
+            // A cell that is shutting during this block is still open for
+            // most of it: its losses and wall are those of the wider end.
+            let a = self.a1[i].max(self.a0[i]);
             self.att[i] = if self.lossy {
                 cell_loss(a, self.dx, 1.0)
             } else {
@@ -477,7 +480,7 @@ impl Phys {
                 0.0
             };
             self.adot_target[i] = if self.walls {
-                (a - self.a0[i]) / block_dt
+                (self.a1[i] - self.a0[i]) / block_dt
             } else {
                 0.0
             };
@@ -545,7 +548,7 @@ impl Phys {
 
     /// Advance one tick. `lambda` is the position within the current block.
     /// Returns the flow radiated from lips and nose, cm³/s.
-    #[allow(clippy::many_single_char_names)]
+    #[allow(clippy::many_single_char_names, clippy::too_many_lines)]
     pub(crate) fn tick(&mut self, lambda: f32, drive: Drive) -> f32 {
         let mut y = [0.0f32; N];
         let mut inv = [0.0f32; N];

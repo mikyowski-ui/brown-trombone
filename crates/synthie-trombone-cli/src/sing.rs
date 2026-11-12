@@ -12,7 +12,7 @@ use synthie::audio::fx::Reverb;
 use synthie_trombone::midi::{self, MidiFile};
 use synthie_trombone::sing::{self, SingOptions};
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::{Preset, Trombone, VoiceSettings, normalize};
+use synthie_trombone::{Engine, Preset, Trombone, VoiceSettings, normalize};
 
 /// Sing a MIDI melody.
 #[derive(Debug, Args)]
@@ -118,7 +118,7 @@ fn list(file: &MidiFile) {
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-pub fn run(args: &SingArgs) -> Result<()> {
+pub fn run(args: &SingArgs, engine: Engine) -> Result<()> {
     let bytes =
         std::fs::read(&args.midi).with_context(|| format!("reading {}", args.midi.display()))?;
     let file = midi::parse(&bytes).with_context(|| format!("parsing {}", args.midi.display()))?;
@@ -194,7 +194,7 @@ pub fn run(args: &SingArgs) -> Result<()> {
             names.join(", ")
         )
     })?;
-    let mut settings = preset.settings();
+    let mut settings = preset.settings().with_engine(engine);
     if let Some(t) = args.tract {
         settings.tract_length = t;
     }

@@ -171,7 +171,7 @@ fn table() {
         for k in 0..15 {
             let (f, mean, swing, level) = held(0.35 * 1.18f32.powi(k), g);
             print!("{f:.1}, ");
-            if g == 0.014 {
+            if (g - 0.014).abs() < 1e-6 {
                 notes.push(format!("// tension {:.2}: {f:.0} Hz, mean flow {mean:.0}, swing {swing:.0}, level {level:.1} dB", 0.35 * 1.18f32.powi(k)));
             }
         }

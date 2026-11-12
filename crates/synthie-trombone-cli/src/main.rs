@@ -24,13 +24,27 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, panic, time::Duration};
+use synthie_trombone::Engine;
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
 #[command(name = "synthie-trombone", version, about)]
 struct Cli {
+    /// Sound model: `classic` is Pink Trombone as written; `physical` is
+    /// the same tract in real units, with self-oscillating vocal folds,
+    /// lung pressure, yielding walls and airflow-driven noise.
+    #[arg(long, global = true, default_value = "classic", value_parser = parse_engine)]
+    engine: Engine,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+fn parse_engine(name: &str) -> Result<Engine, String> {
+    match name.to_ascii_lowercase().as_str() {
+        "classic" => Ok(Engine::Classic),
+        "physical" => Ok(Engine::Physical),
+        other => Err(format!("unknown engine {other:?}; try classic or physical")),
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,13 +54,14 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
-        Some(Command::Sing(args)) => sing::run(&args),
-        None => tui(),
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Command::Sing(args)) => sing::run(&args, cli.engine),
+        None => tui(cli.engine),
     }
 }
 
-fn tui() -> Result<()> {
+fn tui(engine: Engine) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = restore();
@@ -76,7 +91,7 @@ fn tui() -> Result<()> {
         .is_ok();
 
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    let mut app = app::App::new(link, release);
+    let mut app = app::App::new(link, release, engine);
     let result = run(&mut terminal, &mut app);
 
     if release {

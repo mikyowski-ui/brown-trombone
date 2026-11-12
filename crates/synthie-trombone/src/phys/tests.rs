@@ -1,5 +1,7 @@
 //! Stage gates for the physical tube, checked against theory.
 
+#![allow(clippy::many_single_char_names)]
+
 extern crate std;
 
 use super::*;

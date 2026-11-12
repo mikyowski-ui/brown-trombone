@@ -397,8 +397,14 @@ impl Trombone {
         self.step = f64::from(self.internal_rate) / f64::from(self.sample_rate);
         self.glottis.set_rate(self.internal_rate);
         self.tract.set_rate(self.internal_rate);
+        // A different-sized speaker is a different tube: the air in the old
+        // one means nothing in the new, so the physical engine starts over
+        // (a few milliseconds of silence rather than a bang).
         self.phys.set_rate(0.5 / self.internal_rate, length);
+        self.phys.reset();
         self.source.set_size(length);
+        self.source.reset();
+        self.phys_flow = 0.0;
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 

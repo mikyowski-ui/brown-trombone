@@ -30,7 +30,7 @@ fn app() -> (App, Receiver<Cmd>) {
         trash,
         sample_rate: SR,
     };
-    (App::new(link, true), rx)
+    (App::new(link, true, synthie_trombone::Engine::Classic), rx)
 }
 
 fn press(app: &mut App, c: char) {

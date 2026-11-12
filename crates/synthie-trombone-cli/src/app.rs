@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use synthie_trombone::speech::{Prosody, Utterance};
 use synthie_trombone::{
-    Constriction, N, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
+    Constriction, Engine, N, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
 };
 use synthie_ui::{Key, KeyCode, KeyKind};
 
@@ -67,6 +67,7 @@ pub struct App {
     pub rate: f32,
     pub preset: Preset,
     pub settings: VoiceSettings,
+    pub engine: Engine,
 
     pub text: String,
     history: Vec<String>,
@@ -82,8 +83,16 @@ pub struct App {
     pub status: String,
 }
 
+/// Lowercase name of a sound model.
+pub fn engine_name(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Classic => "classic",
+        Engine::Physical => "physical",
+    }
+}
+
 impl App {
-    pub fn new(link: Link, keyboard_release: bool) -> Self {
+    pub fn new(link: Link, keyboard_release: bool, engine: Engine) -> Self {
         let mut app = Self {
             cmd: link.cmd.clone(),
             link,
@@ -103,7 +112,8 @@ impl App {
             reverb: 0.18,
             rate: 1.0,
             preset: Preset::Deep,
-            settings: Preset::Deep.settings(),
+            settings: Preset::Deep.settings().with_engine(engine),
+            engine,
             text: String::new(),
             history: Vec::new(),
             history_pos: 0,
@@ -119,6 +129,7 @@ impl App {
         } else {
             NO_RELEASE_HINT.into()
         };
+        app.send(Cmd::Model(engine));
         app.send(Cmd::Note(app.note_f32()));
         app
     }
@@ -259,6 +270,7 @@ impl App {
                 };
                 self.send(Cmd::Reverb(self.reverb));
             }
+            '\\' => self.toggle_engine(),
             '[' => self.set_tenseness(self.tenseness - 0.05),
             ']' => self.set_tenseness(self.tenseness + 0.05),
             '-' => self.set_vibrato(self.vibrato - 0.005),
@@ -346,6 +358,20 @@ impl App {
         self.send(Cmd::StopSpeaking);
     }
 
+    /// Switch between the classic and the physical sound model.
+    fn toggle_engine(&mut self) {
+        self.engine = match self.engine {
+            Engine::Classic => Engine::Physical,
+            Engine::Physical => Engine::Classic,
+        };
+        self.settings.engine = self.engine;
+        self.send(Cmd::Model(self.engine));
+        if let Some(v) = self.last_vowel {
+            self.send(Cmd::Vowel(v));
+        }
+        self.status = format!("engine: {}", engine_name(self.engine));
+    }
+
     /// Switch to the next (`+1`) or previous (`-1`) voice preset.
     fn cycle_preset(&mut self, dir: isize) {
         let all = Preset::ALL;
@@ -353,7 +379,7 @@ impl App {
         #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         let next = (i as isize + dir).rem_euclid(all.len() as isize) as usize;
         self.preset = all[next];
-        self.settings = self.preset.settings();
+        self.settings = self.preset.settings().with_engine(self.engine);
         self.tenseness = self.settings.tenseness;
         self.vibrato = self.settings.vibrato;
         // Play at the note nearest the voice's speaking pitch.
@@ -387,12 +413,15 @@ impl App {
     }
 
     fn vowel(&mut self, v: Phoneme) {
-        let a = v.articulation();
-        if let Some((i, d)) = a.tongue {
-            self.set_tongue(i, d);
+        // The sound model picks the shape; remember the classic tongue
+        // position so the arrow keys have somewhere to start from.
+        if let Some((i, d)) = v.articulation().tongue {
+            self.tongue = (
+                i.clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
+                d.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
+            );
         }
-        self.send(Cmd::Constriction(0, a.constriction));
-        self.send(Cmd::Constriction(1, a.lips));
+        self.send(Cmd::Vowel(v));
         self.last_vowel = Some(v);
     }
 
@@ -489,7 +518,7 @@ mod tests {
             trash,
             sample_rate: 48_000.0,
         };
-        let app = App::new(link, release);
+        let app = App::new(link, release, Engine::Classic);
         while rx.try_recv().is_ok() {}
         (app, rx)
     }
