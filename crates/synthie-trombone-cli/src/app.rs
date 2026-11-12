@@ -1204,6 +1204,9 @@ impl App {
                         "recording {name} into {} · F5 stops",
                         recorder.dir().display()
                     );
+                    // A take is for playing: in type mode the keys would
+                    // only fill the text line, and nothing would sound.
+                    self.mode = Mode::Play;
                 } else {
                     recorder.cancel();
                     self.status = "cannot record: the audio thread is not answering".into();

@@ -242,7 +242,7 @@ impl Engine {
     /// Fill one block of the output: what the audio callback does.
     /// Commands are taken off the queue at the start of the block, so a
     /// take stamps each with the sample it is applied before.
-    pub(crate) fn render(&mut self, data: &mut [f32], channels: usize) {
+    fn render(&mut self, data: &mut [f32], channels: usize) {
         self.tap.service();
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             self.apply(cmd);
@@ -376,9 +376,16 @@ fn open(
     Ok(stream)
 }
 
+/// The body of the output callback: the engine filling interleaved blocks
+/// of `channels` channels. The device runs exactly this (see [`start`]),
+/// and so do the tests, with plain buffers.
+pub(crate) fn output(mut engine: Engine, channels: usize) -> impl FnMut(&mut [f32]) + Send {
+    move |data: &mut [f32]| engine.render(data, channels)
+}
+
 /// The engine and the UI's end of its channels, without a sound device:
-/// the device's callback calls [`Engine::render`]. With `takes`, takes are
-/// recorded into that directory.
+/// [`output`] turns the engine into the device's callback. With `takes`,
+/// takes are recorded into that directory.
 pub(crate) fn wire(
     sample_rate: f32,
     ear_rx: Option<Receiver<(Gesture, Heard)>>,
@@ -464,14 +471,15 @@ pub fn start(
     } else {
         None
     };
-    let (mut engine, mut link) = wire(sample_rate, ear_rx, size, Some(takes));
+    let (engine, mut link) = wire(sample_rate, ear_rx, size, Some(takes));
+    let mut callback = output(engine, channels);
     link.microphone = heard_on.is_some();
     link.microphone_name = heard_on;
 
     let stream = device
         .build_output_stream(
             stream_config,
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| engine.render(data, channels),
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| callback(data),
             |_err| {},
             None,
         )

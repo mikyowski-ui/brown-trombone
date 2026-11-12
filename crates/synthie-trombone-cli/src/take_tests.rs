@@ -2,13 +2,15 @@
 //! sound device) record a take into a directory, and the take is read back
 //! and replayed.
 
-use crate::app::{App, RECORD_KEY};
-use crate::audio::{Cmd, Engine, wire};
+use crate::app::{App, Mode, RECORD_KEY, X_BOUNDS, Y_BOUNDS};
+use crate::audio::{Cmd, output, wire};
 use crate::record::{self, Clock, Event, Tap};
 use crate::take::{
     self, Controls, Logged, Replay, Shaping, Speech, Take, command_line, header_line,
 };
 use crossbeam_channel::{Sender, bounded};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::{Terminal, backend::TestBackend};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,6 +27,8 @@ const SR: f32 = 48_000.0;
 /// Frames per audio callback in these tests; a device's varies, and so do
 /// these (see `play`).
 const BLOCK: usize = 512;
+/// Output channels, interleaved, as a sound card has them.
+const CHANNELS: usize = 2;
 
 /// Set to a directory to keep the tests' takes there (to try the replay
 /// example on them).
@@ -47,12 +51,16 @@ fn clean(dir: &Path) {
     }
 }
 
+/// The output callback, as the sound device runs it.
+type Callback = Box<dyn FnMut(&mut [f32]) + Send>;
+
 /// The app and its audio engine, wired as `audio::start` wires them but
 /// without a device, recording into `dir`; with `ear`, a microphone that
 /// the test speaks into.
 struct Rig {
     app: App,
-    engine: Engine,
+    /// The output callback, as the sound device runs it.
+    callback: Callback,
     ear: Option<Sender<(Gesture, Heard)>>,
     /// Frames rendered so far, to vary the callback's block size.
     frames: usize,
@@ -72,7 +80,7 @@ impl Rig {
         let app = App::new(link, true, SoundModel::Classic);
         Self {
             app,
-            engine,
+            callback: Box::new(output(engine, CHANNELS)),
             ear: ear_tx,
             frames: 0,
         }
@@ -83,10 +91,10 @@ impl Rig {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn play(&mut self, seconds: f32) {
         let mut left = (seconds * SR) as usize;
-        let mut buf = vec![0.0f32; 2 * BLOCK];
+        let mut buf = vec![0.0f32; 2 * BLOCK * CHANNELS];
         while left > 0 {
             let n = (BLOCK / 2 + (self.frames * 7) % BLOCK).min(left);
-            self.engine.render(&mut buf[..n], 1);
+            (self.callback)(&mut buf[..n * CHANNELS]);
             self.frames += n;
             left -= n;
             self.app.tick();
@@ -220,13 +228,13 @@ fn recording_toggles_and_numbers_takes() {
     rig.play(0.1);
     assert!(rig.app.key(Key::press(KeyCode::Char('q'))));
     // `finish` needs the audio running to take the stop: run it alongside.
-    let mut engine = rig.engine;
+    let mut callback = rig.callback;
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let keep = Arc::clone(&running);
     let audio = std::thread::spawn(move || {
-        let mut buf = [0.0f32; BLOCK];
+        let mut buf = [0.0f32; BLOCK * CHANNELS];
         while keep.load(std::sync::atomic::Ordering::Relaxed) {
-            engine.render(&mut buf, 1);
+            callback(&mut buf);
             std::thread::sleep(Duration::from_millis(1));
         }
     });
@@ -581,7 +589,120 @@ fn the_record_key_works_in_both_modes_and_says_when_it_cannot() {
     rig.press(RECORD_KEY);
     assert_eq!(rig.app.recording(), Some("take-001"));
     assert_eq!(rig.app.text, "");
+    // …and goes to play mode, where the keys sound.
+    assert_eq!(rig.app.mode, Mode::Play);
     rig.play(0.05);
     rig.stop_and_save();
+    clean(&dir);
+}
+
+/// A mouse event at a terminal cell.
+fn mouse(kind: MouseEventKind, (column, row): (u16, u16)) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+/// Playing by hand, as on a terminal: speech first (the app is left in
+/// type mode), then F5, a held piano key, a finger dragged along the mouth
+/// and let go, the tongue handle dragged, F5. Everything goes from the
+/// app's key and mouse handlers through the command queue and the output
+/// callback the device runs into the take, which sounds and replays
+/// exactly.
+#[test]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn playing_by_hand_goes_into_the_take() {
+    let dir = scratch("hand");
+    let mut rig = Rig::new(&dir, false);
+    let mut term = Terminal::new(TestBackend::new(120, 34)).unwrap();
+    let mut show = |rig: &mut Rig| {
+        term.draw(|f| crate::ui::draw(f, &mut rig.app)).unwrap();
+    };
+    rig.press(KeyCode::Tab);
+    for c in "good dog".chars() {
+        rig.press(KeyCode::Char(c));
+    }
+    rig.press(KeyCode::Enter);
+    rig.play(1.2);
+    show(&mut rig);
+    assert_eq!(rig.app.mode, Mode::Type);
+
+    rig.press(RECORD_KEY);
+    assert_eq!(rig.app.mode, Mode::Play);
+    rig.play(0.1);
+    show(&mut rig);
+    let key = |c, kind| Key {
+        code: KeyCode::Char(c),
+        kind,
+        ctrl: false,
+        shift: false,
+    };
+    rig.app.key(key('a', KeyKind::Press));
+    rig.play(0.3);
+    // A finger on the midline row of the mouth, dragged towards the lips.
+    let a = rig.app.tract_area;
+    let col = |x: f64| {
+        a.x + ((x - X_BOUNDS[0]) / (X_BOUNDS[1] - X_BOUNDS[0]) * f64::from(a.width)) as u16
+    };
+    let midline = a.y + (Y_BOUNDS[1] / (Y_BOUNDS[1] - Y_BOUNDS[0]) * f64::from(a.height)) as u16;
+    let left = MouseEventKind::Down(MouseButton::Left);
+    let drag = MouseEventKind::Drag(MouseButton::Left);
+    let up = MouseEventKind::Up(MouseButton::Left);
+    rig.app.mouse(mouse(left, (col(28.0), midline)));
+    for k in 1..=6 {
+        rig.play(0.03);
+        show(&mut rig);
+        rig.app.mouse(mouse(drag, (col(28.0) + k, midline)));
+    }
+    rig.app.mouse(mouse(up, (col(28.0) + 6, midline)));
+    rig.play(0.2);
+    // The tongue handle, taken and dragged back.
+    show(&mut rig);
+    let handle = rig.app.tongue_cell().expect("the tract is drawn");
+    rig.app.mouse(mouse(left, handle));
+    for k in 1..=5 {
+        rig.play(0.03);
+        rig.app.mouse(mouse(drag, (handle.0 - 2 * k, handle.1)));
+    }
+    rig.app.mouse(mouse(up, (handle.0 - 10, handle.1)));
+    rig.play(0.2);
+    rig.app.key(key('a', KeyKind::Release));
+    rig.play(0.2);
+    rig.stop_and_save();
+
+    let (take, sound) = read_take(&dir, "take-001");
+    let has = |f: &dyn Fn(&Logged) -> bool| take.commands.iter().any(|c| f(&c.cmd));
+    assert!(
+        has(&|c| matches!(c, Logged::NoteOn(_))),
+        "{:?}",
+        take.commands
+    );
+    assert!(
+        has(&|c| matches!(c, Logged::NoteOff)),
+        "{:?}",
+        take.commands
+    );
+    assert!(
+        has(&|c| matches!(c, Logged::Constriction(2, Some(k)) if k.diameter < 0.1)),
+        "{:?}",
+        take.commands
+    );
+    assert!(has(&|c| matches!(c, Logged::Constriction(2, None))));
+    let tongues = take
+        .commands
+        .iter()
+        .filter(|c| matches!(c.cmd, Logged::Tongue(..)))
+        .count();
+    assert!(tongues >= 5, "{:?}", take.commands);
+    let (diff, peak) = compare(&replay(&take), &sound);
+    println!(
+        "{} commands, peak {peak:.3}, largest difference {diff:e}",
+        take.commands.len()
+    );
+    assert!(peak > 0.05, "the take is silent");
+    assert!(diff == 0.0, "replay differs by up to {diff}");
     clean(&dir);
 }
