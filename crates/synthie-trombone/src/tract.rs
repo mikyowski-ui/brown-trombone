@@ -89,7 +89,7 @@ const TIP_SHOULDER_FRONT: f32 = 1.5;
 /// [`BLADE_PLACE`]): the blade makes a long channel, sloping down to the
 /// teeth, as long in front as behind (the original's shoulder; a shorter
 /// one takes a fifth off the hiss of /ʃ/).
-const BLADE_SHOULDER_FRONT: f32 = 5.0;
+const BLADE_SHOULDER_FRONT: f32 = 3.5;
 /// Constriction index from which the tip, not the blade, makes it.
 const BLADE_PLACE: f32 = 34.5;
 /// The front shoulder of /s z/: their jet crosses a short, narrow channel
@@ -101,7 +101,7 @@ const SIBILANT_SHOULDER_FRONT: f32 = 4.0;
 const DENTAL_PLACE: f32 = 38.5;
 /// Shoulder of a closure of the lips, cells either way: the lips are the
 /// last four cells of the tract, and closing them leaves the tongue alone.
-const LIP_SHOULDER: f32 = 2.0;
+const LIP_SHOULDER: f32 = 2.5;
 /// Where the lips begin, as a constriction index (labials sit at 40.5 to
 /// 41).
 const LIP_PLACE: f32 = 40.0;

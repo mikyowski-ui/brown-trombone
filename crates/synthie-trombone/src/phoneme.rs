@@ -141,10 +141,11 @@ const ALVEOLAR_PULL: f32 = 0.3;
 const POSTALVEOLAR_PULL: f32 = 0.45;
 
 /// Where /k g ŋ/ close before a vowel whose body is at tongue index
-/// `index`: further forward before front vowels, further back before back
-/// ones, around the classic closure at [`VELAR`].
+/// `index`: at the classic closure ([`VELAR`]) before back vowels, further
+/// forward before front ones. Never further back: the throat behind a /g/
+/// must stay large enough to take up the voice's air.
 fn velar_place(index: f32) -> f32 {
-    (0.3 * index + 14.5).clamp(VELAR - 1.5, VELAR + 2.0)
+    (0.3 * index + 14.5).clamp(VELAR, VELAR + 2.0)
 }
 macro_rules! phonemes {
     ($( $(#[$doc:meta])* $name:ident = $arpa:literal, $manner:ident; )*) => {

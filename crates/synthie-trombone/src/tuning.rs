@@ -250,11 +250,11 @@ tuning! {
 
     // ----- A: voiced sibilants (physical engine) ------------------------
 
-    /// Opening left behind the vibrating folds in /z ʒ/, cm² at native
-    /// size: more than `voiced_fricative_spread`, since their hiss has to
-    /// be as plain as the voice under it (a /z/ with too little air is
-    /// heard as /ð/), while /v ð/ are weak and too much air makes them
-    /// breathy.
+    /// Opening left behind the vibrating folds in a word-final /z ʒ/, cm²
+    /// at native size: more than `voiced_fricative_spread`. English lets
+    /// them go partly voiceless at the end of a word, and their hiss has to
+    /// be as plain as the voice under it (a final /z/ with too little air
+    /// is heard as /ð/); /v ð/ are weak, and too much air makes them breathy.
     voiced_sibilant_spread = 0.05, 0.0..=0.12, A;
 
     // ----- B: voiced sibilants (physical engine) ------------------------

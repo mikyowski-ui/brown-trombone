@@ -803,6 +803,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     }
     if physical {
         lean_on_vowels(&mut drafts);
+        assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
     }
 
@@ -837,6 +838,37 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         release_lead: timing.release_lead,
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
+    }
+}
+
+/// The physical engine's place assimilation: /t d n/ right before /θ ð/
+/// are made where the dental is, with the tip against the teeth ("get the",
+/// "in the" are [t̪ ð], [n̪ ð]), so the tongue goes straight on into the
+/// fricative's gap instead of letting a closure behind the ridge burst
+/// into a gap at the teeth.
+fn assimilate_place(drafts: &mut [Draft]) {
+    for k in 0..drafts.len().saturating_sub(1) {
+        let next = drafts[k + 1];
+        if !matches!(drafts[k].phoneme, Phoneme::T | Phoneme::D | Phoneme::N)
+            || !matches!(next.phoneme, Phoneme::Th | Phoneme::Dh)
+        {
+            continue;
+        }
+        let (Some(c), Some(dental)) = (
+            drafts[k].articulation.constriction,
+            next.articulation.constriction,
+        ) else {
+            continue;
+        };
+        // The closure and, for a stop, its release segment.
+        let p = drafts[k].phoneme;
+        for d in drafts[..=k].iter_mut().rev().take_while(|d| d.phoneme == p) {
+            if let Some(own) = &mut d.articulation.constriction
+                && own.diameter <= c.diameter
+            {
+                own.index = dental.index;
+            }
+        }
     }
 }
 
@@ -1068,9 +1100,22 @@ fn expand(
             out.push(with(draft(p, fric.articulation(), dur, a.voiced), fg));
         }
         Manner::Fricative => {
-            let g = if matches!(p, Phoneme::Z | Phoneme::Zh) {
+            let word_final = context.next.is_none_or(|(_, _, same)| !same);
+            let g = if matches!(p, Phoneme::Z | Phoneme::Zh) && word_final {
+                // At the end of a word English lets /z/ go partly
+                // voiceless: more air behind the folds, a plainer hiss.
                 Gesture {
                     spread: timing.voiced_sibilant_spread,
+                    ..Gesture::default()
+                }
+            } else if matches!(p, Phoneme::Z | Phoneme::Zh) {
+                // Inside a word, a long, loud hiss with the voice under it
+                // all the way: the pharynx widened a little, as for a
+                // voiced stop, so the mouth does not fill and stop the
+                // voice before the hiss is over.
+                Gesture {
+                    spread: 0.5 * (timing.voiced_fricative_spread + timing.voiced_sibilant_spread),
+                    expansion: SIBILANT_EXPANSION * timing.cavity_expansion,
                     ..Gesture::default()
                 }
             } else if a.voiced {
@@ -1083,6 +1128,10 @@ fn expand(
         _ => out.push(draft(p, a, dur, a.voiced)),
     }
 }
+
+/// Share of a voiced stop's widening of the pharynx (`Tuning::cavity_expansion`)
+/// that /z ʒ/ make (physical engine).
+const SIBILANT_EXPANSION: f32 = 0.5;
 
 /// How long the breath goes on through the release of a stop at the end
 /// of a phrase, seconds (physical engine).

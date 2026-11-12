@@ -4,6 +4,7 @@
 //! ```sh
 //! cargo run -p synthie-trombone --example place --release
 //! cargo run -p synthie-trombone --example place --release -- loci murmur
+//! cargo run -p synthie-trombone --example place --release -- steps --voice elder
 //! ```
 //!
 //! Sections (all by default, or name some):
@@ -21,6 +22,9 @@
 //!   Hz, against the vowel, and how much of it is voiced.
 //! * `final`: whether word-final stops are released: the loudest sample in
 //!   the 10 ms after the closure opens, against the vowel's.
+//! * `steps`: the largest step between two output samples in the click
+//!   gate's sentences, and the sound it falls in.
+//! * `tongues`: where each vowel holds the tongue body.
 //! * `clusters`: in the judge's sentences, how wide the mouth gets between
 //!   two consonants that follow one another (a wide one is a vowel nobody
 //!   asked for), and how much of each kind of sound the tract spends near
@@ -250,10 +254,55 @@ fn tongues() {
     }
 }
 
+fn steps(settings: &VoiceSettings) {
+    println!("== largest step between two samples, x the loudest vowel sample, and where");
+    for text in [
+        "As for etchings they are of two kinds British and foreign.",
+        "The judge checked the big black bag at the gate.",
+        "Pick a cup and dig deep to get the chips.",
+    ] {
+        let r = stops::record(settings, text);
+        let vowel = stops::vowel_peak(&r);
+        let (n, step) = r
+            .out
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .enumerate()
+            .fold((0, 0.0f32), |m, (n, x)| if x > m.1 { (n, x) } else { m });
+        let k = r.segment[n];
+        let at = |k: usize| r.phonemes.get(k).map_or("-", |p| p.symbol());
+        let start = r.segment.iter().position(|&s| s == k).unwrap_or(n);
+        println!(
+            "{:.2} at {:.3} s, {:.1} ms into {} (glottis {:.3} cm², mouth shut {}; after {}, before {}): {text}",
+            step / vowel,
+            n as f32 / stops::SR,
+            (n - start) as f32 / stops::SR * 1e3,
+            at(k),
+            r.glottal_area[n],
+            r.sealed[n],
+            at(k.wrapping_sub(1)),
+            at(k + 1)
+        );
+    }
+}
+
 fn main() {
-    let settings = stops::judge_voice();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // `--voice NAME`: another preset than the judge's.
+    let settings = match args.iter().position(|a| a == "--voice") {
+        Some(k) if k + 1 < args.len() => {
+            let name = args.remove(k + 1);
+            args.remove(k);
+            synthie_trombone::Preset::from_name(&name)
+                .unwrap_or_else(|| panic!("no voice {name}"))
+                .settings()
+        }
+        _ => stops::judge_voice(),
+    };
     let wants = |s: &str| args.is_empty() || args.iter().any(|a| a == s);
+    if wants("steps") {
+        steps(&settings);
+    }
     if wants("tongues") {
         tongues();
     }
