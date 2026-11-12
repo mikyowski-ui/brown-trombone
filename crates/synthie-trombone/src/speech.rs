@@ -22,9 +22,9 @@
 
 #![allow(clippy::match_same_arms, clippy::if_same_then_else)] // rule tables
 
-use crate::Trombone;
 use crate::math::lerp;
 use crate::phoneme::{Articulation, Manner, Phoneme};
+use crate::{Engine, Trombone};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -156,7 +156,18 @@ pub struct Speaker {
     index: usize,
     elapsed: f32,
     started: bool,
+    /// The next segment's shape has already been sent (physical engine).
+    ahead: bool,
 }
+
+/// Head start, in seconds, the physical engine's articulators get on each
+/// sound. Their tissue has inertia there, and people begin moving towards
+/// a sound before it is due; without the head start every shape arrives
+/// late and speech slurs.
+const LEAD: f32 = 0.03;
+/// The head start out of a closure. Stops and nasals need their closure
+/// held, and the release should fall on the boundary, so it is short.
+const RELEASE_LEAD: f32 = 0.008;
 
 impl Speaker {
     /// An idle speaker.
@@ -171,6 +182,7 @@ impl Speaker {
         self.index = 0;
         self.elapsed = 0.0;
         self.started = false;
+        self.ahead = false;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -218,13 +230,33 @@ impl Speaker {
         if let Some(seg) = self.utterance.segments.get(self.index) {
             if !self.started {
                 self.started = true;
-                voice.articulate(&seg.articulation);
+                if !self.ahead {
+                    voice.articulate(&seg.articulation);
+                }
+                self.ahead = false;
                 voice.set_voiced(seg.voiced);
                 voice.set_tenseness(seg.tenseness);
             }
             let t = (self.elapsed / seg.duration).min(1.0);
             voice.set_frequency(lerp(seg.pitch.0, seg.pitch.1, t));
             self.elapsed += 1.0 / voice.sample_rate();
+            if !self.ahead
+                && voice.engine() == Engine::Physical
+                && let Some(next) = self.utterance.segments.get(self.index + 1)
+            {
+                let closed = matches!(
+                    seg.phoneme.manner(),
+                    Manner::Stop | Manner::Affricate | Manner::Nasal
+                ) && seg
+                    .articulation
+                    .constriction
+                    .is_some_and(|c| c.diameter <= 0.3);
+                let lead = if closed { RELEASE_LEAD } else { LEAD };
+                if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
+                    voice.articulate(&next.articulation);
+                    self.ahead = true;
+                }
+            }
             if self.elapsed >= seg.duration {
                 self.elapsed -= seg.duration;
                 self.index += 1;

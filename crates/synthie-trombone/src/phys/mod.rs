@@ -208,7 +208,11 @@ pub(crate) struct Phys {
     att: [f32; N],
     visc: f32,
 
+    /// Wall surface of each cell, cm²: now, and at the start and end of
+    /// the block (it follows the moving shape tick by tick, like the area).
     wall_s: [f32; N],
+    wall_s0: [f32; N],
+    wall_s1: [f32; N],
     wall_v: [f32; N],
     wall_y: [f32; N],
     /// Velocity of the dragged tissue layer.
@@ -262,6 +266,8 @@ impl Phys {
             att: [1.0; N],
             visc: 0.0,
             wall_s: [0.0; N],
+            wall_s0: [0.0; N],
+            wall_s1: [0.0; N],
             wall_v: [0.0; N],
             wall_y: [0.0; N],
             wall_w: [0.0; N],
@@ -447,7 +453,8 @@ impl Phys {
         for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
             nose.set_port(port * factor);
         }
-        if !self.primed {
+        let first = !self.primed;
+        if first {
             self.a0 = self.a1;
             for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
                 nose.set_port(port * factor);
@@ -455,6 +462,19 @@ impl Phys {
             self.primed = true;
         }
         self.refresh(block_dt);
+        if first {
+            self.wall_s0 = self.wall_s1;
+            self.wall_s = self.wall_s1;
+        }
+    }
+
+    /// Stop the shape where it is at the end of the current block: no
+    /// further motion, no displaced air (for measuring a moving tract).
+    pub(crate) fn freeze(&mut self) {
+        self.a0 = self.a1;
+        self.wall_s0 = self.wall_s1;
+        self.adot = [0.0; N];
+        self.adot_target = [0.0; N];
     }
 
     /// Jump straight to a shape, with no motion (for measurements).
@@ -465,6 +485,7 @@ impl Phys {
     }
 
     fn refresh(&mut self, block_dt: f32) {
+        self.wall_s0 = self.wall_s1;
         for i in 0..N {
             // A cell that is shutting during this block is still open for
             // most of it: its losses and wall are those of the wider end.
@@ -474,8 +495,9 @@ impl Phys {
             } else {
                 1.0
             };
-            self.wall_s[i] = if self.walls && a >= A_MIN {
-                2.0 * sqrt(PI * a) * self.dx
+            let end = self.a1[i];
+            self.wall_s1[i] = if self.walls && end >= A_MIN {
+                2.0 * sqrt(PI * end) * self.dx
             } else {
                 0.0
             };
@@ -556,6 +578,7 @@ impl Phys {
             let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);
+            self.wall_s[i] = self.wall_s0[i] + (self.wall_s1[i] - self.wall_s0[i]) * lambda;
             self.adot[i] += (self.adot_target[i] - self.adot[i]) * self.adot_smooth;
         }
         let mut nr = [0.0f32; N];

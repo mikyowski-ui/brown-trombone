@@ -147,6 +147,78 @@ fn folds_start_quickly_and_near_the_note() {
 }
 
 #[test]
+fn every_vowel_voices_promptly_after_a_consonant() {
+    // Folds brought together in a stream that is already flowing, or
+    // behind lips that are still parting, must still start: within 60 ms
+    // from silence and after /s/, and within 120 ms of a /p/ release even
+    // for the close, rounded vowels (which keep the mouth pressurised
+    // longest). Before the glottal attack some took over 200 ms or never
+    // started.
+    let vowels = [
+        Phoneme::Iy,
+        Phoneme::Ih,
+        Phoneme::Eh,
+        Phoneme::Ae,
+        Phoneme::Ah,
+        Phoneme::Aa,
+        Phoneme::Ao,
+        Phoneme::Uh,
+        Phoneme::Uw,
+        Phoneme::Ow,
+        Phoneme::Er,
+        Phoneme::Ax,
+    ];
+    for p in vowels {
+        for (before, limit) in [(None, 60), (Some(Phoneme::S), 60), (Some(Phoneme::P), 120)] {
+            let mut t = Trombone::new(SR);
+            t.set_engine(Engine::Physical);
+            t.set_articulation_speed(2.2);
+            t.set_voicing_rates(40.0, 40.0);
+            t.set_vibrato(0.0, 0.0);
+            t.set_jitter(0.0);
+            t.set_frequency(105.0);
+            t.set_tenseness(0.65);
+            t.articulate_phoneme(p);
+            if let Some(c) = before {
+                t.articulate_phoneme(c);
+                render(&mut t, 0.1);
+                t.articulate_phoneme(p);
+            } else {
+                t.settle();
+            }
+            t.set_voiced(true);
+            // First 10 ms stretch in which the glottis both shuts and opens wide.
+            let mut slices: Vec<(f32, f32)> = Vec::new();
+            let mut started = None;
+            for ms in 0..300 {
+                let (mut lo, mut hi) = (f32::INFINITY, 0.0f32);
+                for _ in 0..48 {
+                    t.process();
+                    let a = t.gauges().glottal_area;
+                    lo = lo.min(a);
+                    hi = hi.max(a);
+                }
+                slices.push((lo, hi));
+                if slices.len() >= 10 {
+                    let recent = &slices[slices.len() - 10..];
+                    let lo = recent.iter().map(|s| s.0).fold(f32::INFINITY, f32::min);
+                    let hi = recent.iter().map(|s| s.1).fold(0.0f32, f32::max);
+                    if lo < 0.01 && hi > 0.1 && hi < 0.3 {
+                        started = Some(ms + 1 - 9);
+                        break;
+                    }
+                }
+            }
+            let started = started.unwrap_or(usize::MAX);
+            assert!(
+                started <= limit,
+                "{p} after {before:?}: full voice only after {started} ms"
+            );
+        }
+    }
+}
+
+#[test]
 fn flow_through_the_glottis_is_humanlike() {
     // Modal voice in men: mean flow 100-300 cm³/s, peak a few hundred,
     // the folds closed for part of each cycle.

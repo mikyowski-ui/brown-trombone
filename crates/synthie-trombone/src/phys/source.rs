@@ -30,7 +30,28 @@ pub(crate) const LUNG_PRESSURE: f32 = 8.0;
 /// Seconds for lung pressure to build or fall.
 const LUNG_TIME: f32 = 0.03;
 /// Seconds for the folds to come together or part.
-const ADDUCTION_TIME: f32 = 0.012;
+const ADDUCTION_TIME: f32 = 0.008;
+/// When voicing begins the folds are first pressed together, this far past
+/// touching (cm), and held until they are together and there has been
+/// enough pressure across them for `ATTACK_HOLD` seconds; then they relax to where
+/// the tenseness holds them. Speakers do this (a glottal attack). Without
+/// it, folds brought together in a stream that is already flowing (after an
+/// /s/, or behind lips that are still parting) find a quiet resting place
+/// in it and take a tenth of a second to start; pressed shut, they are
+/// blown open and are vibrating at once. The same is done whenever the
+/// voice is wanted but the folds have stalled, as at the end of a /b/.
+///
+/// It also gives stops their timing for free: after /b/ the folds are
+/// already together and start within a few milliseconds of the release;
+/// after /p/ they first have to come together.
+const ATTACK_DEPTH: f32 = 0.04;
+const ATTACK_HOLD: f32 = 0.006;
+/// Pressure across the folds, dyn/cm², that counts as enough to start:
+/// just above what these folds need to keep going.
+const START_PRESSURE: f32 = 3.5 * CM_H2O;
+/// Swing of the area between the folds, cm² at native size, below which
+/// they count as stalled.
+const STALL_SWING: f32 = 0.03;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
 /// size.
 const VIBRATION_AREA: f32 = 0.14;
@@ -132,6 +153,7 @@ pub(crate) enum SourceKind {
 
 /// Glottal source.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)] // independent states
 pub(crate) struct Source {
     pub(crate) kind: SourceKind,
     phase: f32,
@@ -161,6 +183,17 @@ pub(crate) struct Source {
 
     folds: Folds,
     voicing: bool,
+    /// The folds are being pressed together to start the voice.
+    pressing: bool,
+    /// Seconds they have been touching with enough pressure across them.
+    pressed_for: f32,
+    /// Pressure across the folds, averaged over a few milliseconds.
+    across: f32,
+    /// Watching for a stall: smallest and largest area between the folds
+    /// since the watch began, and how long ago that was.
+    watch_lo: f32,
+    watch_hi: f32,
+    watch_for: f32,
     /// Whether the folds can sing the current note.
     reachable: bool,
     tension0: f32,
@@ -206,6 +239,12 @@ impl Source {
             size: 1.0,
             folds: Folds::new(FoldParams::steinecke_herzel()),
             voicing: false,
+            pressing: false,
+            pressed_for: 0.0,
+            across: 0.0,
+            watch_lo: f32::INFINITY,
+            watch_hi: 0.0,
+            watch_for: 0.0,
             reachable: true,
             tension0: 1.0,
             tension1: 1.0,
@@ -233,6 +272,19 @@ impl Source {
         (self.tension_override, self.gap_override) = overrides;
         self.muscle_override = muscles;
         self.set_size(size);
+    }
+
+    /// Begin a glottal attack.
+    fn press(&mut self) {
+        self.pressing = true;
+        self.pressed_for = 0.0;
+        self.restart_watch();
+    }
+
+    fn restart_watch(&mut self) {
+        self.watch_lo = f32::INFINITY;
+        self.watch_hi = 0.0;
+        self.watch_for = 0.0;
     }
 
     /// Lung pressure while sounding, cmH2O.
@@ -289,6 +341,12 @@ impl Source {
         self.amp1 = g.intensity;
 
         let voicing = g.voiced || g.always_voice;
+        if voicing && !self.voicing {
+            self.press();
+        }
+        if !voicing {
+            self.pressing = false;
+        }
         self.voicing = voicing;
         let breathing = voicing || constricted || g.intensity > 0.01;
         let area_scale = self.size * self.size;
@@ -347,7 +405,12 @@ impl Source {
     pub(crate) fn tick(&mut self, lambda: f32, dt: f32) -> (f32, f32) {
         self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
         self.leak += (self.leak_target - self.leak) * (dt / ADDUCTION_TIME);
-        self.gap += (self.gap_target - self.gap) * (dt / ADDUCTION_TIME);
+        let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
+            -ATTACK_DEPTH * self.size
+        } else {
+            self.gap_target
+        };
+        self.gap += (gap_target - self.gap) * (dt / ADDUCTION_TIME);
         self.chink += (self.chink_target - self.chink) * (dt / ADDUCTION_TIME);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
@@ -394,6 +457,34 @@ impl Source {
             return;
         }
         self.folds.step(gauge, self.fold_share, dt);
+
+        // The attack ends once the folds touch with pressure behind them.
+        let between = self.folds.area();
+        self.across += (gauge.p_sub - gauge.p_supra - self.across) * (dt / 0.003);
+        if self.pressing {
+            // "Together" is where the cartilages hold them, not whether the
+            // edges happen to touch: under pressure one edge can stand a
+            // hair open for as long as it likes.
+            if self.gap <= 0.0 && self.across > START_PRESSURE {
+                self.pressed_for += dt;
+                if self.pressed_for >= ATTACK_HOLD {
+                    self.pressing = false;
+                    self.restart_watch();
+                }
+            }
+        } else if self.voicing && self.gap_override.is_none() {
+            // Wanted but stalled: press together and start again.
+            self.watch_lo = self.watch_lo.min(between);
+            self.watch_hi = self.watch_hi.max(between);
+            self.watch_for += dt;
+            let period = 1.0 / (self.f0 + (self.f1 - self.f0) * lambda).max(20.0);
+            if self.watch_for > (1.5 * period).max(0.012) {
+                if self.watch_hi - self.watch_lo < STALL_SWING * self.size * self.size {
+                    self.press();
+                }
+                self.restart_watch();
+            }
+        }
 
         // Pitch: time between upward crossings of the lower edge through
         // its own slow average.

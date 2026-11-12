@@ -608,6 +608,7 @@ impl Trombone {
             Engine::Physical => {
                 let mut phys = self.phys.clone();
                 phys.reset();
+                phys.freeze();
                 for (n, o) in out.iter_mut().enumerate() {
                     *o = phys.tick(1.0, Drive::Flow(if n == 0 { 1.0 } else { 0.0 }));
                 }

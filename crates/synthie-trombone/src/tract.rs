@@ -43,6 +43,9 @@ const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
 /// Natural frequency, rad/s, of a damped articulator at the original's
 /// movement speed.
 const DAMPED_RATE: f32 = 40.0;
+/// Speed at which a closure lets go, as a share of `w·distance`. A spring
+/// like these peaks at 0.37 of that; a release starts there.
+const RELEASE_SPEED: f32 = 0.37;
 /// How far past contact a closing articulator aims (diameter units).
 const CLOSURE_OVERSHOOT: f32 = 0.3;
 
@@ -424,9 +427,16 @@ impl Tract {
             } else {
                 0.6 + 0.4 * (i - NOSE_START) as f32 / (TIP_START - NOSE_START) as f32
             };
-            let w = base * region;
             let e0 = self.diameter[i] - self.target[i];
-            let v0 = self.velocity[i];
+            // Closing is twice as fast as opening, as in the original.
+            let w = base * region * if e0 > 0.0 { 2.0 } else { 1.0 };
+            let mut v0 = self.velocity[i];
+            if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {
+                // Letting go of a closure: surfaces pressed together spring
+                // apart (and the air behind them pushes), so the release
+                // starts at speed instead of from rest.
+                v0 = RELEASE_SPEED * w * -e0;
+            }
             let decay = exp(-w * dt);
             let c = v0 + w * e0;
             let mut d = self.target[i] + (e0 + c * dt) * decay;
