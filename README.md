@@ -94,7 +94,8 @@ Notes stop when you let go of the key in terminals that report key releases
 press `Space`.
 
 **Recording takes.** `F5` starts recording a take and `F5` again stops it
-(in either mode); meanwhile the header shows `● REC take-007 0:03`. A take
+(in either mode; starting one returns to play mode, so the keys sound);
+meanwhile the header shows `● REC take-007 0:03`. A take
 is two files in `takes/` under the current directory, or in the directory
 given with `--record DIR`, numbered past the highest take already there so
 that nothing is overwritten:
