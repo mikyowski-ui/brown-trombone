@@ -47,10 +47,7 @@ const LIMIT: f32 = 0.03;
 
 /// The articulation that stands for `key`.
 fn articulation(key: VowelKey) -> Articulation {
-    match key {
-        VowelKey::Vowel(p) | VowelKey::Start(p) => p.articulation(),
-        VowelKey::End(p) => p.glide_end().expect("a diphthong"),
-    }
+    key.articulation().expect("a vowel shape")
 }
 
 /// A physical voice of `length` holding `a`, settled.

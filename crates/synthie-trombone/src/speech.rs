@@ -48,6 +48,10 @@ pub struct Prosody {
     /// How long sounds last and how early the articulators start for the
     /// next one (the timing fields of the voice's [`Tuning`]).
     pub tuning: Tuning,
+    /// The sound model the speech is for. On the physical engine each
+    /// vowel has a length of its own and drifts while it is held (pass C
+    /// of the [`Tuning`]); the classic engine keeps every vowel alike.
+    pub engine: Engine,
 }
 
 impl Default for Prosody {
@@ -59,6 +63,7 @@ impl Default for Prosody {
             tenseness: 0.65,
             nasality: 0.0,
             tuning: Tuning::DEFAULT,
+            engine: Engine::Classic,
         }
     }
 }
@@ -532,11 +537,50 @@ fn number_words(digits: &str) -> String {
 
 // ===== tokens → timed segments ============================================
 
+/// Share of a diphthong the classic engine holds on its first vowel.
+const CLASSIC_NUCLEUS: f32 = 0.55;
+/// The rest of it, the glide.
+const CLASSIC_GLIDE: f32 = 0.45;
+
+/// How long vowel or diphthong `p` lasts against others of its kind, on
+/// the physical engine (pass C of the tuning). English vowels have
+/// lengths of their own: lax /ɪ ɛ ʌ ʊ/ are about two thirds as long as
+/// tense /i æ ɑ ɔ u/.
+fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
+    use Phoneme as P;
+    match p {
+        P::Iy => timing.iy_length,
+        P::Ih => timing.ih_length,
+        P::Eh => timing.eh_length,
+        P::Ae => timing.ae_length,
+        P::Ah => timing.ah_length,
+        P::Aa => timing.aa_length,
+        P::Ao => timing.ao_length,
+        P::Uh => timing.uh_length,
+        P::Uw => timing.uw_length,
+        P::Er => timing.er_length,
+        P::Ax => timing.ax_length,
+        P::Ey => timing.ey_length,
+        P::Ay => timing.ay_length,
+        P::Ow => timing.ow_length,
+        P::Aw => timing.aw_length,
+        P::Oy => timing.oy_length,
+        _ => 1.0,
+    }
+}
+
 /// Base durations in seconds at rate 1.
-fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
+fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
+    let own = |d: f32| {
+        if physical {
+            d * own_length(p, timing)
+        } else {
+            d
+        }
+    };
     let d = match p.manner() {
-        Manner::Vowel => timing.vowel_length,
-        Manner::Diphthong => timing.diphthong_length,
+        Manner::Vowel => own(timing.vowel_length),
+        Manner::Diphthong => own(timing.diphthong_length),
         Manner::Stop | Manner::Affricate => timing.stop_length,
         Manner::Nasal => timing.nasal_length,
         Manner::Fricative => {
@@ -557,6 +601,17 @@ fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     }
 }
 
+/// Which part of a sound a draft is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Part {
+    /// A whole sound, or the first part of a vowel.
+    Head,
+    /// A diphthong's glide to its end.
+    Glide,
+    /// A vowel's drift towards its end shape (physical engine).
+    Drift,
+}
+
 #[derive(Clone, Copy)]
 struct Draft {
     phoneme: Phoneme,
@@ -567,6 +622,7 @@ struct Draft {
     /// Relative pitch target at the end of the segment (1.0 = baseline).
     accent: f32,
     vowel: bool,
+    part: Part,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -576,6 +632,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let tense = prosody.tenseness.clamp(0.0, 1.0);
     let nasality = prosody.nasality.clamp(0.0, 1.0);
     let timing = prosody.tuning.clamped();
+    let physical = prosody.engine == Engine::Physical;
 
     // Split into phrases at breaks; each phrase gets its own contour.
     let mut drafts: Vec<Draft> = Vec::new();
@@ -602,6 +659,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                     next_vowel_or_approx,
                     rate,
                     &timing,
+                    physical,
                     &mut drafts,
                 );
             }
@@ -626,6 +684,22 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             && let Some(v) = drafts[..k].iter().rposition(|d| d.vowel)
         {
             drafts[v].duration *= 1.4;
+            // On the physical engine the whole vowel, not only its end.
+            let mut head = v;
+            while physical && head > 0 && drafts[head].part != Part::Head {
+                head -= 1;
+                drafts[head].duration *= 1.4;
+            }
+        }
+    }
+
+    // A vowel that drifts keeps the pitch course it would have had held
+    // still: its first part ends on the way to the accent, not on it.
+    for k in 1..drafts.len() {
+        if drafts[k].part == Part::Drift {
+            let before = if k >= 2 { drafts[k - 2].accent } else { 1.0 };
+            let (head, tail) = (drafts[k - 1].duration, drafts[k].duration);
+            drafts[k - 1].accent = lerp(before, drafts[k].accent, head / (head + tail));
         }
     }
 
@@ -687,6 +761,7 @@ fn silence(duration: f32) -> Draft {
         tenseness: None,
         accent: 1.0,
         vowel: false,
+        part: Part::Head,
     }
 }
 
@@ -696,10 +771,11 @@ fn expand(
     before_vowel: bool,
     rate: f32,
     timing: &Tuning,
+    physical: bool,
     out: &mut Vec<Draft>,
 ) {
     let a = p.articulation();
-    let dur = base_duration(p, stressed, timing) / rate;
+    let dur = base_duration(p, stressed, timing, physical) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {
         phoneme,
@@ -710,6 +786,7 @@ fn expand(
         // Marks stress for `shape_phrase`; replaced by a pitch ratio there.
         accent,
         vowel: is_vowel(phoneme),
+        part: Part::Head,
     };
 
     match p.manner() {
@@ -718,9 +795,26 @@ fn expand(
             // AO's more open "aw"), then glide to its end (on the physical
             // engine the diphthong's own, on the classic its second vowel).
             let end = p.glide_end().expect("diphthong");
-            out.push(draft(p, a, dur * 0.55, true));
-            let mut tail = draft(p, end, dur * 0.45, true);
+            let (head, glide) = if physical {
+                let n = timing.diphthong_nucleus;
+                (n, 1.0 - n)
+            } else {
+                (CLASSIC_NUCLEUS, CLASSIC_GLIDE)
+            };
+            out.push(draft(p, a, dur * head, true));
+            let mut tail = draft(p, end, dur * glide, true);
             tail.accent = 0.0;
+            tail.part = Part::Glide;
+            out.push(tail);
+        }
+        Manner::Vowel if physical && timing.vowel_drift > 0.0 => {
+            // Held, then on the way to where the vowel drifts: lax vowels
+            // towards the middle of the mouth, tense ones further out.
+            let end = p.drift_end().expect("a vowel");
+            let drift = timing.vowel_drift;
+            out.push(draft(p, a, dur * (1.0 - drift), true));
+            let mut tail = draft(p, end, dur * drift, true);
+            tail.part = Part::Drift;
             out.push(tail);
         }
         Manner::Stop => {

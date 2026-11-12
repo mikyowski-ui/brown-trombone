@@ -50,7 +50,8 @@ pub enum VowelKey {
     Vowel(Phoneme),
     /// Where a diphthong starts.
     Start(Phoneme),
-    /// Where a diphthong ends.
+    /// Where a diphthong ends, or where a vowel has drifted to by its end
+    /// (in English most vowels move a little while they are held).
     End(Phoneme),
 }
 
@@ -165,12 +166,34 @@ pub const TARGETS: &[Target] = &[
     end(Phoneme::Ow, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Aw, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Oy, FRONT_OFFGLIDE, Lips::Spread),
+    // Where each vowel drifts to by its end (the physical engine moves
+    // there over the last part of the vowel; see `Tuning::vowel_drift`).
+    end(Phoneme::Iy, [ 342.0, 2322.0, 3000.0], Lips::Spread),
+    end(Phoneme::Ih, [ 427.0, 2034.0, 2684.0], Lips::Spread),
+    end(Phoneme::Eh, [ 580.0, 1799.0, 2605.0], Lips::Spread),
+    end(Phoneme::Ae, [ 588.0, 1952.0, 2601.0], Lips::Spread),
+    end(Phoneme::Ah, [ 623.0, 1200.0, 2550.0], Lips::Spread),
+    end(Phoneme::Aa, [ 768.0, 1333.0, 2522.0], Lips::Spread),
+    end(Phoneme::Ao, [ 652.0,  997.0, 2538.0], Lips::Spread),
+    end(Phoneme::Uh, [ 469.0, 1122.0, 2434.0], Lips::Rounded),
+    end(Phoneme::Uw, [ 378.0,  997.0, 2343.0], Lips::Rounded),
+    end(Phoneme::Er, [ 474.0, 1379.0, 1710.0], Lips::Rounded),
+    end(Phoneme::Ax, [ 510.0, 1530.0, 2550.0], Lips::Spread),
 ];
+
+/// How many vowel shapes there are (the length of [`TARGETS`]).
+pub const TARGET_COUNT: usize = TARGETS.len();
 
 /// The target of `key`, if it has one.
 #[must_use]
 pub fn target(key: VowelKey) -> Option<&'static Target> {
     TARGETS.iter().find(|t| t.key == key)
+}
+
+/// Where `key` is in [`TARGETS`], if it is there.
+#[must_use]
+pub fn position(key: VowelKey) -> Option<usize> {
+    TARGETS.iter().position(|t| t.key == key)
 }
 
 /// F1, F2 and F3, Hz, that `key` aims for in a voice of `tract_length`
@@ -191,7 +214,7 @@ mod tests {
     fn every_vowel_glide_and_diphthong_end_has_one_target() {
         for &p in Phoneme::ALL {
             let keys: &[VowelKey] = match p.manner() {
-                Manner::Vowel => &[VowelKey::Vowel(p)],
+                Manner::Vowel => &[VowelKey::Vowel(p), VowelKey::End(p)],
                 Manner::Diphthong => &[VowelKey::Start(p), VowelKey::End(p)],
                 _ if matches!(p, Phoneme::W | Phoneme::Y) => &[VowelKey::Vowel(p)],
                 _ => &[],

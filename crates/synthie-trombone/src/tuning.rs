@@ -12,13 +12,17 @@
 //! ([`Tuning::FIELDS`]); [`Tuning::clamped`] keeps a profile inside it, so a
 //! bad file cannot break the engine.
 //!
-//! The fields fall in two groups, tuned separately:
+//! The fields fall in three groups, tuned separately:
 //!
 //! * **A — how sounds are made:** the breath and the folds, the noise of
 //!   jets, and how wide consonant gaps are.
 //! * **B — how sounds follow one another:** how long each kind of sound
 //!   lasts, how early the articulators start for the next one, and how fast
 //!   they move.
+//! * **C — vowels one by one (physical engine):** how long each vowel lasts
+//!   against the others, how far into it the tongue starts to drift, and
+//!   how much of a diphthong is its first vowel. The classic engine keeps
+//!   every vowel alike.
 
 /// Which tuning pass a field belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +31,8 @@ pub enum Pass {
     A,
     /// How sounds follow one another: timing and speeds.
     B,
+    /// How long each vowel lasts and how it moves (physical engine).
+    C,
 }
 
 /// One field of [`Tuning`]: its name, default and allowed range.
@@ -182,6 +188,54 @@ tuning! {
     release_speed = 0.37, 0.1..=0.8, B;
     /// How far past contact a closing articulator aims (diameter units).
     closure_overshoot = 0.3, 0.1..=0.5, B;
+
+    // ----- C: each vowel's length, against `vowel_length` -----------------
+
+    /// Length of /i/ ("beat") against `vowel_length` (physical engine).
+    iy_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɪ/ ("bit") against `vowel_length` (physical engine).
+    ih_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɛ/ ("bet") against `vowel_length` (physical engine).
+    eh_length = 1.0, 0.5..=2.0, C;
+    /// Length of /æ/ ("bat") against `vowel_length` (physical engine).
+    ae_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ʌ/ ("but") against `vowel_length` (physical engine).
+    ah_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɑ/ ("father") against `vowel_length` (physical engine).
+    aa_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɔ/ ("thought") against `vowel_length` (physical engine).
+    ao_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ʊ/ ("book") against `vowel_length` (physical engine).
+    uh_length = 1.0, 0.5..=2.0, C;
+    /// Length of /u/ ("boot") against `vowel_length` (physical engine).
+    uw_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɝ/ ("bird") against `vowel_length` (physical engine).
+    er_length = 1.0, 0.5..=2.0, C;
+    /// Length of schwa ("about") against `vowel_length` (physical engine).
+    ax_length = 1.0, 0.5..=2.0, C;
+
+    // ----- C: each diphthong's length, against `diphthong_length` ---------
+
+    /// Length of /eɪ/ ("bait") against `diphthong_length` (physical engine).
+    ey_length = 1.0, 0.5..=2.0, C;
+    /// Length of /aɪ/ ("bite") against `diphthong_length` (physical engine).
+    ay_length = 1.0, 0.5..=2.0, C;
+    /// Length of /oʊ/ ("boat") against `diphthong_length` (physical engine).
+    ow_length = 1.0, 0.5..=2.0, C;
+    /// Length of /aʊ/ ("bout") against `diphthong_length` (physical engine).
+    aw_length = 1.0, 0.5..=2.0, C;
+    /// Length of /ɔɪ/ ("boy") against `diphthong_length` (physical engine).
+    oy_length = 1.0, 0.5..=2.0, C;
+
+    // ----- C: movement ----------------------------------------------------
+
+    /// Share of a vowel at whose end its tongue heads for where the vowel
+    /// drifts to (its end shape; physical engine). `0` holds every vowel
+    /// still.
+    vowel_drift = 0.0, 0.0..=0.7, C;
+    /// Share of a diphthong spent on the vowel it starts from, before it
+    /// glides to its end (physical engine; the classic engine holds 55 %).
+    diphthong_nucleus = 0.55, 0.2..=0.8, C;
 }
 
 impl Default for Tuning {
@@ -208,6 +262,23 @@ mod tests {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
         assert_eq!((a, b), (14, 16));
+    }
+
+    #[test]
+    fn every_vowel_has_a_length_in_pass_c() {
+        for p in crate::Phoneme::ALL {
+            if matches!(p.manner(), crate::Manner::Vowel | crate::Manner::Diphthong) {
+                let f = Tuning::FIELDS
+                    .iter()
+                    .find(|f| {
+                        f.name
+                            .strip_suffix("_length")
+                            .is_some_and(|v| v.eq_ignore_ascii_case(p.symbol()))
+                    })
+                    .unwrap_or_else(|| panic!("{p}"));
+                assert_eq!(f.pass, Pass::C, "{p}");
+            }
+        }
     }
 
     #[test]

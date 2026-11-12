@@ -306,7 +306,7 @@ def item_slots(item: material.Item, metric: str, sentence: bool) -> list[tuple[i
             out.append((k, {"target": p, "pair": pair, "pos": "sentence", "voicing": voicing_of(p), "lex": "sentence"}))
         elif metric == "confusions" and p in A.CONSONANTS:
             out.append((k, {"target": p}))
-    if item.set == "human" and metric == "vowels":
+    if item.set in material.SENTENCE_SETS and metric == "vowels":
         marks = sentence_stress(item.ortho or item.text, list(item.expected))
         for k, m in out:
             if marks and len(marks) == len(ref):
@@ -783,7 +783,7 @@ def run(
         raise SystemExit("the human system only has the 'human' set (in-sentence) or --cut")
     if cut and system != "human":
         raise SystemExit("--cut cuts tokens out of the human recordings: use it with the human system")
-    sentence = set_name == "human" or cut
+    sentence = set_name in material.SENTENCE_SETS or cut
     label = name or default_label(system, profile, set_name, cut)
     own = pj is None
     t0 = time.perf_counter()
