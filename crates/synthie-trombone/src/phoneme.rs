@@ -300,7 +300,61 @@ impl Phoneme {
     }
 }
 
+/// Vowel shapes for the physical engine: tongue body `(index, diameter)`,
+/// lip rounding, and a narrowing along the tongue `(cell, diameter)`.
+///
+/// The physical tract has yielding walls, losses, side cavities and a real
+/// lip load, so the classic shapes land on different formants there. These
+/// were fitted with `examples/tune_physical.rs` to Peterson & Barney's
+/// (1952) F1, F2 *and* F3 for men; the extra narrowing is what lets F3 be
+/// placed at all. Lips and narrowing are kept wide enough not to hiss.
+const PHYSICAL_VOWELS: &[(Phoneme, (f32, f32), Option<f32>, (f32, f32))] = &[
+    (Phoneme::Iy, (28.08, 2.05), Some(0.86), (34.0, 0.7)),
+    (Phoneme::Ih, (28.67, 3.053), Some(0.944), (32.33, 0.832)),
+    (Phoneme::Eh, (21.83, 2.912), None, (30.69, 0.942)),
+    (Phoneme::Ae, (12.57, 3.339), None, (28.82, 1.4)),
+    (Phoneme::Ah, (12.0, 2.39), None, (24.02, 1.015)),
+    (Phoneme::Aa, (14.36, 2.65), None, (14.0, 1.028)),
+    (Phoneme::Ao, (12.0, 2.08), Some(1.348), (22.96, 1.315)),
+    (Phoneme::Uh, (19.55, 2.273), Some(0.739), (32.28, 0.887)),
+    (Phoneme::Uw, (25.06, 2.05), Some(0.65), (23.13, 0.7)),
+    (Phoneme::Ow, (16.1, 2.1), Some(1.108), (26.95, 0.955)),
+    (Phoneme::Er, (13.86, 2.696), Some(1.173), (30.15, 0.727)),
+    (Phoneme::Ax, (20.34, 3.28), Some(0.961), (30.78, 1.214)),
+    // The glides are their vowels, a little closer.
+    (Phoneme::W, (25.06, 2.05), Some(0.65), (23.13, 0.7)),
+    (Phoneme::Y, (28.08, 2.05), Some(0.86), (33.0, 0.7)),
+];
+
 impl Articulation {
+    /// The same articulation as the physical engine needs it, plus the
+    /// narrowing along the tongue that belongs to its vowel shape. Shapes
+    /// are stored for the classic engine; here a vowel's tongue and lips
+    /// are replaced by the ones fitted to the physical tract, and a
+    /// consonant that borrowed a vowel's tongue position gets that vowel's
+    /// physical tongue position.
+    pub(crate) fn physical(self) -> (Self, Option<Constriction>) {
+        for &(p, tongue, lips, narrow) in PHYSICAL_VOWELS {
+            let classic = p.articulation();
+            if self.tongue != classic.tongue {
+                continue;
+            }
+            let mut a = self;
+            a.tongue = Some(tongue);
+            if self.constriction == classic.constriction && self.lips == classic.lips {
+                // The vowel itself, not a consonant leaning on it.
+                a.constriction = None;
+                a.lips = match lips {
+                    Some(d) => Some(Constriction::new(LIPS, d)),
+                    None => None,
+                };
+                return (a, Some(Constriction::new(narrow.0, narrow.1)));
+            }
+            return (a, None);
+        }
+        (self, None)
+    }
+
     const fn with_constriction(mut self, index: f32, diameter: f32) -> Self {
         self.constriction = Some(Constriction::new(index, diameter));
         self

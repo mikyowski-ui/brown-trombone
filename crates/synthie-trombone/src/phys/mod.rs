@@ -22,7 +22,9 @@
 //! [`Trombone::set_tract_length`]: crate::Trombone::set_tract_length
 
 pub(crate) mod branch;
+pub(crate) mod folds;
 pub(crate) mod junction;
+pub(crate) mod noise;
 pub(crate) mod radiation;
 pub(crate) mod source;
 
@@ -31,6 +33,7 @@ use crate::tract::{N, NOSE_LEN, NOSE_START};
 use branch::{Branch, End, Resonator};
 use core::f32::consts::PI;
 use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
+use noise::{Turbulence, glottal_noise, jet_noise};
 use radiation::Radiation;
 
 /// Density of warm, moist air, g/cm³.
@@ -60,12 +63,21 @@ const WALL_FRICTION: f32 = 1.17e-3;
 /// Wall tissue per unit area, from in-vivo measurements on seven men with
 /// the glottis closed (Hanna, Smith & Wolfe 2016, JASA 139, Table III):
 /// 0.17 kg of moving tissue and 4.3 kN/m of stiffness over 110 cm² of
-/// wall, and the loss they found at the 212 Hz wall resonance. Mass g/cm²,
-/// resistance dyn·s/cm³, stiffness dyn/cm³. The tissue's own resonance is
-/// then 25 Hz and its yield about 2.8 cm³ per cmH2O, as measured.
+/// wall. Mass g/cm², stiffness dyn/cm³. The tissue's own resonance is then
+/// near 25 Hz and its yield about 2.8 cm³ per cmH2O, as measured.
 const WALL_MASS: f32 = 1.55;
-const WALL_RESISTANCE: f32 = 950.0;
 const WALL_STIFFNESS: f32 = 3.9e4;
+/// The same study found the walls three times lossier at their 212 Hz
+/// resonance against the enclosed air (0.86 MPa·s/m³) than at the tissue's
+/// own slow resonance (0.27). One damper cannot be both, and both matter:
+/// the first sets how sharp low formants are, the second how fast the
+/// mouth swells behind a closure. So the wall drags a second layer of
+/// tissue through a damper: slow motion carries the layer along and loses
+/// little, fast motion leaves it behind and loses more. Resistances in
+/// dyn·s/cm³, the layer's mass in g/cm².
+const WALL_RESISTANCE: f32 = 300.0;
+const WALL_LAYER_RESISTANCE: f32 = 650.0;
+const WALL_LAYER_MASS: f32 = 0.8;
 
 /// Seconds over which displaced-air flow is smoothed (articulators are
 /// updated in blocks; their velocity must not step).
@@ -85,6 +97,16 @@ const GLOTTAL_KT: f32 = 1.1;
 /// Fold length and thickness for the viscous term, cm, native size.
 const FOLD_LENGTH: f32 = 1.4;
 const FOLD_THICKNESS: f32 = 0.3;
+
+/// Share of the walls' motion that reaches the outside air as sound. Bone
+/// (jaw, palate, teeth) does not move; cheeks and throat do. This is what
+/// is heard during a closed /b/: the voice bar.
+const SKIN_RADIATION: f32 = 0.4;
+
+/// Joint in front of which the upper teeth stand in the air stream.
+pub(crate) const TEETH_AT: usize = 40;
+/// How far behind the teeth (cells) a jet can form and still strike them.
+const JET_REACH: usize = 9;
 
 /// Loss multiplier for the nasal passages (large wetted surface).
 const NASAL_LOSS: f32 = 3.0;
@@ -162,6 +184,8 @@ pub(crate) struct Gauge {
     pub u_lips: f32,
     /// Flow out of the nose.
     pub u_nose: f32,
+    /// Flow radiated through the skin.
+    pub u_skin: f32,
 }
 
 /// The physical tract.
@@ -186,9 +210,13 @@ pub(crate) struct Phys {
     wall_s: [f32; N],
     wall_v: [f32; N],
     wall_y: [f32; N],
+    /// Velocity of the dragged tissue layer.
+    wall_w: [f32; N],
     wall_cv: f32,
     wall_cg: f32,
     wall_ck: f32,
+    wall_cw: f32,
+    wall_drag: f32,
     adot: [f32; N],
     adot_target: [f32; N],
     adot_smooth: f32,
@@ -203,6 +231,15 @@ pub(crate) struct Phys {
     piriform: [Branch<PIRIFORM_LEN>; 2],
     side_cavities: bool,
     lips: Radiation,
+
+    /// Flow through each joint, averaged over about a millisecond (what
+    /// the noise rule sees).
+    flow: [f32; N + 1],
+    flow_smooth: f32,
+    /// Narrowest cell behind the teeth this block.
+    jet_cell: usize,
+    turbulence: Turbulence,
+    noisy: bool,
 
     pub(crate) gauge: Gauge,
 }
@@ -226,9 +263,12 @@ impl Phys {
             wall_s: [0.0; N],
             wall_v: [0.0; N],
             wall_y: [0.0; N],
+            wall_w: [0.0; N],
             wall_cv: 1.0,
             wall_cg: 0.0,
             wall_ck: 0.0,
+            wall_cw: 0.0,
+            wall_drag: 0.0,
             adot: [0.0; N],
             adot_target: [0.0; N],
             adot_smooth: 0.0,
@@ -241,6 +281,11 @@ impl Phys {
             piriform: [Branch::new(End::Closed), Branch::new(End::Closed)],
             side_cavities: true,
             lips: Radiation::default(),
+            flow: [0.0; N + 1],
+            flow_smooth: 1.0,
+            jet_cell: TEETH_AT - 1,
+            turbulence: Turbulence::new(0x7B0E_5EED),
+            noisy: true,
             gauge: Gauge::default(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
@@ -254,10 +299,16 @@ impl Phys {
         self.len = len;
         self.visc = 8.0 * PI * MU * self.dx;
 
-        let damp = 1.0 / (1.0 + dt * WALL_RESISTANCE / WALL_MASS);
+        // Implicit step of  m·v' = p − b·v − k·y − b₂·(v − w),
+        //                   m₂·w' = b₂·(v − w).
+        let drag = dt * WALL_LAYER_RESISTANCE / WALL_LAYER_MASS;
+        let layer = WALL_LAYER_RESISTANCE / (1.0 + drag);
+        let damp = 1.0 / (1.0 + dt * (WALL_RESISTANCE + layer) / WALL_MASS);
         self.wall_cv = damp;
         self.wall_cg = damp * dt / WALL_MASS;
         self.wall_ck = dt * WALL_STIFFNESS / WALL_MASS;
+        self.wall_cw = dt * layer / WALL_MASS;
+        self.wall_drag = drag;
         self.adot_smooth = (dt / DISPLACEMENT_SMOOTHING).min(1.0);
 
         // Trachea: uniform, narrowing over the last centimetre to the folds.
@@ -277,8 +328,16 @@ impl Phys {
         self.glottal_visc = 12.0 * MU * fl * fl * FOLD_THICKNESS * len;
 
         self.configure_branches();
+        self.turbulence.set_rate(dt);
+        self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
+    }
+
+    /// Seed the turbulence. Equal seeds give equal sound.
+    pub(crate) fn seed(&mut self, seed: u32) {
+        self.turbulence = Turbulence::new(seed);
+        self.turbulence.set_rate(self.dt);
     }
 
     /// Global cross-section scale (fitted once against vowel formants).
@@ -333,6 +392,7 @@ impl Phys {
         self.lossy = !ideal;
         self.walls = !ideal;
         self.side_cavities = !ideal;
+        self.noisy = !ideal;
     }
 
     /// Switch the piriform sinuses on or off (to measure what they do).
@@ -357,6 +417,7 @@ impl Phys {
         self.l = [0.0; N];
         self.wall_v = [0.0; N];
         self.wall_y = [0.0; N];
+        self.wall_w = [0.0; N];
         self.adot = [0.0; N];
         self.sub_r = [0.0; NS];
         self.sub_l = [0.0; NS];
@@ -367,6 +428,8 @@ impl Phys {
             b.reset();
         }
         self.lips.reset();
+        self.flow = [0.0; N + 1];
+        self.turbulence.reset();
         self.gauge = Gauge::default();
     }
 
@@ -419,10 +482,17 @@ impl Phys {
                 0.0
             };
         }
+        // Where a jet aimed at the teeth would come from.
+        let mut narrowest = TEETH_AT - 1;
+        for i in TEETH_AT - JET_REACH..TEETH_AT {
+            if self.a1[i] < self.a1[narrowest] {
+                narrowest = i;
+            }
+        }
+        self.jet_cell = narrowest;
     }
 
     /// Pressure in cell `i`, dyn/cm².
-    #[cfg(test)]
     pub(crate) fn pressure(&self, i: usize) -> f32 {
         self.r[i] + self.l[i]
     }
@@ -446,23 +516,31 @@ impl Phys {
         if s == 0.0 {
             return Shunt::NONE;
         }
-        let rest = self.wall_cv * (self.wall_v[i] - self.wall_ck * self.wall_y[i]);
+        let rest = self.wall_cv
+            * (self.wall_v[i] - self.wall_ck * self.wall_y[i] + self.wall_cw * self.wall_w[i]);
         Shunt {
             g: s * self.wall_cg,
             h: s * rest + self.dx * self.adot[i],
         }
     }
 
+    /// Move the wall of cell `i` under pressure `p`; returns the flow its
+    /// motion takes up, cm³/s.
     #[inline]
-    fn wall_commit(&mut self, i: usize, p: f32) {
+    fn wall_commit(&mut self, i: usize, p: f32) -> f32 {
         if self.wall_s[i] == 0.0 {
             // A shut cell's wall just settles.
             self.wall_v[i] *= 0.999;
-            return;
+            self.wall_w[i] *= 0.999;
+            return 0.0;
         }
-        let v = self.wall_cv * (self.wall_v[i] - self.wall_ck * self.wall_y[i]) + self.wall_cg * p;
+        let v = self.wall_cv
+            * (self.wall_v[i] - self.wall_ck * self.wall_y[i] + self.wall_cw * self.wall_w[i])
+            + self.wall_cg * p;
         self.wall_v[i] = v;
         self.wall_y[i] += self.dt * v;
+        self.wall_w[i] = (self.wall_w[i] + self.wall_drag * v) / (1.0 + self.wall_drag);
+        self.wall_s[i] * v
     }
 
     /// Advance one tick. `lambda` is the position within the current block.
@@ -492,6 +570,12 @@ impl Phys {
 
         let dt = self.dt;
         let mut u_nose = 0.0;
+        let mut u_skin = 0.0;
+        let (hiss, hiss_teeth) = if self.noisy {
+            self.turbulence.tick()
+        } else {
+            (0.0, 0.0)
+        };
         for j in 1..N {
             let i = j - 1;
             let mut shunt = self.wall_shunt(i);
@@ -510,6 +594,17 @@ impl Phys {
                 }
             }
             let (k_fwd, k_rev) = expansion_loss(inv[i], inv[j]);
+            // A stream leaving a narrow cell breaks into turbulence; one
+            // that strikes the teeth does so far more efficiently.
+            let mut pn = 0.0;
+            if self.noisy {
+                pn = hiss * jet_noise(self.flow[j], inv[i], inv[j], 1.0);
+                if j == TEETH_AT && self.jet_cell + 1 < TEETH_AT {
+                    let c = self.jet_cell;
+                    pn += hiss_teeth
+                        * jet_noise(self.flow[c + 1], inv[c], inv[j], noise::OBSTACLE_GAIN);
+                }
+            }
             let s = solve(
                 &Joint {
                     y1: y[i],
@@ -518,7 +613,7 @@ impl Phys {
                     k_fwd,
                     k_rev,
                     r: self.visc * inv[j] * inv[j],
-                    pn: 0.0,
+                    pn,
                     sealed: false,
                 },
                 self.r[i],
@@ -526,7 +621,8 @@ impl Phys {
             );
             nl[i] = s.out_left;
             nr[j] = s.out_right;
-            self.wall_commit(i, s.p1);
+            self.flow[j] += (s.u - self.flow[j]) * self.flow_smooth;
+            u_skin += self.wall_commit(i, s.p1);
             if nose_here {
                 for b in &mut self.nose {
                     u_nose += b.tick(lambda, s.p1, dt);
@@ -557,16 +653,21 @@ impl Phys {
         if let Some(load) = self.lips.load(lip_area, dt) {
             joint.y2 = load.y;
             joint.k_fwd = load.k_out;
+            if self.noisy {
+                joint.pn = hiss * jet_noise(self.flow[N], inv[i], 0.0, 1.0);
+            }
             let s = solve(&joint, self.r[i], load.b);
             nl[i] = s.out_left;
             self.lips.commit(load.b + s.out_right, dt);
-            self.wall_commit(i, s.p1);
+            u_skin += self.wall_commit(i, s.p1);
             u_lips = s.u;
         } else {
             let s = solve(&joint, self.r[i], 0.0);
             nl[i] = s.out_left;
-            self.wall_commit(i, s.p1);
+            u_skin += self.wall_commit(i, s.p1);
         }
+        self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
+        let u_skin = SKIN_RADIATION * u_skin;
 
         for i in 0..N {
             self.r[i] = nr[i] * self.att[i];
@@ -574,7 +675,8 @@ impl Phys {
         }
         self.gauge.u_lips = u_lips;
         self.gauge.u_nose = u_nose;
-        u_lips + u_nose
+        self.gauge.u_skin = u_skin;
+        u_lips + u_nose + u_skin
     }
 
     /// The lungs, trachea and glottis. Returns the wave sent up into the
@@ -612,6 +714,11 @@ impl Phys {
         let sealed = area < A_MIN;
         let inv_g = 1.0 / area.max(A_MIN);
         let k = 0.5 * RHO * GLOTTAL_KT * inv_g * inv_g;
+        let pn = if self.noisy && !sealed {
+            self.turbulence.breath() * glottal_noise(self.flow[0], inv_g, FOLD_LENGTH * self.len)
+        } else {
+            0.0
+        };
         let s = solve(
             &Joint {
                 y1: self.sub_y[NS - 1],
@@ -620,13 +727,14 @@ impl Phys {
                 k_fwd: k,
                 k_rev: k,
                 r: self.glottal_visc * inv_g * inv_g * inv_g,
-                pn: 0.0,
+                pn,
                 sealed,
             },
             self.sub_r[NS - 1],
             self.l[0],
         );
         nsl[NS - 1] = s.out_left;
+        self.flow[0] += (s.u - self.flow[0]) * self.flow_smooth;
         self.gauge.u_glottis = s.u;
         self.gauge.p_sub = s.p1;
         self.gauge.p_supra = self.l[0] + s.out_right;

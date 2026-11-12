@@ -6,8 +6,8 @@ use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
-use crate::phys::source::Source;
-use crate::phys::{Drive, Phys};
+use crate::phys::source::{Source, SourceKind};
+use crate::phys::{CM_H2O, Drive, Phys};
 use crate::tract::{Constriction, Dynamics, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
 use core::f32::consts::PI;
 
@@ -35,6 +35,45 @@ pub enum Engine {
     Physical,
 }
 
+/// What moves the vocal folds in the physical engine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum GlottalSource {
+    /// The opening between the folds follows a prescribed pulse at the
+    /// requested pitch; the air flow through it is real. Always in tune.
+    Pulse,
+    /// Self-oscillating folds: masses on springs driven by the air
+    /// pressure around them. Pitch comes from their tension, and voicing
+    /// starts, weakens and stops by itself as pressures change. Notes the
+    /// folds cannot reach (far above or below their natural range) are
+    /// sung with the pulse instead.
+    #[default]
+    Folds,
+}
+
+/// Readings from inside the physical engine, for measurements and
+/// displays. All zero while the classic engine is in use.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gauges {
+    /// Air flow through the glottis, cm³/s.
+    pub glottal_flow: f32,
+    /// Pressure just below the vocal folds, cmH2O.
+    pub subglottal_pressure: f32,
+    /// Pressure just above the vocal folds, cmH2O.
+    pub supraglottal_pressure: f32,
+    /// Air flow out of the lips, cm³/s.
+    pub lip_flow: f32,
+    /// Air flow out of the nostrils, cm³/s.
+    pub nose_flow: f32,
+    /// Flow radiated through the walls of the throat and cheeks, cm³/s.
+    pub skin_flow: f32,
+    /// Area between the vocal folds, cm².
+    pub glottal_area: f32,
+    /// Pitch the self-oscillating folds are actually producing, Hz (`0`
+    /// while they are not vibrating or the pulse source is in use).
+    pub fold_pitch: f32,
+}
+
 /// One Pink Trombone voice.
 ///
 /// The model runs at a fixed [`INTERNAL_RATE`] (tract at twice that) and is
@@ -53,6 +92,7 @@ pub struct Trombone {
     source: Source,
     /// Radiated flow at the previous internal sample (physical engine).
     phys_flow: f32,
+    glottal_area: f32,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -96,13 +136,20 @@ impl Trombone {
         );
         let mut rng = Rng::new(seed);
         let simplex = Simplex::new(&mut rng);
+        let mut phys = Phys::new();
+        phys.seed(seed ^ 0x9E37_79B9);
         Self {
             glottis: Glottis::new(),
             tract: Tract::new(),
             engine: Engine::Classic,
-            phys: Phys::new(),
-            source: Source::new(),
+            phys,
+            source: {
+                let mut source = Source::new();
+                source.kind = SourceKind::Folds;
+                source
+            },
             phys_flow: 0.0,
+            glottal_area: 0.0,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -163,6 +210,52 @@ impl Trombone {
     #[must_use]
     pub fn engine(&self) -> Engine {
         self.engine
+    }
+
+    /// Choose what moves the vocal folds in the physical engine.
+    pub fn set_glottal_source(&mut self, source: GlottalSource) {
+        let kind = match source {
+            GlottalSource::Pulse => SourceKind::Kinematic,
+            GlottalSource::Folds => SourceKind::Folds,
+        };
+        if kind != self.source.kind {
+            self.source.kind = kind;
+            self.source.reset();
+        }
+    }
+
+    /// Lung pressure of the physical engine while sounding, in cmH2O
+    /// (default 8, clamped to 1‥40). More pressure is louder and brighter;
+    /// below a few cmH2O the folds stop vibrating.
+    pub fn set_lung_pressure(&mut self, cm_h2o: f32) {
+        if cm_h2o.is_finite() {
+            self.source.set_lung_pressure(cm_h2o.clamp(1.0, 40.0));
+        }
+    }
+
+    /// Lung pressure setting, cmH2O.
+    #[must_use]
+    pub fn lung_pressure(&self) -> f32 {
+        self.source.lung_pressure()
+    }
+
+    /// Hold the self-oscillating folds at a fixed tension (relative to
+    /// their standard stiffness) and rest gap (half-width, cm) instead of
+    /// deriving them from pitch and tenseness. For measuring the folds;
+    /// `None` returns control to the pitch and tenseness settings.
+    #[doc(hidden)]
+    pub fn override_folds(&mut self, tension: Option<f32>, gap: Option<f32>) {
+        self.source.tension_override = tension;
+        self.source.gap_override = gap;
+    }
+
+    /// What moves the vocal folds in the physical engine.
+    #[must_use]
+    pub fn glottal_source(&self) -> GlottalSource {
+        match self.source.kind {
+            SourceKind::Kinematic => GlottalSource::Pulse,
+            SourceKind::Folds => GlottalSource::Folds,
+        }
     }
 
     /// Cross-section scale of the physical engine's tract (`1.0` reads the
@@ -380,6 +473,12 @@ impl Trombone {
     /// Move to an articulation. Uses [`SLOT_MAIN`] and [`SLOT_LIPS`]; leaves
     /// voicing and pitch alone (see [`Articulation::voiced`]).
     pub fn articulate(&mut self, a: &Articulation) {
+        // Vowel shapes are tuned per engine.
+        let (a, narrowing) = match self.engine {
+            Engine::Classic => (*a, None),
+            Engine::Physical => a.physical(),
+        };
+        self.tract.set_narrowing(narrowing);
         if let Some((index, diameter)) = a.tongue {
             self.set_tongue(index, diameter);
         }
@@ -432,6 +531,36 @@ impl Trombone {
     #[must_use]
     pub fn tick_rate(&self) -> f32 {
         2.0 * self.internal_rate
+    }
+
+    /// Readings from inside the physical engine at the latest tick.
+    #[must_use]
+    pub fn gauges(&self) -> Gauges {
+        if self.engine != Engine::Physical {
+            return Gauges::default();
+        }
+        let g = self.phys.gauge;
+        Gauges {
+            glottal_flow: g.u_glottis,
+            subglottal_pressure: g.p_sub / CM_H2O,
+            supraglottal_pressure: g.p_supra / CM_H2O,
+            lip_flow: g.u_lips,
+            nose_flow: g.u_nose,
+            skin_flow: g.u_skin,
+            glottal_area: self.glottal_area,
+            fold_pitch: self.source.measured,
+        }
+    }
+
+    /// Air pressure in tract cell `cell` (`0` at the glottis), cmH2O, in
+    /// the physical engine.
+    #[must_use]
+    pub fn pressure(&self, cell: usize) -> f32 {
+        if self.engine == Engine::Physical && cell < N {
+            self.phys.pressure(cell) / CM_H2O
+        } else {
+            0.0
+        }
     }
 
     /// Let the articulators finish moving, without rendering sound.
@@ -548,8 +677,11 @@ impl Trombone {
         let dt = 0.5 / self.internal_rate;
         let (area, lung) = self.source.tick(lambda1, dt);
         self.phys.tick(lambda1, Drive::Glottis { area, lung });
+        self.source.react(&self.phys.gauge, lambda1, dt);
         let (area, lung) = self.source.tick(lambda2, dt);
         let flow = self.phys.tick(lambda2, Drive::Glottis { area, lung });
+        self.source.react(&self.phys.gauge, lambda2, dt);
+        self.glottal_area = area;
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;
         if out.is_finite() {

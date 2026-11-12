@@ -39,16 +39,23 @@ const TARGETS: &[(&str, [f32; 3])] = &[
     ("UH", [440.0, 1020.0, 2240.0]),
     ("UW", [300.0, 870.0, 2240.0]),
     ("OH", [497.0, 910.0, 2459.0]),
+    ("ER", [490.0, 1350.0, 1690.0]),
+    // Schwa: the neutral tract.
+    ("AX", [500.0, 1500.0, 2500.0]),
 ];
 
-const LIPS: [Option<f32>; 7] = [
+/// Narrowest vowel lip opening and tongue channel searched (touch units).
+/// Tighter ones would reach the formants too, but they would hiss.
+const MIN_LIPS: f32 = 0.65;
+const MIN_NARROW: f32 = 0.7;
+
+const LIPS: [Option<f32>; 6] = [
     None,
     Some(1.3),
     Some(1.1),
     Some(0.95),
     Some(0.8),
     Some(0.65),
-    Some(0.55),
 ];
 
 #[derive(Clone, Copy)]
@@ -108,7 +115,7 @@ fn survey(scale: f32) -> Vec<Shape> {
         for d in 0..=11 {
             for &l in &LIPS {
                 for at in [18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0] {
-                    for width in [0.6, 0.7, 0.85, 1.0, 1.2] {
+                    for width in [0.7, 0.85, 1.0, 1.2] {
                         grid.push((12.0 + i as f32, 2.05 + d as f32 * 0.1, l, Some((at, width))));
                     }
                 }
@@ -135,6 +142,57 @@ fn survey(scale: f32) -> Vec<Shape> {
     })
 }
 
+/// How far a shape is from a target: F1 and F2 first; once both are
+/// within 1.5 %, F3 decides.
+fn cost(s: &Shape, t: [f32; 3]) -> f32 {
+    let e12 = (s.f[0] / t[0]).ln().abs().max((s.f[1] / t[1]).ln().abs());
+    let e3 = (s.f[2] / t[2]).ln().abs();
+    if e12 < 0.015 { e3 } else { 1.0 + e12 }
+}
+
+/// Small deterministic generator for the local search.
+struct Lcg(u64);
+
+impl Lcg {
+    fn unit(&mut self) -> f32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((self.0 >> 40) as f32 / (1u64 << 24) as f32) * 2.0 - 1.0
+    }
+}
+
+/// Hill-climb from `start` with shrinking random steps.
+fn refine(scale: f32, start: Shape, target: [f32; 3], seed: u64) -> Shape {
+    let mut rng = Lcg(seed);
+    let mut best = start;
+    let mut best_cost = cost(&best, target);
+    for round in 0..420 {
+        let reach = (1.0 - round as f32 / 440.0).max(0.05);
+        let index = (best.index + 1.5 * reach * rng.unit()).clamp(12.0, 29.0);
+        let diameter = (best.diameter + 0.25 * reach * rng.unit()).clamp(2.05, 3.5);
+        let lips = best
+            .lips
+            .map(|l| (l + 0.15 * reach * rng.unit()).clamp(MIN_LIPS, 1.45));
+        let narrow = best.narrow.map(|(at, w)| {
+            (
+                (at + 2.5 * reach * rng.unit()).clamp(14.0, 34.0),
+                (w + 0.15 * reach * rng.unit()).clamp(MIN_NARROW, 1.4),
+            )
+        });
+        let Some(s) = measure(scale, (index, diameter, lips, narrow)) else {
+            continue;
+        };
+        let c = cost(&s, target);
+        if c < best_cost {
+            best = s;
+            best_cost = c;
+        }
+    }
+    best
+}
+
 fn main() {
     let scales: Vec<f32> = std::env::args()
         .skip(1)
@@ -150,20 +208,54 @@ fn main() {
         println!("area scale {scale}: {} shapes measured", shapes.len());
         let mut worst = 0.0f32;
         let mut f3_total = 0.0f32;
-        for &(name, t) in TARGETS {
+        // Refine the best few coarse shapes of every vowel, in parallel.
+        let mut jobs = Vec::new();
+        for (v, &(_, t)) in TARGETS.iter().enumerate() {
+            let mut ranked: Vec<&Shape> = shapes.iter().collect();
+            ranked.sort_by(|a, b| cost(a, t).total_cmp(&cost(b, t)));
+            // Start from the best shape of each distinct lip setting and
+            // narrowing place, so the climbs explore different basins.
+            let mut seen: Vec<(Option<u32>, Option<u32>)> = Vec::new();
+            for s in ranked {
+                let key = (
+                    s.lips.map(|l| (l * 100.0) as u32),
+                    s.narrow.map(|(at, _)| at as u32),
+                );
+                if seen.contains(&key) {
+                    continue;
+                }
+                seen.push(key);
+                jobs.push((v, *s, (v * 100 + seen.len()) as u64 + 1));
+                if seen.len() >= 24 {
+                    break;
+                }
+            }
+        }
+        let refined: Vec<(usize, Shape)> = std::thread::scope(|sc| {
+            let handles: Vec<_> = jobs
+                .iter()
+                .map(|&(v, start, seed)| {
+                    sc.spawn(move || (v, refine(scale, start, TARGETS[v].1, seed)))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("worker panicked"))
+                .collect()
+        });
+        for (v, &(name, t)) in TARGETS.iter().enumerate() {
             let err12 = |s: &Shape| (s.f[0] / t[0]).ln().abs().max((s.f[1] / t[1]).ln().abs());
             let err3 = |s: &Shape| (s.f[2] / t[2]).ln().abs();
-            let close: Vec<&Shape> = shapes.iter().filter(|s| err12(s) < 0.02).collect();
-            let best = if close.is_empty() {
-                shapes.iter().min_by(|a, b| err12(a).total_cmp(&err12(b)))
-            } else {
-                close.into_iter().min_by(|a, b| err3(a).total_cmp(&err3(b)))
-            };
+            let best = refined
+                .iter()
+                .filter(|(i, _)| *i == v)
+                .map(|(_, s)| s)
+                .min_by(|a, b| cost(a, t).total_cmp(&cost(b, t)));
             let Some(b) = best else { continue };
             worst = worst.max(err12(b));
             f3_total += err3(b);
             println!(
-                "  {name}: tongue ({:.1}, {:.2}) lips {:?} narrow {:?} -> {:.0}/{:.0}/{:.0} (target {:.0}/{:.0}/{:.0}; F1 {:+.1}% F2 {:+.1}% F3 {:+.1}%)",
+                "  {name}: tongue ({:.2}, {:.3}) lips {:?} narrow {:?} -> {:.0}/{:.0}/{:.0} (target {:.0}/{:.0}/{:.0}; F1 {:+.1}% F2 {:+.1}% F3 {:+.1}%)",
                 b.index,
                 b.diameter,
                 b.lips,

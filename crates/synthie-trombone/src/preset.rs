@@ -1,6 +1,6 @@
 //! Voice character: [`VoiceSettings`] and ready-made [`Preset`]s.
 
-use crate::Trombone;
+use crate::{Engine, Trombone};
 
 /// Everything that makes one speaker sound different from another.
 ///
@@ -33,6 +33,8 @@ pub struct VoiceSettings {
     pub jitter: f32,
     /// Constant velum opening during vowels: a nasal, whiny voice. `0‥1`.
     pub nasality: f32,
+    /// The sound model: Pink Trombone's own, or the physical one.
+    pub engine: Engine,
 }
 
 impl Default for VoiceSettings {
@@ -45,6 +47,7 @@ impl VoiceSettings {
     /// Configure `voice` with these settings (voice quality only; pitch is
     /// set per segment while speaking).
     pub fn apply(&self, voice: &mut Trombone) {
+        voice.set_engine(self.engine);
         voice.set_tract_length(self.tract_length);
         voice.set_tenseness(self.tenseness);
         voice.set_vibrato(self.vibrato, self.vibrato_rate);
@@ -69,6 +72,13 @@ impl VoiceSettings {
     #[must_use]
     pub fn with_pitch(mut self, hz: f32) -> Self {
         self.pitch = hz;
+        self
+    }
+
+    /// The same voice on another sound model.
+    #[must_use]
+    pub fn with_engine(mut self, engine: Engine) -> Self {
+        self.engine = engine;
         self
     }
 
@@ -156,6 +166,7 @@ impl Preset {
             vibrato_rate: 5.5,
             jitter: 1.0,
             nasality: 0.0,
+            engine: Engine::Classic,
         };
         match self {
             Preset::Deep => base,
@@ -190,6 +201,7 @@ impl Preset {
                 vibrato_rate: 5.0,
                 jitter: 2.5,
                 nasality: 0.1,
+                ..base
             },
             Preset::Giant => VoiceSettings {
                 pitch: 62.0,
@@ -212,6 +224,7 @@ impl Preset {
                 vibrato_rate: 7.5,
                 jitter: 1.5,
                 nasality: 0.15,
+                ..base
             },
             Preset::Robot => VoiceSettings {
                 pitch: 95.0,
@@ -234,6 +247,7 @@ impl Preset {
                 vibrato_rate: 0.0,
                 jitter: 0.0,
                 nasality: 0.06,
+                ..base
             },
             Preset::Whisper => VoiceSettings {
                 pitch: 140.0,

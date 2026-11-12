@@ -128,6 +128,9 @@ pub(crate) struct Tract {
     pub(crate) movement_speed: f32,
     pub(crate) dynamics: Dynamics,
     velocity: [f32; N],
+    /// A narrowing along the tongue that belongs to the vowel shape itself
+    /// (physical engine), apart from the consonant slots.
+    narrowing: Option<Constriction>,
     slots: [Option<Slot>; MAX_CONSTRICTIONS],
     transients: [Transient; MAX_TRANSIENTS],
     transient_decay: f32,
@@ -167,6 +170,7 @@ impl Tract {
             movement_speed: MOVEMENT_SPEED,
             dynamics: Dynamics::Linear,
             velocity: [0.0; N],
+            narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             transients: [Transient::default(); MAX_TRANSIENTS],
             // Original: strength · 2^(−200·t) over 0.2 s.
@@ -273,6 +277,11 @@ impl Tract {
             .map(|s| s.c)
     }
 
+    /// Set or clear the vowel shape's own narrowing.
+    pub(crate) fn set_narrowing(&mut self, c: Option<Constriction>) {
+        self.narrowing = c.map(sanitize);
+    }
+
     /// Whether any constriction is being held.
     pub(crate) fn any_constriction(&self) -> bool {
         self.slots.iter().flatten().any(|s| s.alive)
@@ -323,43 +332,15 @@ impl Tract {
         for i in 0..N {
             self.target[i] = self.rest_diameter(i);
         }
+        let floor = match self.dynamics {
+            Dynamics::Linear => 0.0,
+            Dynamics::Damped => -CLOSURE_OVERSHOOT,
+        };
         for s in self.slots.iter().flatten().filter(|s| s.alive) {
-            let index = s.c.index;
-            let floor = match self.dynamics {
-                Dynamics::Linear => 0.0,
-                Dynamics::Damped => -CLOSURE_OVERSHOOT,
-            };
-            let d = (s.c.diameter - 0.3).max(floor);
-            if !(2.0..N as f32).contains(&index) || d >= 3.0 {
-                continue;
-            }
-            let width = if index < 25.0 {
-                10.0
-            } else if index >= TIP_START as f32 {
-                5.0
-            } else {
-                10.0 - 5.0 * (index - 25.0) / (TIP_START as f32 - 25.0)
-            };
-            let centre = (index + 0.5) as i32;
-            let reach = width as i32 + 2;
-            for k in -reach..=reach {
-                let j = centre + k;
-                if !(0..N as i32).contains(&j) {
-                    continue;
-                }
-                let j = j as usize;
-                let rel = (j as f32 - index).abs() - 0.5;
-                let shrink = if rel <= 0.0 {
-                    0.0
-                } else if rel > width {
-                    1.0
-                } else {
-                    0.5 * (1.0 - cos(PI * rel / width))
-                };
-                if d < self.target[j] {
-                    self.target[j] = d + (self.target[j] - d) * shrink;
-                }
-            }
+            carve(&mut self.target, s.c, floor);
+        }
+        if let Some(c) = self.narrowing {
+            carve(&mut self.target, c, floor);
         }
     }
 
@@ -620,6 +601,49 @@ impl Tract {
         if i + 2 < N {
             self.right[i + 2] += n1 * 0.5;
             self.left[i + 2] += n1 * 0.5;
+        }
+    }
+}
+
+/// Carve a constriction into a target shape with a raised-cosine shoulder.
+/// `floor` is the lowest target diameter (negative: aim past contact).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
+    let index = c.index;
+    let d = (c.diameter - 0.3).max(floor);
+    if !(2.0..N as f32).contains(&index) || d >= 3.0 {
+        return;
+    }
+    let width = if index < 25.0 {
+        10.0
+    } else if index >= TIP_START as f32 {
+        5.0
+    } else {
+        10.0 - 5.0 * (index - 25.0) / (TIP_START as f32 - 25.0)
+    };
+    let centre = (index + 0.5) as i32;
+    let reach = width as i32 + 2;
+    for k in -reach..=reach {
+        let j = centre + k;
+        if !(0..N as i32).contains(&j) {
+            continue;
+        }
+        let j = j as usize;
+        let rel = (j as f32 - index).abs() - 0.5;
+        let shrink = if rel <= 0.0 {
+            0.0
+        } else if rel > width {
+            1.0
+        } else {
+            0.5 * (1.0 - cos(PI * rel / width))
+        };
+        if d < target[j] {
+            target[j] = d + (target[j] - d) * shrink;
         }
     }
 }

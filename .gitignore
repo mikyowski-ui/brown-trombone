@@ -9,3 +9,6 @@ voices/
 *.midi
 *.kar
 *.wav
+
+# A/B renders (examples/ab.rs)
+report/
