@@ -361,7 +361,12 @@ impl Speaker {
                     self.readied = false;
                     self.pause_time = 0.0;
                 }
-                self.pause_pending = pause && !self.readied;
+                // The pause that ends the utterance readies nothing: the
+                // breath dies away in it as its gesture says.
+                let last = self.utterance.segments[self.index..]
+                    .iter()
+                    .all(|s| s.phoneme == Phoneme::Sil);
+                self.pause_pending = pause && !self.readied && !last;
                 self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
                 if !self.ahead && !pause {
                     voice.articulate(&entry_shape(&seg));
@@ -1538,12 +1543,12 @@ fn expand(
 /// A phrase that opens on a vowel or a sonorant starts from
 /// [`Tuning::onset_pressure`] of the pressure, about what the folds need
 /// to start, and the voice grows from there. Before a phrase that opens on
-/// an obstruent the lungs start pushing in the pause, its last part split
-/// off for it: with all their pressure behind a closure or a voiced sound,
-/// for [`Tuning::lead`], so the voice starts as from a closure in the middle
-/// of speech and the release bursts; from nothing behind the gap of a
-/// voiceless fricative, for up to the whole build-up, so its hiss swells in
-/// out of the silence. `phrases` is kept up to date with the split.
+/// an obstruent or /h/ the lungs start pushing in the pause, its last part
+/// split off for it, with all their pressure, for [`Tuning::lead`]: the
+/// voice starts as from a closure in the middle of speech, the release
+/// bursts and the first hiss is there from the start (built up from
+/// nothing, an opening /f/, /s/ or /h/ was mostly lost). `phrases` is kept
+/// up to date with the split.
 fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timing: &Tuning) {
     for d in drafts.iter_mut() {
         if d.phoneme == Phoneme::Sil {
@@ -1556,13 +1561,12 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
             continue;
         };
         let pause = a.checked_sub(1).filter(|&k| drafts[k].phoneme == Phoneme::Sil);
-        let hissing = first.phoneme.manner() == Manner::Fricative && !first.voiced;
         // Seconds the lungs push before the phrase, the share of their
         // pressure they start from, and the seconds over which they build
         // up to all of it.
+        let breathy = is_obstruent(first.phoneme) || first.phoneme.manner() == Manner::Aspirate;
         let (ready, floor, swell_time) = match pause {
-            Some(k) if hissing => (drafts[k].duration.min(timing.phrase_onset), 0.0, timing.phrase_onset),
-            Some(k) if is_obstruent(first.phoneme) => (drafts[k].duration.min(timing.lead), 1.0, 0.0),
+            Some(k) if breathy => (drafts[k].duration.min(timing.lead), 1.0, 0.0),
             _ => (0.0, timing.onset_pressure, timing.phrase_onset),
         };
         let phrase = &drafts[a..b];
@@ -1594,6 +1598,13 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
             let start = held(t);
             t += d.duration;
             d.gesture.pressure_drop = (start, held(t));
+        }
+        // After the last phrase the breath dies away over the closing pause,
+        // so its last sound is not cut off.
+        if b + 1 == drafts.len()
+            && let Some(end) = drafts.get_mut(b).filter(|d| d.phoneme == Phoneme::Sil)
+        {
+            end.gesture.pressure_drop = (held(total), 1.0);
         }
         let Some(k) = pause.filter(|_| ready > 0.0) else {
             continue;

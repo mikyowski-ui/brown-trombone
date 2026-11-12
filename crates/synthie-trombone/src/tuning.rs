@@ -294,7 +294,7 @@ tuning! {
     /// sonorant starts from, rising to all of it over `phrase_onset`: about
     /// what the folds need to start, so the voice grows in from its first
     /// cycles without the first sound being lost.
-    onset_pressure = 0.4, 0.0..=1.0, A;
+    onset_pressure = 0.6, 0.0..=1.0, A;
 
     // ----- A: the hiss of fricatives (physical engine) -----------------
 
@@ -315,14 +315,17 @@ tuning! {
 
     // ----- B: the hiss of fricatives (physical engine) -----------------
 
-    /// Share of /s ʃ/ at each end spent in that wider gap.
-    frication_ramp = 0.25, 0.0..=0.4, B;
+    /// Share of /s ʃ/ at each end spent in that wider gap. Off by default:
+    /// at 0.25 the hiss rises over some 25 ms as a speaker's does, but the
+    /// recognizer heard 2 to 6 points more phoneme errors in sentences and
+    /// carrier phrases.
+    frication_ramp = 0.0, 0.0..=0.4, B;
 
     // ----- B: intonation (physical engine) ------------------------------
 
     /// Rise of the pitch on a stressed vowel, semitones at expressiveness
     /// 1 (a speaker's accents are 2 to 5).
-    accent_size = 8.0, 0.0..=16.0, B;
+    accent_size = 6.0, 0.0..=16.0, B;
     /// Seconds over which an accent sinks back after its vowel.
     accent_decay = 0.2, 0.05..=0.5, B;
     /// Fall of the pitch over a phrase, semitones at expressiveness 1.
