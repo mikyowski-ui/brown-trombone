@@ -1446,22 +1446,22 @@ fn stop_releases_are_bursts_not_clicks() {
     // articulator squeezed out of a cell that had all but shut (thousands
     // of cmH2O in its last ticks, cut off at the seal), and the folds being
     // handed to the pulse source and back while apart for a pause. Before
-    // the fix the largest step was up to 3 times the loudest vowel sample
-    // in the default voice, over 6 in the child's.
+    // the fix the largest step in these sentences was 11 times the loudest
+    // vowel sample in the default voice, 8 to 9 in the elder's and the
+    // giant's, 85 in the whisper's; up to 0.9 of it at a release.
     //
     // Around every release (5 ms before to 10 ms after) no step is above a
     // quarter of the loudest vowel sample (the whisper's vowels are faint
     // breath, so there the release may step up to that sample). Anywhere
-    // in a sentence no step is above 3 vowel peaks: what is left are
-    // closures of the tongue back made at full speed, and in the critter's
-    // small, stiff folds collisions that shut the glottis within two
-    // samples (bounds of 10 and, for the whisper, 30 hold those where they
-    // are). No kind of stop bursts louder on average than 6 dB below the
-    // vowel that follows, and no single burst more than 4 dB above it.
+    // in a sentence no step is above 3 vowel peaks (12 in the whisper):
+    // what is left are closures of the tongue back made at full speed and
+    // the sharpest glottal closures. No kind of stop bursts louder on
+    // average than 6 dB below the vowel that follows, and no single burst
+    // is louder than that vowel.
     const AT_RELEASE: f32 = 0.25;
     const STEP: f32 = 3.0;
     const MEAN_BURST: f32 = -6.0;
-    const MAX_BURST: f32 = 4.0;
+    const MAX_BURST: f32 = 0.0;
     let texts = [
         "As for etchings they are of two kinds British and foreign.",
         "The judge checked the big black bag at the gate.",
@@ -1470,8 +1470,7 @@ fn stop_releases_are_bursts_not_clicks() {
     for preset in Preset::ALL {
         let settings = tuned(preset.settings());
         let (at_release, step) = match preset {
-            Preset::Whisper => (1.0, 30.0),
-            Preset::Critter => (AT_RELEASE, 10.0),
+            Preset::Whisper => (1.0, 12.0),
             _ => (AT_RELEASE, STEP),
         };
         let (mut worst, mut worst_release) = (0.0f32, 0.0f32);
