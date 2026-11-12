@@ -2,7 +2,8 @@
     dead_code,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
 )]
 //! Formants of a vowel shape on the physical engine, measured as
 //! `tune_physical` does: the peaks of the tract's transfer function.
@@ -194,8 +195,8 @@ fn spectrum_wide(x: &[f32], rate: f32, out: &mut Vec<f32>) {
         let mut rot_re = [0.0f64; LANES];
         let mut rot_im = [0.0f64; LANES];
         for j in 0..LANES {
-            let w = 2.0 * std::f64::consts::PI * f64::from((first + j) as f32 * STEP)
-                / f64::from(rate);
+            let w =
+                2.0 * std::f64::consts::PI * f64::from((first + j) as f32 * STEP) / f64::from(rate);
             rot_re[j] = w.cos();
             rot_im[j] = -w.sin();
         }
