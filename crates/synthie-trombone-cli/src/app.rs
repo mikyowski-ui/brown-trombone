@@ -2,7 +2,7 @@
 
 use crate::audio::{Cmd, Link, Snapshot};
 use crossbeam_channel::Sender;
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use synthie_trombone::speech::{Prosody, Utterance};
@@ -23,6 +23,80 @@ const PIANO: &str = "awsedftgyhujkolp;";
 pub const Y_BOUNDS: [f64; 2] = [-2.6, 5.2];
 /// Canvas x range of the tract view.
 pub const X_BOUNDS: [f64; 2] = [-1.0, 45.0];
+/// Vertical centre of the nasal tract in canvas units.
+pub const NOSE_Y: f64 = 3.6;
+/// Half-height of the band the mouth and throat can occupy. Mouse drags
+/// outside it never become constrictions.
+pub const LUMEN: f32 = 1.9;
+/// Lower edge of the nasal cavity; between it and `LUMEN` lies the velum.
+const NOSE_FLOOR: f32 = 2.65;
+/// Width of a meter in the glottis panel, and the column it starts at.
+pub const BAR_WIDTH: u16 = 22;
+const BAR_START: u16 = 9;
+/// Range of the `loud` control, cmH2O of lung pressure.
+pub const LOUD_RANGE: (f32, f32) = (2.0, 20.0);
+
+/// Vowels marked on the tract view; a click sets them.
+pub const LANDMARKS: [(&str, Phoneme); 5] = [
+    ("i", Phoneme::Iy),
+    ("e", Phoneme::Eh),
+    ("a", Phoneme::Aa),
+    ("o", Phoneme::Ow),
+    ("u", Phoneme::Uw),
+];
+
+/// Where the tongue handle is drawn for a tongue `(index, diameter)`.
+#[must_use]
+pub fn tongue_handle(tongue: (f32, f32)) -> (f32, f32) {
+    let span = TONGUE_DIAMETER.end() - TONGUE_DIAMETER.start();
+    let depth = (tongue.1 - TONGUE_DIAMETER.start()) / span;
+    (tongue.0, -0.6 - 1.5 * depth)
+}
+
+/// Something in the glottis panel or header that the mouse can work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    Tense,
+    Tongue,
+    Velum,
+    Vibrato,
+    Reverb,
+    Loud,
+    OctaveDown,
+    OctaveUp,
+    Mode,
+    Engine,
+    Wobble,
+    Drone,
+}
+
+impl Control {
+    /// A meter to drag, as opposed to a button to click.
+    fn is_bar(self) -> bool {
+        matches!(
+            self,
+            Control::Tense
+                | Control::Tongue
+                | Control::Velum
+                | Control::Vibrato
+                | Control::Reverb
+                | Control::Loud
+        )
+    }
+}
+
+/// What a mouse press has taken hold of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Grab {
+    /// A finger on the tract wall.
+    Constriction,
+    /// The tongue handle (or Shift-drag).
+    Tongue,
+    /// Right-drag: the tongue, as the original maps it.
+    TongueOld,
+    Velum,
+    Control(Control),
+}
 
 /// Number keys → vowels.
 pub const VOWEL_KEYS: [(char, Phoneme); 10] = [
@@ -78,7 +152,11 @@ pub struct App {
 
     /// Inner area of the tract canvas, for mouse mapping.
     pub tract_area: Rect,
-    mouse: Option<MouseButton>,
+    /// Where each mouse-operated control was last drawn.
+    pub controls: Vec<(Rect, Control)>,
+    /// Lung pressure of the physical engine, cmH2O.
+    pub loud: f32,
+    grab: Option<Grab>,
     pop_until: Option<Instant>,
     pub status: String,
 }
@@ -120,7 +198,9 @@ impl App {
             spoken: Vec::new(),
             last_vowel: None,
             tract_area: Rect::default(),
-            mouse: None,
+            controls: Vec::new(),
+            loud: 8.0,
+            grab: None,
             pop_until: None,
             status: String::new(),
         };
@@ -413,9 +493,9 @@ impl App {
     }
 
     fn vowel(&mut self, v: Phoneme) {
-        // The sound model picks the shape; remember the classic tongue
-        // position so the arrow keys have somewhere to start from.
-        if let Some((i, d)) = v.articulation().tongue {
+        // The sound model picks the shape; remember where it puts the
+        // tongue so the handle and the arrow keys start from there.
+        if let Some((i, d)) = v.tongue(self.engine) {
             self.tongue = (
                 i.clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
                 d.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
@@ -457,48 +537,225 @@ impl App {
         Some((x as f32, y as f32))
     }
 
-    /// Left drag: press the tract closed like a finger on the original.
-    /// Right drag: move the tongue body.
+    /// Hit areas of the glottis panel, given its inner area. Rows follow
+    /// `ui::draw_glottis`.
+    #[must_use]
+    pub fn glottis_controls(inner: Rect) -> Vec<(Rect, Control)> {
+        let bar = |row: u16, c: Control| {
+            (
+                Rect::new(inner.x + BAR_START, inner.y + row, BAR_WIDTH, 1),
+                c,
+            )
+        };
+        let button = |row: u16, from: u16, width: u16, c: Control| {
+            (Rect::new(inner.x + from, inner.y + row, width, 1), c)
+        };
+        vec![
+            button(0, 25, 3, Control::OctaveDown),
+            button(0, 35, 3, Control::OctaveUp),
+            bar(2, Control::Tense),
+            bar(3, Control::Tongue),
+            bar(4, Control::Velum),
+            bar(5, Control::Vibrato),
+            bar(6, Control::Reverb),
+            bar(7, Control::Loud),
+            button(8, 0, 12, Control::Wobble),
+            button(8, 12, 11, Control::Drone),
+            button(8, 23, 21, Control::Engine),
+        ]
+    }
+
+    /// Where a vowel landmark sits on the tract view for the engine in use.
+    #[must_use]
+    pub fn landmark(&self, vowel: Phoneme) -> Option<(f32, f32)> {
+        vowel.tongue(self.engine).map(tongue_handle)
+    }
+
+    /// Whether tract coordinates fall in the nasal cavity or the velum gap
+    /// below it.
+    #[allow(clippy::cast_precision_loss)]
+    fn in_nose(x: f32, y: f32) -> bool {
+        y > LUMEN && x >= synthie_trombone::NOSE_START as f32 - 1.0
+    }
+
+    /// What a press at this cell takes hold of.
+    fn grab_at(&mut self, button: MouseButton, shift: bool, col: u16, row: u16) -> Option<Grab> {
+        if button == MouseButton::Left
+            && let Some(&(_, c)) = self
+                .controls
+                .iter()
+                .find(|(r, _)| r.contains((col, row).into()))
+        {
+            return Some(Grab::Control(c));
+        }
+        let (x, y) = self.to_tract(col, row)?;
+        if button == MouseButton::Right {
+            return (y.abs() <= LUMEN + 0.4).then_some(Grab::TongueOld);
+        }
+        if button != MouseButton::Left {
+            return None;
+        }
+        if Self::in_nose(x, y) {
+            return Some(Grab::Velum);
+        }
+        // The handle is drawn from what the voice reports.
+        let (hx, hy) = tongue_handle(self.snap.tongue);
+        if shift || ((x - hx).abs() <= 1.6 && (y - hy).abs() <= 0.45) {
+            return Some(Grab::Tongue);
+        }
+        for (_, vowel) in LANDMARKS {
+            if let Some((lx, ly)) = self.landmark(vowel)
+                && (x - lx).abs() <= 1.0
+                && (y - ly).abs() <= 0.35
+            {
+                // A click on a landmark is that vowel; nothing to drag.
+                self.vowel(vowel);
+                return None;
+            }
+        }
+        (y.abs() <= LUMEN).then_some(Grab::Constriction)
+    }
+
+    /// Left press and drag: a finger on the tract wall, the tongue handle,
+    /// the velum, or a control in the panel. Shift-drag and right-drag move
+    /// the tongue.
     pub fn mouse(&mut self, ev: MouseEvent) {
+        let (col, row) = (ev.column, ev.row);
         match ev.kind {
             MouseEventKind::Down(b) => {
-                if self.to_tract(ev.column, ev.row).is_some() {
-                    self.mouse = Some(b);
-                    self.drag(b, ev.column, ev.row);
+                let shift = ev.modifiers.contains(KeyModifiers::SHIFT);
+                self.grab = self.grab_at(b, shift, col, row);
+                if let Some(g) = self.grab {
+                    self.pull(g, col, row, true);
                 }
             }
-            MouseEventKind::Drag(b) if self.mouse == Some(b) => self.drag(b, ev.column, ev.row),
-            MouseEventKind::Up(b) if self.mouse == Some(b) => {
-                self.mouse = None;
-                if b == MouseButton::Left {
+            MouseEventKind::Drag(_) => {
+                if let Some(g) = self.grab {
+                    self.pull(g, col, row, false);
+                }
+            }
+            MouseEventKind::Up(_) => {
+                if self.grab == Some(Grab::Constriction) {
                     self.send(Cmd::Constriction(SLOT_MOUSE, None));
                 }
+                self.grab = None;
             }
             _ => {}
         }
     }
 
+    /// Follow the mouse with whatever it holds. `first` is the press itself.
     #[allow(clippy::cast_precision_loss)]
-    fn drag(&mut self, b: MouseButton, col: u16, row: u16) {
+    fn pull(&mut self, grab: Grab, col: u16, row: u16, first: bool) {
+        if let Grab::Control(c) = grab {
+            self.work(c, col, first);
+            return;
+        }
+        // Outside the canvas the drag holds its last position.
         let Some((x, y)) = self.to_tract(col, row) else {
             return;
         };
         let index = x.clamp(2.0, N as f32 - 0.5);
-        match b {
-            MouseButton::Left => {
-                // Distance from the midline is the opening left.
-                let diameter = (y.abs() * 2.0 - 0.1).max(0.0);
+        let span = TONGUE_DIAMETER.end() - TONGUE_DIAMETER.start();
+        match grab {
+            Grab::Constriction => {
+                // Distance from the midline is the opening left; the finger
+                // cannot leave the tract.
+                let diameter = (y.abs().min(LUMEN) * 2.0 - 0.1).max(0.0);
                 self.send(Cmd::Constriction(
                     SLOT_MOUSE,
                     Some(Constriction::new(index, diameter)),
                 ));
             }
-            MouseButton::Right => {
-                let span = TONGUE_DIAMETER.end() - TONGUE_DIAMETER.start();
+            Grab::Tongue => {
+                // The handle hangs below the midline: put it under the mouse.
+                let depth = ((y.abs() - 0.6) / 1.5).clamp(0.0, 1.0);
+                self.set_tongue(index, TONGUE_DIAMETER.start() + depth * span);
+            }
+            Grab::TongueOld => {
                 let d = TONGUE_DIAMETER.start() + (y.abs() / 1.75) * span;
                 self.set_tongue(index, d);
             }
-            MouseButton::Middle => {}
+            Grab::Velum => {
+                let open = if y >= NOSE_FLOOR {
+                    // In the nose itself: a press opens it, or shuts it if
+                    // it was open; dragging around inside changes nothing.
+                    if !first {
+                        return;
+                    }
+                    if self.nasal { 0.0 } else { 1.0 }
+                } else {
+                    // In the gap: the height is how far the velum hangs open.
+                    ((y - LUMEN) / (NOSE_FLOOR - LUMEN)).clamp(0.0, 1.0)
+                };
+                self.nasal = open > 0.5;
+                self.send(Cmd::Velum(open));
+            }
+            Grab::Control(_) => {}
+        }
+    }
+
+    /// Operate a panel control from a press or drag at column `col`.
+    fn work(&mut self, c: Control, col: u16, first: bool) {
+        if !c.is_bar() {
+            if first {
+                self.press(c);
+            }
+            return;
+        }
+        let Some(&(r, _)) = self.controls.iter().find(|(_, k)| *k == c) else {
+            return;
+        };
+        let at = (f32::from(col.saturating_sub(r.x)) + 0.5) / f32::from(r.width.max(1));
+        let v = at.clamp(0.0, 1.0);
+        match c {
+            Control::Tense => self.set_tenseness(v),
+            Control::Tongue => {
+                let (lo, hi) = (*TONGUE_INDEX.start(), *TONGUE_INDEX.end());
+                self.set_tongue(lo + v * (hi - lo), self.tongue.1);
+            }
+            Control::Velum => {
+                self.nasal = v > 0.5;
+                self.send(Cmd::Velum(v));
+            }
+            Control::Vibrato => self.set_vibrato(v * 0.05),
+            Control::Reverb => {
+                self.reverb = v * 0.4;
+                self.send(Cmd::Reverb(self.reverb));
+            }
+            Control::Loud => {
+                self.loud = LOUD_RANGE.0 + v * (LOUD_RANGE.1 - LOUD_RANGE.0);
+                self.send(Cmd::Lung(self.loud));
+            }
+            _ => {}
+        }
+    }
+
+    /// Click a button.
+    fn press(&mut self, c: Control) {
+        match c {
+            Control::OctaveDown => self.octave = (self.octave - 1).max(1),
+            Control::OctaveUp => self.octave = (self.octave + 1).min(6),
+            Control::Mode => match self.mode {
+                Mode::Play => {
+                    self.mode = Mode::Type;
+                    self.status = "type, Enter to speak · ↑↓ history · Esc/Tab back".into();
+                }
+                Mode::Type => {
+                    self.mode = Mode::Play;
+                    self.status.clear();
+                }
+            },
+            Control::Engine => self.toggle_engine(),
+            Control::Wobble => {
+                self.wobble = !self.wobble;
+                self.send(Cmd::Wobble(self.wobble));
+            }
+            Control::Drone => {
+                self.drone = !self.drone;
+                self.send(Cmd::Drone(self.drone));
+            }
+            _ => {}
         }
     }
 }
@@ -591,5 +848,219 @@ mod tests {
         sent(&rx);
         app.key(key(' ', KeyKind::Press));
         assert!(sent(&rx).iter().any(|c| matches!(c, Cmd::NoteOff)));
+    }
+    // ----- mouse -------------------------------------------------------
+
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    /// An app with a tract canvas and a glottis panel laid out.
+    fn laid_out() -> (App, Receiver<Cmd>) {
+        let (mut app, rx) = app(true);
+        app.tract_area = Rect::new(1, 2, 138, 26);
+        app.controls = App::glottis_controls(Rect::new(1, 30, 44, 9));
+        app.controls.push((Rect::new(40, 0, 6, 1), Control::Mode));
+        // Park the tongue handle away from where the tests press.
+        app.snap.tongue = (13.0, 3.5);
+        (app, rx)
+    }
+
+    /// The terminal cell showing tract coordinates `(x, y)`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn cell(app: &App, x: f64, y: f64) -> (u16, u16) {
+        let a = app.tract_area;
+        let fx = (x - X_BOUNDS[0]) / (X_BOUNDS[1] - X_BOUNDS[0]);
+        let fy = (Y_BOUNDS[1] - y) / (Y_BOUNDS[1] - Y_BOUNDS[0]);
+        (
+            a.x + (fx * f64::from(a.width)) as u16,
+            a.y + (fy * f64::from(a.height)) as u16,
+        )
+    }
+
+    fn mouse(app: &mut App, kind: MouseEventKind, at: (u16, u16), modifiers: KeyModifiers) {
+        app.mouse(MouseEvent {
+            kind,
+            column: at.0,
+            row: at.1,
+            modifiers,
+        });
+    }
+
+    const DOWN: MouseEventKind = MouseEventKind::Down(MouseButton::Left);
+    const DRAG: MouseEventKind = MouseEventKind::Drag(MouseButton::Left);
+    const UP: MouseEventKind = MouseEventKind::Up(MouseButton::Left);
+    const PLAIN: KeyModifiers = KeyModifiers::NONE;
+
+    #[test]
+    fn a_finger_in_the_mouth_constricts_and_lets_go() {
+        let (mut app, rx) = laid_out();
+        let at = cell(&app, 30.0, 0.3);
+        mouse(&mut app, DOWN, at, PLAIN);
+        let cmds = sent(&rx);
+        let [Cmd::Constriction(SLOT_MOUSE, Some(c))] = cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        assert!((c.index - 30.0).abs() < 1.0 && c.diameter < 1.0, "{c:?}");
+        mouse(&mut app, UP, at, PLAIN);
+        assert!(matches!(
+            sent(&rx)[..],
+            [Cmd::Constriction(SLOT_MOUSE, None)]
+        ));
+    }
+
+    #[test]
+    fn a_finger_cannot_leave_the_tract() {
+        let (mut app, rx) = laid_out();
+        // Above the throat, where there is no nose: nothing to press on.
+        let nowhere = cell(&app, 8.0, 3.4);
+        mouse(&mut app, DOWN, nowhere, PLAIN);
+        mouse(&mut app, UP, nowhere, PLAIN);
+        assert!(sent(&rx).is_empty());
+        // A drag that wanders off the mouth stays a finger at its edge.
+        let inside = cell(&app, 30.0, 0.5);
+        let outside = cell(&app, 30.0, 4.4);
+        mouse(&mut app, DOWN, inside, PLAIN);
+        mouse(&mut app, DRAG, outside, PLAIN);
+        let cmds = sent(&rx);
+        for c in &cmds {
+            let Cmd::Constriction(SLOT_MOUSE, Some(c)) = c else {
+                panic!("{cmds:?}");
+            };
+            assert!(c.diameter <= 2.0 * LUMEN, "{c:?}");
+        }
+        assert!(!app.nasal);
+    }
+
+    #[test]
+    fn the_nose_and_the_velum_gap_work_the_velum() {
+        let (mut app, rx) = laid_out();
+        let nose = cell(&app, 30.0, 3.6);
+        mouse(&mut app, DOWN, nose, PLAIN);
+        mouse(&mut app, UP, nose, PLAIN);
+        assert!(matches!(sent(&rx)[..], [Cmd::Velum(v)] if v > 0.99));
+        assert!(app.nasal);
+        mouse(&mut app, DOWN, nose, PLAIN);
+        mouse(&mut app, UP, nose, PLAIN);
+        assert!(matches!(sent(&rx)[..], [Cmd::Velum(v)] if v < 0.01));
+        // In the gap under it, the height sets how far it hangs open.
+        let gap = cell(&app, 19.0, 2.3);
+        mouse(&mut app, DOWN, gap, PLAIN);
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Velum(v)] if v > 0.2 && v < 0.9),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn the_tongue_handle_drags_with_the_left_button() {
+        let (mut app, rx) = laid_out();
+        app.snap.tongue = (20.0, 2.5);
+        let (hx, hy) = tongue_handle(app.snap.tongue);
+        let handle = cell(&app, f64::from(hx), f64::from(hy));
+        mouse(&mut app, DOWN, handle, PLAIN);
+        let to = cell(&app, 25.0, -1.5);
+        mouse(&mut app, DRAG, to, PLAIN);
+        mouse(&mut app, UP, to, PLAIN);
+        let cmds = sent(&rx);
+        assert!(
+            cmds.iter().all(|c| matches!(c, Cmd::Tongue(..))),
+            "{cmds:?}"
+        );
+        let Some(Cmd::Tongue(i, d)) = cmds.last() else {
+            panic!("{cmds:?}");
+        };
+        assert!((i - 25.0).abs() < 0.6, "{i}");
+        // Where it was dropped is where the handle is now drawn.
+        let (_, y) = tongue_handle((*i, *d));
+        assert!((y + 1.5).abs() < 0.2, "{y}");
+    }
+
+    #[test]
+    fn shift_drag_moves_the_tongue_from_anywhere() {
+        let (mut app, rx) = laid_out();
+        let at = cell(&app, 24.0, 0.8);
+        mouse(&mut app, DOWN, at, KeyModifiers::SHIFT);
+        mouse(&mut app, UP, at, KeyModifiers::SHIFT);
+        let cmds = sent(&rx);
+        assert!(matches!(cmds[..], [Cmd::Tongue(..)]), "{cmds:?}");
+    }
+
+    #[test]
+    fn clicking_a_vowel_landmark_sets_the_vowel() {
+        let (mut app, rx) = laid_out();
+        let (x, y) = app.landmark(Phoneme::Uw).unwrap();
+        let at = cell(&app, f64::from(x), f64::from(y));
+        mouse(&mut app, DOWN, at, PLAIN);
+        mouse(&mut app, UP, at, PLAIN);
+        let cmds = sent(&rx);
+        assert!(matches!(cmds[..], [Cmd::Vowel(Phoneme::Uw)]), "{cmds:?}");
+        assert_eq!(app.last_vowel, Some(Phoneme::Uw));
+    }
+
+    #[test]
+    fn panel_meters_follow_the_mouse() {
+        let (mut app, rx) = laid_out();
+        let bar = |app: &App, c: Control, share: f32| {
+            let r = app.controls.iter().find(|(_, k)| *k == c).unwrap().0;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let col = r.x + (share * f32::from(r.width)) as u16;
+            (col, r.y)
+        };
+        let at = bar(&app, Control::Tense, 0.5);
+        mouse(&mut app, DOWN, at, PLAIN);
+        let further = bar(&app, Control::Tense, 0.9);
+        mouse(&mut app, DRAG, further, PLAIN);
+        mouse(&mut app, UP, further, PLAIN);
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Tenseness(a), Cmd::Tenseness(b)] if (a - 0.5).abs() < 0.05 && (b - 0.9).abs() < 0.05),
+            "{cmds:?}"
+        );
+        for (c, expect) in [
+            (Control::Velum, "Velum"),
+            (Control::Vibrato, "Vibrato"),
+            (Control::Reverb, "Reverb"),
+            (Control::Loud, "Lung"),
+            (Control::Tongue, "Tongue"),
+        ] {
+            let at = bar(&app, c, 0.5);
+            mouse(&mut app, DOWN, at, PLAIN);
+            mouse(&mut app, UP, at, PLAIN);
+            let cmds = sent(&rx);
+            assert!(
+                cmds.len() == 1 && format!("{:?}", cmds[0]).starts_with(expect),
+                "{c:?}: {cmds:?}"
+            );
+        }
+        assert!((app.loud - 11.0).abs() < 0.6, "{}", app.loud);
+    }
+
+    #[test]
+    fn panel_buttons_click() {
+        let (mut app, rx) = laid_out();
+        let click = |app: &mut App, c: Control| {
+            let r = app.controls.iter().find(|(_, k)| *k == c).unwrap().0;
+            mouse(app, DOWN, (r.x + 1, r.y), PLAIN);
+            mouse(app, UP, (r.x + 1, r.y), PLAIN);
+        };
+        let octave = app.octave;
+        click(&mut app, Control::OctaveDown);
+        assert_eq!(app.octave, octave - 1);
+        click(&mut app, Control::OctaveUp);
+        click(&mut app, Control::OctaveUp);
+        assert_eq!(app.octave, octave + 1);
+        assert!(sent(&rx).is_empty());
+
+        click(&mut app, Control::Engine);
+        assert_eq!(app.engine, Engine::Physical);
+        assert!(matches!(sent(&rx)[..], [Cmd::Model(Engine::Physical)]));
+        click(&mut app, Control::Wobble);
+        assert!(matches!(sent(&rx)[..], [Cmd::Wobble(true)]));
+        click(&mut app, Control::Drone);
+        assert!(matches!(sent(&rx)[..], [Cmd::Drone(true)]));
+        click(&mut app, Control::Mode);
+        assert_eq!(app.mode, Mode::Type);
+        click(&mut app, Control::Mode);
+        assert_eq!(app.mode, Mode::Play);
     }
 }

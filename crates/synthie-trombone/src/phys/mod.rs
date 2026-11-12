@@ -108,6 +108,15 @@ pub(crate) const TEETH_AT: usize = 40;
 /// How far behind the teeth (cells) a jet can form and still strike them.
 const JET_REACH: usize = 9;
 
+/// When a closure opens while the voice is wanted, the air the walls took
+/// up behind it is let go for this long, seconds, with this time constant,
+/// instead of all being pushed back out through the opening. Otherwise the
+/// mouth stays pressurised for some 20 to 40 ms and the folds cannot
+/// restart until it has drained. It is not applied to voiceless releases,
+/// whose burst and aspiration are that very air.
+const BLEED_TIME: f32 = 0.012;
+const BLEED_TAU: f32 = 0.002;
+
 /// Loss multiplier for the nasal passages (large wetted surface).
 const NASAL_LOSS: f32 = 3.0;
 /// Velopharyngeal port fully open, cm² (both sides together).
@@ -225,6 +234,8 @@ pub(crate) struct Phys {
     adot: [f32; N],
     adot_target: [f32; N],
     adot_smooth: f32,
+    /// Seconds left of a release bleed.
+    bleed: f32,
 
     sub_r: [f32; NS],
     sub_l: [f32; NS],
@@ -279,6 +290,7 @@ impl Phys {
             adot: [0.0; N],
             adot_target: [0.0; N],
             adot_smooth: 0.0,
+            bleed: 0.0,
             sub_r: [0.0; NS],
             sub_l: [0.0; NS],
             sub_y: [0.0; NS],
@@ -426,6 +438,7 @@ impl Phys {
         self.wall_y = [0.0; N];
         self.wall_w = [0.0; N];
         self.adot = [0.0; N];
+        self.bleed = 0.0;
         self.sub_r = [0.0; NS];
         self.sub_l = [0.0; NS];
         for b in &mut self.nose {
@@ -441,11 +454,21 @@ impl Phys {
     }
 
     /// Take the articulation model's shape for the coming block. `velum` is
-    /// how far the velar port is open (`0‥1`), `block_dt` the block length.
-    pub(crate) fn begin_block(&mut self, diameter: &[f32; N], velum: f32, block_dt: f32) {
+    /// how far the velar port is open (`0‥1`), `block_dt` the block length,
+    /// `voiced` whether the voice is wanted (see `BLEED_TIME`).
+    pub(crate) fn begin_block(
+        &mut self,
+        diameter: &[f32; N],
+        velum: f32,
+        block_dt: f32,
+        voiced: bool,
+    ) {
         self.a0 = self.a1;
         for (i, &d) in diameter.iter().enumerate() {
             self.a1[i] = self.area_of(d);
+        }
+        if voiced && self.primed && (0..N).any(|i| self.a0[i] < A_MIN && self.a1[i] >= A_MIN) {
+            self.bleed = BLEED_TIME;
         }
         // A velum resting on the back wall is shut, not a pinhole.
         let open = if velum > 0.01 { velum.min(1.0) } else { 0.0 };
@@ -480,7 +503,7 @@ impl Phys {
     /// Jump straight to a shape, with no motion (for measurements).
     pub(crate) fn snap(&mut self, diameter: &[f32; N], velum: f32) {
         self.primed = false;
-        self.begin_block(diameter, velum, 1.0);
+        self.begin_block(diameter, velum, 1.0, false);
         self.adot = [0.0; N];
     }
 
@@ -574,7 +597,14 @@ impl Phys {
     pub(crate) fn tick(&mut self, lambda: f32, drive: Drive) -> f32 {
         let mut y = [0.0f32; N];
         let mut inv = [0.0f32; N];
+        let keep = if self.bleed > 0.0 {
+            self.bleed -= self.dt;
+            1.0 - (self.dt / BLEED_TAU).min(1.0)
+        } else {
+            1.0
+        };
         for i in 0..N {
+            self.wall_y[i] *= keep;
             let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);

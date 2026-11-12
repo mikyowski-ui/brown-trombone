@@ -6,6 +6,7 @@
 //! example); consonants follow the original's tract diagram.
 
 use crate::tract::Constriction;
+use crate::voice::Engine;
 
 /// How a phoneme is produced; drives timing in the speech front end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -217,6 +218,17 @@ impl Phoneme {
             Ow => Some((Ao, Uh)),
             Oy => Some((Ao, Iy)),
             _ => None,
+        }
+    }
+
+    /// Where the tongue body sits for this sound on `engine`, as
+    /// `(index, diameter)`: the two engines shape vowels differently.
+    /// `None` for sounds that leave the tongue where it is.
+    #[must_use]
+    pub fn tongue(self, engine: Engine) -> Option<(f32, f32)> {
+        match engine {
+            Engine::Classic => self.articulation().tongue,
+            Engine::Physical => self.articulation().physical().0.tongue,
         }
     }
 

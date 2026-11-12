@@ -657,8 +657,12 @@ impl Trombone {
             self.glottis.update_block(dt, &self.simplex);
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
-                self.phys
-                    .begin_block(&self.tract.diameter, self.tract.velum_openness(), dt);
+                self.phys.begin_block(
+                    &self.tract.diameter,
+                    self.tract.velum_openness(),
+                    dt,
+                    self.glottis.voiced || self.glottis.always_voice,
+                );
                 self.source
                     .begin_block(&self.glottis, self.tract.any_constriction());
             }

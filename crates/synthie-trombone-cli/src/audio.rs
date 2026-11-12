@@ -30,6 +30,8 @@ pub enum Cmd {
     Drone(bool),
     Reverb(f32),
     Voice(VoiceSettings),
+    /// Lung pressure of the physical engine, cmH2O.
+    Lung(f32),
     /// Switch the sound model.
     Model(SoundModel),
     /// Move to a vowel's shape, as the current sound model tunes it.
@@ -186,6 +188,7 @@ impl Engine {
                 settings.apply(v);
                 self.instrument.tenseness = settings.tenseness;
             }
+            Cmd::Lung(p) => v.set_lung_pressure(p),
             Cmd::Model(model) => v.set_engine(model),
             Cmd::Vowel(p) => {
                 v.articulate_phoneme(p);

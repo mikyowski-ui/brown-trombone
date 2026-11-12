@@ -1,7 +1,10 @@
 //! Rendering: the tract as a Braille side view, glottis meters, scope,
 //! and the speech line.
 
-use crate::app::{App, Mode, VOWEL_KEYS, X_BOUNDS, Y_BOUNDS};
+use crate::app::{
+    App, BAR_WIDTH, Control, LANDMARKS, LOUD_RANGE, Mode, NOSE_Y, VOWEL_KEYS, X_BOUNDS, Y_BOUNDS,
+    engine_name, tongue_handle,
+};
 use crate::audio::SCOPE_LEN;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -10,22 +13,21 @@ use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
-use synthie_trombone::{N, NOSE_LEN, NOSE_START, TONGUE_DIAMETER};
+use synthie_trombone::{N, NOSE_LEN, NOSE_START};
 use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, YELLOW, bold, fg};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
 
-/// Vertical centre of the nasal tract in canvas units.
-const NOSE_Y: f64 = 3.6;
 const NOTE_NAMES: [&str; 12] = [
     "C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B",
 ];
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     paint_background(frame);
+    app.controls.clear();
     let [header, tract, mid, speech, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(12),
-        Constraint::Length(10),
+        Constraint::Length(11),
         Constraint::Length(4),
         Constraint::Length(3),
     ])
@@ -34,20 +36,25 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_header(frame, header, app);
     draw_tract(frame, tract, app);
     let [glottis, scope] =
-        Layout::horizontal([Constraint::Length(46), Constraint::Min(20)]).areas(mid);
+        Layout::horizontal([Constraint::Length(54), Constraint::Min(20)]).areas(mid);
     draw_glottis(frame, glottis, app);
     draw_scope(frame, scope, app);
     draw_speech(frame, speech, app);
     draw_footer(frame, footer, app);
 }
 
-fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_header(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut spans = logo().spans;
     spans.push(Span::styled("  P I N K   T R O M B O N E  ", bold(MAGENTA)));
     let (label, color) = match app.mode {
         Mode::Play => (" PLAY ", CYAN),
         Mode::Type => (" TYPE ", YELLOW),
     };
+    // The mode badge is a button.
+    let before = u16::try_from(Line::from(spans.clone()).width()).unwrap_or(0);
+    let width = u16::try_from(label.len()).unwrap_or(0);
+    app.controls
+        .push((Rect::new(area.x + before, area.y, width, 1), Control::Mode));
     spans.push(Span::styled(
         label,
         Style::default()
@@ -79,11 +86,18 @@ fn lerp_cell(cells: &[f32], x: f64) -> f64 {
 )]
 fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = panel(
-        "vocal tract  ·  left-drag: constrict  ·  right-drag: tongue",
+        "vocal tract  ·  drag: constrict  ·  drag ◆ or shift-drag: tongue  ·  click a vowel or the nose",
         true,
     );
     app.tract_area = block.inner(area);
     let s = app.snap;
+    let marks: Vec<(f64, f64, &str)> = LANDMARKS
+        .iter()
+        .filter_map(|&(name, vowel)| {
+            app.landmark(vowel)
+                .map(|(x, y)| (f64::from(x), f64::from(y), name))
+        })
+        .collect();
 
     let canvas = Canvas::default()
         .block(block)
@@ -160,15 +174,17 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
             ));
             ctx.layer();
 
-            // Markers.
-            let (ti, td) = s.tongue;
-            let depth =
-                (td - TONGUE_DIAMETER.start()) / (TONGUE_DIAMETER.end() - TONGUE_DIAMETER.start());
+            // Where the vowels sit, faintly; then the tongue handle on top.
+            for &(x, y, name) in &marks {
+                ctx.print(x, y, Span::styled(name, fg(DIM)));
+            }
+            let (hx, hy) = tongue_handle(s.tongue);
             ctx.print(
-                f64::from(ti),
-                -0.6 - 1.5 * f64::from(depth),
-                Span::styled("▲tongue", bold(YELLOW)),
+                f64::from(hx),
+                f64::from(hy),
+                Span::styled("◆ tongue", bold(YELLOW)),
             );
+            // Each constriction is marked where it presses on the wall.
             for (k, c) in s.constrictions.iter().enumerate() {
                 if let Some(c) = c {
                     let label = match k {
@@ -176,7 +192,12 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
                         2 => "●",
                         _ => "○",
                     };
-                    ctx.print(f64::from(c.index), 1.9, Span::styled(label, bold(MAGENTA)));
+                    let wall = f64::from((c.diameter - 0.3).max(0.0)) / 2.0;
+                    ctx.print(
+                        f64::from(c.index),
+                        (wall + 0.25).min(1.9),
+                        Span::styled(label, bold(MAGENTA)),
+                    );
                 }
             }
             ctx.print(-0.8, -2.4, Span::styled("glottis", fg(DIM)));
@@ -200,9 +221,13 @@ fn row<'a>(label: &'a str, bar: Vec<Span<'a>>, value: impl std::fmt::Display) ->
     Line::from(spans)
 }
 
-fn draw_glottis(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_glottis(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = panel("glottis  ·  click or drag", false);
+    app.controls
+        .extend(App::glottis_controls(block.inner(area)));
+    let app = &*app;
     let s = &app.snap;
-    let w = 22;
+    let w = usize::from(BAR_WIDTH);
     let on_off = |b: bool| {
         if b {
             "on".to_string()
@@ -216,12 +241,12 @@ fn draw_glottis(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(" note    ", fg(DIM)),
             Span::styled(format!("{:<4}", note_name(app.note)), bold(YELLOW)),
             Span::styled(format!(" {:6.1} Hz", s.frequency), fg(FG)),
-            Span::styled(format!("  oct {}  {vowel}  ", app.octave), fg(DIM)),
+            Span::styled("  ", fg(DIM)),
+            Span::styled("[-]", bold(CYAN)),
+            Span::styled(format!(" oct {} ", app.octave), fg(FG)),
+            Span::styled("[+]", bold(CYAN)),
+            Span::styled(format!(" {vowel} "), fg(DIM)),
             Span::styled(app.preset.name(), bold(MAGENTA)),
-            Span::styled(
-                format!("  {}", crate::app::engine_name(app.engine)),
-                fg(DIM),
-            ),
         ]),
         row(
             "voice",
@@ -253,16 +278,26 @@ fn draw_glottis(frame: &mut Frame, area: Rect, app: &App) {
             meter(app.reverb / 0.4, w),
             format!("{:.2}", app.reverb),
         ),
+        row(
+            "loud",
+            meter((app.loud - LOUD_RANGE.0) / (LOUD_RANGE.1 - LOUD_RANGE.0), w),
+            if app.engine == synthie_trombone::Engine::Physical {
+                format!("{:.0} cmH2O", app.loud)
+            } else {
+                "physical only".to_string()
+            },
+        ),
         Line::from(vec![
             Span::styled(" wobble ", fg(DIM)),
             Span::styled(format!("{:<4}", on_off(app.wobble)), fg(FG)),
             Span::styled(" drone ", fg(DIM)),
             Span::styled(format!("{:<4}", on_off(app.drone)), fg(FG)),
-            Span::styled(" rate ", fg(DIM)),
-            Span::styled(format!("×{:.1}", app.rate), fg(FG)),
+            Span::styled(" engine ", fg(DIM)),
+            Span::styled(format!("{:<8}", engine_name(app.engine)), bold(CYAN)),
+            Span::styled(format!(" ×{:.1}", app.rate), fg(DIM)),
         ]),
     ];
-    frame.render_widget(Paragraph::new(lines).block(panel("glottis", false)), area);
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 #[allow(clippy::cast_precision_loss)]

@@ -45,7 +45,23 @@ const ADDUCTION_TIME: f32 = 0.008;
 /// already together and start within a few milliseconds of the release;
 /// after /p/ they first have to come together.
 const ATTACK_DEPTH: f32 = 0.04;
-const ATTACK_HOLD: f32 = 0.006;
+const ATTACK_HOLD: f32 = 0.003;
+/// Seconds for pressed folds to come back to touching once the attack
+/// lets go (much quicker than bringing them together from apart).
+const ATTACK_RELEASE_TIME: f32 = 0.002;
+/// Slack folds are held closer together: below this tension the rest gap
+/// shrinks in proportion, down to `CLOSEST` of itself. Low notes and fry
+/// are sung that way, and it is what keeps slack folds vibrating under a
+/// close vowel, where they otherwise stall below about 75 Hz.
+const SLACK_TENSION: f32 = 0.8;
+const CLOSEST: f32 = 0.3;
+/// Stalls in a row after which a note is handed to the pulse source.
+const STALLS_ALLOWED: u32 = 3;
+/// Longest the glottis stays open in each pulse of the pulse source,
+/// seconds. Below about 100 Hz this turns the pulse into vocal fry: short
+/// sharp openings with long closures between them, which is what a voice
+/// does below the notes its folds can sustain.
+const FRY_OPEN_TIME: f32 = 0.007;
 /// Pressure across the folds, dyn/cm², that counts as enough to start:
 /// just above what these folds need to keep going.
 const START_PRESSURE: f32 = 3.5 * CM_H2O;
@@ -89,13 +105,15 @@ const TABLE_TENSION_RATIO: f32 = 1.18;
 const TABLE_COLUMNS: usize = 15;
 #[rustfmt::skip]
 const PITCH_TABLE: [[f32; TABLE_COLUMNS]; 3] = [
-    [45.0, 53.4, 64.2, 76.5, 90.6, 106.8, 123.1, 143.4, 174.1, 207.7, 234.7, 294.9, 343.9, 0.0, 0.0],
-    [44.9, 53.4, 61.9, 73.8, 87.5, 103.1, 124.8, 148.8, 174.7, 204.6, 237.8, 285.0, 328.4, 359.2, 381.6],
-    [0.0, 52.3, 62.2, 73.9, 87.2, 103.3, 123.6, 146.1, 171.1, 198.5, 235.6, 273.8, 313.5, 351.5, 407.0],
+    [45.5, 52.7, 62.6, 75.1, 89.1, 101.9, 124.5, 148.5, 172.3, 202.4, 246.1, 272.0, 0.0, 0.0, 0.0],
+    [0.0, 53.6, 62.7, 73.4, 88.0, 106.0, 126.0, 147.4, 171.1, 199.6, 235.4, 270.5, 306.3, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 74.4, 87.9, 103.3, 121.1, 141.7, 168.9, 197.3, 228.8, 267.0, 295.7, 323.1, 0.0],
 ];
 
 /// Tension, relative to the standard folds, that gives native-size pitch
-/// `hz` at rest gap `gap`; and whether the table covers that pitch.
+/// `hz` at rest gap `gap`; and whether the folds can actually sing it. A
+/// note counts as singable only where the folds vibrate at the gaps on
+/// both sides of this one, with a little margin.
 fn tension_from_table(hz: f32, gap: f32) -> (f32, bool) {
     let step = TABLE_GAPS[1] - TABLE_GAPS[0];
     #[allow(clippy::cast_precision_loss)]
@@ -108,22 +126,23 @@ fn tension_from_table(hz: f32, gap: f32) -> (f32, bool) {
     let mut pitch = [0.0f32; TABLE_COLUMNS];
     for (k, p) in pitch.iter_mut().enumerate() {
         let (a, b) = (PITCH_TABLE[row][k], PITCH_TABLE[row + 1][k]);
-        // Where one row has no voice, lean on the other.
-        *p = if a == 0.0 {
-            b
-        } else if b == 0.0 {
+        *p = if weight < 0.02 {
             a
+        } else if a == 0.0 || b == 0.0 {
+            0.0
         } else {
             a + (b - a) * weight
         };
     }
+    let Some(first) = pitch.iter().position(|&p| p > 0.0) else {
+        return (1.0, false);
+    };
+    let last = pitch.iter().rposition(|&p| p > 0.0).unwrap_or(first);
     let log_ratio = ln(TABLE_TENSION_RATIO);
-    let first = pitch.iter().position(|&p| p > 0.0).unwrap_or(0);
-    let last = TABLE_COLUMNS - 1;
     #[allow(clippy::cast_precision_loss)]
     let column = |k: usize, towards: f32| k as f32 + towards;
-    let position = if hz <= pitch[first] {
-        // Below the table: pitch goes nearly in proportion to tension.
+    let position = if hz <= pitch[first] || first == last {
+        // Outside the table pitch goes nearly in proportion to tension.
         column(first, ln(hz / pitch[first]) / log_ratio)
     } else if hz >= pitch[last] {
         column(last, ln(hz / pitch[last]) / log_ratio)
@@ -134,7 +153,7 @@ fn tension_from_table(hz: f32, gap: f32) -> (f32, bool) {
         }
         column(k, ln(hz / pitch[k]) / ln(pitch[k + 1] / pitch[k]))
     };
-    let covered = hz >= 0.9 * pitch[first] && hz <= 1.04 * pitch[last];
+    let covered = first < last && hz >= 1.04 * pitch[first] && hz <= 0.97 * pitch[last];
     (TABLE_TENSION_START * exp(position * log_ratio), covered)
 }
 /// How lung pressure rises with fold tension above the natural pitch.
@@ -194,6 +213,10 @@ pub(crate) struct Source {
     watch_lo: f32,
     watch_hi: f32,
     watch_for: f32,
+    /// Stalls in a row on the current note.
+    stalls: u32,
+    /// The pitch, Hz, at which the folds were given up on, if they were.
+    given_up_at: f32,
     /// Whether the folds can sing the current note.
     reachable: bool,
     tension0: f32,
@@ -245,6 +268,8 @@ impl Source {
             watch_lo: f32::INFINITY,
             watch_hi: 0.0,
             watch_for: 0.0,
+            stalls: 0,
+            given_up_at: 0.0,
             reachable: true,
             tension0: 1.0,
             tension1: 1.0,
@@ -346,6 +371,8 @@ impl Source {
         }
         if !voicing {
             self.pressing = false;
+            self.stalls = 0;
+            self.given_up_at = 0.0;
         }
         self.voicing = voicing;
         let breathing = voicing || constricted || g.intensity > 0.01;
@@ -367,7 +394,9 @@ impl Source {
                 // Letting go: the edges part and the voice turns to breath.
                 WIDEST_GAP + (abducted - WIDEST_GAP) * (1.0 - self.tense1 / WHISPER_TENSENESS)
             } else {
-                (MODAL_GAP * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP)
+                let gap = (MODAL_GAP * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
+                let (tension, _) = tension_from_table(f1 * self.size, gap);
+                gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
             };
         let loose = (slack - 0.3).max(0.0) / 0.7;
         self.chink_target = if voicing && self.gap_override.is_none() {
@@ -379,7 +408,20 @@ impl Source {
         // Stiffer folds need more breath to keep going, as singers know.
         let mut effort = 1.0;
         if self.kind == SourceKind::Folds {
-            let (tension, covered) = self.tension_for(f1);
+            let (tension, mut covered) = self.tension_for(f1);
+            // Folds that keep stalling on a note they should manage are not
+            // waited for: the pulse sings it until the note moves on.
+            if self.stalls >= STALLS_ALLOWED {
+                self.given_up_at = f1;
+                self.stalls = 0;
+            }
+            if self.given_up_at > 0.0 {
+                if (ln(f1 / self.given_up_at)).abs() > 0.058 {
+                    self.given_up_at = 0.0;
+                } else {
+                    covered = false;
+                }
+            }
             if covered != self.reachable {
                 // Handing over between the models: start the other cleanly.
                 self.reachable = covered;
@@ -410,7 +452,12 @@ impl Source {
         } else {
             self.gap_target
         };
-        self.gap += (gap_target - self.gap) * (dt / ADDUCTION_TIME);
+        let time = if !self.pressing && self.gap < 0.0 {
+            ATTACK_RELEASE_TIME
+        } else {
+            ADDUCTION_TIME
+        };
+        self.gap += (gap_target - self.gap) * (dt / time);
         self.chink += (self.chink_target - self.chink) * (dt / ADDUCTION_TIME);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
@@ -433,7 +480,7 @@ impl Source {
 
         // Pressed folds stay shut for most of the cycle, slack ones barely
         // close; fully slack folds do not vibrate at all (a whisper).
-        let open_quotient = 0.85 - 0.45 * tense;
+        let open_quotient = (0.85 - 0.45 * tense).min(FRY_OPEN_TIME * f);
         let x = self.phase / open_quotient;
         let pulse = if x >= 1.0 {
             0.0
@@ -480,7 +527,10 @@ impl Source {
             let period = 1.0 / (self.f0 + (self.f1 - self.f0) * lambda).max(20.0);
             if self.watch_for > (1.5 * period).max(0.012) {
                 if self.watch_hi - self.watch_lo < STALL_SWING * self.size * self.size {
+                    self.stalls += 1;
                     self.press();
+                } else {
+                    self.stalls = 0;
                 }
                 self.restart_watch();
             }

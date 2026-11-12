@@ -473,6 +473,134 @@ fn muscle_driven_folds_sing_and_follow_their_muscles() {
     assert!(thick.0 < low.0 && thick.1 < low.1);
 }
 
+/// Hold every other note of the app's range on one voice and vowel, at
+/// three tenseness settings. Returns the quietest: level in dB re
+/// `reference`, the note and the tenseness.
+fn sweep_notes(preset: Preset, vowel: Phoneme, reference: f32) -> (f32, usize, f32) {
+    let settings = preset.settings().with_engine(Engine::Physical);
+    let mut quietest = (0.0f32, 0, 0.0f32);
+    for tense in [0.4f32, 0.65, 0.85] {
+        for note in (24..=96).step_by(2) {
+            let mut t = Trombone::new(SR);
+            settings.apply(&mut t);
+            t.articulate_phoneme(vowel);
+            t.set_tenseness(tense);
+            t.settle();
+            t.note_on_midi(note as f32);
+            let first = render(&mut t, 0.15);
+            assert!(
+                first.chunks(480).any(|c| rms(c) > 0.01 * reference),
+                "{preset} {vowel} tenseness {tense} note {note}: nothing within 150 ms"
+            );
+            render(&mut t, 0.35);
+            let level = db(rms(&render(&mut t, 0.1)) / reference);
+            if level < quietest.0 {
+                quietest = (level, note, tense);
+            }
+            assert!(
+                level > -40.0,
+                "{preset} {vowel} tenseness {tense} note {note}: {level:.1} dB re the voice"
+            );
+        }
+    }
+    quietest
+}
+
+#[test]
+fn no_held_note_is_ever_silent() {
+    // Every other note the terminal app can play (octaves 1 to 6), on an
+    // open and two close vowels, breathy to pressed, on large and small
+    // voices: sound within 150 ms, and still sounding half a second later.
+    // Slack folds are held closer together, notes below their range are
+    // sung as fry by the pulse source, and a note the folds keep stalling
+    // on is handed to the pulse.
+    let presets = [Preset::Deep, Preset::Giant, Preset::Bright, Preset::Critter];
+    let vowels = [Phoneme::Aa, Phoneme::Iy, Phoneme::Uw];
+    std::thread::scope(|scope| {
+        let mut jobs = Vec::new();
+        for preset in presets {
+            let reference = {
+                let mut t = Trombone::new(SR);
+                preset
+                    .settings()
+                    .with_engine(Engine::Physical)
+                    .apply(&mut t);
+                t.articulate_phoneme(Phoneme::Aa);
+                t.settle();
+                t.note_on();
+                render(&mut t, 0.5);
+                rms(&render(&mut t, 0.2))
+            };
+            for vowel in vowels {
+                jobs.push((
+                    preset,
+                    vowel,
+                    scope.spawn(move || sweep_notes(preset, vowel, reference)),
+                ));
+            }
+        }
+        for (preset, vowel, job) in jobs {
+            let (level, note, tense) = job.join().expect("a held note was silent");
+            println!(
+                "{preset} on {vowel}: quietest held note {level:.1} dB re the voice's own pitch (note {note}, tenseness {tense})"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_voice_recovers_at_once_from_a_pinch() {
+    // Hold a note, pinch the tract fully shut anywhere for 300 ms, let go.
+    // The folds are vibrating again within 10 ms of the tract reopening.
+    // (It used to take 16 to 43 ms: the mouth stayed pressurised by the
+    // air its walls had taken up, and the pressed folds let go slowly.)
+    for index in [
+        3.0f32, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0, 34.0, 37.0, 40.0, 42.5,
+    ] {
+        let mut t = Trombone::new(SR);
+        Preset::Deep
+            .settings()
+            .with_engine(Engine::Physical)
+            .apply(&mut t);
+        t.articulate_phoneme(Phoneme::Aa);
+        t.settle();
+        t.note_on_midi(45.0);
+        render(&mut t, 0.5);
+        t.set_constriction(2, Some(Constriction::new(index, 0.0)));
+        render(&mut t, 0.3);
+        assert!(
+            t.diameters()[1..].iter().any(|&d| d <= 0.0),
+            "cell {index} never shut"
+        );
+        t.set_constriction(2, None);
+        let (mut reopened, mut swinging) = (None, None);
+        let mut slices: Vec<(f32, f32)> = Vec::new();
+        for ms in 0..200 {
+            let (mut lo, mut hi) = (f32::INFINITY, 0.0f32);
+            for _ in 0..48 {
+                t.process();
+                let a = t.gauges().glottal_area;
+                lo = lo.min(a);
+                hi = hi.max(a);
+            }
+            if reopened.is_none() && !t.diameters()[1..].iter().any(|&d| d <= 0.0) {
+                reopened = Some(ms);
+            }
+            slices.push((lo, hi));
+            let recent = &slices[slices.len().saturating_sub(8)..];
+            let lo = recent.iter().map(|s| s.0).fold(f32::INFINITY, f32::min);
+            let hi = recent.iter().map(|s| s.1).fold(0.0f32, f32::max);
+            if swinging.is_none() && reopened.is_some() && hi - lo > 0.08 {
+                swinging = Some(ms);
+                break;
+            }
+        }
+        let delay = swinging.expect("the voice never came back") - reopened.unwrap();
+        println!("pinch at cell {index}: folds vibrating {delay} ms after it reopens");
+        assert!(delay <= 10, "cell {index}: {delay} ms");
+    }
+}
+
 #[test]
 fn every_preset_speaks_on_the_physical_engine() {
     let text = "Hello there, how are you? Pink trombone, 42.";
