@@ -7,6 +7,7 @@
 
 use crate::tract::Constriction;
 use crate::voice::Engine;
+use crate::vowel_size;
 
 /// How a phoneme is produced; drives timing in the speech front end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -223,13 +224,45 @@ impl Phoneme {
 
     /// Where the tongue body sits for this sound on `engine`, as
     /// `(index, diameter)`: the two engines shape vowels differently.
-    /// `None` for sounds that leave the tongue where it is.
+    /// `None` for sounds that leave the tongue where it is. This is the
+    /// position for a voice of the native size; see
+    /// [`tongue_for`](Self::tongue_for) for other sizes.
     #[must_use]
     pub fn tongue(self, engine: Engine) -> Option<(f32, f32)> {
+        self.tongue_for(engine, 1.0)
+    }
+
+    /// [`tongue`](Self::tongue) for a voice whose tract length is
+    /// `tract_length` (as given to
+    /// [`Trombone::set_tract_length`](crate::Trombone::set_tract_length)).
+    /// The physical engine shapes each vowel a little differently for
+    /// each size, so that its formants follow the size exactly; the
+    /// classic engine does not depend on it.
+    #[must_use]
+    pub fn tongue_for(self, engine: Engine, tract_length: f32) -> Option<(f32, f32)> {
         match engine {
             Engine::Classic => self.articulation().tongue,
-            Engine::Physical => self.articulation().physical().0.tongue,
+            Engine::Physical => self.articulation().physical(tract_length).0.tongue,
         }
+    }
+
+    /// The vowel shape the physical engine holds for this sound at
+    /// `tract_length` (as given to
+    /// [`Trombone::set_tract_length`](crate::Trombone::set_tract_length)):
+    /// tongue body, lip rounding and narrowing along the tongue. Its F1
+    /// and F2 are those of the native-length shape divided by the length.
+    /// Diphthongs give the shape they start from; `None` for sounds that
+    /// are not vowels or glides.
+    #[must_use]
+    pub fn physical_shape(self, tract_length: f32) -> Option<crate::inverse::Shape> {
+        let (a, narrowing) = self.articulation().physical(tract_length);
+        let ((tongue_index, tongue_diameter), narrowing) = (a.tongue?, narrowing?);
+        Some(crate::inverse::Shape {
+            tongue_index,
+            tongue_diameter,
+            lips: a.lips.map(|c| c.diameter),
+            narrowing: Some((narrowing.index, narrowing.diameter)),
+        })
     }
 
     /// Whether the vocal folds vibrate.
@@ -348,12 +381,19 @@ impl Articulation {
     /// are replaced by the ones fitted to the physical tract, and a
     /// consonant that borrowed a vowel's tongue position gets that vowel's
     /// physical tongue position.
-    pub(crate) fn physical(self) -> (Self, Option<Constriction>) {
+    ///
+    /// The shapes are those for a voice of `tract_length` (see
+    /// [`vowel_size`](crate::vowel_size)): at `1.0` exactly the fitted
+    /// ones, at other lengths changed so that the formants scale as
+    /// `1 / length`.
+    pub(crate) fn physical(self, tract_length: f32) -> (Self, Option<Constriction>) {
         for &(p, tongue, lips, narrow) in PHYSICAL_VOWELS {
             let classic = p.articulation();
             if self.tongue != classic.tongue {
                 continue;
             }
+            let (tongue, lips, narrow) =
+                vowel_size::at_length(p, (tongue, lips, narrow), tract_length);
             let mut a = self;
             a.tongue = Some(tongue);
             if self.constriction == classic.constriction && self.lips == classic.lips {
@@ -407,6 +447,24 @@ mod tests {
                 }
                 _ => assert!(p.glide().is_none()),
             }
+        }
+    }
+
+    #[test]
+    fn physical_vowels_follow_the_tract_length() {
+        for &(p, tongue, lips, narrow) in PHYSICAL_VOWELS {
+            let native = p.physical_shape(1.0).unwrap();
+            // Exactly the fitted shape at the native length.
+            assert_eq!(native.tongue_index.to_bits(), tongue.0.to_bits(), "{p}");
+            assert_eq!(native.tongue_diameter.to_bits(), tongue.1.to_bits(), "{p}");
+            assert_eq!(native.lips.map(f32::to_bits), lips.map(f32::to_bits), "{p}");
+            let n = native.narrowing.unwrap();
+            assert_eq!(
+                (n.0.to_bits(), n.1.to_bits()),
+                (narrow.0.to_bits(), narrow.1.to_bits())
+            );
+            // Another shape for a child.
+            assert_ne!(p.physical_shape(0.6), Some(native), "{p}");
         }
     }
 
