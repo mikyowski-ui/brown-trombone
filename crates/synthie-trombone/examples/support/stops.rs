@@ -336,15 +336,22 @@ pub struct FricativeMeasure {
     pub hiss: f32,
 }
 
-/// Measure the fricative `p` in `text`: its last segment (for an
-/// affricate, the frication after the closure).
+/// Measure the fricative `p` in `text`: its last occurrence, all of its
+/// segments (the physical /s ʃ/ form and open their gap in segments of
+/// their own); for an affricate, the frication after the closure.
 #[must_use]
 pub fn fricative(settings: &VoiceSettings, text: &str, p: Phoneme) -> FricativeMeasure {
     let r = record(settings, text);
     let Some(k) = r.phonemes.iter().rposition(|&q| q == p) else {
         return FricativeMeasure::default();
     };
-    let (s, e) = span(&r, k);
+    let mut first = k;
+    if p.manner() == Manner::Fricative {
+        while first > 0 && r.phonemes[first - 1] == p {
+            first -= 1;
+        }
+    }
+    let (s, e) = (span(&r, first).0, span(&r, k).1);
     let mid = (s + (e - s) / 5, e - (e - s) / 5);
     let vowel_k = main_vowel(&r, 0);
     let (vs, ve) = span(&r, vowel_k);

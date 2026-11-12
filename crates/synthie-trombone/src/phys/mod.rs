@@ -515,7 +515,8 @@ impl Phys {
         self.turbulence.teeth_eff = old.teeth_eff;
         self.turbulence.glottal_eff = old.glottal_eff;
         self.turbulence.corner = old.corner;
-        self.turbulence.low_corner = old.low_corner;
+        self.turbulence.teeth_floor = old.teeth_floor;
+        self.turbulence.teeth_corner = old.teeth_corner;
         self.turbulence.set_rate(self.dt, self.len);
     }
 

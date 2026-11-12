@@ -9,7 +9,7 @@
   "jet_efficiency": {"lo": 0.015, "hi": 0.2, "default": 0.057, "pass": "a"},
   "teeth_gain": {"lo": 0.07, "hi": 1, "default": 0.28, "pass": "a"},
   "glottal_efficiency": {"lo": 0.01, "hi": 0.15, "default": 0.043, "pass": "a"},
-  "hiss_corner": {"lo": 2500, "hi": 10000, "default": 7000, "pass": "a"},
+  "hiss_corner": {"lo": 2500, "hi": 8000, "default": 4500, "pass": "a"},
   "fricative_gap": {"lo": -0.1, "hi": 0.15, "default": 0, "pass": "a"},
   "approximant_gap": {"lo": -0.2, "hi": 0.3, "default": 0, "pass": "a"},
   "nasal_port": {"lo": 0.3, "hi": 1.6, "default": 0.8, "pass": "a"},

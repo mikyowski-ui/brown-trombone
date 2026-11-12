@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-two numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-three numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -136,10 +136,9 @@ tuning! {
     teeth_gain = 0.28, 0.07..=1.0, A;
     /// Efficiency of the jet between the folds (breath noise).
     glottal_efficiency = 0.043, 0.01..=0.15, A;
-    /// Frequency above which the turbulence of jets in the mouth has less
-    /// and less energy, Hz (a speaker's /s/ has its energy up to 8 kHz and
-    /// beyond; the breath at the glottis keeps a corner of 4.5 kHz).
-    hiss_corner = 7000.0, 2500.0..=10000.0, A;
+    /// Frequency above which turbulence has less and less energy, Hz (that
+    /// of a jet on the teeth: `teeth_corner`).
+    hiss_corner = 4500.0, 2500.0..=8000.0, A;
 
     // ----- A: gaps ------------------------------------------------------
 
@@ -299,12 +298,17 @@ tuning! {
 
     // ----- A: the hiss of fricatives (physical engine) -----------------
 
-    /// Corner below which the jets in the mouth make less and less noise,
-    /// Hz at the native size: their eddies are small and fast, and a
-    /// speaker's /s/ has little energy below 3 kHz.
-    hiss_floor = 1500.0, 400.0..=3000.0, A;
+    /// Corner below which a jet on the teeth (/s ʃ/) makes less and less
+    /// noise, Hz at the native size. Raising it takes the low end out of
+    /// /s/ (a speaker's has little below 3 kHz), but also blurs /i/, whose
+    /// narrow front lets a little of that jet through.
+    hiss_floor = 400.0, 200.0..=3000.0, A;
+    /// Frequency above which the noise of a jet on the teeth has less and
+    /// less energy, Hz at the native size: a speaker's /s/ peaks at 5 to 8
+    /// kHz.
+    teeth_corner = 5500.0, 3000.0..=10000.0, A;
     /// Lip opening of /ʃ ʒ tʃ dʒ/ (diameter units): rounded, but open.
-    postalveolar_lips = 1.8, 0.8..=2.5, A;
+    postalveolar_lips = 1.2, 0.8..=2.5, A;
     /// How much wider the gap of /s ʃ/ is as it forms (twice that as it
     /// opens again), diameter units.
     frication_widening = 0.15, 0.0..=0.3, A;
@@ -318,7 +322,7 @@ tuning! {
 
     /// Rise of the pitch on a stressed vowel, semitones at expressiveness
     /// 1 (a speaker's accents are 2 to 5).
-    accent_size = 10.0, 0.0..=16.0, B;
+    accent_size = 8.0, 0.0..=16.0, B;
     /// Seconds over which an accent sinks back after its vowel.
     accent_decay = 0.2, 0.05..=0.5, B;
     /// Fall of the pitch over a phrase, semitones at expressiveness 1.
@@ -355,10 +359,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_eight_and_thirty_three() {
+    fn two_passes_of_twenty_nine_and_thirty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (28, 33));
+        assert_eq!((a, b), (29, 33));
     }
 
     #[test]

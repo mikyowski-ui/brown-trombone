@@ -10,8 +10,9 @@
 //! middle of its hiss it prints the level in 500 Hz bands up to 8 kHz (dB
 //! under the loudest band), the spectral centroid and flatness over 1 to 8
 //! kHz and the width of the band within 6 dB of the peak; for the hiss
-//! above 1.5 kHz, its rise and fall (15 dB under its peak to 3 dB under)
-//! and how long it stays within 10 dB of its peak. People's /s/ has its
+//! above 2 kHz (3 kHz for /s z/), its rise and fall (15 dB under its peak to 3 dB under)
+//! and how long it stays within 10 dB of its peak, and its level at the
+//! peak against the loudest 10 ms of the vowels. People's /s/ has its
 //! energy from about 4 kHz up and peaks at 5 to 8 kHz, /ʃ/ from about 2 kHz
 //! with a broad peak at 2.5 to 4 kHz; /f θ/ are flat and weak; the hiss
 //! rises and falls over tens of milliseconds.
@@ -43,7 +44,7 @@ fn main() {
     for b in 0..hiss::BANDS {
         print!("{:5.1}", (b as f32 + 0.5) * hiss::BAND_HZ / 1000.0);
     }
-    println!("  centroid flat width6  rise  fall  dur  (kHz, ms)");
+    println!("  centroid flat width6  rise  fall  dur level  (kHz, ms, dB)");
     for p in ["S", "Z", "SH", "ZH", "F", "V", "TH", "DH"] {
         let h = hiss::measure(&settings, p);
         print!("{p:>4}   ");
@@ -51,8 +52,8 @@ fn main() {
             print!("{v:5.0}");
         }
         println!(
-            "  {:6.0} {:5.2} {:5.0} {:5.1} {:5.1} {:5.0}",
-            h.centroid, h.flatness, h.width6, h.rise_ms, h.fall_ms, h.dur_ms
+            "  {:6.0} {:5.2} {:5.0} {:5.1} {:5.1} {:5.0} {:5.1}",
+            h.centroid, h.flatness, h.width6, h.rise_ms, h.fall_ms, h.dur_ms, h.level
         );
     }
 }

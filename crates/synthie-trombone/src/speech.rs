@@ -113,6 +113,13 @@ pub struct Gesture {
     /// [`Trombone::set_breath`]): `0` pushes with all of it, `1` not at
     /// all. A phrase builds up from nothing and dies away at its end.
     pub pressure_drop: (f32, f32),
+    /// For a fricative: seconds at its start and at its end over which its
+    /// gap is still forming and already opening again, wider by
+    /// `gap_widening` (twice that at the end); `(0, 0)` holds the gap
+    /// throughout.
+    pub gap_opening: (f32, f32),
+    /// How much wider the gap is while it forms, diameter units.
+    pub gap_widening: f32,
     /// For the breath after a voiceless stop's release: how long after the
     /// mouth actually opens the voice comes back, seconds (a voice onset
     /// time, less the folds' own few milliseconds). The release is the
@@ -227,6 +234,9 @@ pub struct Speaker {
     readied: bool,
     /// Seconds into the pause being spoken.
     pause_time: f32,
+    /// How far a fricative's gap has got (see [`Gesture::gap_opening`]):
+    /// `0` still forming, `1` made, `2` opening again.
+    gap_stage: u8,
     /// Seconds since the utterance began.
     clock: f32,
     /// The mouth was shut at the last sample (physical engine).
@@ -352,8 +362,9 @@ impl Speaker {
                     self.pause_time = 0.0;
                 }
                 self.pause_pending = pause && !self.readied;
+                self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
                 if !self.ahead && !pause {
-                    voice.articulate(&seg.articulation);
+                    voice.articulate(&entry_shape(&seg));
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -418,7 +429,7 @@ impl Speaker {
             {
                 let segments = &self.utterance.segments[self.index..];
                 if let Some(next) = segments.iter().find(|s| s.phoneme != Phoneme::Sil) {
-                    voice.articulate(&next.articulation);
+                    voice.articulate(&entry_shape(next));
                     voice.settle();
                     // What little still rings in the tract belongs to the
                     // old shape; let it go with it.
@@ -446,9 +457,25 @@ impl Speaker {
                     self.utterance.lead
                 };
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
-                    voice.articulate(&next.articulation);
+                    voice.articulate(&entry_shape(&next));
                     self.ahead = true;
                 }
+            }
+            // A fricative's gap forming and opening again.
+            let (into, out_of) = seg.gesture.gap_opening;
+            let lead = self.utterance.lead;
+            if physical && self.gap_stage == 0 && self.elapsed >= into - lead.min(0.5 * into) {
+                voice.articulate(&seg.articulation);
+                self.gap_stage = 1;
+            }
+            if physical
+                && self.gap_stage == 1
+                && out_of > 0.0
+                && !self.ahead
+                && self.elapsed >= seg.duration - out_of - lead.min(0.5 * out_of)
+            {
+                voice.articulate(&widened(&seg.articulation, 2.0 * seg.gesture.gap_widening));
+                self.gap_stage = 2;
             }
             // Into a voiceless fricative the larynx moves a little ahead
             // too, so the voice stops as the tract narrows rather than
@@ -563,6 +590,26 @@ impl Speaker {
         for s in out {
             *s = self.process(voice);
         }
+    }
+}
+
+/// The shape a segment begins with: a fricative's gap still forming (see
+/// [`Gesture::gap_opening`]), anything else its own.
+fn entry_shape(seg: &Segment) -> Articulation {
+    if seg.gesture.gap_opening.0 > 0.0 {
+        widened(&seg.articulation, seg.gesture.gap_widening)
+    } else {
+        seg.articulation
+    }
+}
+
+/// `a` with its gap wider by `by` (diameter units).
+fn widened(a: &Articulation, by: f32) -> Articulation {
+    Articulation {
+        constriction: a
+            .constriction
+            .map(|c| crate::Constriction::new(c.index, c.diameter + by)),
+        ..*a
     }
 }
 
@@ -1059,17 +1106,6 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
-        for d in &mut drafts {
-            // The physical engine's /ʃ ʒ tʃ dʒ/ are rounded less than the
-            // classic engine's: lips nearly shut over the long front
-            // cavity make it ring as one narrow, low resonance (a whistle
-            // near 1.5 kHz) where a speaker's hiss is broad from 2 kHz up.
-            if matches!(d.phoneme, Phoneme::Sh | Phoneme::Zh | Phoneme::Ch | Phoneme::Jh)
-                && let Some(lips) = &mut d.articulation.lips
-            {
-                lips.diameter = lips.diameter.max(timing.postalveolar_lips);
-            }
-        }
         for &(a, b, brk) in &phrases {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
@@ -1448,30 +1484,40 @@ fn expand(
                 out.push(with(draft(p, shut, closure, true), voiced_stop));
                 dur = (dur - closure).max(0.5 * dur);
             }
-            if matches!(p, Phoneme::S | Phoneme::Sh)
-                && let Some(c) = a.constriction
-            {
+            let g = if matches!(p, Phoneme::S | Phoneme::Sh) {
                 // The gap narrows into the hiss and widens out of it: the
-                // first and last part of /s ʃ/ are made a little wider, so
-                // the hiss swells in and dies away over tens of
-                // milliseconds, as a speaker's does, instead of switching
-                // on and off with the gap. Not /z ʒ/, whose hiss is weak
-                // enough beside their voice (any less and they are heard as
-                // /ð/), nor the faint /f θ v ð/.
-                // Out of the gap the breath is flowing freely already, so
-                // the gap has to open further for the hiss to fade.
+                // first and last part of /s ʃ/ are made with a wider gap
+                // (the Speaker sends the shapes), so the hiss swells in and
+                // dies away over tens of milliseconds, as a speaker's does,
+                // instead of switching on and off with the gap; out of it
+                // the breath is flowing freely already, and the gap has to
+                // open further for the hiss to fade. Next to another
+                // obstruent or a closure the tongue goes straight from one
+                // to the other, and a wider gap there would be a vowel
+                // between them. Not /z ʒ/, whose hiss is weak enough beside
+                // their voice (any less and they are heard as /ð/), nor the
+                // faint /f θ v ð/.
                 let ramp = timing.frication_ramp * dur;
-                let widened = |by: f32| Articulation {
-                    constriction: Some(crate::Constriction::new(c.index, c.diameter + by)),
-                    ..a
+                let closes = |q: Phoneme| is_obstruent(q) || q.manner() == Manner::Nasal;
+                let into = if context.prev.is_some_and(closes) {
+                    0.0
+                } else {
+                    ramp
                 };
-                let w = timing.frication_widening;
-                out.push(with(draft(p, widened(w), ramp, a.voiced), g));
-                out.push(with(draft(p, a, dur - 2.0 * ramp, a.voiced), g));
-                out.push(with(draft(p, widened(2.0 * w), ramp, a.voiced), g));
+                let out_of = if context.next.is_some_and(|(q, _, _)| closes(q)) {
+                    0.0
+                } else {
+                    ramp
+                };
+                Gesture {
+                    gap_opening: (into, out_of),
+                    gap_widening: timing.frication_widening,
+                    ..g
+                }
             } else {
-                out.push(with(draft(p, a, dur, a.voiced), g));
-            }
+                g
+            };
+            out.push(with(draft(p, a, dur, a.voiced), g));
         }
         _ => out.push(draft(p, a, dur, a.voiced)),
     }

@@ -680,7 +680,16 @@ fn voiced_fricatives_hiss_and_voice_at_once() {
             u.voiced_share
         );
         assert!(v.voice_bar > u.voice_bar + 3.0, "{voiced} voice bar");
-        assert!(v.hiss > u.hiss - 15.0, "{voiced} hiss {:.1} dB", v.hiss);
+        // The bound was 15 dB. The voiceless sibilants are louder now, as a
+        // speaker's are (/s/ about level with the vowel next to it, /ʃ/ 3 dB
+        // under, in the judge's recordings): the jet on the teeth has a
+        // corner of 5.5 kHz (`Tuning::teeth_corner`, 4.5 before) and /ʃ tʃ/
+        // open their lips a little (`Tuning::postalveolar_lips`), while
+        // the voiced ones keep their hiss under the voice. Measured: S
+        // -11.8 → +0.3 dB re the vowel, Z -22.3 → -15.8; SH -14.2 → +1.2,
+        // ZH -26.2 → -15.1; CH -13.9 → +2.7, JH -27.2 → -15.8 (the vowel
+        // itself starts softly now, which lifts every figure here).
+        assert!(v.hiss > u.hiss - 19.0, "{voiced} hiss {:.1} dB", v.hiss);
     }
 }
 
