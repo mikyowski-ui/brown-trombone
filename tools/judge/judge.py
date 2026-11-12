@@ -372,6 +372,7 @@ class ItemScore:
     word_edits: int | None = None
     word_n: int | None = None
     ops: list = field(default_factory=list)
+    inserted: int | None = None
 
     def to_json(self) -> dict:
         d = {
@@ -386,6 +387,8 @@ class ItemScore:
         if self.intended is not None:
             d["intended"] = " ".join(self.intended)
             d["per_intended"] = round((self.edits_intended or 0) / max(1, len(self.intended)), 4)
+        if self.inserted is not None:
+            d["inserted"] = self.inserted
         if self.whisper is not None:
             d["ortho"] = self.ortho
             d["whisper"] = self.whisper
@@ -415,8 +418,18 @@ def score_phonemes(judge: PhonemeJudge, rendered: list[render.Rendered], batch_s
         if r.engine_phones is not None:
             s.intended = A.canonical(r.engine_phones)
             s.edits_intended = A.edit_distance(s.intended, heard)
+        s.inserted = inserted_segments(s.intended or ref, heard)
         out.append(s)
     return out
+
+
+def inserted_segments(said: list[str], heard: list[str]) -> int:
+    """Segments heard that were never asked for: the insertions of the
+    minimum-edit alignment of what was heard against what the speaker
+    meant to say (the engine's own phonemes when it reports them, so its
+    text front end is not counted; the reference otherwise).  Movements
+    between sounds that are heard as sounds of their own show up here."""
+    return sum(1 for op, _, _ in A.align(said, heard) if op == "ins")
 
 
 def score_words(wj: WordJudge, rendered: list[render.Rendered], scores: list[ItemScore], batch_size: int = 8) -> None:
@@ -439,6 +452,9 @@ def summarize_set(scores: list[ItemScore]) -> dict:
         "per": sum(s.edits for s in scores) / max(1, n_ph),
         "ll": sum(s.ll * len(s.ref) for s in scores) / max(1, n_ph),
     }
+    ins = [s.inserted for s in scores if s.inserted is not None]
+    if ins:
+        d["inserted_per_item"] = sum(ins) / len(ins)
     eng = [s for s in scores if s.intended is not None]
     if eng:
         d["per_intended"] = sum(s.edits_intended or 0 for s in eng) / max(1, sum(len(s.intended or []) for s in eng))
@@ -561,7 +577,8 @@ def print_summary(res: dict) -> None:
     for s, d in res["sets"].items():
         wa = fmt_pct(d.get("word_acc"))
         pi = f"  per_intended {fmt_pct(d['per_intended'])}%" if "per_intended" in d else ""
-        print(f"  {SET_LABEL.get(s, s):17} PER {fmt_pct(d['per']):>5}%  ll {d['ll']:6.2f}  words {wa:>5}%{pi}")
+        ins = f"  inserted {d['inserted_per_item']:.2f}/item" if "inserted_per_item" in d else ""
+        print(f"  {SET_LABEL.get(s, s):17} PER {fmt_pct(d['per']):>5}%  ll {d['ll']:6.2f}  words {wa:>5}%{pi}{ins}")
     top = ", ".join(f"{r}→{h} {n}" for r, h, n in res["confusions"]["pairs"][:10])
     print(f"  top confusions: {top}")
 
@@ -626,6 +643,15 @@ def write_report(path: Path = REPORT_PATH) -> None:
         "",
     ]
     L += table("per_intended", fmt_pct)
+    L += [
+        "",
+        "## Inserted segments per item (lower is better)",
+        "",
+        "Insertions in the alignment of what was heard against what was meant (the engine's own",
+        "phonemes when it reports them): movements between sounds heard as sounds of their own.",
+        "",
+    ]
+    L += table("inserted_per_item", lambda x: "–" if x is None else f"{x:.2f}")
     L += ["", "## Top confusions", "", "`X→Y n`: reference X heard as Y n times (`-` = deleted / inserted).", ""]
     for name, d in scores.items():
         c = d["confusions"]
