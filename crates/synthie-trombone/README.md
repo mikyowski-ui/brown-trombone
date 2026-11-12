@@ -81,6 +81,15 @@ for s in &mut buf {
 }
 ```
 
+## Two engines
+
+`Engine::Classic` (the default) is Pink Trombone's own model.
+`Engine::Physical` runs the same tract in real units: self-oscillating
+vocal folds under lung pressure, frequency-dependent losses, yielding
+walls, side cavities and airflow-driven noise. Choose it per voice with
+`VoiceSettings::with_engine`, or on a `Trombone` with `set_engine`. The
+repository README has the details and the measurements it is held to.
+
 ## Examples
 
 ```sh
@@ -88,6 +97,9 @@ cargo run -p synthie-trombone --example say --release -- --voice bright "Can you
 cargo run -p synthie-trombone --example voices --release                       # → voices/*.wav
 cargo run -p synthie-trombone --example vowels --release                       # → vowels.wav
 cargo run -p synthie-trombone --example formants --release                     # F1–F3 table
+cargo run -p synthie-trombone --example say --release -- --engine physical "Hello!"  # the physical engine
+cargo run -p synthie-trombone --example ab --release                           # both engines → report/
+cargo run -p synthie-trombone --example probe --release                        # measurements of both
 ```
 
 ## License

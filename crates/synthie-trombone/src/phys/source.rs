@@ -177,6 +177,9 @@ pub(crate) struct Source {
     /// Fixed tension and rest gap, for measuring the folds themselves.
     pub(crate) tension_override: Option<f32>,
     pub(crate) gap_override: Option<f32>,
+    /// Fixed muscle activations (cricothyroid, thyroarytenoid, lateral
+    /// cricoarytenoid) for measuring the body–cover folds.
+    pub(crate) muscle_override: Option<(f32, f32, f32)>,
 }
 
 impl Source {
@@ -215,17 +218,20 @@ impl Source {
             measured: 0.0,
             tension_override: None,
             gap_override: None,
+            muscle_override: None,
         }
     }
 
     pub(crate) fn reset(&mut self) {
         let (size, kind) = (self.size, self.kind);
         let overrides = (self.tension_override, self.gap_override);
+        let muscles = self.muscle_override;
         let lung_base = self.lung_base;
         *self = Self::new();
         self.kind = kind;
         self.lung_base = lung_base;
         (self.tension_override, self.gap_override) = overrides;
+        self.muscle_override = muscles;
         self.set_size(size);
     }
 
@@ -241,8 +247,11 @@ impl Source {
     /// Fold size follows the tract: `len` is the relative tract length.
     pub(crate) fn set_size(&mut self, len: f32) {
         self.size = len;
-        self.folds
-            .set_params(FoldParams::steinecke_herzel().sized(len));
+        let params = match self.muscle_override {
+            Some((ct, ta, lc)) => FoldParams::from_muscles(ct, ta, lc),
+            None => FoldParams::steinecke_herzel(),
+        };
+        self.folds.set_params(params.sized(len));
     }
 
     /// Tension that puts the folds at `hz`, and whether they can sing it.

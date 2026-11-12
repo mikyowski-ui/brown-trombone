@@ -152,6 +152,39 @@ fn survey() {
     }
 }
 
+/// Body-cover folds under muscle control: pitch, flow and level against
+/// cricothyroid activation, for a few thyroarytenoid settings and gaps.
+fn muscles() {
+    println!("Body-cover folds (Titze & Story 2002 rules), lateral cricoarytenoid 0.5, vowel /a/");
+    println!("  ct    ta    gap    pitch   mean flow  swing   level");
+    for ta in [0.1f32, 0.25, 0.5] {
+        for gap in [0.0f32, 0.01] {
+            for k in 0..=8 {
+                let ct = k as f32 / 8.0;
+                let mut t = voice(110.0, 0.65, 1.0);
+                t.override_muscles(Some((ct, ta, 0.5)));
+                t.override_folds(Some(1.0), Some(gap));
+                run(&mut t, 0.6);
+                let (out, flows) = run(&mut t, 0.4);
+                let mean = flows.iter().sum::<f32>() / flows.len() as f32;
+                let peak = flows.iter().fold(0.0f32, |m, &v| m.max(v));
+                let floor = flows.iter().fold(f32::INFINITY, |m, &v| m.min(v));
+                let swing = peak - floor;
+                let f = if swing > 0.15 * peak {
+                    pitch(&flows)
+                } else {
+                    0.0
+                };
+                let rms = (out.iter().map(|v| v * v).sum::<f32>() / out.len() as f32).sqrt();
+                println!(
+                    "  {ct:.3} {ta:.2}  {gap:.3}  {f:>6.1}   {mean:>6.0}    {swing:>5.0}   {:>6.1} dB",
+                    20.0 * rms.max(1e-9).log10()
+                );
+            }
+        }
+    }
+}
+
 /// Print the pitch table embedded in `src/phys/source.rs`.
 fn table() {
     let gaps = [0.0f32, 0.007, 0.014];
@@ -186,6 +219,10 @@ fn table() {
 fn main() {
     if std::env::args().any(|a| a == "--survey") {
         survey();
+        return;
+    }
+    if std::env::args().any(|a| a == "--muscles") {
+        muscles();
         return;
     }
     if std::env::args().any(|a| a == "--table") {

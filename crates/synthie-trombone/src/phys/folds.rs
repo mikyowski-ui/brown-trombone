@@ -23,6 +23,8 @@
 //! pressure. None of that is scripted.
 
 use super::{Gauge, RHO};
+use crate::math::{exp, sqrt};
+use core::f32::consts::PI;
 
 /// Mechanical description of one fold (the two are assumed alike).
 /// Centimetres, grams, seconds.
@@ -74,6 +76,102 @@ impl FoldParams {
             d2: 0.05,
             length: 1.4,
             body_locked: true,
+        }
+    }
+
+    /// Body–cover folds set by three laryngeal muscles, each `0‥1`: the
+    /// cricothyroid (`ct`, stretches and thins the folds: higher), the
+    /// thyroarytenoid (`ta`, the body of the fold itself: shortens and
+    /// thickens them, stiffens the body) and the lateral cricoarytenoid
+    /// (`lc`, brings them together, shortening them slightly).
+    ///
+    /// These are the rules of Titze & Story (2002, JASA 112, "Rules for
+    /// controlling low-dimensional vocal fold models with muscle
+    /// activation"): strain from the muscle balance, length, thickness and
+    /// layer depths from strain, fibre stress in mucosa, ligament and
+    /// muscle from strain, and from those the masses and stiffnesses of
+    /// the cover and body. The tissue constants are the ones in Brad
+    /// Story's LeTalker 1.22, which implements that paper.
+    pub(crate) fn from_muscles(ct: f32, ta: f32, lc: f32) -> Self {
+        /// Shear modulus of cover and body, dyn/cm².
+        const SHEAR: f32 = 5000.0;
+        /// Tissue density, g/cm³.
+        const DENSITY: f32 = 1.04;
+        /// Torque ratio, elongation gain, adductory strain factor.
+        const R: f32 = 3.0;
+        const G: f32 = 0.2;
+        const H: f32 = 0.2;
+        /// Resting length and thickness, cm (male).
+        const LENGTH: f32 = 1.6;
+        const THICKNESS: f32 = 0.3;
+        /// Resting depth of muscle, ligament and mucosa, cm.
+        const MUSCLE: f32 = 0.4;
+        const LIGAMENT: f32 = 0.2;
+        const MUCOSA: f32 = 0.2;
+        /// Largest active stress of the muscle, dyn/cm².
+        const ACTIVE_STRESS: f32 = 1.05e6;
+
+        let strain = G * (R * ct - ta) - H * lc;
+        let length = LENGTH * (1.0 + strain);
+        let thick = THICKNESS / (1.0 + 0.8 * strain);
+        let body_depth = (ta * MUSCLE + 0.5 * LIGAMENT) / (1.0 + 0.2 * strain);
+        let cover_depth = (MUCOSA + 0.5 * LIGAMENT) / (1.0 + 0.2 * strain);
+        // Where the cover pivots: higher with an active muscle.
+        let node = thick * (1.0 + ta) / 3.0;
+
+        // Passive fibre stress: linear from 50 % shortening, exponential
+        // past a knee.
+        let passive = |at_rest: f32, scale: f32, rate: f32, knee: f32| {
+            let linear = 2.0 * at_rest * (strain + 0.5);
+            let over = strain - knee;
+            if over > 0.0 {
+                linear + scale * (exp(rate * over) - 1.0 - rate * over)
+            } else {
+                linear
+            }
+        };
+        let mucosa = passive(5000.0, 300_000.0, 4.4, -0.35);
+        let ligament = passive(4000.0, 13_930.0, 17.0, 0.0);
+        let muscle_passive = passive(10_000.0, 15_000.0, 6.5, -0.05);
+        let stretch = strain - 0.4;
+        let muscle =
+            ta * ACTIVE_STRESS * (1.0 - 1.07 * stretch * stretch).max(0.0) + muscle_passive;
+        let body_stress = (0.5 * ligament * LIGAMENT + muscle * MUSCLE) / body_depth;
+        let cover_stress = (mucosa * MUCOSA + 0.5 * ligament * LIGAMENT) / cover_depth;
+
+        let share = node / thick;
+        let pi2 = PI * PI;
+        let shear_cover = 2.0 * SHEAR * length * thick / cover_depth;
+        let mb = DENSITY * length * thick * body_depth;
+        let kb = 2.0 * SHEAR * length * thick / body_depth
+            + pi2 * body_stress * body_depth * thick / length;
+        let k1 = shear_cover * share + pi2 * cover_stress * (cover_depth / length) * node;
+        let k2 = shear_cover * (1.0 - share)
+            + pi2 * cover_stress * (cover_depth / length) * thick * (1.0 - share);
+        let cover_mass = DENSITY * length * thick * cover_depth;
+        let m1 = cover_mass * share;
+        let m2 = cover_mass * (1.0 - share);
+        let lever = share * (1.0 - share);
+        let kc = (0.5 * SHEAR * (length * cover_depth / thick) / (1.0 / 3.0 - lever) - shear_cover)
+            * lever;
+        Self {
+            m1,
+            m2,
+            mb,
+            k1,
+            k2,
+            kc: kc.max(0.0),
+            kb,
+            r1: 0.2 * sqrt(m1 * k1),
+            r2: 1.2 * sqrt(m2 * k2),
+            rb: 0.2 * sqrt(mb * kb),
+            // Contact stiffens the edge threefold, as in the two-mass set.
+            c1: 3.0 * k1,
+            c2: 3.0 * k2,
+            d1: node,
+            d2: thick - node,
+            length,
+            body_locked: false,
         }
     }
 
@@ -258,5 +356,72 @@ impl Folds {
             self.vb = (self.vb + dt * eb / mb) / (1.0 + dt * p.rb / mb);
             self.xb += dt * self.vb;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: f32, b: f32, tolerance: f32) -> bool {
+        (a - b).abs() <= tolerance * b.abs()
+    }
+
+    #[test]
+    fn muscle_rules_match_a_hand_calculation() {
+        // Cricothyroid 0.25, thyroarytenoid 0.25, lateral cricoarytenoid
+        // 0.5: zero strain, so the folds are at their resting 1.6 cm and
+        // 0.3 cm, and every rule can be followed with a pocket calculator.
+        let p = FoldParams::from_muscles(0.25, 0.25, 0.5);
+        assert!(close(p.length, 1.6, 1e-5));
+        assert!(close(p.d1 + p.d2, 0.3, 1e-5));
+        assert!(close(p.d1, 0.125, 1e-4));
+        assert!(close(p.m1, 0.0624, 0.01), "m1 {}", p.m1);
+        assert!(close(p.m2, 0.0874, 0.01), "m2 {}", p.m2);
+        assert!(close(p.mb, 0.0998, 0.01), "mb {}", p.mb);
+        assert!(close(p.k1, 106_000.0, 0.02), "k1 {}", p.k1);
+        assert!(close(p.k2, 148_400.0, 0.02), "k2 {}", p.k2);
+        assert!(close(p.kb, 193_800.0, 0.02), "kb {}", p.kb);
+        assert!(close(p.kc, 6880.0, 0.03), "kc {}", p.kc);
+        assert!(!p.body_locked);
+    }
+
+    #[test]
+    fn muscles_do_what_their_names_say() {
+        let rest = FoldParams::from_muscles(0.25, 0.25, 0.5);
+        // The cricothyroid stretches: longer, thinner, stiffer cover.
+        let stretched = FoldParams::from_muscles(0.75, 0.25, 0.5);
+        assert!(stretched.length > rest.length);
+        assert!(stretched.d1 + stretched.d2 < rest.d1 + rest.d2);
+        assert!(stretched.k1 / stretched.m1 > rest.k1 / rest.m1);
+        // The thyroarytenoid bulks and stiffens the body and shortens the
+        // fold.
+        let bulked = FoldParams::from_muscles(0.25, 0.75, 0.5);
+        assert!(bulked.length < rest.length);
+        assert!(bulked.mb > rest.mb);
+        assert!(bulked.kb > rest.kb);
+        // Every setting gives a physical fold.
+        for ct in [0.0, 0.5, 1.0] {
+            for ta in [0.0, 0.5, 1.0] {
+                for lc in [0.0, 0.5, 1.0] {
+                    let p = FoldParams::from_muscles(ct, ta, lc);
+                    for v in [p.m1, p.m2, p.mb, p.k1, p.k2, p.kb, p.r1, p.r2, p.d1, p.d2] {
+                        assert!(v.is_finite() && v > 0.0, "{ct} {ta} {lc}: {p:?}");
+                    }
+                    assert!(p.kc >= 0.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_larger_larynx_sings_lower() {
+        let p = FoldParams::steinecke_herzel();
+        let big = p.sized(1.4);
+        let ratio = sqrt(big.k1 / big.m1) / sqrt(p.k1 / p.m1);
+        assert!(close(ratio, 1.0 / 1.4, 1e-4), "{ratio}");
+        // Damping ratio unchanged.
+        let zeta = |q: &FoldParams| q.r1 / (2.0 * sqrt(q.k1 * q.m1));
+        assert!(close(zeta(&big), zeta(&p), 1e-4));
     }
 }

@@ -249,6 +249,17 @@ impl Trombone {
         self.source.gap_override = gap;
     }
 
+    /// Replace the folds by body–cover folds held at fixed muscle
+    /// activations (cricothyroid, thyroarytenoid, lateral cricoarytenoid,
+    /// each `0‥1`), after Titze & Story (2002). For measuring them; `None`
+    /// returns to the standard folds. Use with
+    /// [`override_folds`](Self::override_folds)`(Some(1.0), ..)`.
+    #[doc(hidden)]
+    pub fn override_muscles(&mut self, muscles: Option<(f32, f32, f32)>) {
+        self.source.muscle_override = muscles;
+        self.source.set_size(self.tract_length);
+    }
+
     /// What moves the vocal folds in the physical engine.
     #[must_use]
     pub fn glottal_source(&self) -> GlottalSource {

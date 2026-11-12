@@ -379,6 +379,29 @@ fn stops_build_pressure_and_burst_by_themselves() {
 }
 
 #[test]
+fn muscle_driven_folds_sing_and_follow_their_muscles() {
+    // Body-cover folds under the Titze & Story (2002) rules: the
+    // cricothyroid raises the pitch, the thyroarytenoid lowers it and
+    // lets less air through.
+    let reading = |ct: f32, ta: f32| {
+        let mut t = voice(110.0, 0.65, 1.0);
+        t.override_muscles(Some((ct, ta, 0.5)));
+        t.override_folds(Some(1.0), Some(0.01));
+        render(&mut t, 0.6);
+        let f = flows(&mut t, 0.4);
+        (pitch(&f), f.iter().sum::<f32>() / f.len() as f32)
+    };
+    let low = reading(0.0, 0.25);
+    let mid = reading(0.5, 0.25);
+    let high = reading(0.75, 0.25);
+    let thick = reading(0.0, 0.5);
+    println!("ct 0: {low:?}, ct 0.5: {mid:?}, ct 0.75: {high:?}; ta 0.5 at ct 0: {thick:?}");
+    assert!(low.0 > 80.0, "not vibrating: {low:?}");
+    assert!(mid.0 > 1.25 * low.0 && high.0 > 1.25 * mid.0);
+    assert!(thick.0 < low.0 && thick.1 < low.1);
+}
+
+#[test]
 fn every_preset_speaks_on_the_physical_engine() {
     let text = "Hello there, how are you? Pink trombone, 42.";
     for p in Preset::ALL {

@@ -90,6 +90,66 @@ of `VoiceSettings`, so your own voice starts from a preset and changes what
 you like. With the `serde` feature, the settings can live in your game's
 data files.
 
+## The physical engine
+
+Next to Pink Trombone's own model there is a second one, `Engine::Physical`,
+that uses the same tract shape and controls but works in real units and
+lets the sound come out of the air flow instead of a script:
+
+| | Classic | Physical |
+|---|---|---|
+| Voice source | a fixed pulse shape | vocal folds as masses on springs, driven by lung pressure through the glottis; pitch from their tension |
+| Losses | the same at every frequency | lip radiation, yielding walls and viscous losses, each with its own frequency dependence |
+| Side cavities | one lossless nose | two piriform sinuses, two nasal passages with a sinus each |
+| Hiss | noise wherever a finger narrows the tract | turbulence where a jet is fast enough, loudest where it strikes the teeth |
+| Stop bursts | a scripted pop | pressure builds behind the closure and is released |
+| Articulators | constant speed | critically damped, as tissue with inertia |
+
+```sh
+cargo run --release -p synthie-trombone-cli -- --engine physical   # `\` switches engines while playing
+cargo run --release -p synthie-trombone --example say -- --engine physical "Hello there!"
+cargo run --release -p synthie-trombone --example ab                # both engines side by side, in report/
+cargo run --release -p synthie-trombone --example probe             # what each engine measures
+```
+
+```rust
+use synthie_trombone::{Engine, Preset, Talker};
+
+let voice = Preset::Deep.settings().with_engine(Engine::Physical);
+let line = Talker::new(44_100.0, voice).bake("Stay a while, and listen.");
+```
+
+It is held to published measurements of real voices by tests
+(`crates/synthie-trombone/tests/physical_gates.rs` and
+`src/phys/tests.rs`); the classic engine is pinned bit for bit by
+`tests/classic_golden.rs`, so it is the unchanged baseline to compare
+against. A few of the figures:
+
+- Formant bandwidths of 30 to 110 Hz, rising with frequency (classic: 70 to
+  1900 Hz), and vowels fitted to Peterson & Barney's F1, F2 and F3.
+- The walls resonate against the enclosed air near 190 Hz and give about
+  2.7 cm³ per cmH2O, as measured in vivo (Hanna, Smith & Wolfe 2016).
+- The piriform sinuses cut a notch near 4.4 kHz (Dang & Honda 1997).
+- The folds sing within a cent of the requested note over every preset's
+  range, stop below about 3.4 cmH2O of lung pressure, and keep voicing for
+  some 40 ms into a /b/ before the mouth fills.
+- /s/ and /sh/ come out 15 to 20 dB louder than /f/ and /th/.
+
+It costs more: about 6 times faster than real time on one core at the
+native tract length, against 170 for the classic engine. Notes outside the
+folds' range (above about 400 Hz for the native tract) are sung with a
+prescribed glottal pulse. Body-cover folds under muscle control (Titze &
+Story 2002) are implemented and tested but not yet what sets the pitch.
+
+The models and numbers come from: Steinecke & Herzel (1995) for the
+two-mass folds; Story & Titze (1995) and Titze & Story (2002) for the
+body-cover folds and muscle rules, with tissue constants as in Brad
+Story's LeTalker 1.22; Titze (1984, 2002) for flow through the glottis;
+Hanna, Smith & Wolfe (2016) for the walls; Dang & Honda (1997) and Dang,
+Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
+for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
+Peterson & Barney (1952) for the vowel targets.
+
 ## Making your game talk
 
 Add the library (`synthie-trombone`, in `crates/synthie-trombone`) to your
