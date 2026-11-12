@@ -1053,10 +1053,11 @@ fn expand(
     match p.manner() {
         Manner::Diphthong => {
             // Start on the diphthong's own shape (OW starts on /o/, not on
-            // AO's more open "aw"), then glide to the second vowel.
-            let (_, to) = p.glide().expect("diphthong");
+            // AO's more open "aw"), then glide to its end (on the physical
+            // engine the diphthong's own, on the classic its second vowel).
+            let end = p.glide_end().expect("diphthong");
             out.push(draft(p, a, dur * 0.55, true));
-            let mut tail = draft(p, to.articulation(), dur * 0.45, true);
+            let mut tail = draft(p, end, dur * 0.45, true);
             tail.accent = 0.0;
             out.push(tail);
         }

@@ -1,33 +1,38 @@
-//! Generate `src/vowel_size_table.rs`: how each physical vowel's shape
-//! changes with the speaker's size, so that its formants scale exactly as
-//! `1 / length`.
+//! Generate `src/vowel_size_table.rs`: the shape of every physical vowel,
+//! glide and diphthong end, for every body size, solved from the formant
+//! targets in `src/vowel_targets.rs`.
 //!
-//! The native shapes (`PHYSICAL_VOWELS` in `src/phoneme.rs`) were fitted at
-//! tract length 1.0. Used unchanged on a shorter or longer tract their F1
-//! drifts from `native / length` by up to 8.5 % at length 0.6, because the
-//! yielding walls, the side cavities and the lip load do not scale with
-//! the tube. For every vowel and every row of a grid of tract lengths this
-//!
-//! 1. starts from the shape of the row next to it, nearer to 1.0 (at first
-//!    the native shape), stepped on along the way the shape has been
-//!    moving;
-//! 2. refines it against the real engine (damped Gauss-Newton on measured
-//!    formants, with derivatives by finite differences) until F1 and F2 are
-//!    the native ones divided by the length, and F3 as near as the other
-//!    two allow, staying close to the neighbouring row so that the rows
-//!    make a smooth path. If that misses, it also tries the babble map's
-//!    answer (`inverse::solve_for`, started near the same shape) and keeps
-//!    the better one. Lips and narrowing are never tighter than the
-//!    tightest native vowel's, so no shape hisses;
-//! 3. verifies the table as the library will read it (quantised, and
-//!    interpolated between rows) at the rows, between them, and at the
-//!    lengths the tests use, measuring each shape through the engine.
+//! To move a vowel, change its F1, F2 or F3 in `TARGETS` there and run
 //!
 //! ```sh
 //! cargo run -p synthie-trombone --example vowel_size --release
 //! ```
 //!
-//! Uses every CPU thread; takes under a minute.
+//! then check with `cargo test -p synthie-trombone --release --test
+//! vowel_size_gate`. Uses every CPU thread; takes a minute or two. The babble
+//! map (`examples/babble.rs`) only needs regenerating when the engine's
+//! acoustics change, not when a target does.
+//!
+//! For every target this
+//!
+//! 1. solves the shape at the native tract length (1.0): starts from the
+//!    articulators' natural place for the sound (the classic engine's
+//!    tongue and lips) and from the babble map's answers (`inverse::solve`,
+//!    with and without F3), refines each against the real
+//!    engine (damped Gauss-Newton on measured formants, derivatives by
+//!    finite differences) until F1 and F2 are on the target and F3 as near
+//!    as the other two allow, and keeps the best. Rounded targets keep
+//!    rounded lips and spread ones spread lips; lips and narrowing are
+//!    never tighter than the tightest vowels may be without hissing;
+//! 2. solves the other rows (0.5 to 1.6) outwards from the native one, each
+//!    starting from the row next to it nearer to 1.0, stepped on along the
+//!    way the shape has been moving, and staying close to it so that the
+//!    rows make a smooth path. If that misses, it also tries the babble
+//!    map's answer (`inverse::solve_for`) and keeps the better one;
+//! 3. verifies the table as the library will read it (quantised, and
+//!    interpolated between rows) at the rows, between them, and at the
+//!    lengths the tests use, measuring each shape through the engine, and
+//!    reports how far apart the lax and tense vowels are.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -48,26 +53,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use survey::Meter;
-use synthie_trombone::Phoneme;
 use synthie_trombone::inverse::{self, Shape};
+use synthie_trombone::vowel_targets::{self, Lips, TARGETS, Target, VowelKey};
+use synthie_trombone::{Articulation, Phoneme};
 
-/// The physical vowels, in the order of `PHYSICAL_VOWELS`.
-const VOWELS: [Phoneme; 14] = [
-    Phoneme::Iy,
-    Phoneme::Ih,
-    Phoneme::Eh,
-    Phoneme::Ae,
-    Phoneme::Ah,
-    Phoneme::Aa,
-    Phoneme::Ao,
-    Phoneme::Uh,
-    Phoneme::Uw,
-    Phoneme::Ow,
-    Phoneme::Er,
-    Phoneme::Ax,
-    Phoneme::W,
-    Phoneme::Y,
-];
 /// Tract length of the first table row...
 const FIRST: f32 = 0.5;
 /// ...the step between rows...
@@ -86,17 +75,29 @@ const STAY: f32 = 1.0e-3;
 /// Pull towards the shape the two rows before predict (going on in a
 /// straight line), per squared coordinate: keeps the path from bending.
 const BEND: f32 = 3.0e-3;
+/// How hard the native shape is pulled towards the articulators' natural
+/// place for it (see [`prior`]), per coordinate, relative to [`STAY`] and
+/// [`BEND`].
+const NATURAL_PULL: [f32; 5] = [1.0, 1.0, 1.0, 0.1, 0.1];
 /// Finite-difference step, in shape coordinates.
 const H: f32 = 0.008;
 /// Tongue body positions and heights the engine allows.
 const TONGUE_INDEX: (f32, f32) = (12.0, 29.0);
 const TONGUE_DIAMETER: (f32, f32) = (2.05, 3.5);
-/// Lip rounding searched: from the tightest vowel lips to lips that hardly
-/// touch the tract.
-const LIPS: (f32, f32) = (MIN_LIPS, 3.3);
-/// Where the narrowing may sit: along the tongue, up to the teeth (the
-/// babble map stops at 34; /i/ in a long tract wants a little more).
-const NARROWING_AT: (f32, f32) = (12.0, 38.0);
+/// Lip rounding of rounded vowels: from the tightest that does not hiss to
+/// lips that still round (rest lips are 1.8 in these units).
+const LIPS: (f32, f32) = (MIN_LIPS, 1.7);
+/// Lips a rounded vowel starts from when the babble map leaves them spread.
+const START_LIPS: f32 = 1.2;
+/// Where the narrowing may sit: from the lower pharynx, as in the babble
+/// map, up to the teeth (/i/ in a long tract wants a little more than the
+/// map's 34).
+const NARROWING_AT: (f32, f32) = (10.0, 38.0);
+/// Lowest narrowing place for all but the open vowels: the upper pharynx,
+/// behind the tongue body...
+const ORAL: f32 = 14.0;
+/// ...and the F1 (adult man, Hz) from which a vowel counts as open.
+const THROAT_F1: f32 = 640.0;
 /// Narrowing openings searched.
 const NARROWING: (f32, f32) = (MIN_NARROWING, 3.0);
 /// What a touch diameter loses before it becomes a tract diameter.
@@ -105,19 +106,33 @@ const TOUCH: f32 = 0.3;
 const GOOD: f32 = 1.5e-3;
 /// ...and beyond which the babble map's answer is tried too.
 const TRY_MAP: f32 = 5.0e-3;
+/// ...and taken instead of the shape that carries on from the row before
+/// only if that one misses by more than this.
+const SWITCH: f32 = 0.015;
 /// The tests' limit for F1 and F2 (relative error).
 const LIMIT: f32 = 0.03;
-/// Tightest lips and narrowing of the native vowels.
+/// Tightest lips and narrowing a vowel may have without hissing.
 const MIN_LIPS: f32 = 0.65;
 const MIN_NARROWING: f32 = 0.7;
+/// Lax and tense vowels the recognizer confuses, reported side by side.
+const PAIRS: [(Phoneme, Phoneme); 4] = [
+    (Phoneme::Ih, Phoneme::Iy),
+    (Phoneme::Uh, Phoneme::Uw),
+    (Phoneme::Eh, Phoneme::Ae),
+    (Phoneme::Ah, Phoneme::Aa),
+];
 
 /// Tract length of row `k`, computed as the library does.
 fn row_length(k: usize) -> f32 {
     FIRST + STEP * k as f32
 }
 
-fn native(p: Phoneme) -> Shape {
-    p.physical_shape(1.0).expect("a physical vowel")
+/// The articulation that stands for `key`.
+fn articulation(key: VowelKey) -> Articulation {
+    match key {
+        VowelKey::Vowel(p) | VowelKey::Start(p) => p.articulation(),
+        VowelKey::End(p) => p.glide_end().expect("a diphthong"),
+    }
 }
 
 /// The five raw numbers of a shape: tongue index, tongue diameter, lips
@@ -135,19 +150,20 @@ fn raw(s: &Shape) -> [f32; 5] {
 
 /// A shape as five coordinates, each `0‥1` over the ranges searched:
 /// tongue index, tongue diameter, lips, narrowing place, narrowing
-/// opening; the openings on a logarithmic scale. Spread lips are `1`.
+/// opening; the openings on a logarithmic scale. Spread lips are `1`, no
+/// narrowing the widest one.
 fn to_x(s: &Shape) -> [f32; 5] {
     let lin = |v: f32, r: (f32, f32)| (v - r.0) / (r.1 - r.0);
     let log = |v: f32, r: (f32, f32)| {
         ((v - TOUCH).ln() - (r.0 - TOUCH).ln()) / ((r.1 - TOUCH).ln() - (r.0 - TOUCH).ln())
     };
-    let n = s.narrowing.expect("physical vowels narrow the tongue");
+    let (at, narrow) = s.narrowing.unwrap_or((23.0, NARROWING.1));
     [
         lin(s.tongue_index, TONGUE_INDEX),
         lin(s.tongue_diameter, TONGUE_DIAMETER),
         s.lips.map_or(1.0, |l| log(l, LIPS)),
-        lin(n.0, NARROWING_AT),
-        log(n.1, NARROWING),
+        lin(at, NARROWING_AT),
+        log(narrow, NARROWING),
     ]
     .map(|v| v.clamp(0.0, 1.0))
 }
@@ -167,6 +183,23 @@ fn from_x(x: &[f32; 5], rounded: bool) -> Shape {
     }
 }
 
+/// A start for target `t` from shape `s`: lips made to agree with the
+/// target's.
+fn start_from(s: &Shape, t: &Target) -> [f32; 5] {
+    let mut x = to_x(s);
+    match t.lips {
+        Lips::Spread => x[2] = 1.0,
+        Lips::Rounded if s.lips.is_none_or(|l| l > LIPS.1) => {
+            x[2] = to_x(&Shape {
+                lips: Some(START_LIPS),
+                ..*s
+            })[2];
+        }
+        Lips::Rounded => {}
+    }
+    x
+}
+
 /// What one row of one vowel aims for.
 struct Goal {
     /// `ln` of the target formants.
@@ -177,6 +210,10 @@ struct Goal {
     ahead: [f32; 5],
     /// Which coordinates may move.
     free: [bool; 5],
+    /// How hard each coordinate is pulled towards `near` and `ahead`.
+    pull: [f32; 5],
+    /// Lowest value of each coordinate (the highest is 1).
+    lo: [f32; 5],
     rounded: bool,
     length: f32,
 }
@@ -193,8 +230,9 @@ impl Goal {
     fn cost(&self, x: &[f32; 5], r: &[f32; 3]) -> f32 {
         let mut c: f32 = r.iter().map(|v| v * v).sum();
         for d in 0..5 {
-            c += STAY * (x[d] - self.near[d]) * (x[d] - self.near[d])
-                + BEND * (x[d] - self.ahead[d]) * (x[d] - self.ahead[d]);
+            c += self.pull[d]
+                * (STAY * (x[d] - self.near[d]) * (x[d] - self.near[d])
+                    + BEND * (x[d] - self.ahead[d]) * (x[d] - self.ahead[d]));
         }
         c
     }
@@ -209,7 +247,7 @@ impl Goal {
     /// coordinates reached, their residuals and cost.
     fn refine(&self, m: &mut Meter, mut x: [f32; 5]) -> Option<([f32; 5], [f32; 3], f32)> {
         for d in 0..5 {
-            x[d] = x[d].clamp(0.0, 1.0);
+            x[d] = x[d].clamp(self.lo[d], 1.0);
         }
         let (mut r, mut cost) = self.eval(m, &x)?;
         let mut damping = 1.0e-3f32;
@@ -242,8 +280,9 @@ impl Goal {
                         a[d][c] += j[k][d] * j[k][c];
                     }
                 }
-                b[d] += STAY * (x[d] - self.near[d]) + BEND * (x[d] - self.ahead[d]);
-                a[d][d] += STAY + BEND;
+                b[d] +=
+                    self.pull[d] * (STAY * (x[d] - self.near[d]) + BEND * (x[d] - self.ahead[d]));
+                a[d][d] += self.pull[d] * (STAY + BEND);
             }
             let mut moved = false;
             while damping < 1.0e3 {
@@ -251,8 +290,9 @@ impl Goal {
                 let mut rhs = b.map(|v| -v);
                 for d in 0..5 {
                     lhs[d][d] += damping * (a[d][d] + 1.0e-4);
-                    let stuck =
-                        !self.free[d] || (x[d] <= 0.0 && b[d] > 0.0) || (x[d] >= 1.0 && b[d] < 0.0);
+                    let stuck = !self.free[d]
+                        || (x[d] <= self.lo[d] && b[d] > 0.0)
+                        || (x[d] >= 1.0 && b[d] < 0.0);
                     if stuck {
                         for c in 0..5 {
                             lhs[d][c] = 0.0;
@@ -265,7 +305,7 @@ impl Goal {
                 let Some(step) = solve5(lhs, rhs) else { break };
                 let mut y = x;
                 for d in 0..5 {
-                    y[d] = (x[d] + step[d]).clamp(0.0, 1.0);
+                    y[d] = (x[d] + step[d]).clamp(self.lo[d], 1.0);
                 }
                 if let Some((ry, cy)) = self.eval(m, &y)
                     && cy < cost
@@ -318,24 +358,139 @@ fn solve5(mut a: [[f32; 5]; 5], mut b: [f32; 5]) -> Option<[f32; 5]> {
 #[derive(Clone, Copy)]
 struct Solved {
     x: [f32; 5],
-    /// Relative errors of F1, F2, F3 against `native / length`.
+    /// Relative errors of F1, F2, F3 against the target.
     err: [f32; 3],
     /// Whether the babble map's start won.
     from_map: bool,
 }
 
-/// Solve the rows of vowel `p` from the native one outwards, `up` towards
-/// longer tracts or down towards shorter ones.
-fn chain(m: &mut Meter, p: Phoneme, f_native: [f32; 3], up: bool) -> Vec<(usize, Solved)> {
-    let s0 = native(p);
-    let x0 = to_x(&s0);
-    let rounded = s0.lips.is_some();
+/// Relative errors from `ln` residuals.
+fn rel(r: &[f32; 3]) -> [f32; 3] {
+    [
+        r[0].exp() - 1.0,
+        r[1].exp() - 1.0,
+        (r[2] / F3_WEIGHT.sqrt()).exp() - 1.0,
+    ]
+}
+
+/// Where the articulators of target `t` would be by phonetics: the classic
+/// engine's tongue and lips for the sound (hand-drawn after the original's
+/// tract diagram), its constriction as the narrowing, the target's
+/// rounding. Of the many shapes that make the same formants the solver
+/// keeps the one nearest to this, so that /u/ keeps a high back tongue
+/// and does not make its formants with a pharynx pinched near the folds
+/// (which a real voice's folds would feel: such shapes sound different
+/// from their closed-glottis formants).
+fn prior(t: &Target) -> [f32; 5] {
+    let a = articulation(t.key);
+    let (index, diameter) = a.tongue.expect("a vowel tongue");
+    let lips = match t.lips {
+        Lips::Spread => None,
+        Lips::Rounded => Some(a.lips.map_or(START_LIPS, |c| c.diameter).min(LIPS.1)),
+    };
+    let narrowing = a.constriction.map(|c| (c.index, c.diameter));
+    let mut x = to_x(&Shape {
+        tongue_index: index,
+        tongue_diameter: diameter,
+        lips,
+        narrowing,
+    });
+    if narrowing.is_none() {
+        x[3] = 0.5;
+        x[4] = 1.0;
+    }
+    x
+}
+
+/// Lowest coordinates target `t` may take: only open vowels (F1 of
+/// [`THROAT_F1`] or more) narrow the pharynx below [`ORAL`]. A narrowing
+/// that low, close to the folds, loads them: the sound's F1 then rises
+/// above the tract's own, by 5 % for /e/ and /æ/ (as the listener hears
+/// them), where a narrowing along the tongue leaves it alone. Open vowels
+/// need it all the same, to reach their F1.
+fn lowest(t: &Target) -> [f32; 5] {
+    let mut lo = [0.0; 5];
+    if t.formants[0] < THROAT_F1 {
+        lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
+    }
+    lo
+}
+
+/// Solve the native row of target `t`: from the articulators' natural
+/// place for it and the babble map's answers, keep the best, measured by
+/// formants and nearness to that place. (Not from the shape the table held
+/// before: the table is then the same however often it is regenerated.)
+fn native_row(m: &mut Meter, t: &Target) -> Solved {
+    let f = vowel_targets::formants(t.key, 1.0).expect("a target");
+    let rounded = t.lips == Lips::Rounded;
+    let home = prior(t);
+    let mut starts: Vec<([f32; 5], bool)> = vec![(home, false)];
+    for f3 in [Some(f[2]), None] {
+        let near = from_x(&home, rounded);
+        starts.push((
+            start_from(&inverse::solve(f[0], f[1], f3, Some(&near)), t),
+            true,
+        ));
+        starts.push((start_from(&inverse::solve(f[0], f[1], f3, None), t), true));
+    }
+    let lo = lowest(t);
+    let starts: Vec<([f32; 5], bool)> = starts
+        .into_iter()
+        .map(|(mut x, m)| {
+            for d in 0..5 {
+                x[d] = x[d].max(lo[d]);
+            }
+            (x, m)
+        })
+        .collect();
+    let goal = Goal {
+        t: f.map(f32::ln),
+        near: home,
+        ahead: home,
+        free: [true, true, rounded, true, true],
+        // Tongue and lips have a natural place; the narrowing is there to
+        // place F3 and is let go wherever that needs it.
+        pull: NATURAL_PULL,
+        lo: lowest(t),
+        rounded,
+        length: 1.0,
+    };
+    let mut best: Option<([f32; 5], f32, bool)> = None;
+    for (x, from_map) in starts {
+        let Some((x, _, cost)) = goal.refine(m, x) else {
+            continue;
+        };
+        if best.is_none_or(|b| cost < b.1) {
+            best = Some((x, cost, from_map));
+        }
+    }
+    // The pull towards the natural place has chosen the shape; now put the
+    // formants on target from there, pulled only towards where it is.
+    let (x, _, from_map) = best.expect("a measurable shape");
+    let polish = Goal {
+        near: x,
+        ahead: x,
+        pull: [1.0; 5],
+        ..goal
+    };
+    let (x, r, _) = polish.refine(m, x).expect("a measurable shape");
+    Solved {
+        x,
+        err: rel(&r),
+        from_map,
+    }
+}
+
+/// Solve the rows of target `t` outwards from the native one `x0`, `up`
+/// towards longer tracts or down towards shorter ones.
+fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solved)> {
+    let rounded = t.lips == Lips::Rounded;
     // /a/ in a small body keeps its throat: the narrowing that would lift
     // F1 the last 2 % sits deep in the pharynx, and tightening it there
     // makes the vowel louder, not only higher (by 0.4 dB at length 0.6,
     // which upsets the balance of /s/ against /a/ that the physical gates
     // hold). Its tongue still moves.
-    let throat = p == Phoneme::Aa && !up;
+    let throat = t.key == VowelKey::Vowel(Phoneme::Aa) && !up;
     let free = [true, true, rounded, !throat, !throat];
     let rows: Vec<usize> = if up {
         (NATIVE_ROW + 1..ROWS).collect()
@@ -346,7 +501,7 @@ fn chain(m: &mut Meter, p: Phoneme, f_native: [f32; 3], up: bool) -> Vec<(usize,
     let mut out = Vec::new();
     for k in rows {
         let length = row_length(k);
-        let target = f_native.map(|f| f / length);
+        let target = vowel_targets::formants(t.key, length).expect("a target");
         // Carry on the way the shape has been moving.
         let mut ahead = [0.0f32; 5];
         for d in 0..5 {
@@ -361,6 +516,8 @@ fn chain(m: &mut Meter, p: Phoneme, f_native: [f32; 3], up: bool) -> Vec<(usize,
             near: last,
             ahead,
             free,
+            pull: [1.0; 5],
+            lo: lowest(t),
             rounded,
             length,
         };
@@ -370,26 +527,29 @@ fn chain(m: &mut Meter, p: Phoneme, f_native: [f32; 3], up: bool) -> Vec<(usize,
             let near = from_x(&last, rounded);
             let guess =
                 inverse::solve_for(target[0], target[1], Some(target[2]), Some(&near), length);
-            let mut g = to_x(&guess);
-            if !rounded {
-                g[2] = 1.0;
+            let mut g = start_from(&guess, t);
+            for d in 0..5 {
+                if !free[d] {
+                    g[d] = last[d];
+                }
             }
-            if guess.narrowing.is_none() {
-                g[4] = 1.0;
-            }
+            // A different shape breaks the path the rows make, so it is
+            // taken only when the path cannot go on well enough.
             if let Some((x, r, c)) = goal.refine(m, g)
-                && best.is_none_or(|b| c < b.2)
+                && best.is_none_or(|b| c < b.2 && miss(&b.1) > SWITCH)
             {
                 best = Some((x, r, c, true));
             }
         }
         let (x, r, _, from_map) = best.expect("a measurable shape");
-        let err = [
-            r[0].exp() - 1.0,
-            r[1].exp() - 1.0,
-            (r[2] / F3_WEIGHT.sqrt()).exp() - 1.0,
-        ];
-        out.push((k, Solved { x, err, from_map }));
+        out.push((
+            k,
+            Solved {
+                x,
+                err: rel(&r),
+                from_map,
+            },
+        ));
         before = last;
         last = x;
     }
@@ -420,52 +580,77 @@ fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&mut Meter, &T) -> R + Sync
 }
 
 /// The shape the library makes of the table at `length`, with the same
-/// arithmetic as `vowel_size::at_length`.
-fn interpolate(native: &Shape, rows: &[[i16; 5]; ROWS], length: f32) -> Shape {
-    if length.to_bits() == 1.0f32.to_bits() {
-        return *native;
-    }
-    let last = (ROWS - 1) as f32;
-    let t = ((length - FIRST) / STEP).clamp(0.0, last);
-    let a = (t as usize).min(ROWS - 2);
-    let s = t - a as f32;
-    let d = |k: usize| {
-        let (lo, hi) = (f32::from(rows[a][k]), f32::from(rows[a + 1][k]));
-        (lo + (hi - lo) * s) * 1.0e-3
+/// arithmetic as `vowel_size::shape`.
+fn interpolate(rows: &[[u16; 5]; ROWS], length: f32) -> Shape {
+    let (a, s) = if length.to_bits() == 1.0f32.to_bits() {
+        (NATIVE_ROW, 0.0)
+    } else {
+        let t = ((length - FIRST) / STEP).clamp(0.0, (ROWS - 1) as f32);
+        let a = (t as usize).min(ROWS - 2);
+        (a, t - a as f32)
     };
-    let n = native.narrowing.expect("narrowing");
+    let v = |k: usize| {
+        let lo = f32::from(rows[a][k]);
+        let hi = rows.get(a + 1).map_or(lo, |r| f32::from(r[k]));
+        (lo + (hi - lo) * s) / 1000.0
+    };
     Shape {
-        tongue_index: native.tongue_index + d(0),
-        tongue_diameter: native.tongue_diameter + d(1),
-        lips: native.lips.map(|l| (l + d(2)).max(MIN_LIPS)),
-        narrowing: Some((n.0 + d(3), (n.1 + d(4)).max(MIN_NARROWING))),
+        tongue_index: v(0).clamp(TONGUE_INDEX.0, TONGUE_INDEX.1),
+        tongue_diameter: v(1).clamp(TONGUE_DIAMETER.0, TONGUE_DIAMETER.1),
+        lips: (rows[a][2] > 0).then(|| v(2).max(MIN_LIPS)),
+        narrowing: Some((v(3), v(4).max(MIN_NARROWING))),
     }
 }
 
-/// Relative errors of `f` against `native / length`.
-fn errors(f: Option<[f32; 3]>, f_native: [f32; 3], length: f32) -> [f32; 3] {
-    f.map_or([f32::INFINITY; 3], |f| {
-        [0, 1, 2].map(|k| f[k] / (f_native[k] / length) - 1.0)
-    })
+/// Relative errors of `f` against the target of `key` at `length`.
+fn errors(f: Option<[f32; 3]>, key: VowelKey, length: f32) -> [f32; 3] {
+    let t = vowel_targets::formants(key, length).expect("a target");
+    f.map_or([f32::INFINITY; 3], |f| [0, 1, 2].map(|k| f[k] / t[k] - 1.0))
+}
+
+/// The Rust name of a key, as the table writes it.
+fn key_src(key: VowelKey) -> String {
+    match key {
+        VowelKey::Vowel(p) => format!("Vowel(Phoneme::{p:?})"),
+        VowelKey::Start(p) => format!("Start(Phoneme::{p:?})"),
+        VowelKey::End(p) => format!("End(Phoneme::{p:?})"),
+    }
 }
 
 fn main() {
     let started = Instant::now();
+    let targets: Vec<Target> = TARGETS.to_vec();
 
-    // Native formants, measured as the tests measure them.
-    let natives: Vec<[f32; 3]> = par_map(&VOWELS, |_, &p| {
-        survey::measure(&native(p), 1.0).expect("native formants")
+    // How far apart the lax and tense vowels are now, for the report.
+    let pair_now = par_map(&PAIRS, |m, &(a, b)| {
+        let fa = m.measure(&a.physical_shape(1.0).expect("a vowel"), 1.0);
+        let fb = m.measure(&b.physical_shape(1.0).expect("a vowel"), 1.0);
+        fa.zip(fb)
     });
-    for (p, f) in VOWELS.iter().zip(&natives) {
-        println!("{p:>2} native {:.0} / {:.0} / {:.0} Hz", f[0], f[1], f[2]);
+
+    // 1. The native rows.
+    let natives = par_map(&targets, native_row);
+    for (t, s) in targets.iter().zip(&natives) {
+        println!(
+            "{:>4} native: F1 {:+.2} % F2 {:+.2} % F3 {:+.2} %{}  {:?}",
+            t.key.to_string(),
+            100.0 * s.err[0],
+            100.0 * s.err[1],
+            100.0 * s.err[2],
+            if s.from_map { " (map)" } else { "" },
+            from_x(&s.x, t.lips == Lips::Rounded)
+        );
     }
 
-    // Solve every vowel's rows, outwards from the native one.
-    let jobs: Vec<(usize, bool)> = (0..VOWELS.len())
+    // 2. Every other row, outwards from the native one.
+    let jobs: Vec<(usize, bool)> = (0..targets.len())
         .flat_map(|v| [(v, false), (v, true)])
         .collect();
-    let chains = par_map(&jobs, |m, &(v, up)| chain(m, VOWELS[v], natives[v], up));
-    let mut solved: Vec<[Option<Solved>; ROWS]> = vec![[None; ROWS]; VOWELS.len()];
+    let chains = par_map(&jobs, |m, &(v, up)| chain(m, &targets[v], natives[v].x, up));
+    let mut solved: Vec<[Option<Solved>; ROWS]> = vec![[None; ROWS]; targets.len()];
+    for (v, s) in natives.iter().enumerate() {
+        solved[v][NATIVE_ROW] = Some(*s);
+    }
     for (&(v, _), rows) in jobs.iter().zip(chains) {
         for (k, s) in rows {
             solved[v][k] = Some(s);
@@ -474,78 +659,56 @@ fn main() {
     println!("solved in {:.1} s", started.elapsed().as_secs_f32());
 
     // Quantise to thousandths of the raw shape numbers.
-    let mut table = vec![[[0i16; 5]; ROWS]; VOWELS.len()];
-    for (v, &p) in VOWELS.iter().enumerate() {
-        let base = raw(&native(p));
+    let mut table = vec![[[0u16; 5]; ROWS]; targets.len()];
+    for (v, t) in targets.iter().enumerate() {
         for k in 0..ROWS {
-            let Some(s) = solved[v][k] else { continue };
-            let shape = from_x(&s.x, native(p).lips.is_some());
-            let r = raw(&shape);
+            let s = solved[v][k].expect("every row solved");
+            let r = raw(&from_x(&s.x, t.lips == Lips::Rounded));
             for d in 0..5 {
-                let delta = if d == 2 && native(p).lips.is_none() {
-                    0.0
-                } else {
-                    r[d] - base[d]
-                };
-                table[v][k][d] = (delta * 1000.0).round() as i16;
+                table[v][k][d] = (r[d] * 1000.0).round() as u16;
             }
         }
     }
 
-    // Verify: rows, half-way between them, and the tests' lengths.
+    // 3. Verify: rows, half-way between them, and the tests' lengths.
     let mut lengths: Vec<f32> = (0..ROWS).map(row_length).collect();
     lengths.extend((0..ROWS - 1).map(|k| row_length(k) + 0.5 * STEP));
-    lengths.extend([0.85, 0.93, 1.15]);
+    lengths.extend([0.85, 0.93, 0.97, 1.03, 1.15]);
     lengths.sort_by(f32::total_cmp);
     lengths.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
-    let checks: Vec<(usize, f32)> = (0..VOWELS.len())
+    let checks: Vec<(usize, f32)> = (0..targets.len())
         .flat_map(|v| lengths.iter().map(move |&l| (v, l)))
         .collect();
     let measured = par_map(&checks, |m, &(v, l)| {
-        let p = VOWELS[v];
-        let before = m.measure(&native(p), l);
-        let after = m.measure(&interpolate(&native(p), &table[v], l), l);
-        (errors(before, natives[v], l), errors(after, natives[v], l))
+        let f = m.measure(&interpolate(&table[v], l), l);
+        (f, errors(f, targets[v].key, l))
     });
 
     let mut report = String::new();
     let _ = writeln!(
         report,
-        "Worst error against native / length over all {} vowels (F1, F2, F3):",
-        VOWELS.len()
+        "Worst error against the targets over all {} shapes (F1, F2, F3):",
+        targets.len()
     );
     // The same, shorter, for the table's header: table rows only.
-    let mut summary = String::from(
-        "Largest F1 / F2 / F3 error against native / length, of all vowels:\n\
-         length: unchanged shapes -> these shapes\n",
-    );
+    let mut summary =
+        String::from("Largest F1 / F2 / F3 error against the targets, of all shapes:\n");
     let mut misses = Vec::new();
-    // Per vowel: (first length, last length, largest F1 error) missing it.
-    let mut miss_span: Vec<Option<(f32, f32, f32)>> = vec![None; VOWELS.len()];
     for &l in &lengths {
-        let mut before = [0.0f32; 3];
-        let mut after = [0.0f32; 3];
-        let mut worst = [(0.0f32, Phoneme::Aa); 3];
-        for (&(v, cl), (b, a)) in checks.iter().zip(&measured) {
+        let mut worst = [(0.0f32, targets[0].key); 3];
+        for (&(v, cl), (_, a)) in checks.iter().zip(&measured) {
             if cl.to_bits() != l.to_bits() {
                 continue;
             }
             for k in 0..3 {
-                before[k] = before[k].max(b[k].abs());
                 if a[k].abs() > worst[k].0 {
-                    worst[k] = (a[k].abs(), VOWELS[v]);
+                    worst[k] = (a[k].abs(), targets[v].key);
                 }
-                after[k] = after[k].max(a[k].abs());
             }
             if a[0].abs() > LIMIT || a[1].abs() > LIMIT {
-                let m = miss_span[v].get_or_insert((l, l, 0.0));
-                m.1 = l;
-                if a[0].abs() > m.2.abs() {
-                    m.2 = a[0];
-                }
                 misses.push(format!(
                     "{} at length {l:.2}: F1 {:+.2} %, F2 {:+.2} %",
-                    VOWELS[v],
+                    targets[v].key,
                     100.0 * a[0],
                     100.0 * a[1]
                 ));
@@ -553,13 +716,10 @@ fn main() {
         }
         let _ = writeln!(
             report,
-            "length {l:.2}: unchanged shapes {:4.1} / {:4.1} / {:4.1} %, sized shapes {:4.2} / {:4.2} / {:4.2} % ({} / {} / {})",
-            100.0 * before[0],
-            100.0 * before[1],
-            100.0 * before[2],
-            100.0 * after[0],
-            100.0 * after[1],
-            100.0 * after[2],
+            "length {l:.2}: {:4.2} / {:4.2} / {:4.2} % ({} / {} / {})",
+            100.0 * worst[0].0,
+            100.0 * worst[1].0,
+            100.0 * worst[2].0,
             worst[0].1,
             worst[1].1,
             worst[2].1,
@@ -567,31 +727,17 @@ fn main() {
         if (0..ROWS).any(|k| row_length(k).to_bits() == l.to_bits()) {
             let _ = writeln!(
                 summary,
-                "{l:.1}: {:4.1} / {:3.1} / {:3.1} % -> {:4.2} / {:4.2} / {:4.2} %",
-                100.0 * before[0],
-                100.0 * before[1],
-                100.0 * before[2],
-                100.0 * after[0],
-                100.0 * after[1],
-                100.0 * after[2],
-            );
-        }
-    }
-    for (v, m) in miss_span.iter().enumerate() {
-        if let Some((from, to, worst)) = m {
-            let _ = writeln!(
-                summary,
-                "{} misses {:.0} % from length {from:.2} to {to:.2} (F1 up to {:+.1} %)",
-                VOWELS[v],
-                100.0 * LIMIT,
-                100.0 * worst
+                "{l:.1}: {:4.2} / {:4.2} / {:5.2} %",
+                100.0 * worst[0].0,
+                100.0 * worst[1].0,
+                100.0 * worst[2].0,
             );
         }
     }
     if misses.is_empty() {
         let _ = writeln!(
             report,
-            "Every vowel within {:.0} % for F1 and F2 at every length checked.",
+            "Every shape within {:.0} % for F1 and F2 at every length checked.",
             100.0 * LIMIT
         );
     } else {
@@ -600,13 +746,70 @@ fn main() {
             let _ = writeln!(report, "  {m}");
         }
     }
+    // Per shape: the worst F1, F2 and F3 errors at the gates' lengths.
+    let _ = writeln!(report, "Per shape, worst F1 / F2 / F3 error, %, at length:");
+    let gate_lengths = [0.6f32, 0.8, 1.0, 1.2, 1.4];
+    let _ = write!(report, "      ");
+    for l in gate_lengths {
+        let _ = write!(report, "{l:^18.1}");
+    }
+    let _ = writeln!(report);
+    for (v, t) in targets.iter().enumerate() {
+        let _ = write!(report, "{:>5} ", t.key.to_string());
+        for l in gate_lengths {
+            let i = checks
+                .iter()
+                .position(|&(cv, cl)| cv == v && (cl - l).abs() < 1e-4)
+                .expect("a checked length");
+            let e = measured[i].1;
+            let _ = write!(
+                report,
+                "{:+5.1} {:+5.1} {:+5.1} ",
+                100.0 * e[0],
+                100.0 * e[1],
+                100.0 * e[2]
+            );
+        }
+        let _ = writeln!(report);
+    }
+    // Lax and tense, before and after.
+    let at_native = |p: Phoneme| {
+        let v = targets
+            .iter()
+            .position(|t| t.key == VowelKey::Vowel(p))
+            .expect("a vowel");
+        let i = checks
+            .iter()
+            .position(|&(cv, cl)| cv == v && cl.to_bits() == 1.0f32.to_bits())
+            .expect("the native length");
+        measured[i].0.expect("formants")
+    };
+    let _ = writeln!(report, "Lax against tense at length 1.0, ΔF1 / ΔF2, Hz:");
+    for (&(a, b), now) in PAIRS.iter().zip(&pair_now) {
+        let (fa, fb) = (at_native(a), at_native(b));
+        let ta = vowel_targets::formants(VowelKey::Vowel(a), 1.0).expect("a target");
+        let tb = vowel_targets::formants(VowelKey::Vowel(b), 1.0).expect("a target");
+        let before = now.map_or_else(
+            || "unmeasured".to_string(),
+            |(x, y)| format!("{:+4.0} / {:+5.0}", y[0] - x[0], y[1] - x[1]),
+        );
+        let _ = writeln!(
+            report,
+            "  {a}-{b}: before {before}, now {:+4.0} / {:+5.0} (target {:+4.0} / {:+5.0})",
+            fb[0] - fa[0],
+            fb[1] - fa[1],
+            tb[0] - ta[0],
+            tb[1] - ta[1],
+        );
+    }
     let from_map: Vec<String> = solved
         .iter()
         .enumerate()
         .flat_map(|(v, rows)| {
+            let key = targets[v].key;
             rows.iter().enumerate().filter_map(move |(k, s)| {
                 s.filter(|s| s.from_map)
-                    .map(|_| format!("{} {:.1}", VOWELS[v], row_length(k)))
+                    .map(|_| format!("{key} {:.1}", row_length(k)))
             })
         })
         .collect();
@@ -618,28 +821,13 @@ fn main() {
         );
     }
     print!("{report}");
-    for (v, rows) in solved.iter().enumerate() {
-        for (k, s) in rows.iter().enumerate() {
-            if let Some(s) = s {
-                println!(
-                    "  {:>2} {:.1}: F1 {:+.2} % F2 {:+.2} % F3 {:+.2} %  {:?}",
-                    VOWELS[v],
-                    row_length(k),
-                    100.0 * s.err[0],
-                    100.0 * s.err[1],
-                    100.0 * s.err[2],
-                    table[v][k]
-                );
-            }
-        }
-    }
 
     // Write the table.
     let mut src = String::new();
     let _ = writeln!(
         src,
-        "//! Vowel shapes by tract length, generated by `examples/vowel_size.rs`;\n\
-         //! do not edit. Regenerate with\n\
+        "//! Vowel shapes by tract length, solved from `src/vowel_targets.rs` by\n\
+         //! `examples/vowel_size.rs`; do not edit. Regenerate with\n\
          //! `cargo run -p synthie-trombone --example vowel_size --release`.\n\
          //!\n\
          //! ```text"
@@ -649,24 +837,28 @@ fn main() {
     }
     let _ = writeln!(
         src,
-        "//! ```\n\nuse crate::phoneme::Phoneme;\n\n\
+        "//! ```\n\n\
+         use crate::phoneme::Phoneme;\n\
+         use crate::vowel_targets::VowelKey::{{self, End, Start, Vowel}};\n\n\
          /// Tract length of the first row.\n\
          pub(super) const FIRST: f32 = {FIRST:?};\n\
          /// Tract length between rows.\n\
          pub(super) const STEP: f32 = {STEP:?};\n\
-         /// Per vowel and row: how much tongue index, tongue diameter, lips,\n\
-         /// narrowing cell and narrowing diameter differ from the native\n\
-         /// shape, in thousandths.\n\
+         /// The row at the native length.\n\
+         pub(super) const NATIVE: usize = {NATIVE_ROW};\n\
+         /// Per vowel shape and row: tongue index, tongue diameter, lips (`0`\n\
+         /// when spread), narrowing cell and narrowing diameter, in\n\
+         /// thousandths.\n\
          #[rustfmt::skip]\n\
-         pub(super) static DELTAS: &[(Phoneme, [[i16; 5]; {ROWS}])] = &["
+         pub(super) static SHAPES: &[(VowelKey, [[u16; 5]; {ROWS}])] = &["
     );
-    for (v, p) in VOWELS.iter().enumerate() {
-        let _ = writeln!(src, "    (Phoneme::{p:?}, [");
+    for (v, t) in targets.iter().enumerate() {
+        let _ = writeln!(src, "    ({}, [", key_src(t.key));
         for rows in table[v].chunks(4) {
             let rows: Vec<String> = rows
                 .iter()
                 .map(|row| {
-                    let cells: Vec<String> = row.iter().map(i16::to_string).collect();
+                    let cells: Vec<String> = row.iter().map(u16::to_string).collect();
                     format!("[{}]", cells.join(","))
                 })
                 .collect();

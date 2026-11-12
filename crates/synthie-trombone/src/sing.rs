@@ -638,7 +638,7 @@ pub fn compile_timed(
                             &mut cursor,
                             until,
                             v,
-                            to_vowel.articulation(),
+                            v.glide_end().unwrap_or(to_vowel.articulation()),
                             true,
                             (target, target),
                         );
