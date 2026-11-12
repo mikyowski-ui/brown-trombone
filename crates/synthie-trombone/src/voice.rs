@@ -50,10 +50,25 @@ pub enum GlottalSource {
     /// Self-oscillating folds: masses on springs driven by the air
     /// pressure around them. Pitch comes from their tension, and voicing
     /// starts, weakens and stops by itself as pressures change. Notes the
-    /// folds cannot reach (far above or below their natural range) are
-    /// sung with the pulse instead.
+    /// folds cannot reach (below or above [`Trombone::fold_range`]) are
+    /// sung with the pulse instead, unless [`Fallback::Never`] is set;
+    /// [`Gauges::sounding`] tells which is singing.
     #[default]
     Folds,
+}
+
+/// When the self-oscillating folds hand the voice to the pulse source (see
+/// [`GlottalSource`]). To sing with the pulse alone, choose
+/// [`GlottalSource::Pulse`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Fallback {
+    /// Notes outside the folds' range are sung by the pulse: below it as
+    /// vocal fry, above it as a falsetto the folds have no register for.
+    #[default]
+    Auto,
+    /// The folds sing everything; a note they cannot hold is not sung.
+    Never,
 }
 
 /// Readings from inside the physical engine, for measurements and
@@ -74,6 +89,13 @@ pub struct Gauges {
     pub skin_flow: f32,
     /// Area between the vocal folds, cm².
     pub glottal_area: f32,
+    /// The part of [`glottal_area`](Self::glottal_area) between the
+    /// vibrating edges, cm²: zero while they touch. The rest is the
+    /// standing gap behind them (a breathy voice's leak).
+    pub edge_area: f32,
+    /// Which source is making the voice: the folds or the pulse (see
+    /// [`GlottalSource`]); `None` while no voice is wanted.
+    pub sounding: Option<GlottalSource>,
     /// Pitch the self-oscillating folds are actually producing, Hz (`0`
     /// while they are not vibrating or the pulse source is in use).
     pub fold_pitch: f32,
@@ -311,6 +333,42 @@ impl Trombone {
     pub fn override_muscles(&mut self, muscles: Option<(f32, f32, f32)>) {
         self.source.muscle_override = muscles;
         self.source.set_size(self.tract_length);
+    }
+
+    /// Switch parts of the fold control off, to find out which of them a
+    /// behaviour comes from: the pitch trim, the stall watch, and the
+    /// pressure the tract above and the trachea below send back to the
+    /// folds (without it they feel only the lungs and the open air). For
+    /// measuring; everything is on by default.
+    #[doc(hidden)]
+    #[allow(clippy::fn_params_excessive_bools)] // four independent switches
+    pub fn probe_folds(&mut self, trim: bool, monitor: bool, supraglottal: bool, subglottal: bool) {
+        self.source.probe = crate::phys::source::Probe {
+            trim,
+            monitor,
+            supraglottal,
+            subglottal,
+        };
+    }
+
+    /// When the folds hand the voice to the pulse source (default
+    /// [`Fallback::Auto`]). [`Gauges::sounding`] shows which is singing.
+    pub fn set_fallback(&mut self, fallback: Fallback) {
+        self.source.fallback = fallback;
+    }
+
+    /// When the folds hand the voice to the pulse source.
+    #[must_use]
+    pub fn fallback(&self) -> Fallback {
+        self.source.fallback
+    }
+
+    /// Lowest and highest pitch, Hz, the self-oscillating folds can sing at
+    /// the present size and tenseness; outside it the pulse takes over
+    /// (see [`Fallback`]).
+    #[must_use]
+    pub fn fold_range(&self) -> (f32, f32) {
+        self.source.range()
     }
 
     /// What moves the vocal folds in the physical engine.
@@ -657,6 +715,11 @@ impl Trombone {
             nose_flow: g.u_nose,
             skin_flow: g.u_skin,
             glottal_area: self.glottal_area,
+            edge_area: self.source.edge_area,
+            sounding: self.source.sounding().map(|kind| match kind {
+                SourceKind::Kinematic => GlottalSource::Pulse,
+                SourceKind::Folds => GlottalSource::Folds,
+            }),
             fold_pitch: self.source.measured,
             jet_noise: g.jet / CM_H2O,
             jet_speed: g.jet_speed,

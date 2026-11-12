@@ -7,8 +7,10 @@
 //!   far apart the folds are held.
 //! * [`SourceKind::Kinematic`]: the area follows a prescribed pulse at the
 //!   requested pitch, and the flow through it is whatever lung pressure
-//!   and the tract allow. It cannot fall out of tune or stall, so it is
-//!   the fallback wherever the folds cannot follow.
+//!   and the tract allow. It sings when asked to, and (unless
+//!   [`Fallback::Never`]) the notes outside the folds' range: below it as
+//!   vocal fry, above it as the falsetto these folds have no register
+//!   for. Inside the range the folds sing everything, stalls included.
 //!
 //! The classic controls are reinterpreted rather than replaced:
 //!
@@ -22,8 +24,9 @@
 use super::folds::{FoldParams, Folds};
 use super::{CM_H2O, Gauge};
 use crate::glottis::Glottis;
-use crate::math::{cos, exp, ln};
+use crate::math::{cos, exp, ln, sqrt};
 use crate::tuning::Tuning;
+use crate::voice::Fallback;
 use core::f32::consts::PI;
 
 /// Seconds for lung pressure to build or fall.
@@ -53,8 +56,6 @@ const ATTACK_RELEASE_TIME: f32 = 0.002;
 /// close vowel, where they otherwise stall below about 75 Hz.
 const SLACK_TENSION: f32 = 0.8;
 const CLOSEST: f32 = 0.3;
-/// Stalls in a row after which a note is handed to the pulse source.
-const STALLS_ALLOWED: u32 = 3;
 /// Longest the glottis stays open in each pulse of the pulse source,
 /// seconds. Below about 100 Hz this turns the pulse into vocal fry: short
 /// sharp openings with long closures between them, which is what a voice
@@ -127,7 +128,17 @@ fn tension_from_table(hz: f32, gap: f32) -> (f32, bool) {
         *p = if weight < 0.02 {
             a
         } else if a == 0.0 || b == 0.0 {
-            0.0
+            // Slack folds: the edge of where they vibrate lies between
+            // these two gaps; put it halfway, rather than at the gap that
+            // vibrates (which left notes the folds sing well, such as the
+            // default voice at 1.4 times its size, to the pulse). At the
+            // stiff end the edge stays where both gaps vibrate.
+            let slack = k < TABLE_COLUMNS / 2;
+            if !slack || (a == 0.0) == (weight < 0.5) {
+                0.0
+            } else {
+                a.max(b)
+            }
         } else {
             a + (b - a) * weight
         };
@@ -166,6 +177,30 @@ const TRIM_RANGE: f32 = 0.12;
 pub(crate) enum SourceKind {
     Kinematic,
     Folds,
+}
+
+/// Parts of the fold control that can be switched off one at a time, to
+/// find out which of them a behaviour comes from. All on in normal use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // independent switches
+pub(crate) struct Probe {
+    /// The slow pitch trim.
+    pub trim: bool,
+    /// The stall watch, which presses stalled folds together again.
+    pub monitor: bool,
+    /// The folds feel the pressure the tract sends back above them.
+    pub supraglottal: bool,
+    /// The folds feel the pressure the trachea sends back below them.
+    pub subglottal: bool,
+}
+
+impl Probe {
+    pub(crate) const ON: Self = Self {
+        trim: true,
+        monitor: true,
+        supraglottal: true,
+        subglottal: true,
+    };
 }
 
 /// Glottal source.
@@ -213,11 +248,8 @@ pub(crate) struct Source {
     watch_lo: f32,
     watch_hi: f32,
     watch_for: f32,
-    /// Stalls in a row on the current note.
-    stalls: u32,
-    /// The pitch, Hz, at which the folds were given up on, if they were.
-    given_up_at: f32,
-    /// Whether the folds can sing the current note.
+    /// Whether the folds are singing the current note (it lies inside
+    /// their range, or the pulse is not allowed to take it).
     reachable: bool,
     tension0: f32,
     tension1: f32,
@@ -236,6 +268,12 @@ pub(crate) struct Source {
     /// Fixed muscle activations (cricothyroid, thyroarytenoid, lateral
     /// cricoarytenoid) for measuring the body–cover folds.
     pub(crate) muscle_override: Option<(f32, f32, f32)>,
+    /// Area between the vibrating edges on the last tick, cm²: the glottal
+    /// area less the gap behind them (or, for the pulse, less its leak).
+    pub(crate) edge_area: f32,
+    pub(crate) probe: Probe,
+    /// When the pulse may take over from the folds.
+    pub(crate) fallback: Fallback,
 }
 
 impl Source {
@@ -269,8 +307,6 @@ impl Source {
             watch_lo: f32::INFINITY,
             watch_hi: 0.0,
             watch_for: 0.0,
-            stalls: 0,
-            given_up_at: 0.0,
             reachable: true,
             tension0: 1.0,
             tension1: 1.0,
@@ -284,16 +320,21 @@ impl Source {
             tension_override: None,
             gap_override: None,
             muscle_override: None,
+            edge_area: 0.0,
+            probe: Probe::ON,
+            fallback: Fallback::Auto,
         }
     }
 
     pub(crate) fn reset(&mut self) {
-        let (size, kind) = (self.size, self.kind);
+        let (size, kind, probe, fallback) = (self.size, self.kind, self.probe, self.fallback);
         let overrides = (self.tension_override, self.gap_override);
         let muscles = self.muscle_override;
         let (lung_base, tuning) = (self.lung_base, self.tuning);
         *self = Self::new();
         self.kind = kind;
+        self.probe = probe;
+        self.fallback = fallback;
         self.lung_base = lung_base;
         self.tuning = tuning;
         (self.tension_override, self.gap_override) = overrides;
@@ -357,6 +398,42 @@ impl Source {
         (tension.clamp(0.2, 5.0), covered)
     }
 
+    /// Rest half-width of the vibrating edges, cm at native size, for a
+    /// modal voice at pitch `hz` and tenseness `tense`.
+    fn modal_gap(&self, hz: f32, tense: f32) -> f32 {
+        let slack = 1.0 - tense;
+        let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
+        let (tension, _) = tension_from_table(hz * self.size, gap);
+        gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
+    }
+
+    /// Lowest and highest pitch, Hz, the folds can sing at the present
+    /// size and tenseness (the pitch table read the way `begin_block`
+    /// reads it). Not for the audio path: it walks the whole range.
+    pub(crate) fn range(&self) -> (f32, f32) {
+        /// Pitch step of the walk (about a sixth of a semitone).
+        const STEP: f32 = 1.01;
+        if self.tension_override.is_some() || self.tense1 < WHISPER_TENSENESS {
+            return (0.0, 0.0);
+        }
+        let (mut lo, mut hi) = (0.0f32, 0.0f32);
+        let mut hz = 20.0f32;
+        while hz < 2000.0 {
+            let gap = match self.gap_override {
+                Some(gap) => gap,
+                None => self.modal_gap(hz, self.tense1),
+            };
+            if tension_from_table(hz * self.size, gap).1 {
+                if lo == 0.0 {
+                    lo = hz;
+                }
+                hi = hz;
+            }
+            hz *= STEP;
+        }
+        (lo, hi)
+    }
+
     /// The model in charge right now: the folds, unless the note lies
     /// outside what they can sing.
     #[inline]
@@ -386,8 +463,6 @@ impl Source {
         }
         if !voicing {
             self.pressing = false;
-            self.stalls = 0;
-            self.given_up_at = 0.0;
         }
         self.voicing = voicing;
         let breathing = voicing || constricted || g.intensity > 0.01;
@@ -409,9 +484,7 @@ impl Source {
                 // Letting go: the edges part and the voice turns to breath.
                 WIDEST_GAP + (abducted - WIDEST_GAP) * (1.0 - self.tense1 / WHISPER_TENSENESS)
             } else {
-                let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP);
-                let (tension, _) = tension_from_table(f1 * self.size, gap);
-                gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
+                self.modal_gap(f1, self.tense1)
             };
         let loose = (slack - 0.3).max(0.0) / 0.7;
         self.chink_target = if voicing && self.gap_override.is_none() {
@@ -423,20 +496,12 @@ impl Source {
         // Stiffer folds need more breath to keep going, as singers know.
         let mut effort = 1.0;
         if self.kind == SourceKind::Folds {
-            let (tension, mut covered) = self.tension_for(f1);
-            // Folds that keep stalling on a note they should manage are not
-            // waited for: the pulse sings it until the note moves on.
-            if self.stalls >= STALLS_ALLOWED {
-                self.given_up_at = f1;
-                self.stalls = 0;
-            }
-            if self.given_up_at > 0.0 {
-                if (ln(f1 / self.given_up_at)).abs() > 0.058 {
-                    self.given_up_at = 0.0;
-                } else {
-                    covered = false;
-                }
-            }
+            let (tension, covered) = self.tension_for(f1);
+            // Inside their range the folds sing every note themselves, even
+            // one they keep stalling on: the stall watch presses them
+            // together again, as a speaker would, but never hands the note
+            // to the pulse.
+            let covered = covered || self.fallback == Fallback::Never;
             if covered != self.reachable {
                 // Handing over between the models: start the other cleanly.
                 self.reachable = covered;
@@ -484,6 +549,7 @@ impl Source {
             let between = self.folds.area();
             let total = between + self.chink;
             self.fold_share = if total > 0.0 { between / total } else { 1.0 };
+            self.edge_area = between;
             return (total, self.lung);
         }
 
@@ -509,8 +575,14 @@ impl Source {
         let engage = engage * engage * (3.0 - 2.0 * engage);
         let blown = (self.lung / VIBRATION_PRESSURE).clamp(0.25, 2.5);
         let swing = self.size * self.size * VIBRATION_AREA * blown;
-        let area = self.leak + swing * amp * engage * pulse;
-        (area, self.lung)
+        self.edge_area = swing * amp * engage * pulse;
+        (self.leak + self.edge_area, self.lung)
+    }
+
+    /// Which model is making the voice right now, or `None` while no voice
+    /// is wanted.
+    pub(crate) fn sounding(&self) -> Option<SourceKind> {
+        self.voicing.then(|| self.active())
     }
 
     /// Let the folds feel what the tract solver just found, and keep the
@@ -521,7 +593,23 @@ impl Source {
             self.measured = 0.0;
             return;
         }
-        self.folds.step(gauge, self.fold_share, dt);
+        if self.probe.supraglottal && self.probe.subglottal {
+            self.folds.step(gauge, self.fold_share, dt);
+        } else {
+            // A load that sends nothing back: lungs straight below, open
+            // air straight above, and the flow those two alone would drive.
+            let mut alone = *gauge;
+            if !self.probe.subglottal {
+                alone.p_sub = self.lung;
+            }
+            if !self.probe.supraglottal {
+                alone.p_supra = 0.0;
+            }
+            let area = self.folds.area() + self.chink;
+            let drop = (alone.p_sub - alone.p_supra).max(0.0);
+            alone.u_glottis = area * sqrt(2.0 * drop / (1.1 * super::RHO));
+            self.folds.step(&alone, self.fold_share, dt);
+        }
 
         // The attack ends once the folds touch with pressure behind them.
         let between = self.folds.area();
@@ -537,7 +625,7 @@ impl Source {
                     self.restart_watch();
                 }
             }
-        } else if self.voicing && self.gap_override.is_none() {
+        } else if self.voicing && self.gap_override.is_none() && self.probe.monitor {
             // Wanted but stalled: press together and start again.
             self.watch_lo = self.watch_lo.min(between);
             self.watch_hi = self.watch_hi.max(between);
@@ -545,10 +633,7 @@ impl Source {
             let period = 1.0 / (self.f0 + (self.f1 - self.f0) * lambda).max(20.0);
             if self.watch_for > (1.5 * period).max(0.012) {
                 if self.watch_hi - self.watch_lo < STALL_SWING * self.size * self.size {
-                    self.stalls += 1;
                     self.press();
-                } else {
-                    self.stalls = 0;
                 }
                 self.restart_watch();
             }
@@ -577,7 +662,7 @@ impl Source {
             }
             // The table sets the pitch at once; this only removes what is
             // left, slowly, and only once the voice is running cleanly.
-            if self.clean_cycles >= 3 && self.tension_override.is_none() {
+            if self.clean_cycles >= 3 && self.tension_override.is_none() && self.probe.trim {
                 self.trim =
                     (self.trim + (period / TRIM_TIME) * ln(ratio)).clamp(-TRIM_RANGE, TRIM_RANGE);
             }

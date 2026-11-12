@@ -101,7 +101,7 @@ pub use tract::{
     TONGUE_DIAMETER, TONGUE_INDEX,
 };
 pub use tuning::{Field, Pass, Tuning};
-pub use voice::{Engine, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
+pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
 /// Rate at which the glottis runs; the tract runs at twice this.
 pub const INTERNAL_RATE: f32 = 48_000.0;
