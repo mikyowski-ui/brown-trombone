@@ -6,7 +6,9 @@ use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
-use crate::tract::{Constriction, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
+use crate::phys::source::Source;
+use crate::phys::{Drive, Phys};
+use crate::tract::{Constriction, Dynamics, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
 use core::f32::consts::PI;
 
 /// Internal samples per parameter block.
@@ -15,6 +17,23 @@ const BLOCK: u32 = 512;
 pub const SLOT_MAIN: usize = 0;
 /// Constriction slot used by [`Trombone::articulate`] for lip rounding.
 pub const SLOT_LIPS: usize = 1;
+
+/// Output level of the physical engine: radiated flow derivative
+/// (cm³/s²) to sample units, set so both engines are about equally loud.
+const PHYSICAL_GAIN: f32 = 2.5e-7;
+
+/// Which model turns the articulation into sound.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Engine {
+    /// Pink Trombone as Neil Thapen wrote it: a scripted glottal pulse into
+    /// a lossless tube, with noise and bursts added by rule.
+    #[default]
+    Classic,
+    /// The same tract in physical units: lung pressure through a glottis,
+    /// frequency-dependent losses, yielding walls and lip radiation.
+    Physical,
+}
 
 /// One Pink Trombone voice.
 ///
@@ -29,6 +48,11 @@ pub const SLOT_LIPS: usize = 1;
 pub struct Trombone {
     glottis: Glottis,
     tract: Tract,
+    engine: Engine,
+    phys: Phys,
+    source: Source,
+    /// Radiated flow at the previous internal sample (physical engine).
+    phys_flow: f32,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -75,6 +99,10 @@ impl Trombone {
         Self {
             glottis: Glottis::new(),
             tract: Tract::new(),
+            engine: Engine::Classic,
+            phys: Phys::new(),
+            source: Source::new(),
+            phys_flow: 0.0,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -103,6 +131,9 @@ impl Trombone {
     pub fn reset(&mut self) {
         self.glottis.reset();
         self.tract.reset_waves();
+        self.phys.reset();
+        self.source.reset();
+        self.phys_flow = 0.0;
         self.frication.reset();
         self.block_pos = 0;
         self.frac = 1.0;
@@ -110,6 +141,43 @@ impl Trombone {
         self.cur = 0.0;
         self.dc_x = 0.0;
         self.dc_y = 0.0;
+    }
+
+    // ----- engine ------------------------------------------------------
+
+    /// Choose the sound model. Switching silences the voice; articulation
+    /// and settings are kept.
+    pub fn set_engine(&mut self, engine: Engine) {
+        if engine == self.engine {
+            return;
+        }
+        self.engine = engine;
+        self.tract.dynamics = match engine {
+            Engine::Classic => Dynamics::Linear,
+            Engine::Physical => Dynamics::Damped,
+        };
+        self.reset();
+    }
+
+    /// The sound model in use.
+    #[must_use]
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+
+    /// Cross-section scale of the physical engine's tract (`1.0` reads the
+    /// articulation model's diameters as centimetres). The classic engine
+    /// only depends on area ratios and ignores it.
+    pub fn set_area_scale(&mut self, scale: f32) {
+        if scale.is_finite() {
+            self.phys.set_area_scale(scale.clamp(0.1, 4.0));
+        }
+    }
+
+    /// Cross-section scale (see [`set_area_scale`](Self::set_area_scale)).
+    #[must_use]
+    pub fn area_scale(&self) -> f32 {
+        self.phys.area_scale()
     }
 
     // ----- voicing and pitch -------------------------------------------
@@ -236,6 +304,8 @@ impl Trombone {
         self.step = f64::from(self.internal_rate) / f64::from(self.sample_rate);
         self.glottis.set_rate(self.internal_rate);
         self.tract.set_rate(self.internal_rate);
+        self.phys.set_rate(0.5 / self.internal_rate, length);
+        self.source.set_size(length);
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 
@@ -355,6 +425,50 @@ impl Trombone {
         self.tract.nose_amplitudes()
     }
 
+    // ----- measurement -------------------------------------------------
+
+    /// Rate of the tract model's own time steps, Hz (twice the glottal
+    /// rate; it rises as the tract gets shorter).
+    #[must_use]
+    pub fn tick_rate(&self) -> f32 {
+        2.0 * self.internal_rate
+    }
+
+    /// Let the articulators finish moving, without rendering sound.
+    #[allow(clippy::cast_precision_loss)]
+    pub fn settle(&mut self) {
+        let dt = BLOCK as f32 / self.internal_rate;
+        for _ in 0..400 {
+            self.tract.update_block(dt);
+        }
+        self.phys
+            .snap(&self.tract.diameter, self.tract.velum_openness());
+    }
+
+    /// The tract's response to a unit flow impulse at a closed glottis, as
+    /// flow at the lips and nostrils, one value per tick (see
+    /// [`tick_rate`](Self::tick_rate)). Its spectrum is the vocal tract
+    /// transfer function for the current shape. The voice itself is not
+    /// disturbed.
+    pub fn impulse_response(&self, out: &mut [f32]) {
+        match self.engine {
+            Engine::Classic => {
+                let mut tract = self.tract.clone();
+                tract.reset_waves();
+                for (n, o) in out.iter_mut().enumerate() {
+                    *o = tract.step(if n == 0 { 1.0 } else { 0.0 }, 0.0, 1.0);
+                }
+            }
+            Engine::Physical => {
+                let mut phys = self.phys.clone();
+                phys.reset();
+                for (n, o) in out.iter_mut().enumerate() {
+                    *o = phys.tick(1.0, Drive::Flow(if n == 0 { 1.0 } else { 0.0 }));
+                }
+            }
+        }
+    }
+
     // ----- audio -------------------------------------------------------
 
     /// Output gain (default `1.0`).
@@ -395,10 +509,20 @@ impl Trombone {
             let dt = BLOCK as f32 / self.internal_rate;
             self.glottis.update_block(dt, &self.simplex);
             self.tract.update_block(dt);
+            if self.engine == Engine::Physical {
+                self.phys
+                    .begin_block(&self.tract.diameter, self.tract.velum_openness(), dt);
+                self.source
+                    .begin_block(&self.glottis, self.tract.any_constriction());
+            }
         }
         let lambda1 = self.block_pos as f32 / BLOCK as f32;
         let lambda2 = (self.block_pos as f32 + 0.5) / BLOCK as f32;
         self.block_pos = (self.block_pos + 1) % BLOCK;
+
+        if self.engine == Engine::Physical {
+            return self.physical_sample(lambda1, lambda2);
+        }
 
         let glottal = self
             .glottis
@@ -413,6 +537,27 @@ impl Trombone {
             // Never let a NaN circulate in the waveguide.
             self.tract.reset_waves();
             self.glottis.reset();
+            0.0
+        }
+    }
+
+    /// One internal sample of the physical engine: two tract ticks. The
+    /// sound that reaches a listener is the rate of change of the flow
+    /// leaving the mouth and nose.
+    fn physical_sample(&mut self, lambda1: f32, lambda2: f32) -> f32 {
+        let dt = 0.5 / self.internal_rate;
+        let (area, lung) = self.source.tick(lambda1, dt);
+        self.phys.tick(lambda1, Drive::Glottis { area, lung });
+        let (area, lung) = self.source.tick(lambda2, dt);
+        let flow = self.phys.tick(lambda2, Drive::Glottis { area, lung });
+        let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
+        self.phys_flow = flow;
+        if out.is_finite() {
+            out
+        } else {
+            self.phys.reset();
+            self.source.reset();
+            self.phys_flow = 0.0;
             0.0
         }
     }

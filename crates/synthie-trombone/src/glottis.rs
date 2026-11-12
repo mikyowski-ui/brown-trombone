@@ -148,6 +148,16 @@ impl Glottis {
         self.new_frequency
     }
 
+    /// Pitch at the start and end of the current block, Hz.
+    pub(crate) fn block_frequency(&self) -> (f32, f32) {
+        (self.old_frequency, self.new_frequency)
+    }
+
+    /// Tenseness at the start and end of the current block.
+    pub(crate) fn block_tenseness(&self) -> (f32, f32) {
+        (self.old_tenseness, self.new_tenseness)
+    }
+
     /// One glottal sample. `white` is a white noise sample, `lambda` the
     /// position within the current parameter block.
     pub(crate) fn step(&mut self, lambda: f32, white: f32, simplex: &Simplex) -> f32 {

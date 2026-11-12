@@ -1,0 +1,643 @@
+//! The physical engine: the same 44-cell tract as the classic engine, but in
+//! real units (centimetres, grams, seconds; pressure in dyn/cm²) and with
+//! the parts the classic engine scripts replaced by the physics that causes
+//! them.
+//!
+//! The articulation model is shared with the classic engine: this module
+//! only reads cell diameters and turns them into areas. What it adds:
+//!
+//! * [`junction`]: one scattering rule for every joint, with kinetic and
+//!   viscous losses and room for shunts (walls, side branches).
+//! * [`radiation`]: a frequency-dependent load at the lips and nostrils.
+//! * Yielding walls: each cell's wall is a mass on a soft spring. Its mass
+//!   bouncing on the enclosed air gives the closed-tract resonance near
+//!   200 Hz; its softness lets the mouth swell during a voiced stop.
+//! * A subglottal tube fed by lung pressure, joined to the tract through
+//!   the glottis as an ordinary (very narrow, very lossy) joint.
+//!
+//! Everything is parameterised by the tick `dt` and the cell length
+//! `dx = c·dt`, because [`Trombone::set_tract_length`] changes the tick
+//! rate.
+//!
+//! [`Trombone::set_tract_length`]: crate::Trombone::set_tract_length
+
+pub(crate) mod branch;
+pub(crate) mod junction;
+pub(crate) mod radiation;
+pub(crate) mod source;
+
+use crate::math::sqrt;
+use crate::tract::{N, NOSE_LEN, NOSE_START};
+use branch::{Branch, End, Resonator};
+use core::f32::consts::PI;
+use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
+use radiation::Radiation;
+
+/// Density of warm, moist air, g/cm³.
+pub(crate) const RHO: f32 = 1.14e-3;
+/// Speed of sound in the tract, cm/s.
+pub(crate) const C: f32 = 35_000.0;
+/// Characteristic impedance times area.
+pub(crate) const RHO_C: f32 = RHO * C;
+pub(crate) const INV_RHO_C: f32 = 1.0 / RHO_C;
+/// Viscosity of air, dyn·s/cm².
+pub(crate) const MU: f32 = 1.86e-4;
+/// One centimetre of water, dyn/cm².
+pub(crate) const CM_H2O: f32 = 980.665;
+/// Lumen area below which a cell counts as shut, cm².
+pub(crate) const A_MIN: f32 = 1.0e-5;
+
+/// Cross-section scale that reads the articulation model's diameters as
+/// anatomy. Fitted with `examples/tune_physical.rs`: at 1.6 every vowel
+/// reaches its Peterson & Barney F1 and F2 within 2 %, and the tract holds
+/// about as much air as measured ones do.
+pub(crate) const AREA_SCALE: f32 = 1.6;
+
+/// Boundary-layer (viscous and thermal) attenuation per centimetre for a
+/// tube of 1 cm radius, evaluated at 1.5 kHz; it scales with 1/radius.
+const WALL_FRICTION: f32 = 1.17e-3;
+
+/// Wall tissue per unit area, from in-vivo measurements on seven men with
+/// the glottis closed (Hanna, Smith & Wolfe 2016, JASA 139, Table III):
+/// 0.17 kg of moving tissue and 4.3 kN/m of stiffness over 110 cm² of
+/// wall, and the loss they found at the 212 Hz wall resonance. Mass g/cm²,
+/// resistance dyn·s/cm³, stiffness dyn/cm³. The tissue's own resonance is
+/// then 25 Hz and its yield about 2.8 cm³ per cmH2O, as measured.
+const WALL_MASS: f32 = 1.55;
+const WALL_RESISTANCE: f32 = 950.0;
+const WALL_STIFFNESS: f32 = 3.9e4;
+
+/// Seconds over which displaced-air flow is smoothed (articulators are
+/// updated in blocks; their velocity must not step).
+const DISPLACEMENT_SMOOTHING: f32 = 0.004;
+
+/// Cells in the subglottal tube (trachea), lungs at `0`.
+pub(crate) const NS: usize = 33;
+/// Tracheal area, cm², at the native tract length.
+const TRACHEA_AREA: f32 = 2.5;
+/// Lung-end resistance relative to the tracheal impedance.
+const LUNG_KAPPA: f32 = 0.15;
+/// Wave loss per subglottal cell.
+const TRACHEA_LOSS: f32 = 0.9985;
+
+/// Kinetic pressure coefficient of the glottal jet (no pressure recovery).
+const GLOTTAL_KT: f32 = 1.1;
+/// Fold length and thickness for the viscous term, cm, native size.
+const FOLD_LENGTH: f32 = 1.4;
+const FOLD_THICKNESS: f32 = 0.3;
+
+/// Loss multiplier for the nasal passages (large wetted surface).
+const NASAL_LOSS: f32 = 3.0;
+/// Velopharyngeal port fully open, cm² (both sides together).
+const VELAR_PORT: f32 = 0.8;
+/// One nasal passage, cm², from the port (cell 0, set by the velum) to the
+/// nostril: half the nasopharynx, the main cavity, the narrow nasal valve
+/// and the nostril. Rounded from MRI area functions (Dang, Honda & Suzuki
+/// 1994).
+const NASAL_PASSAGE: [f32; NOSE_LEN] = [
+    0.0, 1.0, 1.2, 1.4, 1.5, 1.6, 1.6, 1.7, 1.8, 1.9, 2.0, 2.0, 2.0, 2.0, 1.9, 1.8, 1.8, 1.7, 1.6,
+    1.5, 1.4, 1.2, 0.9, 0.65, 0.5, 0.5, 0.6, 0.7,
+];
+/// The two sides are never alike (septum, nasal cycle): area factors and
+/// lengths in cells.
+const NASAL_SIDES: [(f32, usize); 2] = [(1.15, NOSE_LEN), (0.85, NOSE_LEN - 1)];
+/// Maxillary sinus on each side: volume cm³, ostium area cm², ostium
+/// length cm, quality factor, cell where it opens.
+const SINUS: [(f32, f32, f32, f32, usize); 2] =
+    [(15.0, 0.12, 0.6, 6.0, 12), (18.0, 0.10, 0.6, 6.0, 11)];
+
+/// Cells in a piriform sinus branch.
+pub(crate) const PIRIFORM_LEN: usize = 6;
+/// Main-tube joint where the piriform sinuses open: just above the
+/// laryngeal tube.
+pub(crate) const PIRIFORM_AT: usize = 8;
+/// The two piriform sinuses, cm², mouth to blind end: about 2 cm deep and
+/// 2.5 cm³ together, the left shorter (Dang & Honda 1997). A zero
+/// in the last slot ends the shorter one early.
+const PIRIFORM: [[f32; PIRIFORM_LEN]; 2] = [
+    [0.7, 0.7, 0.65, 0.55, 0.45, 0.0],
+    [0.7, 0.7, 0.7, 0.65, 0.55, 0.45],
+];
+
+/// Attenuation of a wave crossing one cell.
+#[inline]
+pub(crate) fn cell_loss(area: f32, dx: f32, scale: f32) -> f32 {
+    if area < A_MIN {
+        return 0.9;
+    }
+    let radius = sqrt(area / PI);
+    (1.0 - scale * WALL_FRICTION * dx / radius).clamp(0.5, 1.0)
+}
+
+/// Poiseuille resistance of one cell; only matters when nearly shut.
+#[inline]
+pub(crate) fn viscous_resistance(inv_area: f32, dx: f32) -> f32 {
+    8.0 * PI * MU * dx * inv_area * inv_area
+}
+
+/// What excites the tract at its lower end.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Drive {
+    /// An ideal flow source at a closed glottis (for measuring the tract).
+    Flow(f32),
+    /// Lung pressure behind a glottis of the given area.
+    Glottis {
+        /// Glottal area, cm².
+        area: f32,
+        /// Lung pressure, dyn/cm².
+        lung: f32,
+    },
+}
+
+/// Readings from the last tick, for tests and measurements.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Gauge {
+    /// Flow through the glottis, cm³/s.
+    pub u_glottis: f32,
+    /// Pressure just below the glottis, dyn/cm².
+    pub p_sub: f32,
+    /// Pressure just above the glottis.
+    pub p_supra: f32,
+    /// Flow out of the lips.
+    pub u_lips: f32,
+    /// Flow out of the nose.
+    pub u_nose: f32,
+}
+
+/// The physical tract.
+#[derive(Clone, Debug)]
+pub(crate) struct Phys {
+    dt: f32,
+    dx: f32,
+    /// Tract length relative to native; cross-sections scale with it too.
+    len: f32,
+    area_scale: f32,
+    lossy: bool,
+    walls: bool,
+    primed: bool,
+
+    r: [f32; N],
+    l: [f32; N],
+    a0: [f32; N],
+    a1: [f32; N],
+    att: [f32; N],
+    visc: f32,
+
+    wall_s: [f32; N],
+    wall_v: [f32; N],
+    wall_y: [f32; N],
+    wall_cv: f32,
+    wall_cg: f32,
+    wall_ck: f32,
+    adot: [f32; N],
+    adot_target: [f32; N],
+    adot_smooth: f32,
+
+    sub_r: [f32; NS],
+    sub_l: [f32; NS],
+    sub_y: [f32; NS],
+    sub_inv: [f32; NS],
+    glottal_visc: f32,
+
+    nose: [Branch<NOSE_LEN>; 2],
+    piriform: [Branch<PIRIFORM_LEN>; 2],
+    side_cavities: bool,
+    lips: Radiation,
+
+    pub(crate) gauge: Gauge,
+}
+
+impl Phys {
+    pub(crate) fn new() -> Self {
+        let mut p = Self {
+            dt: 0.0,
+            dx: 0.0,
+            len: 1.0,
+            area_scale: AREA_SCALE,
+            lossy: true,
+            walls: true,
+            primed: false,
+            r: [0.0; N],
+            l: [0.0; N],
+            a0: [0.0; N],
+            a1: [0.0; N],
+            att: [1.0; N],
+            visc: 0.0,
+            wall_s: [0.0; N],
+            wall_v: [0.0; N],
+            wall_y: [0.0; N],
+            wall_cv: 1.0,
+            wall_cg: 0.0,
+            wall_ck: 0.0,
+            adot: [0.0; N],
+            adot_target: [0.0; N],
+            adot_smooth: 0.0,
+            sub_r: [0.0; NS],
+            sub_l: [0.0; NS],
+            sub_y: [0.0; NS],
+            sub_inv: [0.0; NS],
+            glottal_visc: 0.0,
+            nose: [Branch::new(End::Open), Branch::new(End::Open)],
+            piriform: [Branch::new(End::Closed), Branch::new(End::Closed)],
+            side_cavities: true,
+            lips: Radiation::default(),
+            gauge: Gauge::default(),
+        };
+        p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
+        p
+    }
+
+    /// Set the tick length and the tract length scale it corresponds to.
+    pub(crate) fn set_rate(&mut self, dt: f32, len: f32) {
+        self.dt = dt;
+        self.dx = C * dt;
+        self.len = len;
+        self.visc = 8.0 * PI * MU * self.dx;
+
+        let damp = 1.0 / (1.0 + dt * WALL_RESISTANCE / WALL_MASS);
+        self.wall_cv = damp;
+        self.wall_cg = damp * dt / WALL_MASS;
+        self.wall_ck = dt * WALL_STIFFNESS / WALL_MASS;
+        self.adot_smooth = (dt / DISPLACEMENT_SMOOTHING).min(1.0);
+
+        // Trachea: uniform, narrowing over the last centimetre to the folds.
+        let scale = len * len;
+        for k in 0..NS {
+            let taper = match NS - 1 - k {
+                0 => 0.36,
+                1 => 0.56,
+                2 => 0.8,
+                _ => 1.0,
+            };
+            let a = TRACHEA_AREA * taper * scale;
+            self.sub_y[k] = a * INV_RHO_C;
+            self.sub_inv[k] = 1.0 / a;
+        }
+        let fl = FOLD_LENGTH * len;
+        self.glottal_visc = 12.0 * MU * fl * fl * FOLD_THICKNESS * len;
+
+        self.configure_branches();
+        // Areas depend on the scale: rebuild from the next block.
+        self.primed = false;
+    }
+
+    /// Global cross-section scale (fitted once against vowel formants).
+    pub(crate) fn set_area_scale(&mut self, scale: f32) {
+        self.area_scale = scale;
+        self.primed = false;
+    }
+
+    pub(crate) fn area_scale(&self) -> f32 {
+        self.area_scale
+    }
+
+    /// Side cavities are anatomy in real centimetres: they follow the
+    /// speaker's size, not the articulation model's units.
+    fn configure_branches(&mut self) {
+        let size = self.len * self.len;
+        for (side, &(factor, cells)) in NASAL_SIDES.iter().enumerate() {
+            let mut areas = [0.0f32; NOSE_LEN];
+            for (a, &shape) in areas.iter_mut().zip(&NASAL_PASSAGE) {
+                *a = shape * factor * size;
+            }
+            let mut nose = Branch::new(End::Open);
+            nose.configure(&areas[..cells], NASAL_LOSS, self.dx);
+            let (volume, area, length, q, at) = SINUS[side];
+            nose.set_sinus(
+                at,
+                Resonator::new(
+                    volume * size * self.len,
+                    area * size,
+                    length * self.len,
+                    q,
+                    self.dt,
+                ),
+            );
+            self.nose[side] = nose;
+        }
+        for (side, shape) in PIRIFORM.iter().enumerate() {
+            let cells = shape.iter().take_while(|&&a| a > 0.0).count();
+            let mut areas = [0.0f32; PIRIFORM_LEN];
+            for (a, &s) in areas.iter_mut().zip(shape) {
+                *a = s * size;
+            }
+            let mut pocket = Branch::new(End::Closed);
+            pocket.configure(&areas[..cells], 1.0, self.dx);
+            self.piriform[side] = pocket;
+        }
+    }
+
+    /// Switch losses and walls off, for checks against lossless theory.
+    #[cfg(test)]
+    pub(crate) fn set_ideal(&mut self, ideal: bool) {
+        self.lossy = !ideal;
+        self.walls = !ideal;
+        self.side_cavities = !ideal;
+    }
+
+    /// Switch the piriform sinuses on or off (to measure what they do).
+    #[cfg(test)]
+    pub(crate) fn set_side_cavities(&mut self, on: bool) {
+        self.side_cavities = on;
+    }
+
+    /// Cross-section, cm², of a cell with the articulation model's diameter.
+    #[inline]
+    fn area_of(&self, diameter: f32) -> f32 {
+        if diameter <= 0.0 {
+            return 0.0;
+        }
+        let d = diameter * self.len;
+        self.area_scale * 0.25 * PI * d * d
+    }
+
+    /// Silence everything; the shape is kept.
+    pub(crate) fn reset(&mut self) {
+        self.r = [0.0; N];
+        self.l = [0.0; N];
+        self.wall_v = [0.0; N];
+        self.wall_y = [0.0; N];
+        self.adot = [0.0; N];
+        self.sub_r = [0.0; NS];
+        self.sub_l = [0.0; NS];
+        for b in &mut self.nose {
+            b.reset();
+        }
+        for b in &mut self.piriform {
+            b.reset();
+        }
+        self.lips.reset();
+        self.gauge = Gauge::default();
+    }
+
+    /// Take the articulation model's shape for the coming block. `velum` is
+    /// how far the velar port is open (`0‥1`), `block_dt` the block length.
+    pub(crate) fn begin_block(&mut self, diameter: &[f32; N], velum: f32, block_dt: f32) {
+        self.a0 = self.a1;
+        for (i, &d) in diameter.iter().enumerate() {
+            self.a1[i] = self.area_of(d);
+        }
+        // A velum resting on the back wall is shut, not a pinhole.
+        let open = if velum > 0.01 { velum.min(1.0) } else { 0.0 };
+        let port = 0.5 * VELAR_PORT * self.len * self.len * open;
+        for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
+            nose.set_port(port * factor);
+        }
+        if !self.primed {
+            self.a0 = self.a1;
+            for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
+                nose.set_port(port * factor);
+            }
+            self.primed = true;
+        }
+        self.refresh(block_dt);
+    }
+
+    /// Jump straight to a shape, with no motion (for measurements).
+    pub(crate) fn snap(&mut self, diameter: &[f32; N], velum: f32) {
+        self.primed = false;
+        self.begin_block(diameter, velum, 1.0);
+        self.adot = [0.0; N];
+    }
+
+    fn refresh(&mut self, block_dt: f32) {
+        for i in 0..N {
+            let a = self.a1[i];
+            self.att[i] = if self.lossy {
+                cell_loss(a, self.dx, 1.0)
+            } else {
+                1.0
+            };
+            self.wall_s[i] = if self.walls && a >= A_MIN {
+                2.0 * sqrt(PI * a) * self.dx
+            } else {
+                0.0
+            };
+            self.adot_target[i] = if self.walls {
+                (a - self.a0[i]) / block_dt
+            } else {
+                0.0
+            };
+        }
+    }
+
+    /// Pressure in cell `i`, dyn/cm².
+    #[cfg(test)]
+    pub(crate) fn pressure(&self, i: usize) -> f32 {
+        self.r[i] + self.l[i]
+    }
+
+    /// Acoustic energy stored in the main tube (arbitrary units).
+    #[cfg(test)]
+    pub(crate) fn energy(&self, lambda: f32) -> f32 {
+        (0..N)
+            .map(|i| {
+                let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
+                a * (self.r[i] * self.r[i] + self.l[i] * self.l[i])
+            })
+            .sum()
+    }
+
+    /// The wall of cell `i` as a shunt on the node at its right end, plus
+    /// the air the moving wall displaces.
+    #[inline]
+    fn wall_shunt(&self, i: usize) -> Shunt {
+        let s = self.wall_s[i];
+        if s == 0.0 {
+            return Shunt::NONE;
+        }
+        let rest = self.wall_cv * (self.wall_v[i] - self.wall_ck * self.wall_y[i]);
+        Shunt {
+            g: s * self.wall_cg,
+            h: s * rest + self.dx * self.adot[i],
+        }
+    }
+
+    #[inline]
+    fn wall_commit(&mut self, i: usize, p: f32) {
+        if self.wall_s[i] == 0.0 {
+            // A shut cell's wall just settles.
+            self.wall_v[i] *= 0.999;
+            return;
+        }
+        let v = self.wall_cv * (self.wall_v[i] - self.wall_ck * self.wall_y[i]) + self.wall_cg * p;
+        self.wall_v[i] = v;
+        self.wall_y[i] += self.dt * v;
+    }
+
+    /// Advance one tick. `lambda` is the position within the current block.
+    /// Returns the flow radiated from lips and nose, cm³/s.
+    #[allow(clippy::many_single_char_names)]
+    pub(crate) fn tick(&mut self, lambda: f32, drive: Drive) -> f32 {
+        let mut y = [0.0f32; N];
+        let mut inv = [0.0f32; N];
+        for i in 0..N {
+            let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
+            y[i] = a * INV_RHO_C;
+            inv[i] = 1.0 / a.max(A_MIN);
+            self.adot[i] += (self.adot_target[i] - self.adot[i]) * self.adot_smooth;
+        }
+        let mut nr = [0.0f32; N];
+        let mut nl = [0.0f32; N];
+
+        match drive {
+            Drive::Flow(u) => {
+                nr[0] = self.l[0] + if y[0] >= Y_MIN { u / y[0] } else { 0.0 };
+                self.gauge.u_glottis = u;
+            }
+            Drive::Glottis { area, lung } => {
+                nr[0] = self.below_glottis(area, lung, y[0]);
+            }
+        }
+
+        let dt = self.dt;
+        let mut u_nose = 0.0;
+        for j in 1..N {
+            let i = j - 1;
+            let mut shunt = self.wall_shunt(i);
+            let nose_here = j == NOSE_START;
+            if nose_here {
+                for b in &self.nose {
+                    let s = b.shunt(lambda);
+                    shunt.add(s.g, s.h);
+                }
+            }
+            let piriform_here = j == PIRIFORM_AT && self.side_cavities;
+            if piriform_here {
+                for b in &self.piriform {
+                    let s = b.shunt(lambda);
+                    shunt.add(s.g, s.h);
+                }
+            }
+            let (k_fwd, k_rev) = expansion_loss(inv[i], inv[j]);
+            let s = solve(
+                &Joint {
+                    y1: y[i],
+                    y2: y[j],
+                    shunt,
+                    k_fwd,
+                    k_rev,
+                    r: self.visc * inv[j] * inv[j],
+                    pn: 0.0,
+                    sealed: false,
+                },
+                self.r[i],
+                self.l[j],
+            );
+            nl[i] = s.out_left;
+            nr[j] = s.out_right;
+            self.wall_commit(i, s.p1);
+            if nose_here {
+                for b in &mut self.nose {
+                    u_nose += b.tick(lambda, s.p1, dt);
+                }
+            }
+            if piriform_here {
+                for b in &mut self.piriform {
+                    b.tick(lambda, s.p1, dt);
+                }
+            }
+        }
+
+        // Lips.
+        let i = N - 1;
+        let shunt = self.wall_shunt(i);
+        let lip_area = y[i] * RHO_C;
+        let mut u_lips = 0.0;
+        let mut joint = Joint {
+            y1: y[i],
+            y2: 0.0,
+            shunt,
+            k_fwd: 0.0,
+            k_rev: 0.0,
+            r: 0.0,
+            pn: 0.0,
+            sealed: false,
+        };
+        if let Some(load) = self.lips.load(lip_area, dt) {
+            joint.y2 = load.y;
+            joint.k_fwd = load.k_out;
+            let s = solve(&joint, self.r[i], load.b);
+            nl[i] = s.out_left;
+            self.lips.commit(load.b + s.out_right, dt);
+            self.wall_commit(i, s.p1);
+            u_lips = s.u;
+        } else {
+            let s = solve(&joint, self.r[i], 0.0);
+            nl[i] = s.out_left;
+            self.wall_commit(i, s.p1);
+        }
+
+        for i in 0..N {
+            self.r[i] = nr[i] * self.att[i];
+            self.l[i] = nl[i] * self.att[i];
+        }
+        self.gauge.u_lips = u_lips;
+        self.gauge.u_nose = u_nose;
+        u_lips + u_nose
+    }
+
+    /// The lungs, trachea and glottis. Returns the wave sent up into the
+    /// first tract cell (admittance `y0`).
+    #[inline]
+    #[allow(clippy::many_single_char_names)]
+    fn below_glottis(&mut self, area: f32, lung: f32, y0: f32) -> f32 {
+        let mut nsr = [0.0f32; NS];
+        let mut nsl = [0.0f32; NS];
+
+        // Lungs: a pressure reservoir behind a resistance.
+        nsr[0] = (lung - (1.0 - LUNG_KAPPA) * self.sub_l[0]) / (1.0 + LUNG_KAPPA);
+
+        for k in 1..NS {
+            let (k_fwd, k_rev) = expansion_loss(self.sub_inv[k - 1], self.sub_inv[k]);
+            let s = solve(
+                &Joint {
+                    y1: self.sub_y[k - 1],
+                    y2: self.sub_y[k],
+                    shunt: Shunt::NONE,
+                    k_fwd,
+                    k_rev,
+                    r: 0.0,
+                    pn: 0.0,
+                    sealed: false,
+                },
+                self.sub_r[k - 1],
+                self.sub_l[k],
+            );
+            nsl[k - 1] = s.out_left;
+            nsr[k] = s.out_right;
+        }
+
+        // The glottis: the same joint, with a throat.
+        let sealed = area < A_MIN;
+        let inv_g = 1.0 / area.max(A_MIN);
+        let k = 0.5 * RHO * GLOTTAL_KT * inv_g * inv_g;
+        let s = solve(
+            &Joint {
+                y1: self.sub_y[NS - 1],
+                y2: y0,
+                shunt: Shunt::NONE,
+                k_fwd: k,
+                k_rev: k,
+                r: self.glottal_visc * inv_g * inv_g * inv_g,
+                pn: 0.0,
+                sealed,
+            },
+            self.sub_r[NS - 1],
+            self.l[0],
+        );
+        nsl[NS - 1] = s.out_left;
+        self.gauge.u_glottis = s.u;
+        self.gauge.p_sub = s.p1;
+        self.gauge.p_supra = self.l[0] + s.out_right;
+
+        for k in 0..NS {
+            self.sub_r[k] = nsr[k] * TRACHEA_LOSS;
+            self.sub_l[k] = nsl[k] * TRACHEA_LOSS;
+        }
+        s.out_right
+    }
+}
+
+#[cfg(test)]
+mod tests;

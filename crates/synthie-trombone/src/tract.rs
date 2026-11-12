@@ -6,7 +6,7 @@
 //! Everything here is fixed-size: no allocation, ever.
 
 use crate::INTERNAL_RATE;
-use crate::math::{cos, lerp, move_towards, powf};
+use crate::math::{cos, exp, lerp, move_towards, powf};
 use core::f32::consts::PI;
 
 /// Cells in the oral tract, glottis (0) to lips (`N - 1`).
@@ -40,6 +40,21 @@ const VELUM_OPEN: f32 = 0.4;
 const FRICATIVE_ATTACK: f32 = 0.1;
 const MAX_TRANSIENTS: usize = 8;
 const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
+/// Natural frequency, rad/s, of a damped articulator at the original's
+/// movement speed.
+const DAMPED_RATE: f32 = 40.0;
+/// How far past contact a closing articulator aims (diameter units).
+const CLOSURE_OVERSHOOT: f32 = 0.3;
+
+/// How cells move towards their targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Dynamics {
+    /// The original's constant-speed ramps.
+    Linear,
+    /// Critically damped springs: articulators accelerate, coast and settle
+    /// like tissue with inertia. Closures aim past contact and stop at it.
+    Damped,
+}
 
 /// A narrowing of the tract made by the tongue tip, the lips, or the back of
 /// the tongue, as a finger on the original's tract diagram.
@@ -111,6 +126,8 @@ pub(crate) struct Tract {
     pub(crate) tongue_diameter: f32,
     pub(crate) velum_target: f32,
     pub(crate) movement_speed: f32,
+    pub(crate) dynamics: Dynamics,
+    velocity: [f32; N],
     slots: [Option<Slot>; MAX_CONSTRICTIONS],
     transients: [Transient; MAX_TRANSIENTS],
     transient_decay: f32,
@@ -148,6 +165,8 @@ impl Tract {
             tongue_diameter: 2.43,
             velum_target: VELUM_CLOSED,
             movement_speed: MOVEMENT_SPEED,
+            dynamics: Dynamics::Linear,
+            velocity: [0.0; N],
             slots: [None; MAX_CONSTRICTIONS],
             transients: [Transient::default(); MAX_TRANSIENTS],
             // Original: strength · 2^(−200·t) over 0.2 s.
@@ -254,6 +273,11 @@ impl Tract {
             .map(|s| s.c)
     }
 
+    /// Whether any constriction is being held.
+    pub(crate) fn any_constriction(&self) -> bool {
+        self.slots.iter().flatten().any(|s| s.alive)
+    }
+
     pub(crate) fn amplitudes(&self) -> &[f32; N] {
         &self.max_amplitude
     }
@@ -301,7 +325,11 @@ impl Tract {
         }
         for s in self.slots.iter().flatten().filter(|s| s.alive) {
             let index = s.c.index;
-            let d = (s.c.diameter - 0.3).max(0.0);
+            let floor = match self.dynamics {
+                Dynamics::Linear => 0.0,
+                Dynamics::Damped => -CLOSURE_OVERSHOOT,
+            };
+            let d = (s.c.diameter - 0.3).max(floor);
             if !(2.0..N as f32).contains(&index) || d >= 3.0 {
                 continue;
             }
@@ -356,6 +384,11 @@ impl Tract {
 
         self.compute_targets();
 
+        if self.dynamics == Dynamics::Damped {
+            self.move_damped(dt);
+            return;
+        }
+
         let amount = dt * self.movement_speed;
         let mut obstruction = None;
         for i in 0..N {
@@ -392,6 +425,50 @@ impl Tract {
             amount * 0.1,
         );
 
+        self.calculate_reflections();
+    }
+
+    /// [`Dynamics::Damped`] articulation update. Each cell is a critically
+    /// damped spring pulled towards its target; the step below is the exact
+    /// solution over `dt`, so it is stable for any block length.
+    #[allow(clippy::cast_precision_loss)]
+    fn move_damped(&mut self, dt: f32) {
+        let base = self.movement_speed * (DAMPED_RATE / MOVEMENT_SPEED);
+        for i in 0..N {
+            // The back of the tract is slower than the tip and lips.
+            let region = if i < NOSE_START {
+                0.6
+            } else if i >= TIP_START {
+                1.0
+            } else {
+                0.6 + 0.4 * (i - NOSE_START) as f32 / (TIP_START - NOSE_START) as f32
+            };
+            let w = base * region;
+            let e0 = self.diameter[i] - self.target[i];
+            let v0 = self.velocity[i];
+            let decay = exp(-w * dt);
+            let c = v0 + w * e0;
+            let mut d = self.target[i] + (e0 + c * dt) * decay;
+            let mut v = (v0 - w * c * dt) * decay;
+            if d <= 0.0 {
+                // Contact: the surfaces meet and stop.
+                d = 0.0;
+                v = 0.0;
+            }
+            self.diameter[i] = d;
+            self.velocity[i] = v;
+            // Targets past contact are only meaningful to the springs.
+            self.target[i] = self.target[i].max(0.0);
+        }
+        self.last_obstruction = None;
+
+        let amount = dt * self.movement_speed;
+        self.nose_diameter[0] = move_towards(
+            self.nose_diameter[0],
+            self.velum_target,
+            amount * 0.25,
+            amount * 0.1,
+        );
         self.calculate_reflections();
     }
 
