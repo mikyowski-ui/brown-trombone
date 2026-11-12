@@ -23,9 +23,12 @@ def test_word_hits():
 
 def test_params_file_matches_brief():
     params = T.load_params(HERE / "params.json")
-    assert len(params) == 30
     assert sum(p["pass"] == "a" for p in params.values()) == 14
     assert sum(p["pass"] == "b" for p in params.values()) == 16
+    # Pass c: how long the physical engine holds its vowels (not tuned by
+    # tune.py).
+    assert sum(p["pass"] == "c" for p in params.values()) == 1
+    assert len(params) == 31
 
 
 def test_space_round_trip_and_penalty():

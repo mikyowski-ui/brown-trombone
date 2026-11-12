@@ -129,10 +129,7 @@ fn row_length(k: usize) -> f32 {
 
 /// The articulation that stands for `key`.
 fn articulation(key: VowelKey) -> Articulation {
-    match key {
-        VowelKey::Vowel(p) | VowelKey::Start(p) => p.articulation(),
-        VowelKey::End(p) => p.glide_end().expect("a diphthong"),
-    }
+    key.articulation().expect("a vowel shape")
 }
 
 /// The five raw numbers of a shape: tongue index, tongue diameter, lips

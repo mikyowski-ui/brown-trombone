@@ -1,0 +1,127 @@
+id	set	text	expected	ortho	meta
+car_held_said_pvt_iy	carrier_heldout	[AY1] [S EH1 D] [P IY1 T] [T AX0 D EY1].	AY S EH D P IY T T AX D EY		target=IY;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_iy	carrier_heldout	[AY1] [S EH1 D] [D IY1 G] [T AX0 D EY1].	AY S EH D D IY G T AX D EY		target=IY;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_iy	carrier_heldout	[AY1] [S EH1 D] [F IY1 N] [T AX0 D EY1].	AY S EH D F IY N T AX D EY		target=IY;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_iy	carrier_heldout	[AY1] [S EH1 D] [T IY1 K] [T AX0 D EY1].	AY S EH D T IY K T AX D EY		target=IY;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ih	carrier_heldout	[AY1] [S EH1 D] [P IH1 T] [T AX0 D EY1].	AY S EH D P IH T T AX D EY		target=IH;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ih	carrier_heldout	[AY1] [S EH1 D] [D IH1 G] [T AX0 D EY1].	AY S EH D D IH G T AX D EY		target=IH;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ih	carrier_heldout	[AY1] [S EH1 D] [F IH1 N] [T AX0 D EY1].	AY S EH D F IH N T AX D EY		target=IH;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ih	carrier_heldout	[AY1] [S EH1 D] [T IH1 K] [T AX0 D EY1].	AY S EH D T IH K T AX D EY		target=IH;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_eh	carrier_heldout	[AY1] [S EH1 D] [P EH1 T] [T AX0 D EY1].	AY S EH D P EH T T AX D EY		target=EH;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_eh	carrier_heldout	[AY1] [S EH1 D] [D EH1 G] [T AX0 D EY1].	AY S EH D D EH G T AX D EY		target=EH;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_eh	carrier_heldout	[AY1] [S EH1 D] [F EH1 N] [T AX0 D EY1].	AY S EH D F EH N T AX D EY		target=EH;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_eh	carrier_heldout	[AY1] [S EH1 D] [T EH1 K] [T AX0 D EY1].	AY S EH D T EH K T AX D EY		target=EH;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ae	carrier_heldout	[AY1] [S EH1 D] [P AE1 T] [T AX0 D EY1].	AY S EH D P AE T T AX D EY		target=AE;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ae	carrier_heldout	[AY1] [S EH1 D] [D AE1 G] [T AX0 D EY1].	AY S EH D D AE G T AX D EY		target=AE;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ae	carrier_heldout	[AY1] [S EH1 D] [F AE1 N] [T AX0 D EY1].	AY S EH D F AE N T AX D EY		target=AE;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ae	carrier_heldout	[AY1] [S EH1 D] [T AE1 K] [T AX0 D EY1].	AY S EH D T AE K T AX D EY		target=AE;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ah	carrier_heldout	[AY1] [S EH1 D] [P AH1 T] [T AX0 D EY1].	AY S EH D P AH T T AX D EY		target=AH;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ah	carrier_heldout	[AY1] [S EH1 D] [D AH1 G] [T AX0 D EY1].	AY S EH D D AH G T AX D EY		target=AH;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ah	carrier_heldout	[AY1] [S EH1 D] [F AH1 N] [T AX0 D EY1].	AY S EH D F AH N T AX D EY		target=AH;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ah	carrier_heldout	[AY1] [S EH1 D] [T AH1 K] [T AX0 D EY1].	AY S EH D T AH K T AX D EY		target=AH;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_aa	carrier_heldout	[AY1] [S EH1 D] [P AA1 T] [T AX0 D EY1].	AY S EH D P AA T T AX D EY		target=AA;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_aa	carrier_heldout	[AY1] [S EH1 D] [D AA1 G] [T AX0 D EY1].	AY S EH D D AA G T AX D EY		target=AA;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_aa	carrier_heldout	[AY1] [S EH1 D] [F AA1 N] [T AX0 D EY1].	AY S EH D F AA N T AX D EY		target=AA;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_aa	carrier_heldout	[AY1] [S EH1 D] [T AA1 K] [T AX0 D EY1].	AY S EH D T AA K T AX D EY		target=AA;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ao	carrier_heldout	[AY1] [S EH1 D] [P AO1 T] [T AX0 D EY1].	AY S EH D P AO T T AX D EY		target=AO;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ao	carrier_heldout	[AY1] [S EH1 D] [D AO1 G] [T AX0 D EY1].	AY S EH D D AO G T AX D EY		target=AO;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ao	carrier_heldout	[AY1] [S EH1 D] [F AO1 N] [T AX0 D EY1].	AY S EH D F AO N T AX D EY		target=AO;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ao	carrier_heldout	[AY1] [S EH1 D] [T AO1 K] [T AX0 D EY1].	AY S EH D T AO K T AX D EY		target=AO;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_uh	carrier_heldout	[AY1] [S EH1 D] [P UH1 T] [T AX0 D EY1].	AY S EH D P UH T T AX D EY		target=UH;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_uh	carrier_heldout	[AY1] [S EH1 D] [D UH1 G] [T AX0 D EY1].	AY S EH D D UH G T AX D EY		target=UH;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_uh	carrier_heldout	[AY1] [S EH1 D] [F UH1 N] [T AX0 D EY1].	AY S EH D F UH N T AX D EY		target=UH;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_uh	carrier_heldout	[AY1] [S EH1 D] [T UH1 K] [T AX0 D EY1].	AY S EH D T UH K T AX D EY		target=UH;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_uw	carrier_heldout	[AY1] [S EH1 D] [P UW1 T] [T AX0 D EY1].	AY S EH D P UW T T AX D EY		target=UW;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_uw	carrier_heldout	[AY1] [S EH1 D] [D UW1 G] [T AX0 D EY1].	AY S EH D D UW G T AX D EY		target=UW;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_uw	carrier_heldout	[AY1] [S EH1 D] [F UW1 N] [T AX0 D EY1].	AY S EH D F UW N T AX D EY		target=UW;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_uw	carrier_heldout	[AY1] [S EH1 D] [T UW1 K] [T AX0 D EY1].	AY S EH D T UW K T AX D EY		target=UW;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_er	carrier_heldout	[AY1] [S EH1 D] [P ER1 T] [T AX0 D EY1].	AY S EH D P ER T T AX D EY		target=ER;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_er	carrier_heldout	[AY1] [S EH1 D] [D ER1 G] [T AX0 D EY1].	AY S EH D D ER G T AX D EY		target=ER;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_er	carrier_heldout	[AY1] [S EH1 D] [F ER1 N] [T AX0 D EY1].	AY S EH D F ER N T AX D EY		target=ER;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_er	carrier_heldout	[AY1] [S EH1 D] [T ER1 K] [T AX0 D EY1].	AY S EH D T ER K T AX D EY		target=ER;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ey	carrier_heldout	[AY1] [S EH1 D] [P EY1 T] [T AX0 D EY1].	AY S EH D P EY T T AX D EY		target=EY;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ey	carrier_heldout	[AY1] [S EH1 D] [D EY1 G] [T AX0 D EY1].	AY S EH D D EY G T AX D EY		target=EY;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ey	carrier_heldout	[AY1] [S EH1 D] [F EY1 N] [T AX0 D EY1].	AY S EH D F EY N T AX D EY		target=EY;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ey	carrier_heldout	[AY1] [S EH1 D] [T EY1 K] [T AX0 D EY1].	AY S EH D T EY K T AX D EY		target=EY;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ay	carrier_heldout	[AY1] [S EH1 D] [P AY1 T] [T AX0 D EY1].	AY S EH D P AY T T AX D EY		target=AY;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ay	carrier_heldout	[AY1] [S EH1 D] [D AY1 G] [T AX0 D EY1].	AY S EH D D AY G T AX D EY		target=AY;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ay	carrier_heldout	[AY1] [S EH1 D] [F AY1 N] [T AX0 D EY1].	AY S EH D F AY N T AX D EY		target=AY;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ay	carrier_heldout	[AY1] [S EH1 D] [T AY1 K] [T AX0 D EY1].	AY S EH D T AY K T AX D EY		target=AY;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_ow	carrier_heldout	[AY1] [S EH1 D] [P OW1 T] [T AX0 D EY1].	AY S EH D P OW T T AX D EY		target=OW;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_ow	carrier_heldout	[AY1] [S EH1 D] [D OW1 G] [T AX0 D EY1].	AY S EH D D OW G T AX D EY		target=OW;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_ow	carrier_heldout	[AY1] [S EH1 D] [F OW1 N] [T AX0 D EY1].	AY S EH D F OW N T AX D EY		target=OW;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_ow	carrier_heldout	[AY1] [S EH1 D] [T OW1 K] [T AX0 D EY1].	AY S EH D T OW K T AX D EY		target=OW;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_aw	carrier_heldout	[AY1] [S EH1 D] [P AW1 T] [T AX0 D EY1].	AY S EH D P AW T T AX D EY		target=AW;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_aw	carrier_heldout	[AY1] [S EH1 D] [D AW1 G] [T AX0 D EY1].	AY S EH D D AW G T AX D EY		target=AW;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_aw	carrier_heldout	[AY1] [S EH1 D] [F AW1 N] [T AX0 D EY1].	AY S EH D F AW N T AX D EY		target=AW;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_aw	carrier_heldout	[AY1] [S EH1 D] [T AW1 K] [T AX0 D EY1].	AY S EH D T AW K T AX D EY		target=AW;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_pvt_oy	carrier_heldout	[AY1] [S EH1 D] [P OY1 T] [T AX0 D EY1].	AY S EH D P OY T T AX D EY		target=OY;slot=5;frame=pvt;carrier=said;lex=carrier
+car_held_said_dvg_oy	carrier_heldout	[AY1] [S EH1 D] [D OY1 G] [T AX0 D EY1].	AY S EH D D OY G T AX D EY		target=OY;slot=5;frame=dvg;carrier=said;lex=carrier
+car_held_said_fvn_oy	carrier_heldout	[AY1] [S EH1 D] [F OY1 N] [T AX0 D EY1].	AY S EH D F OY N T AX D EY		target=OY;slot=5;frame=fvn;carrier=said;lex=carrier
+car_held_said_tvk_oy	carrier_heldout	[AY1] [S EH1 D] [T OY1 K] [T AX0 D EY1].	AY S EH D T OY K T AX D EY		target=OY;slot=5;frame=tvk;carrier=said;lex=carrier
+car_held_said_about_ax	carrier_heldout	[AY1] [S EH1 D] [AX B AW1 T] [T AX0 D EY1].	AY S EH D AX B AW T T AX D EY		target=AX;slot=4;frame=about;carrier=said;lex=carrier
+car_held_said_ago_ax	carrier_heldout	[AY1] [S EH1 D] [AX G OW1] [T AX0 D EY1].	AY S EH D AX G OW T AX D EY		target=AX;slot=4;frame=ago;carrier=said;lex=carrier
+car_held_said_salad_ax	carrier_heldout	[AY1] [S EH1 D] [S AE1 L AX D] [T AX0 D EY1].	AY S EH D S AE L AX D T AX D EY		target=AX;slot=7;frame=salad;carrier=said;lex=carrier
+car_held_write_pvt_iy	carrier_heldout	[R AY1 T] [P IY1 T] [W AH1 N S].	R AY T P IY T W AH N S		target=IY;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_iy	carrier_heldout	[R AY1 T] [D IY1 G] [W AH1 N S].	R AY T D IY G W AH N S		target=IY;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_iy	carrier_heldout	[R AY1 T] [F IY1 N] [W AH1 N S].	R AY T F IY N W AH N S		target=IY;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_iy	carrier_heldout	[R AY1 T] [T IY1 K] [W AH1 N S].	R AY T T IY K W AH N S		target=IY;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ih	carrier_heldout	[R AY1 T] [P IH1 T] [W AH1 N S].	R AY T P IH T W AH N S		target=IH;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ih	carrier_heldout	[R AY1 T] [D IH1 G] [W AH1 N S].	R AY T D IH G W AH N S		target=IH;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ih	carrier_heldout	[R AY1 T] [F IH1 N] [W AH1 N S].	R AY T F IH N W AH N S		target=IH;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ih	carrier_heldout	[R AY1 T] [T IH1 K] [W AH1 N S].	R AY T T IH K W AH N S		target=IH;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_eh	carrier_heldout	[R AY1 T] [P EH1 T] [W AH1 N S].	R AY T P EH T W AH N S		target=EH;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_eh	carrier_heldout	[R AY1 T] [D EH1 G] [W AH1 N S].	R AY T D EH G W AH N S		target=EH;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_eh	carrier_heldout	[R AY1 T] [F EH1 N] [W AH1 N S].	R AY T F EH N W AH N S		target=EH;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_eh	carrier_heldout	[R AY1 T] [T EH1 K] [W AH1 N S].	R AY T T EH K W AH N S		target=EH;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ae	carrier_heldout	[R AY1 T] [P AE1 T] [W AH1 N S].	R AY T P AE T W AH N S		target=AE;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ae	carrier_heldout	[R AY1 T] [D AE1 G] [W AH1 N S].	R AY T D AE G W AH N S		target=AE;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ae	carrier_heldout	[R AY1 T] [F AE1 N] [W AH1 N S].	R AY T F AE N W AH N S		target=AE;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ae	carrier_heldout	[R AY1 T] [T AE1 K] [W AH1 N S].	R AY T T AE K W AH N S		target=AE;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ah	carrier_heldout	[R AY1 T] [P AH1 T] [W AH1 N S].	R AY T P AH T W AH N S		target=AH;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ah	carrier_heldout	[R AY1 T] [D AH1 G] [W AH1 N S].	R AY T D AH G W AH N S		target=AH;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ah	carrier_heldout	[R AY1 T] [F AH1 N] [W AH1 N S].	R AY T F AH N W AH N S		target=AH;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ah	carrier_heldout	[R AY1 T] [T AH1 K] [W AH1 N S].	R AY T T AH K W AH N S		target=AH;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_aa	carrier_heldout	[R AY1 T] [P AA1 T] [W AH1 N S].	R AY T P AA T W AH N S		target=AA;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_aa	carrier_heldout	[R AY1 T] [D AA1 G] [W AH1 N S].	R AY T D AA G W AH N S		target=AA;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_aa	carrier_heldout	[R AY1 T] [F AA1 N] [W AH1 N S].	R AY T F AA N W AH N S		target=AA;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_aa	carrier_heldout	[R AY1 T] [T AA1 K] [W AH1 N S].	R AY T T AA K W AH N S		target=AA;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ao	carrier_heldout	[R AY1 T] [P AO1 T] [W AH1 N S].	R AY T P AO T W AH N S		target=AO;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ao	carrier_heldout	[R AY1 T] [D AO1 G] [W AH1 N S].	R AY T D AO G W AH N S		target=AO;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ao	carrier_heldout	[R AY1 T] [F AO1 N] [W AH1 N S].	R AY T F AO N W AH N S		target=AO;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ao	carrier_heldout	[R AY1 T] [T AO1 K] [W AH1 N S].	R AY T T AO K W AH N S		target=AO;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_uh	carrier_heldout	[R AY1 T] [P UH1 T] [W AH1 N S].	R AY T P UH T W AH N S		target=UH;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_uh	carrier_heldout	[R AY1 T] [D UH1 G] [W AH1 N S].	R AY T D UH G W AH N S		target=UH;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_uh	carrier_heldout	[R AY1 T] [F UH1 N] [W AH1 N S].	R AY T F UH N W AH N S		target=UH;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_uh	carrier_heldout	[R AY1 T] [T UH1 K] [W AH1 N S].	R AY T T UH K W AH N S		target=UH;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_uw	carrier_heldout	[R AY1 T] [P UW1 T] [W AH1 N S].	R AY T P UW T W AH N S		target=UW;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_uw	carrier_heldout	[R AY1 T] [D UW1 G] [W AH1 N S].	R AY T D UW G W AH N S		target=UW;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_uw	carrier_heldout	[R AY1 T] [F UW1 N] [W AH1 N S].	R AY T F UW N W AH N S		target=UW;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_uw	carrier_heldout	[R AY1 T] [T UW1 K] [W AH1 N S].	R AY T T UW K W AH N S		target=UW;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_er	carrier_heldout	[R AY1 T] [P ER1 T] [W AH1 N S].	R AY T P ER T W AH N S		target=ER;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_er	carrier_heldout	[R AY1 T] [D ER1 G] [W AH1 N S].	R AY T D ER G W AH N S		target=ER;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_er	carrier_heldout	[R AY1 T] [F ER1 N] [W AH1 N S].	R AY T F ER N W AH N S		target=ER;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_er	carrier_heldout	[R AY1 T] [T ER1 K] [W AH1 N S].	R AY T T ER K W AH N S		target=ER;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ey	carrier_heldout	[R AY1 T] [P EY1 T] [W AH1 N S].	R AY T P EY T W AH N S		target=EY;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ey	carrier_heldout	[R AY1 T] [D EY1 G] [W AH1 N S].	R AY T D EY G W AH N S		target=EY;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ey	carrier_heldout	[R AY1 T] [F EY1 N] [W AH1 N S].	R AY T F EY N W AH N S		target=EY;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ey	carrier_heldout	[R AY1 T] [T EY1 K] [W AH1 N S].	R AY T T EY K W AH N S		target=EY;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ay	carrier_heldout	[R AY1 T] [P AY1 T] [W AH1 N S].	R AY T P AY T W AH N S		target=AY;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ay	carrier_heldout	[R AY1 T] [D AY1 G] [W AH1 N S].	R AY T D AY G W AH N S		target=AY;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ay	carrier_heldout	[R AY1 T] [F AY1 N] [W AH1 N S].	R AY T F AY N W AH N S		target=AY;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ay	carrier_heldout	[R AY1 T] [T AY1 K] [W AH1 N S].	R AY T T AY K W AH N S		target=AY;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_ow	carrier_heldout	[R AY1 T] [P OW1 T] [W AH1 N S].	R AY T P OW T W AH N S		target=OW;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_ow	carrier_heldout	[R AY1 T] [D OW1 G] [W AH1 N S].	R AY T D OW G W AH N S		target=OW;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_ow	carrier_heldout	[R AY1 T] [F OW1 N] [W AH1 N S].	R AY T F OW N W AH N S		target=OW;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_ow	carrier_heldout	[R AY1 T] [T OW1 K] [W AH1 N S].	R AY T T OW K W AH N S		target=OW;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_aw	carrier_heldout	[R AY1 T] [P AW1 T] [W AH1 N S].	R AY T P AW T W AH N S		target=AW;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_aw	carrier_heldout	[R AY1 T] [D AW1 G] [W AH1 N S].	R AY T D AW G W AH N S		target=AW;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_aw	carrier_heldout	[R AY1 T] [F AW1 N] [W AH1 N S].	R AY T F AW N W AH N S		target=AW;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_aw	carrier_heldout	[R AY1 T] [T AW1 K] [W AH1 N S].	R AY T T AW K W AH N S		target=AW;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_pvt_oy	carrier_heldout	[R AY1 T] [P OY1 T] [W AH1 N S].	R AY T P OY T W AH N S		target=OY;slot=4;frame=pvt;carrier=write;lex=carrier
+car_held_write_dvg_oy	carrier_heldout	[R AY1 T] [D OY1 G] [W AH1 N S].	R AY T D OY G W AH N S		target=OY;slot=4;frame=dvg;carrier=write;lex=carrier
+car_held_write_fvn_oy	carrier_heldout	[R AY1 T] [F OY1 N] [W AH1 N S].	R AY T F OY N W AH N S		target=OY;slot=4;frame=fvn;carrier=write;lex=carrier
+car_held_write_tvk_oy	carrier_heldout	[R AY1 T] [T OY1 K] [W AH1 N S].	R AY T T OY K W AH N S		target=OY;slot=4;frame=tvk;carrier=write;lex=carrier
+car_held_write_about_ax	carrier_heldout	[R AY1 T] [AX B AW1 T] [W AH1 N S].	R AY T AX B AW T W AH N S		target=AX;slot=3;frame=about;carrier=write;lex=carrier
+car_held_write_ago_ax	carrier_heldout	[R AY1 T] [AX G OW1] [W AH1 N S].	R AY T AX G OW W AH N S		target=AX;slot=3;frame=ago;carrier=write;lex=carrier
+car_held_write_salad_ax	carrier_heldout	[R AY1 T] [S AE1 L AX D] [W AH1 N S].	R AY T S AE L AX D W AH N S		target=AX;slot=6;frame=salad;carrier=write;lex=carrier

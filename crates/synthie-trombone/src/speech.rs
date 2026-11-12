@@ -51,7 +51,9 @@ pub struct Prosody {
     /// The sound model the speech is for. The physical engine gets the
     /// laryngeal and wall gestures of [`Gesture`] and the timing that goes
     /// with them (voice onset times, longer voiceless closures, vowels
-    /// clipped before voiceless codas); the classic engine keeps its own.
+    /// clipped before voiceless codas), and each vowel has a length of its
+    /// own and glides as people's do (pass C of the [`Tuning`]); the
+    /// classic engine keeps its own.
     pub engine: Engine,
 }
 
@@ -106,6 +108,12 @@ pub struct Gesture {
     /// Pitch added at the start of the segment, Hz, decaying over the
     /// voice's [`Tuning::kick_time`].
     pub kick: f32,
+    /// For the breath after a voiceless stop's release: how long after the
+    /// mouth actually opens the voice comes back, seconds (a voice onset
+    /// time, less the folds' own few milliseconds). The release is the
+    /// instant the tract stops being shut, however early or late the
+    /// articulators get there.
+    pub hold: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -210,7 +218,23 @@ pub struct Speaker {
     /// The shape of the pause being spoken is still to be sent (physical
     /// engine; see [`PAUSE_HOLD`]).
     pause_pending: bool,
+    /// Seconds since the utterance began.
+    clock: f32,
+    /// The mouth was shut at the last sample (physical engine).
+    was_shut: bool,
+    /// When the voice comes back after a voiceless stop's release, on
+    /// `clock`, while it is still held off.
+    voice_at: Option<f32>,
+    /// Time on `clock` the pitch kick of the segment counts from.
+    kick_from: f32,
+    /// A voiceless stop has begun but the mouth is not shut yet: the voice
+    /// stops when it is, or at this time on `clock` at the latest.
+    devoice_at: Option<f32>,
 }
+
+/// Longest a voiceless stop waits for the mouth to shut before the voice
+/// is let go anyway, seconds.
+const DEVOICE_WAIT: f32 = 0.025;
 
 /// How long a voiced sound before a pause keeps its shape once the voice
 /// has been let go, seconds (physical engine): the voice dies away first and
@@ -242,6 +266,11 @@ impl Speaker {
         self.ahead = false;
         self.larynx_ahead = false;
         self.pause_pending = false;
+        self.clock = 0.0;
+        self.was_shut = false;
+        self.voice_at = None;
+        self.kick_from = 0.0;
+        self.devoice_at = None;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -288,8 +317,9 @@ impl Speaker {
     }
 
     /// Advance one output sample and render it.
+    #[allow(clippy::too_many_lines)] // one sample of every channel's timing
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
-        if let Some(seg) = self.utterance.segments.get(self.index) {
+        if let Some(&seg) = self.utterance.segments.get(self.index) {
             let physical = voice.engine() == Engine::Physical;
             if !self.started {
                 self.started = true;
@@ -304,29 +334,52 @@ impl Speaker {
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
-                voice.set_voiced(seg.voiced);
-                voice.set_tenseness(seg.tenseness);
+                self.kick_from = self.clock;
+                // A voice still held off after a voiceless release waits.
+                let held = self.voice_at.is_some_and(|t| t > self.clock);
+                if !held {
+                    self.voice_at = None;
+                }
+                // Into a voiceless stop the voice goes on until the mouth
+                // shuts (see `time_larynx`).
+                let defer = physical
+                    && !seg.voiced
+                    && matches!(seg.phoneme.manner(), Manner::Stop | Manner::Affricate)
+                    && voice.is_voiced()
+                    && !voice.mouth_shut();
+                self.devoice_at = defer.then_some(self.clock + DEVOICE_WAIT);
+                if !defer {
+                    voice.set_voiced(seg.voiced && !held);
+                    voice.set_tenseness(seg.tenseness);
+                }
                 if voice.engine() == Engine::Physical {
                     let g = &seg.gesture;
-                    voice.set_glottal_spread(g.spread);
+                    if (!held || !seg.voiced) && !defer {
+                        voice.set_glottal_spread(g.spread);
+                    }
                     voice.set_fold_slack(g.slack);
                     voice.set_cavity_expansion(g.expansion);
                 }
             }
             let t = (self.elapsed / seg.duration).min(1.0);
             let mut hz = lerp(seg.pitch.0, seg.pitch.1, t);
-            if seg.gesture.kick.abs() > 0.0 {
-                hz += seg.gesture.kick * exp(-self.elapsed / self.utterance.kick_time);
+            if seg.gesture.kick.abs() > 0.0 && self.clock >= self.kick_from {
+                hz += seg.gesture.kick
+                    * exp(-(self.clock - self.kick_from) / self.utterance.kick_time);
             }
             voice.set_frequency(hz);
+            if physical {
+                self.time_larynx(voice, &seg);
+            }
             self.elapsed += 1.0 / voice.sample_rate();
+            self.clock += 1.0 / voice.sample_rate();
             if self.pause_pending && self.elapsed >= PAUSE_HOLD.min(0.8 * seg.duration) {
                 voice.articulate(&seg.articulation);
                 self.pause_pending = false;
             }
             if !self.ahead
                 && physical
-                && let Some(next) = self.utterance.segments.get(self.index + 1)
+                && let Some(&next) = self.utterance.segments.get(self.index + 1)
                 && !(seg.voiced && next.phoneme == Phoneme::Sil)
             {
                 let closed = matches!(
@@ -346,15 +399,18 @@ impl Speaker {
                     self.ahead = true;
                 }
             }
-            // Into a voiceless consonant the larynx moves a little ahead
-            // too, so the voice stops as the tract shuts rather than
-            // carrying on into the closure.
+            // Into a voiceless fricative the larynx moves a little ahead
+            // too, so the voice stops as the tract narrows rather than
+            // carrying on into the hiss. Into a voiceless stop it stops as
+            // the mouth shuts (see `time_larynx`): letting go earlier blew
+            // the open glottis's breath through the closing gap, a hiss
+            // before every /t/.
             if !self.larynx_ahead
                 && seg.voiced
                 && physical
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
                 && !next.voiced
-                && is_obstruent(next.phoneme)
+                && next.phoneme.manner() == Manner::Fricative
                 && self.elapsed
                     >= seg.duration - self.utterance.devoicing_lead.min(0.5 * seg.duration)
             {
@@ -376,6 +432,74 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Time the larynx from what the mouth does (physical engine): the
+    /// voice stops the moment a voiceless stop shuts the mouth, and after
+    /// its release it comes back the segment's `hold` after the mouth
+    /// opens. Timed from the segments alone, both drifted with the
+    /// articulators: a slower tongue body or a longer vowel moved the
+    /// closure and the release against the segment boundaries, and with
+    /// them the voice onset time and the voicing left in a closure.
+    fn time_larynx(&mut self, voice: &mut Trombone, seg: &Segment) {
+        let shut = voice.mouth_shut();
+        let next = self.utterance.segments.get(self.index + 1).copied();
+        let closing = !matches!(
+            seg.phoneme.manner(),
+            Manner::Stop | Manner::Affricate | Manner::Nasal
+        );
+        if shut
+            && !self.was_shut
+            && seg.voiced
+            && closing
+            && !self.larynx_ahead
+            && let Some(n) = next.filter(|n| {
+                !n.voiced && matches!(n.phoneme.manner(), Manner::Stop | Manner::Affricate)
+            })
+        {
+            voice.set_voiced(false);
+            voice.set_glottal_spread(n.gesture.spread);
+            self.larynx_ahead = true;
+        }
+        if !shut && self.was_shut && self.voice_at.is_none() && !seg.voiced {
+            // The aspiration after this release: this segment, or the one
+            // after a closure.
+            let hold = if seg.gesture.hold > 0.0 {
+                seg.gesture.hold
+            } else {
+                next.filter(|n| n.phoneme == seg.phoneme)
+                    .map_or(0.0, |n| n.gesture.hold)
+            };
+            if hold > 0.0 {
+                self.voice_at = Some(self.clock + hold);
+            }
+        }
+        if let Some(t) = self.devoice_at
+            && (shut || self.clock >= t)
+        {
+            self.devoice_at = None;
+            voice.set_voiced(false);
+            voice.set_tenseness(seg.tenseness);
+            voice.set_glottal_spread(seg.gesture.spread);
+        }
+        self.was_shut = shut;
+        if let Some(t) = self.voice_at
+            && self.clock >= t
+        {
+            self.voice_at = None;
+            if seg.voiced {
+                voice.set_voiced(true);
+                voice.set_glottal_spread(seg.gesture.spread);
+                self.kick_from = self.clock;
+            } else if seg.gesture.hold > 0.0
+                && let Some(n) = next.filter(|n| n.voiced)
+            {
+                // Released early: the voice comes during the breath.
+                voice.set_tenseness(n.tenseness);
+                voice.set_voiced(true);
+                voice.set_glottal_spread(n.gesture.spread);
+            }
+        }
     }
 
     /// Render a block.
@@ -626,12 +750,54 @@ fn number_words(digits: &str) -> String {
 
 // ===== tokens → timed segments ============================================
 
+// English vowels have lengths of their own. In the hVd words of
+// Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.81 of
+// their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1).
+// Running speech holds these apart less than words said one by one, so the
+// factors here are half-way between 1 and those ratios (the full ratios
+// also shortened the vowels around stops enough to move their bursts and
+// voice onsets past `tests/physical_gates.rs`).
+
+/// Length of the lax vowels /ɪ ɛ ʌ ʊ/ against the others (physical engine).
+const LAX_LENGTH: f32 = 0.905;
+/// Length of the long tense vowels /æ ɑ ɔ ɝ/ against the others (physical
+/// engine).
+const LONG_LENGTH: f32 = 1.085;
+/// How much longer /aɪ aʊ ɔɪ/ are than /eɪ oʊ/ (Peterson & Lehiste 1960),
+/// against `Tuning::diphthong_length` (physical engine).
+const WIDE_DIPHTHONG_LENGTH: f32 = 1.05;
+
+/// Share of a diphthong spent on the vowel it starts from, before it
+/// glides to its end.
+const NUCLEUS: f32 = 0.55;
+
+/// How long vowel or diphthong `p` lasts against others of its kind, on
+/// the physical engine (pass C of the tuning): every vowel is held longer
+/// than on the classic engine (`Tuning::vowel_hold`), lax vowels are
+/// shorter than long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
+fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
+    use Phoneme as P;
+    match p {
+        P::Ih | P::Eh | P::Ah | P::Uh => LAX_LENGTH * timing.vowel_hold,
+        P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
+        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
+        _ => timing.vowel_hold,
+    }
+}
+
 /// Base durations in seconds at rate 1 (`physical`: for the physical
-/// engine, which has a length of its own for /z ʒ/).
+/// engine, which gives each vowel and /z ʒ/ a length of its own).
 fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
+    let own = |d: f32| {
+        if physical {
+            d * own_length(p, timing)
+        } else {
+            d
+        }
+    };
     let d = match p.manner() {
-        Manner::Vowel => timing.vowel_length,
-        Manner::Diphthong => timing.diphthong_length,
+        Manner::Vowel => own(timing.vowel_length),
+        Manner::Diphthong => own(timing.diphthong_length),
         Manner::Stop | Manner::Affricate => timing.stop_length,
         Manner::Nasal => timing.nasal_length,
         Manner::Fricative => {
@@ -654,6 +820,15 @@ fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) ->
     }
 }
 
+/// Which part of a sound a draft is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Part {
+    /// A whole sound, or the first part of a vowel.
+    Head,
+    /// A diphthong's glide to its end.
+    Glide,
+}
+
 #[derive(Clone, Copy)]
 struct Draft {
     phoneme: Phoneme,
@@ -664,6 +839,7 @@ struct Draft {
     /// Relative pitch target at the end of the segment (1.0 = baseline).
     accent: f32,
     vowel: bool,
+    part: Part,
     /// Laryngeal and wall gesture (physical engine).
     gesture: Gesture,
     /// The breath after a voiceless stop's release: takes the shape of
@@ -789,6 +965,12 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             && let Some(v) = drafts[..k].iter().rposition(|d| d.vowel)
         {
             drafts[v].duration *= 1.4;
+            // On the physical engine the whole vowel, not only its end.
+            let mut head = v;
+            while physical && head > 0 && drafts[head].part != Part::Head {
+                head -= 1;
+                drafts[head].duration *= 1.4;
+            }
         }
     }
 
@@ -956,6 +1138,7 @@ fn silence(duration: f32) -> Draft {
         tenseness: None,
         accent: 1.0,
         vowel: false,
+        part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
     }
@@ -983,6 +1166,7 @@ fn expand(
         // Marks stress for `shape_phrase`; replaced by a pitch ratio there.
         accent,
         vowel: is_vowel(phoneme),
+        part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
     };
@@ -1071,9 +1255,11 @@ fn expand(
     match p.manner() {
         Manner::Diphthong => {
             let end = p.glide_end().expect("diphthong");
-            out.push(draft(p, a, dur * 0.55, true));
-            let mut tail = draft(p, end, dur * 0.45, true);
+            let head = NUCLEUS;
+            out.push(draft(p, a, dur * head, true));
+            let mut tail = draft(p, end, dur * (1.0 - head), true);
             tail.accent = 0.0;
+            tail.part = Part::Glide;
             out.push(tail);
         }
         Manner::Stop if a.voiced => {
@@ -1115,6 +1301,7 @@ fn expand(
                 } * if stressed { 1.0 } else { timing.unstressed_vot };
                 let mut asp = with(draft(p, a, hold / rate, false), voiceless);
                 asp.aspiration = true;
+                asp.gesture.hold = hold / rate;
                 out.push(asp);
             }
         }
@@ -1210,6 +1397,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         tenseness: None,
         accent: 0.0,
         vowel: false,
+        part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
     }
@@ -1404,6 +1592,34 @@ mod tests {
         assert!(buf.iter().all(|s| s.is_finite()));
         let energy: f32 = buf.iter().map(|s| s * s).sum();
         assert!(energy > 1.0, "{energy}");
+    }
+
+    #[test]
+    fn physical_vowels_have_lengths_of_their_own() {
+        let length = |engine: Engine, text: &str, p: Phoneme| {
+            let prosody = Prosody {
+                engine,
+                ..Prosody::default()
+            };
+            Utterance::from_text(text, &prosody)
+                .segments()
+                .iter()
+                .filter(|s| s.phoneme == p)
+                .map(|s| s.duration)
+                .sum::<f32>()
+        };
+        // Lax /ɪ/ is shorter than tense /i/ on the physical engine...
+        let (bit, beat) = (
+            length(Engine::Physical, "[S IH1 L] [AX0]", P::Ih),
+            length(Engine::Physical, "[S IY1 L] [AX0]", P::Iy),
+        );
+        assert!(bit < 0.95 * beat, "{bit} {beat}");
+        // ...and the classic engine keeps them alike.
+        let (bit, beat) = (
+            length(Engine::Classic, "[S IH1 L] [AX0]", P::Ih),
+            length(Engine::Classic, "[S IY1 L] [AX0]", P::Iy),
+        );
+        assert!((bit - beat).abs() < 1e-6, "{bit} {beat}");
     }
 
     #[test]

@@ -80,6 +80,9 @@ pub enum Fallback {
 /// displays. All zero while the classic engine is in use.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Gauges {
+    /// The mouth is shut somewhere in front of the pharynx, as the sound
+    /// sees it (it follows the articulators by up to one parameter block).
+    pub mouth_shut: bool,
     /// Air flow through the glottis, cm³/s.
     pub glottal_flow: f32,
     /// Pressure just below the vocal folds, cmH2O.
@@ -139,6 +142,8 @@ pub struct Trombone {
     glottal_area: f32,
     regulated: bool,
     tuning: Tuning,
+    /// Vowel shapes held in place of the built-in ones (physical engine).
+    own_vowels: crate::vowel_size::OwnShapes,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -198,6 +203,7 @@ impl Trombone {
             glottal_area: 0.0,
             regulated: true,
             tuning: Tuning::DEFAULT,
+            own_vowels: crate::vowel_size::OwnShapes::NONE,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -654,7 +660,7 @@ impl Trombone {
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),
             // Physical vowel shapes also follow the speaker's size.
-            Engine::Physical => a.physical(self.tract_length),
+            Engine::Physical => a.physical_in(self.tract_length, &self.own_vowels),
         };
         self.tract.set_narrowing(narrowing);
         if let Some((index, diameter)) = a.tongue {
@@ -688,6 +694,21 @@ impl Trombone {
     /// Move to a phoneme's articulation (see [`articulate`](Self::articulate)).
     pub fn articulate_phoneme(&mut self, p: Phoneme) {
         self.articulate(&p.articulation());
+    }
+
+    /// Shape the vowel `key` as `shape` from now on (physical engine), in
+    /// place of the built-in shape solved for its
+    /// [target](crate::vowel_targets); `None` returns to the built-in one.
+    /// For trying out other vowel targets: solve the shape for the voice's
+    /// size with [`inverse::solve_for`](crate::inverse::solve_for), and
+    /// set it again after [`set_tract_length`](Self::set_tract_length).
+    /// Returns `false` (and changes nothing) for a key with no target.
+    pub fn set_vowel_shape(
+        &mut self,
+        key: crate::vowel_targets::VowelKey,
+        shape: Option<&crate::inverse::Shape>,
+    ) -> bool {
+        self.own_vowels.set(key, shape)
     }
 
     /// Hold a vowel shape of the physical engine, such as one found by
@@ -769,9 +790,19 @@ impl Trombone {
             jet_noise: g.jet / CM_H2O,
             jet_speed: g.jet_speed,
             jet_cell: g.jet_cell,
+            mouth_shut: g.shut,
             gap_nudge: self.tract.nudges().0,
             vowel_relief: self.tract.nudges().1,
         }
+    }
+
+    /// Whether the mouth is shut somewhere in front of the pharynx right now
+    /// (physical engine; see [`Gauges::mouth_shut`]). The speech front end
+    /// times the larynx from it: the voice stops as a voiceless stop shuts
+    /// and comes back a voice onset time after it opens.
+    #[must_use]
+    pub fn mouth_shut(&self) -> bool {
+        self.engine == Engine::Physical && self.phys.gauge.shut
     }
 
     /// Air pressure in tract cell `cell` (`0` at the glottis), cmH2O, in

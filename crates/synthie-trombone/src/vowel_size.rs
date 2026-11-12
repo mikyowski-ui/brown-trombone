@@ -15,8 +15,9 @@
 //! Lips and narrowing are never tighter than [`MIN_LIPS`] and
 //! [`MIN_NARROWING`], so no shape hisses.
 
+use crate::inverse::Shape;
 use crate::tract::{TONGUE_DIAMETER, TONGUE_INDEX};
-use crate::vowel_targets::VowelKey;
+use crate::vowel_targets::{TARGET_COUNT, VowelKey, position};
 
 #[path = "vowel_size_table.rs"]
 mod table;
@@ -33,6 +34,60 @@ pub(crate) const MIN_NARROWING: f32 = 0.7;
 
 /// Table entries are in thousandths.
 const PER_UNIT: f32 = 1000.0;
+
+/// Narrowing of a shape that has none: wide open, half-way along the
+/// tongue.
+const NO_NARROWING: (f32, f32) = (24.0, 3.0);
+
+/// Vowel shapes a voice holds in place of the table's, one per
+/// [target](crate::vowel_targets::TARGETS), `None` where the table's
+/// shape is used (see
+/// [`Trombone::set_vowel_shape`](crate::Trombone::set_vowel_shape)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct OwnShapes([Option<VowelShape>; TARGET_COUNT]);
+
+impl OwnShapes {
+    /// Every shape from the table.
+    pub(crate) const NONE: Self = Self([None; TARGET_COUNT]);
+
+    /// Hold `shape` for `key` (or the table's again, with `None`); `false`
+    /// if `key` has no target.
+    pub(crate) fn set(&mut self, key: VowelKey, shape: Option<&Shape>) -> bool {
+        let Some(k) = position(key) else {
+            return false;
+        };
+        self.0[k] = shape.map(|s| {
+            (
+                (
+                    s.tongue_index
+                        .clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
+                    s.tongue_diameter
+                        .clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
+                ),
+                s.lips.map(|d| d.max(MIN_LIPS)),
+                s.narrowing
+                    .map_or(NO_NARROWING, |(at, d)| (at, d.max(MIN_NARROWING))),
+            )
+        });
+        true
+    }
+
+    /// The shape held for `key`, if one is.
+    fn get(&self, key: VowelKey) -> Option<VowelShape> {
+        position(key).and_then(|k| self.0[k])
+    }
+}
+
+impl Default for OwnShapes {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// [`shape`], unless `own` holds a shape of its own for `key`.
+pub(crate) fn shape_in(key: VowelKey, tract_length: f32, own: &OwnShapes) -> Option<VowelShape> {
+    own.get(key).or_else(|| shape(key, tract_length))
+}
 
 /// The shape of `key` at `tract_length`, or `None` for a key the table
 /// does not know. Lengths outside the table are clamped into it; at

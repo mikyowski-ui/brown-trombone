@@ -16,6 +16,21 @@
 //! profile with `--profile voice.json` (see `VoiceSettings::with_profile`).
 //! `--dump-profile` prints the voice that results; `--dump-parameters`
 //! prints every tunable number with its range.
+//!
+//! A profile may also move the physical engine's vowels, for trying out
+//! other targets without regenerating the vowel table: a `"vowels"` object
+//! of F1, F2 and F3 for an adult man, Hz (see `vowel_targets`), keyed by
+//! the vowel (`"IH"`), a diphthong's start (`"AY<"` or `"AY"`) or end
+//! (`"AY>"`):
+//!
+//! ```json
+//! { "engine": "Physical", "vowels": { "IH": [410, 2050, 2700], "AY>": [400, 2100, 2800] } }
+//! ```
+//!
+//! Their shapes are solved through the babble map (`inverse::solve_for`)
+//! at start-up, scaled to the voice's size, starting from the built-in
+//! shape so that they stay close to it; they land within about 2 % of
+//! the formants asked for.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -27,7 +42,72 @@
 mod wav;
 
 use std::time::Instant;
-use synthie_trombone::{Engine, GlottalSource, Persona, Preset, Talker, normalize};
+use synthie_trombone::vowel_targets::{self, VowelKey};
+use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
+use synthie_trombone::{Trombone, normalize};
+
+/// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`.
+fn vowel_key(name: &str) -> Option<VowelKey> {
+    let (symbol, end) = match name.strip_suffix('>') {
+        Some(s) => (s, true),
+        None => (name.strip_suffix('<').unwrap_or(name), false),
+    };
+    let p = Phoneme::from_symbol(symbol)?;
+    let key = match (p.manner(), end) {
+        (_, true) => VowelKey::End(p),
+        (Manner::Diphthong, false) => VowelKey::Start(p),
+        _ => VowelKey::Vowel(p),
+    };
+    vowel_targets::target(key).map(|_| key)
+}
+
+/// Take the `"vowels"` object out of a profile: `(key, [F1, F2, F3])`.
+fn take_vowels(json: &str) -> (String, Vec<(VowelKey, [f32; 3])>) {
+    let mut value: serde_json::Value =
+        serde_json::from_str(json).unwrap_or_else(|e| panic!("not a profile: {e}"));
+    let Some(vowels) = value.as_object_mut().and_then(|o| o.remove("vowels")) else {
+        return (json.to_string(), Vec::new());
+    };
+    let serde_json::Value::Object(vowels) = vowels else {
+        panic!("\"vowels\" must be an object of [F1, F2, F3]");
+    };
+    let targets = vowels
+        .iter()
+        .map(|(name, f)| {
+            let key = vowel_key(name).unwrap_or_else(|| panic!("no vowel shape {name:?}"));
+            let f: Vec<f32> = f
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_f64().map(|v| v as f32))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let f: [f32; 3] = f
+                .try_into()
+                .unwrap_or_else(|_| panic!("vowels.{name} must be [F1, F2, F3]"));
+            (key, f)
+        })
+        .collect();
+    (value.to_string(), targets)
+}
+
+/// Shape `voice`'s vowels for `targets` (adult man, Hz), at its size.
+fn hold_vowels(voice: &mut Trombone, targets: &[(VowelKey, [f32; 3])]) {
+    let length = voice.tract_length();
+    let scale = vowel_targets::ADULT_MALE_LENGTH / length;
+    for &(key, f) in targets {
+        let near = key.articulation().and_then(|a| a.physical_shape(length));
+        let shape = inverse::solve_for(
+            f[0] * scale,
+            f[1] * scale,
+            Some(f[2] * scale),
+            near.as_ref(),
+            length,
+        );
+        voice.set_vowel_shape(key, Some(&shape));
+    }
+}
 
 #[allow(clippy::too_many_lines)] // one flat argument loop
 fn main() -> std::io::Result<()> {
@@ -105,8 +185,11 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut settings = settings.with_engine(engine).with_persona(&persona);
+    let mut vowels = Vec::new();
     if let Some(file) = profile {
         let json = std::fs::read_to_string(&file)?;
+        let (json, own) = take_vowels(&json);
+        vowels = own;
         settings = settings
             .with_profile(&json)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
@@ -118,6 +201,7 @@ fn main() -> std::io::Result<()> {
 
     let mut talker = Talker::new(SR as f32, settings);
     talker.voice_mut().set_glottal_source(source);
+    hold_vowels(talker.voice_mut(), &vowels);
     let utterance = talker.compile(&text);
     for s in utterance.segments() {
         print!("{} ", s.phoneme);
