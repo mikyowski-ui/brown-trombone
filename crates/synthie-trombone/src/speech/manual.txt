@@ -1,0 +1,155 @@
+# Hand-written dictionary entries, merged into core.dict by examples/lexicon.rs.
+#
+# One word per line, then its ARPAbet phonemes; 1 after the accented vowel.
+# A word with no 1 is an unaccented function word. These entries win over
+# the CMU Pronouncing Dictionary: weak forms of function words, and the
+# words the engine's own examples and tests speak.
+
+# ---- function words (unaccented) ----
+a AX
+an AX N
+the DH AX
+and AE N D
+or AO R
+but B AH T
+of AH V
+to T UW
+in IH N
+on AA N
+at AE T
+for F AO R
+from F R AH M
+with W IH DH
+by B AY
+as AE Z
+is IH Z
+are AA R
+was W AA Z
+were W ER
+be B IY
+it IH T
+its IH T S
+it's IH T S
+i AY
+i'm AY M
+you Y UW
+he HH IY
+she SH IY
+we W IY
+they DH EY
+me M IY
+him HH IH M
+her HH ER
+us AH S
+them DH EH M
+my M AY
+your Y AO R
+you're Y AO R
+his HH IH Z
+our AW R
+their DH EH R
+that DH AE T
+this DH IH S
+than DH AE N
+then DH EH N
+so S OW
+if IH F
+do D UW
+does D AH Z
+has HH AE Z
+have HH AE V
+had HH AE D
+can K AE N
+will W IH L
+
+# ---- common words with fixed forms ----
+too T UW1
+two T UW1
+been B IH1 N
+there DH EH1 R
+they're DH EH1 R
+these DH IY1 Z
+those DH OW1 Z
+though DH OW1
+what W AH1 T
+who HH UW1
+whose HH UW1 Z
+whom HH UW1 M
+where W EH1 R
+why W AY1
+how HH AW1
+done D AH1 N
+don't D OW1 N T
+give G IH1 V
+live L IH1 V
+love L AH1 V
+come K AH1 M
+some S AH1 M
+one W AH1 N
+once W AH1 N S
+said S EH1 D
+says S EH1 Z
+here HH IY1 R
+know N OW1
+through TH R UW1
+thought TH AO1 T
+enough IH N AH1 F
+people P IY1 P AX L
+good G UH1 D
+could K UH1 D
+would W UH1 D
+should SH UH1 D
+no N OW1
+go G OW1
+oh OW1
+yes Y EH1 S
+eye AY1
+only OW1 N L IY
+any EH1 N IY
+many M EH1 N IY
+very V EH1 R IY
+every EH1 V R IY
+again AX G EH1 N
+about AX B AW1 T
+hello HH AX L OW1
+world W ER1 L D
+computer K AX M P Y UW1 T ER
+machine M AX SH IY1 N
+music M Y UW1 Z IH K
+voice V OY1 S
+pink P IH1 NG K
+trombone T R AA M B OW1 N
+synthie S IH1 N TH IY
+daisy D EY1 Z IY
+bicycle B AY1 S IH K AX L
+
+# ---- numbers ----
+zero Z IH1 R OW
+three TH R IY1
+four F AO1 R
+five F AY1 V
+six S IH1 K S
+seven S EH1 V AX N
+eight EY1 T
+nine N AY1 N
+ten T EH1 N
+eleven IH L EH1 V AX N
+twelve T W EH1 L V
+thirteen TH ER T IY1 N
+fourteen F AO R T IY1 N
+fifteen F IH F T IY1 N
+sixteen S IH K S T IY1 N
+seventeen S EH V AX N T IY1 N
+eighteen EY T IY1 N
+nineteen N AY N T IY1 N
+twenty T W EH1 N T IY
+thirty TH ER1 T IY
+forty F AO1 R T IY
+fifty F IH1 F T IY
+sixty S IH1 K S T IY
+seventy S EH1 V AX N T IY
+eighty EY1 T IY
+ninety N AY1 N T IY
+hundred HH AH1 N D R AX D
+thousand TH AW1 Z AX N D
+million M IH1 L Y AX N

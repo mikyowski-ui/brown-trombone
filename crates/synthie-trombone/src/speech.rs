@@ -294,16 +294,41 @@ impl Speaker {
 
 // ===== text → tokens ======================================================
 
+mod lexicon;
+mod rules;
+
 /// Convert English text (with optional `[ARPAbet]` spans) to tokens.
+///
+/// Words are looked up in the built-in dictionary, taken apart into known
+/// stems and regular endings (`-s`, `-ed`, `-ing`, `-ly` ...), and spelled
+/// out by English spelling rules otherwise.
 #[must_use]
 pub fn phonemize(text: &str) -> Vec<Token> {
+    phonemize_words(text, &lexicon::builtin)
+}
+
+/// [`phonemize`] with `lexicon` consulted in place of the built-in
+/// dictionary.
+///
+/// `lexicon` maps a lower-case word (apostrophes kept) to ARPAbet with `1`
+/// after the accented vowel, `"K AX N UW1"`; a word with no `1` is spoken
+/// unaccented, like a function word. Words it does not know go through the
+/// same stems, endings and spelling rules as in [`phonemize`]. Useful for a
+/// custom vocabulary, and for checking the spelling rules alone
+/// (`|_| None`).
+#[must_use]
+pub fn phonemize_with<'a>(text: &str, lexicon: &dyn Fn(&str) -> Option<&'a str>) -> Vec<Token> {
+    phonemize_words(text, &|w: &str| lexicon(w).map(lexicon::parse_arpabet))
+}
+
+fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
     let mut out = Vec::new();
     let mut word = String::new();
     let mut chars = text.chars().peekable();
 
     let flush = |word: &mut String, out: &mut Vec<Token>| {
         if !word.is_empty() {
-            push_word(word, out);
+            push_word(word, lex, out);
             word.clear();
         }
     };
@@ -321,8 +346,12 @@ pub fn phonemize(text: &str) -> Vec<Token> {
                 }
                 push_arpabet(&span, &mut out);
             }
-            c if c.is_alphabetic() || c == '\'' => {
-                word.extend(c.to_lowercase());
+            c if c.is_alphabetic() || c == '\'' || c == '’' => {
+                if c == '’' {
+                    word.push('\'');
+                } else {
+                    word.extend(c.to_lowercase());
+                }
             }
             c if c.is_ascii_digit() => {
                 flush(&mut word, &mut out);
@@ -336,7 +365,7 @@ pub fn phonemize(text: &str) -> Vec<Token> {
                     }
                 }
                 for w in number_words(&n).split(' ').filter(|w| !w.is_empty()) {
-                    push_word(w, &mut out);
+                    push_word(w, lex, &mut out);
                 }
             }
             _ => {
@@ -367,13 +396,18 @@ pub fn phonemize(text: &str) -> Vec<Token> {
     out
 }
 
+/// An `[ARPAbet]` span. A `1` after a vowel marks the accent; with no `1`
+/// the first vowel is accented, unless a vowel is marked `0` (`[DH AX0]`),
+/// which keeps the word unaccented.
 fn push_arpabet(span: &str, out: &mut Vec<Token>) {
     let mut any = false;
     let mut stressed_seen = false;
+    let mut unstressed_marked = false;
     for sym in span.split_whitespace() {
         if let Some(p) = Phoneme::from_symbol(sym) {
             let stressed = sym.ends_with('1');
             stressed_seen |= stressed;
+            unstressed_marked |= sym.ends_with('0');
             out.push(Token::Phone {
                 phoneme: p,
                 stressed,
@@ -382,33 +416,24 @@ fn push_arpabet(span: &str, out: &mut Vec<Token>) {
         }
     }
     if any {
-        if !stressed_seen {
+        if !stressed_seen && !unstressed_marked {
             stress_first_vowel(out);
         }
         out.push(Token::WordBreak);
     }
 }
 
-fn push_word(word: &str, out: &mut Vec<Token>) {
+fn push_word(word: &str, lex: lexicon::Lexicon, out: &mut Vec<Token>) {
     let word = word.trim_matches('\'');
     if word.is_empty() {
         return;
     }
-    let start = out.len();
-    let (phones, function_word) = match lookup(word) {
-        Some(p) => (parse_arpabet(p), FUNCTION_WORDS.contains(&word)),
-        None => (letter_to_sound(word), false),
-    };
-    for p in phones {
-        out.push(Token::Phone {
-            phoneme: p,
-            stressed: false,
-        });
+    for (phoneme, stressed) in lexicon::pronounce(word, lex) {
+        out.push(Token::Phone { phoneme, stressed });
     }
-    if out.len() > start && !function_word {
-        stress_first_vowel(&mut out[start..]);
+    if matches!(out.last(), Some(Token::Phone { .. })) {
+        out.push(Token::WordBreak);
     }
-    out.push(Token::WordBreak);
 }
 
 fn stress_first_vowel(tokens: &mut [Token]) {
@@ -427,145 +452,8 @@ fn stress_first_vowel(tokens: &mut [Token]) {
     }
 }
 
-fn parse_arpabet(s: &str) -> Vec<Phoneme> {
-    s.split_whitespace()
-        .filter_map(Phoneme::from_symbol)
-        .collect()
-}
-
 fn is_vowel(p: Phoneme) -> bool {
     matches!(p.manner(), Manner::Vowel | Manner::Diphthong)
-}
-
-/// Words that do not take an accent.
-const FUNCTION_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "for", "from", "with",
-    "by", "as", "is", "are", "was", "were", "be", "it", "its", "it's", "i", "you", "he", "she",
-    "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "our", "their", "that",
-    "this", "than", "then", "so", "if", "do", "does", "has", "have", "had", "can", "will",
-];
-
-/// Irregular and very common words.
-#[allow(clippy::too_many_lines)] // a dictionary
-fn lookup(word: &str) -> Option<&'static str> {
-    Some(match word {
-        "a" => "AX",
-        "an" => "AX N",
-        "the" => "DH AX",
-        "and" => "AE N D",
-        "or" => "AO R",
-        "of" => "AH V",
-        "to" => "T UW",
-        "too" | "two" => "T UW",
-        "in" => "IH N",
-        "is" => "IH Z",
-        "it" => "IH T",
-        "its" | "it's" => "IH T S",
-        "as" => "AE Z",
-        "was" => "W AA Z",
-        "were" => "W ER",
-        "are" => "AA R",
-        "be" => "B IY",
-        "been" => "B IH N",
-        "i" => "AY",
-        "i'm" => "AY M",
-        "you" => "Y UW",
-        "your" | "you're" => "Y AO R",
-        "he" => "HH IY",
-        "she" => "SH IY",
-        "we" => "W IY",
-        "me" => "M IY",
-        "my" => "M AY",
-        "by" => "B AY",
-        "they" => "DH EY",
-        "them" => "DH EH M",
-        "their" | "there" | "they're" => "DH EH R",
-        "this" => "DH IH S",
-        "that" => "DH AE T",
-        "these" => "DH IY Z",
-        "those" => "DH OW Z",
-        "then" => "DH EH N",
-        "than" => "DH AE N",
-        "though" => "DH OW",
-        "with" => "W IH DH",
-        "what" => "W AH T",
-        "who" => "HH UW",
-        "where" => "W EH R",
-        "why" => "W AY",
-        "how" => "HH AW",
-        "do" => "D UW",
-        "does" => "D AH Z",
-        "done" => "D AH N",
-        "don't" => "D OW N T",
-        "have" => "HH AE V",
-        "has" => "HH AE Z",
-        "his" => "HH IH Z",
-        "her" => "HH ER",
-        "give" => "G IH V",
-        "live" => "L IH V",
-        "love" => "L AH V",
-        "come" => "K AH M",
-        "some" => "S AH M",
-        "one" => "W AH N",
-        "once" => "W AH N S",
-        "said" => "S EH D",
-        "says" => "S EH Z",
-        "here" => "HH IY R",
-        "know" => "N OW",
-        "through" => "TH R UW",
-        "thought" => "TH AO T",
-        "enough" => "IH N AH F",
-        "people" => "P IY P AX L",
-        "good" => "G UH D",
-        "could" => "K UH D",
-        "would" => "W UH D",
-        "should" => "SH UH D",
-        "no" => "N OW",
-        "so" => "S OW",
-        "go" => "G OW",
-        "oh" => "OW",
-        "yes" => "Y EH S",
-        "eye" => "AY",
-        "only" => "OW N L IY",
-        "any" => "EH N IY",
-        "many" => "M EH N IY",
-        "very" => "V EH R IY",
-        "every" => "EH V R IY",
-        "again" => "AX G EH N",
-        "about" => "AX B AW T",
-        "hello" => "HH AX L OW",
-        "world" => "W ER L D",
-        "computer" => "K AX M P Y UW T ER",
-        "machine" => "M AX SH IY N",
-        "music" => "M Y UW Z IH K",
-        "voice" => "V OY S",
-        "pink" => "P IH NG K",
-        "trombone" => "T R AA M B OW N",
-        "synthie" => "S IH N TH IY",
-        "daisy" => "D EY Z IY",
-        "bicycle" => "B AY S IH K AX L",
-        "zero" => "Z IH R OW",
-        "three" => "TH R IY",
-        "four" => "F AO R",
-        "five" => "F AY V",
-        "six" => "S IH K S",
-        "seven" => "S EH V AX N",
-        "eight" => "EY T",
-        "nine" => "N AY N",
-        "ten" => "T EH N",
-        "eleven" => "IH L EH V AX N",
-        "twelve" => "T W EH L V",
-        "thirteen" => "TH ER T IY N",
-        "fifteen" => "F IH F T IY N",
-        "twenty" => "T W EH N T IY",
-        "thirty" => "TH ER T IY",
-        "forty" => "F AO R T IY",
-        "fifty" => "F IH F T IY",
-        "hundred" => "HH AH N D R AX D",
-        "thousand" => "TH AW Z AX N D",
-        "million" => "M IH L Y AX N",
-        _ => return None,
-    })
 }
 
 fn number_words(digits: &str) -> String {
@@ -640,232 +528,6 @@ fn number_words(digits: &str) -> String {
         }
     }
     out
-}
-
-/// English spelling rules for words not in the dictionary.
-#[allow(clippy::too_many_lines)]
-fn letter_to_sound(word: &str) -> Vec<Phoneme> {
-    use Phoneme as P;
-
-    let w: Vec<u8> = word.bytes().filter(u8::is_ascii_lowercase).collect();
-    let n = w.len();
-    let mut out = Vec::new();
-    let at = |i: usize| -> u8 { w.get(i).copied().unwrap_or(0) };
-    let is_v = |c: u8| matches!(c, b'a' | b'e' | b'i' | b'o' | b'u' | b'y');
-    let is_c = |c: u8| c.is_ascii_lowercase() && !is_v(c);
-    let starts = |i: usize, s: &str| w[i..].starts_with(s.as_bytes());
-    // Magic e: vowel, one consonant, final e (or -es/-ed).
-    let magic_e = |i: usize| -> bool {
-        is_c(at(i + 1))
-            && at(i + 2) == b'e'
-            && (i + 3 == n || (i + 4 == n && matches!(at(i + 3), b's' | b'd')))
-            && !matches!(at(i + 1), b'r' | b'w' | b'x')
-    };
-    let mut vowels_seen = 0;
-
-    let mut i = 0;
-    while i < n {
-        let c = w[i];
-        let next = at(i + 1);
-        let first_syllable = vowels_seen == 0;
-        // (phonemes, letters consumed)
-        let (ph, len): (&[Phoneme], usize) = match c {
-            // ---- multi-letter vowel spellings ----
-            b'e' if starts(i, "eigh") => (&[P::Ey], 4),
-            b'i' if starts(i, "igh") => (&[P::Ay], 3),
-            b'o' if starts(i, "ough") => (&[P::Ao], 4),
-            b'a' if starts(i, "augh") => (&[P::Ao], 4),
-            b'a' if starts(i, "all") => (&[P::Ao, P::L], 3),
-            b'e' if starts(i, "ee") => (&[P::Iy], 2),
-            b'e' if starts(i, "ea") => (&[P::Iy], 2),
-            b'e' if starts(i, "ei") => (&[P::Iy], 2),
-            b'e' if starts(i, "ey") => (if i + 2 == n { &[P::Iy] } else { &[P::Ey] }, 2),
-            b'e' if starts(i, "ew") => (&[P::Uw], 2),
-            b'o' if starts(i, "oo") => (&[P::Uw], 2),
-            b'o' if starts(i, "ou") => (&[P::Aw], 2),
-            b'o' if starts(i, "ow") => (if i + 2 == n { &[P::Ow] } else { &[P::Aw] }, 2),
-            b'o' if starts(i, "oa") => (&[P::Ow], 2),
-            b'o' if starts(i, "oi") || starts(i, "oy") => (&[P::Oy], 2),
-            b'a' if starts(i, "ai") || starts(i, "ay") => (&[P::Ey], 2),
-            b'a' if starts(i, "au") || starts(i, "aw") => (&[P::Ao], 2),
-            b'u' if starts(i, "ue") => (&[P::Uw], 2),
-            b'i' if starts(i, "ie") => (if n <= 3 { &[P::Ay] } else { &[P::Iy] }, 2),
-            // ---- r-coloured vowels ----
-            b'e' | b'i' | b'u' if next == b'r' && !is_v(at(i + 2)) => (&[P::Er], 2),
-            b'a' if next == b'r' && !is_v(at(i + 2)) => (
-                if first_syllable {
-                    &[P::Aa, P::R]
-                } else {
-                    &[P::Er]
-                },
-                2,
-            ),
-            b'o' if next == b'r' && !is_v(at(i + 2)) => (
-                if first_syllable {
-                    &[P::Ao, P::R]
-                } else {
-                    &[P::Er]
-                },
-                2,
-            ),
-            // ---- single vowels ----
-            b'a' | b'e' | b'i' | b'o' | b'u' if magic_e(i) => (
-                match c {
-                    b'a' => &[P::Ey],
-                    b'e' => &[P::Iy],
-                    b'i' => &[P::Ay],
-                    b'o' => &[P::Ow],
-                    _ => &[P::Uw],
-                },
-                1,
-            ),
-            b'e' if i + 1 == n && n > 2 => (&[], 1),
-            b'e' if i + 2 == n
-                && next == b's'
-                && n > 3
-                && !matches!(at(i - 1), b's' | b'z' | b'x' | b'h') =>
-            {
-                (&[P::Z], 2)
-            }
-            b'e' if i + 2 == n && next == b'd' && n > 3 => (
-                if matches!(at(i - 1), b't' | b'd') {
-                    &[P::Ih, P::D]
-                } else {
-                    &[P::D]
-                },
-                2,
-            ),
-            b'a' => (if first_syllable { &[P::Ae] } else { &[P::Ax] }, 1),
-            b'e' => (
-                if first_syllable || i + 1 == n {
-                    &[P::Eh]
-                } else {
-                    &[P::Ax]
-                },
-                1,
-            ),
-            b'i' => (&[P::Ih], 1),
-            b'o' => (
-                if i + 1 == n {
-                    &[P::Ow]
-                } else if first_syllable {
-                    &[P::Aa]
-                } else {
-                    &[P::Ax]
-                },
-                1,
-            ),
-            b'u' => (if first_syllable { &[P::Ah] } else { &[P::Ax] }, 1),
-            b'y' if i == 0 => (&[P::Y], 1),
-            b'y' if i + 1 == n => (if n <= 3 { &[P::Ay] } else { &[P::Iy] }, 1),
-            b'y' => (&[P::Ih], 1),
-            // ---- consonant clusters ----
-            b't' if starts(i, "tion") => (&[P::Sh, P::Ax, P::N], 4),
-            b's' if starts(i, "sion") => (
-                if is_v(at(i.wrapping_sub(1))) {
-                    &[P::Zh, P::Ax, P::N]
-                } else {
-                    &[P::Sh, P::Ax, P::N]
-                },
-                4,
-            ),
-            b't' if starts(i, "ture") => (&[P::Ch, P::Er], 4),
-            b't' if starts(i, "tch") => (&[P::Ch], 3),
-            b't' if next == b'h' => (if i == 0 && n <= 4 { &[P::Dh] } else { &[P::Th] }, 2),
-            b'c' if next == b'h' => (&[P::Ch], 2),
-            b's' if next == b'h' => (&[P::Sh], 2),
-            b'p' if next == b'h' => (&[P::F], 2),
-            b'w' if next == b'h' => (&[P::W], 2),
-            b'g' if next == b'h' => (if i == 0 { &[P::G] } else { &[] }, 2),
-            b'c' if next == b'k' => (&[P::K], 2),
-            b'n' if next == b'g' && !is_v(at(i + 2)) => (&[P::Ng], 2),
-            b'n' if next == b'k' => (&[P::Ng, P::K], 2),
-            b'q' if next == b'u' => (&[P::K, P::W], 2),
-            b'k' if next == b'n' && i == 0 => (&[P::N], 2),
-            b'w' if next == b'r' && i == 0 => (&[P::R], 2),
-            b'm' if next == b'b' && i + 2 == n => (&[P::M], 2),
-            b'l' if next == b'e' && i + 2 == n && n > 3 && is_c(at(i - 1)) => (&[P::Ax, P::L], 2),
-            // ---- single consonants ----
-            b'c' => (
-                if matches!(next, b'e' | b'i' | b'y') {
-                    &[P::S]
-                } else {
-                    &[P::K]
-                },
-                1,
-            ),
-            b'g' => (
-                if matches!(next, b'y')
-                    || (next == b'e' && i + 2 == n)
-                    || starts(i, "ge") && i > 0 && magic_e(i - 1)
-                {
-                    &[P::Jh]
-                } else {
-                    &[P::G]
-                },
-                1,
-            ),
-            b'h' => (if is_v(next) { &[P::Hh] } else { &[] }, 1),
-            b's' => (
-                if i > 0 && i + 1 == n && is_voiced_letter(at(i - 1)) && at(i - 1) != b's' {
-                    &[P::Z]
-                } else if i > 0 && is_v(at(i - 1)) && is_v(next) && next != b'y' {
-                    &[P::Z]
-                } else {
-                    &[P::S]
-                },
-                1,
-            ),
-            b'x' => (if i == 0 { &[P::Z] } else { &[P::K, P::S] }, 1),
-            b'b' => (&[P::B], 1),
-            b'd' => (&[P::D], 1),
-            b'f' => (&[P::F], 1),
-            b'j' => (&[P::Jh], 1),
-            b'k' | b'q' => (&[P::K], 1),
-            b'l' => (&[P::L], 1),
-            b'm' => (&[P::M], 1),
-            b'n' => (&[P::N], 1),
-            b'p' => (&[P::P], 1),
-            b'r' => (&[P::R], 1),
-            b't' => (&[P::T], 1),
-            b'v' => (&[P::V], 1),
-            b'w' => (&[P::W], 1),
-            b'z' => (&[P::Z], 1),
-            _ => (&[], 1),
-        };
-        for &p in ph {
-            // Double letters make one sound.
-            if out.last() == Some(&p) && !is_vowel(p) {
-                continue;
-            }
-            out.push(p);
-        }
-        if ph.iter().any(|&p| is_vowel(p) || p == P::Er) {
-            vowels_seen += 1;
-        }
-        i += len;
-    }
-    out
-}
-
-fn is_voiced_letter(c: u8) -> bool {
-    matches!(
-        c,
-        b'a' | b'e'
-            | b'i'
-            | b'o'
-            | b'u'
-            | b'y'
-            | b'b'
-            | b'd'
-            | b'g'
-            | b'l'
-            | b'm'
-            | b'n'
-            | b'r'
-            | b'v'
-            | b'w'
-    )
 }
 
 // ===== tokens → timed segments ============================================
