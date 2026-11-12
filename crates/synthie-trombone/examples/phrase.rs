@@ -69,6 +69,7 @@ fn main() -> std::io::Result<()> {
     let mut sub = Vec::new();
     let mut pitch = Vec::new();
     let mut jet = Vec::new();
+    let mut flows = Vec::new();
     let mut index = Vec::new();
     let tail = (0.3 * SR) as usize;
     let mut after = 0;
@@ -82,6 +83,7 @@ fn main() -> std::io::Result<()> {
         sub.push(g.subglottal_pressure);
         pitch.push(g.fold_pitch);
         jet.push(g.jet_noise);
+        flows.push((g.lip_flow, g.skin_flow, g.glottal_flow));
     }
 
     // Level per 2.5 ms over a 10 ms window, relative to the loudest.
@@ -132,8 +134,9 @@ fn main() -> std::io::Result<()> {
             while f < b.min(frames) {
                 if f >= a {
                     let i = f * HOP + HOP / 2;
+                    let (lips, skin, glottis) = flows[i];
                     println!(
-                        "      {:6.3} {:6.1} dB  Psub {:5.2}  f0 {:5.1}  jet {:6.3}",
+                        "      {:6.3} {:6.1} dB  Psub {:5.2}  f0 {:5.1}  jet {:6.3}  U lips {lips:6.1} skin {skin:6.1} glottis {glottis:6.1}",
                         i as f32 / SR,
                         rel[f],
                         sub[i],

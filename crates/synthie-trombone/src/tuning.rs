@@ -1,4 +1,4 @@
-//! [`Tuning`]: the forty-nine numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the fifty-three numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -265,6 +265,29 @@ tuning! {
     /// (`voiced_fricative_length`), as in English; a short /z/ is heard as
     /// /ð/ or /d/.
     voiced_sibilant_length = 0.095, 0.06..=0.14, B;
+
+    // ----- A: the breath over a phrase (physical engine) ---------------
+
+    /// Share of the lung pressure lost between the start and the end of a
+    /// phrase: the speaker's breath running down, which lowers the level
+    /// and the pitch together.
+    phrase_decline = 0.15, 0.0..=0.4, A;
+    /// Share of the lung pressure let go over the last vowel of a
+    /// statement: the voice dies away instead of being cut off (half of it
+    /// before a comma).
+    final_drop = 0.5, 0.0..=0.9, A;
+    /// Share of the lung pressure a phrase that opens on a vowel or a
+    /// sonorant starts from, rising to all of it over `phrase_onset`: about
+    /// what the folds need to start, so the voice grows in from its first
+    /// cycles without the first sound being lost.
+    onset_pressure = 0.4, 0.0..=1.0, A;
+
+    // ----- B: the breath over a phrase (physical engine) ---------------
+
+    /// Seconds over which the lungs build up their pressure at the start of
+    /// a phrase, from nothing: the first sound swells in rather than
+    /// switching on.
+    phrase_onset = 0.15, 0.04..=0.3, B;
 }
 
 impl Default for Tuning {
@@ -287,10 +310,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_two_and_twenty_seven() {
+    fn two_passes_of_twenty_five_and_twenty_eight() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (22, 27));
+        assert_eq!((a, b), (25, 28));
     }
 
     #[test]

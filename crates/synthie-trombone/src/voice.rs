@@ -444,6 +444,18 @@ impl Trombone {
         }
     }
 
+    /// Push with `share` (`0‥1.5`) of the lung pressure
+    /// ([`set_lung_pressure`](Self::set_lung_pressure)): a speaker's
+    /// breath building up at the start of a phrase and dying away at its
+    /// end, while the lung pressure setting stays the voice's. The pressure
+    /// follows within a few tens of milliseconds. Physical engine only; `1`
+    /// by default.
+    pub fn set_breath(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.breath = share.clamp(0.0, 1.5);
+        }
+    }
+
     /// Slacken the cover of the folds by `share` (`0‥0.5`) of its tension,
     /// as a speaker does in a voiced stop: they then keep vibrating with
     /// less pressure across them, and their pitch dips a little. Physical
