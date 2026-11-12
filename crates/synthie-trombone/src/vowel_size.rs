@@ -1,25 +1,22 @@
 //! Physical vowel shapes for speakers of every size.
 //!
-//! A shorter tract should raise every formant by `1 / length`, as a smaller
-//! person's are. The tube itself does, but the yielding walls, the side
-//! cavities and the load of the lips do not scale with it, so the vowel
-//! shapes fitted at the native length drift: F1 by up to 8.5 % at length
-//! 0.6. `examples/vowel_size.rs` measured, for a grid of tract lengths, how
-//! each vowel's shape has to change so that its F1 and F2 (and as far as
-//! possible F3) are the native ones divided by the length; here those
-//! changes are interpolated between the grid rows. That is a few additions
-//! and multiplications, so it is cheap enough for the audio thread.
+//! Each vowel of the physical engine aims for the formants of its
+//! [target](crate::vowel_targets), scaled to the speaker's size: a shorter
+//! tract should raise every formant by `1 / length`, as a smaller person's
+//! are. The tube itself does, but the yielding walls, the side cavities and
+//! the load of the lips do not scale with it, so one shape cannot serve
+//! every size. `examples/vowel_size.rs` solved, for a grid of tract
+//! lengths, the shape that puts each vowel's F1 and F2 (and as far as
+//! possible F3) on its target, and wrote them to `vowel_size_table.rs`;
+//! here the shapes are interpolated between the grid rows. That is a few
+//! additions and multiplications, so it is cheap enough for the audio
+//! thread.
 //!
-//! At the native length the shape is exactly the native one. Lips and
-//! narrowing never get tighter than those of the tightest native vowels, so
-//! no shape hisses. That limits the close rounded /u/ and /w/ in a long
-//! tract: their F1 stays above `native / length`, by 3 % at length 1.2 and
-//! 6 % at 1.4. And /a/ in a short tract keeps its throat, and so 2 % of
-//! its F1 drift at length 0.6: the narrowing that would lift F1 the rest of
-//! the way also makes the vowel louder.
+//! Lips and narrowing are never tighter than [`MIN_LIPS`] and
+//! [`MIN_NARROWING`], so no shape hisses.
 
-use crate::phoneme::Phoneme;
 use crate::tract::{TONGUE_DIAMETER, TONGUE_INDEX};
+use crate::vowel_targets::VowelKey;
 
 #[path = "vowel_size_table.rs"]
 mod table;
@@ -28,52 +25,52 @@ mod table;
 /// and the narrowing along the tongue `(cell, diameter)`.
 pub(crate) type VowelShape = ((f32, f32), Option<f32>, (f32, f32));
 
-/// Tightest lip rounding of any physical vowel (that of /u/); tighter
-/// lips would hiss.
+/// Tightest lip rounding a vowel may have (that of /u/); tighter lips
+/// would hiss.
 pub(crate) const MIN_LIPS: f32 = 0.65;
-/// Tightest narrowing along the tongue of any physical vowel (that of
-/// /i/ and /u/).
+/// Tightest narrowing along the tongue a vowel may have (that of /i/).
 pub(crate) const MIN_NARROWING: f32 = 0.7;
 
-/// Value of a table entry, in thousandths.
-const MILLI: f32 = 1.0e-3;
+/// Table entries are in thousandths.
+const PER_UNIT: f32 = 1000.0;
 
-/// The shape `vowel` takes at `tract_length`, given its shape `native`
-/// at the native length. Lengths outside the table are clamped into it;
-/// at exactly `1.0`, or for a vowel the table does not know, the native
-/// shape is returned unchanged. The tongue stays where the engine lets it
-/// go, and lips and narrowing are never tighter than [`MIN_LIPS`] and
-/// [`MIN_NARROWING`].
+/// The shape of `key` at `tract_length`, or `None` for a key the table
+/// does not know. Lengths outside the table are clamped into it; at
+/// exactly `1.0` the native row is returned as it is. The tongue stays
+/// where the engine lets it go, and lips and narrowing are never tighter
+/// than [`MIN_LIPS`] and [`MIN_NARROWING`].
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-pub(crate) fn at_length(vowel: Phoneme, native: VowelShape, tract_length: f32) -> VowelShape {
-    if tract_length.to_bits() == 1.0f32.to_bits() || !tract_length.is_finite() {
-        return native;
-    }
-    let Some((_, rows)) = table::DELTAS.iter().find(|(q, _)| *q == vowel) else {
-        return native;
-    };
+pub(crate) fn shape(key: VowelKey, tract_length: f32) -> Option<VowelShape> {
+    let (_, rows) = table::SHAPES.iter().find(|(k, _)| *k == key)?;
     // Row below the length, and how far towards the next one it lies.
-    let last = (rows.len() - 1) as f32;
-    let pos = ((tract_length - table::FIRST) / table::STEP).clamp(0.0, last);
-    let row = (pos as usize).min(rows.len() - 2);
-    let frac = pos - row as f32;
-    let d = |k: usize| {
-        let (lo, hi) = (f32::from(rows[row][k]), f32::from(rows[row + 1][k]));
-        (lo + (hi - lo) * frac) * MILLI
+    let (row, frac) = if tract_length.to_bits() == 1.0f32.to_bits() || !tract_length.is_finite() {
+        (table::NATIVE, 0.0)
+    } else {
+        let last = (rows.len() - 1) as f32;
+        let pos = ((tract_length - table::FIRST) / table::STEP).clamp(0.0, last);
+        let row = (pos as usize).min(rows.len() - 2);
+        (row, pos - row as f32)
     };
-    let ((index, diameter), lips, (at, narrow)) = native;
-    (
+    let v = |k: usize| {
+        let lo = f32::from(rows[row][k]);
+        let hi = rows.get(row + 1).map_or(lo, |r| f32::from(r[k]));
+        // Divided, not multiplied by 0.001: a row then decodes to exactly
+        // the number written in it.
+        (lo + (hi - lo) * frac) / PER_UNIT
+    };
+    Some((
         (
-            (index + d(0)).clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
-            (diameter + d(1)).clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
+            v(0).clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end()),
+            v(1).clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end()),
         ),
-        lips.map(|l| (l + d(2)).max(MIN_LIPS)),
-        (at + d(3), (narrow + d(4)).max(MIN_NARROWING)),
-    )
+        // Spread lips are stored as 0.
+        (rows[row][2] > 0).then(|| v(2).max(MIN_LIPS)),
+        (v(3), v(4).max(MIN_NARROWING)),
+    ))
 }
 
 #[cfg(test)]
@@ -82,9 +79,19 @@ mod tests {
 
     #[test]
     fn the_table_covers_the_supported_lengths() {
-        let rows = table::DELTAS[0].1.len();
+        let rows = table::SHAPES[0].1.len();
         #[allow(clippy::cast_precision_loss)]
         let end = table::FIRST + table::STEP * (rows - 1) as f32;
         assert!(table::FIRST <= 0.5 + 1e-6 && end >= 1.6 - 1e-6);
+        #[allow(clippy::cast_precision_loss)]
+        let native = table::FIRST + table::STEP * table::NATIVE as f32;
+        assert!((native - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn every_target_has_shapes() {
+        for t in crate::vowel_targets::TARGETS {
+            assert!(shape(t.key, 1.0).is_some(), "{}", t.key);
+        }
     }
 }

@@ -45,6 +45,30 @@ const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
 /// The slot that holds lip rounding: a shaping of the vowel, never meant to
 /// hiss, however narrow.
 pub(crate) const ROUNDING_SLOT: usize = 1;
+/// Rest diameter of the lip cells.
+const LIP_REST: f32 = 1.5;
+/// How far the lips part beyond [`LIP_REST`] when the jaw is fully open
+/// (physical engine; see `Tract::jaw`), diameter units. The jaw lowers with
+/// the tongue, so open vowels open the mouth too: real /a/ and /æ/ have lip
+/// openings of 4 to 6 cm², twice the 2.8 cm² that rest lips give the
+/// physical tract. With this the lips part at most 2.5 across (7.9 cm²); the
+/// open vowels part them about 2.0 to 2.3 (5 to 6.6 cm²).
+const JAW_OPENING: f32 = 1.0;
+/// Lip rounding (touch diameter) at which the jaw no longer parts the lips
+/// at all: that of /u/...
+const JAW_ROUNDED: f32 = 0.65;
+/// ...and at which it parts them fully: lips at rest.
+const JAW_SPREAD: f32 = 1.8;
+/// Consonant opening (touch diameter) at or below which the jaw is raised
+/// fully: a fricative's gap; approximants raise it part way.
+const JAW_CONSONANT: f32 = 0.75;
+/// Time constant of the jaw, seconds: a heavier articulator than the lips.
+/// A stop released into /a/ parts its lips first and the jaw follows, so
+/// the burst comes out of a mouth that is still nearly closed.
+const JAW_TIME: f32 = 0.02;
+/// Lip cells over which the jaw's opening grows to its full width, from
+/// [`LIP_START`] on: the corners of the mouth open less than its middle.
+const JAW_RAMP: f32 = 3.0;
 
 // ----- the hiss regulator (physical engine) ------------------------------
 //
@@ -222,6 +246,13 @@ pub(crate) struct Tract {
     pub(crate) velum_target: f32,
     pub(crate) movement_speed: f32,
     pub(crate) dynamics: Dynamics,
+    /// Whether the lips part with the tongue's opening, as a jaw lowered
+    /// with the tongue body parts them (physical engine; see
+    /// [`JAW_OPENING`]). The classic engine keeps the original's fixed lips.
+    pub(crate) jaw: bool,
+    /// How far the jaw parts the lips now (see [`Tract::jaw_opening`]): it
+    /// follows where it is going with [`JAW_TIME`].
+    jaw_open: f32,
     /// How the damped articulators move (the speeds of the voice's tuning).
     pub(crate) motion: Tuning,
     velocity: [f32; N],
@@ -274,6 +305,8 @@ impl Tract {
             velum_target: VELUM_CLOSED,
             movement_speed: MOVEMENT_SPEED,
             dynamics: Dynamics::Linear,
+            jaw: false,
+            jaw_open: 0.0,
             motion: Tuning::DEFAULT,
             velocity: [0.0; N],
             narrowing: None,
@@ -417,7 +450,8 @@ impl Tract {
             return 1.1;
         }
         if i >= LIP_START {
-            return 1.5;
+            let ramp = ((i + 1 - LIP_START) as f32 / JAW_RAMP).min(1.0);
+            return LIP_REST + self.jaw_open * ramp;
         }
         let t = 1.1 * PI * (self.tongue_index - i as f32) / (TIP_START - BLADE_START) as f32;
         let fixed = 2.0 + (self.tongue_diameter - 2.0) / 1.5;
@@ -429,6 +463,37 @@ impl Tract {
             curve *= 0.94;
         }
         1.5 - curve
+    }
+
+    /// How far the jaw parts the lips beyond rest, diameter units: by
+    /// [`JAW_OPENING`] times how open the tongue is (0 high, 1 low), less as
+    /// the lips round, and not at all while a consonant narrows the tract:
+    /// the jaw rises to make a closure or a fricative's gap, whatever vowel
+    /// the tongue body is waiting in. Rounded lips purse to their own small opening
+    /// whatever the jaw does; were they to keep the jaw's width just
+    /// behind the rounding, a lowered tongue would widen the mouth of a
+    /// /u/ and give it a second way to its formants, one that a gliding
+    /// voice would have to leave by a jump.
+    fn jaw_opening(&self) -> f32 {
+        let open = (self.tongue_diameter - *TONGUE_DIAMETER.start())
+            / (*TONGUE_DIAMETER.end() - *TONGUE_DIAMETER.start());
+        let smooth = |v: f32, lo: f32, hi: f32| {
+            let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let mut share = 1.0;
+        for (k, s) in self.slots.iter().enumerate() {
+            let Some(s) = s.filter(|s| s.alive) else {
+                continue;
+            };
+            share *= if k == ROUNDING_SLOT {
+                smooth(s.c.diameter, JAW_ROUNDED, JAW_SPREAD)
+            } else {
+                // A consonant raises the jaw to make its closure or gap.
+                smooth(s.c.diameter, JAW_CONSONANT, JAW_SPREAD)
+            };
+        }
+        JAW_OPENING * open.clamp(0.0, 1.0) * share
     }
 
     /// Target shape: tongue rest shape, then every live constriction carved
@@ -628,6 +693,8 @@ impl Tract {
             }
         }
 
+        let jaw = if self.jaw { self.jaw_opening() } else { 0.0 };
+        self.jaw_open += (jaw - self.jaw_open) * (dt / JAW_TIME).min(1.0);
         self.compute_targets();
 
         if self.dynamics == Dynamics::Damped {

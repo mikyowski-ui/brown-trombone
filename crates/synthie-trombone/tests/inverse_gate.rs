@@ -222,10 +222,14 @@ fn a_slow_glide_gives_a_smooth_shape_path() {
         worst_coordinate.1,
     );
     // A jump between distinct shapes moves some cell by 0.3 or more and a
-    // coordinate by 0.25 or more; smooth tracking stays far below.
+    // coordinate by 0.25 or more; smooth tracking stays far below. Where
+    // the formants hardly depend on a coordinate (a low tongue behind
+    // tightly rounded lips, on the way from /u/ to /i/) smooth tracking
+    // moves it fastest, by up to 0.075 per step, while no cell moves by
+    // more than 0.09.
     assert!(w < 0.1, "the tract jumps by {w} at step {at}");
     assert!(
-        worst_coordinate.0 < 0.05,
+        worst_coordinate.0 < 0.1,
         "the shape jumps by {} in coordinates at step {}",
         worst_coordinate.0,
         worst_coordinate.1

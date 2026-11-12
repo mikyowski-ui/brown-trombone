@@ -8,7 +8,9 @@
 //!
 //! * [`junction`]: one scattering rule for every joint, with kinetic and
 //!   viscous losses and room for shunts (walls, side branches).
-//! * [`radiation`]: a frequency-dependent load at the lips and nostrils.
+//! * [`radiation`]: a frequency-dependent load at the lips and nostrils,
+//!   behind the short tube that rounded lips push forward
+//!   ([`protrusion`]).
 //! * Yielding walls: each cell's wall is a mass on a soft spring. Its mass
 //!   bouncing on the enclosed air gives the closed-tract resonance near
 //!   200 Hz; its softness lets the mouth swell during a voiced stop.
@@ -105,6 +107,44 @@ const SKIN_RADIATION: f32 = 0.4;
 
 /// Joint in front of which the upper teeth stand in the air stream.
 pub(crate) const TEETH_AT: usize = 40;
+
+/// How far rounded lips are pushed forward, at the most, in cells of tube:
+/// about 0.7 cm at the native size. Rounding is not only a narrowing: the
+/// lips protrude and the lip tube grows longer (by 0.5 to 1 cm for /u/ in
+/// men; Fant 1960), which lowers F1 and F2 further than the narrowing
+/// alone can without hissing.
+const PROTRUSION_CELLS: f32 = 2.0;
+/// First cell of the lip opening itself, where lip rounding is centred: a
+/// tongue tip's gap just behind the teeth (/s/, /t/) narrows the cells
+/// before it, but is not the lips rounding, and must not muffle the hiss.
+const LIP_OPENING: usize = 41;
+/// Lip opening (articulation diameter of the narrowest cell from
+/// [`LIP_OPENING`] on) at which the lips start to protrude...
+const PROTRUSION_START: f32 = 1.2;
+/// ...and at which they are fully forward: the opening of /u/.
+const PROTRUSION_FULL: f32 = 0.4;
+/// Lips nearly shut belong to consonants, which do not protrude: /f v/
+/// press the lower lip against the teeth, /p b m/ close it. Protrusion
+/// fades out again between these two openings.
+const PROTRUSION_FADE: (f32, f32) = (0.2, 0.32);
+
+/// `0` to `1` with zero slope at both ends.
+#[inline]
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How far forward the lips are, `0` (not at all) to `1`
+/// ([`PROTRUSION_CELLS`]), for a lip opening of articulation diameter
+/// `diameter`: it grows smoothly as the lips round, so moving lips never
+/// jump.
+#[inline]
+pub(crate) fn protrusion(diameter: f32) -> f32 {
+    let rounding = smoothstep((PROTRUSION_START - diameter) / (PROTRUSION_START - PROTRUSION_FULL));
+    let open = smoothstep((diameter - PROTRUSION_FADE.0) / (PROTRUSION_FADE.1 - PROTRUSION_FADE.0));
+    rounding * open
+}
 /// How far behind the teeth (cells) a jet can form and still strike them.
 const JET_REACH: usize = 9;
 
@@ -481,6 +521,22 @@ impl Phys {
         self.area_scale * 0.25 * PI * d * d
     }
 
+    /// Inertance, g/cm⁴, of the stretch of tube that protruding lips add in
+    /// front of an opening of `area`, cm² (see [`protrusion`]).
+    #[inline]
+    fn lip_tube(&self, area: f32) -> f32 {
+        if area < A_MIN {
+            return 0.0;
+        }
+        // The opening as a diameter of the articulation model.
+        let unit = self.area_scale * 0.25 * PI * self.len * self.len;
+        let share = protrusion(sqrt(area / unit));
+        if share <= 0.0 {
+            return 0.0;
+        }
+        RHO * PROTRUSION_CELLS * self.dx * share / area
+    }
+
     /// Silence everything; the shape is kept.
     pub(crate) fn reset(&mut self) {
         self.r = [0.0; N];
@@ -815,10 +871,15 @@ impl Phys {
             }
         }
 
-        // Lips.
+        // Lips, protruding as far as their opening says.
         let i = N - 1;
         let shunt = self.wall_shunt(i);
         let lip_area = y[i] * RHO_C;
+        let narrowest = y[LIP_OPENING..]
+            .iter()
+            .fold(f32::INFINITY, |m, &v| m.min(v))
+            * RHO_C;
+        let series = self.lip_tube(narrowest);
         let mut u_lips = 0.0;
         let mut joint = Joint {
             y1: y[i],
@@ -830,7 +891,7 @@ impl Phys {
             pn: 0.0,
             sealed: false,
         };
-        if let Some(load) = self.lips.load(lip_area, dt) {
+        if let Some(load) = self.lips.load_through(lip_area, series, dt) {
             joint.y2 = load.y;
             joint.k_fwd = load.k_out;
             if self.noisy {
@@ -849,7 +910,8 @@ impl Phys {
             }
             let s = solve(&joint, self.r[i], load.b);
             nl[i] = s.out_left;
-            self.lips.commit(load.b + s.out_right, dt);
+            self.lips
+                .commit_through(&load, load.b + s.out_right, s.u, dt);
             u_skin += self.wall_commit(i, s.p1);
             u_lips = s.u;
         } else {

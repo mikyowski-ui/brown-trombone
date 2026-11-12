@@ -1,7 +1,8 @@
-//! Gates for vowels of every body size on the physical engine: a voice
-//! with a shorter tract should have every formant raised by `1 / length`,
-//! as a smaller person's are, and keep its vowels. Shapes are measured
-//! through the real engine, after `articulate_phoneme` and `settle`.
+//! Gates for vowels of every body size on the physical engine: every
+//! vowel, glide and diphthong end must land on the formants of its target
+//! (`src/vowel_targets.rs`), scaled to the voice's size as a smaller or
+//! larger person's are. Shapes are measured through the real engine, after
+//! `articulate` and `settle`.
 //!
 //! ```sh
 //! cargo test -p synthie-trombone --release --test vowel_size_gate -- --nocapture
@@ -19,6 +20,7 @@ mod spectrum;
 mod survey;
 
 use survey::Meter;
+use synthie_trombone::vowel_targets::{self, Lips, TARGETS, VowelKey};
 use synthie_trombone::{Articulation, Engine, Phoneme, SLOT_LIPS, Trombone};
 
 /// Every vowel the physical engine shapes, glides included.
@@ -39,41 +41,35 @@ const VOWELS: [Phoneme; 14] = [
     Phoneme::Y,
 ];
 
-/// F1 and F2 must be within this of `native / length`.
+/// F1 and F2 must be within this of the target for the voice's size.
+/// No vowel, glide or diphthong end is exempt at any length in 0.6‥1.4.
 const LIMIT: f32 = 0.03;
 
-/// Where 3 % cannot be met, and what is met instead: (vowel, length,
-/// largest F1 error). In a long tract (a large body) the close rounded
-/// vowels /u/ and /w/ cannot lower F1 far enough: their tongue, lips and
-/// narrowing are already as tight as any vowel may be without hissing
-/// (tongue 2.05, lips 0.65, narrowing 0.7), and the yielding walls hold F1
-/// up. A search over every tongue position (12 to 29) and narrowing place
-/// (10 to 40) at those openings found nothing lower than +6.5 % at length
-/// 1.4. F2 stays within 3 %. Everything else in 0.6‥1.4, here and between,
-/// is within 3 %.
-const KNOWN_MISSES: &[(Phoneme, f32, f32)] = &[
-    (Phoneme::Uw, 1.25, 0.045),
-    (Phoneme::W, 1.25, 0.045),
-    (Phoneme::Uw, 1.3, 0.052),
-    (Phoneme::W, 1.3, 0.052),
-    (Phoneme::Uw, 1.35, 0.06),
-    (Phoneme::W, 1.35, 0.06),
-    (Phoneme::Uw, 1.4, 0.067),
-    (Phoneme::W, 1.4, 0.067),
-];
+/// The articulation that stands for `key`.
+fn articulation(key: VowelKey) -> Articulation {
+    match key {
+        VowelKey::Vowel(p) | VowelKey::Start(p) => p.articulation(),
+        VowelKey::End(p) => p.glide_end().expect("a diphthong"),
+    }
+}
 
-/// A physical voice of `length` holding phoneme `p`, settled.
-fn holding(p: Phoneme, length: f32) -> Trombone {
+/// A physical voice of `length` holding `a`, settled.
+fn holding_articulation(a: &Articulation, length: f32) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
     t.set_tract_length(length);
-    t.articulate_phoneme(p);
+    t.articulate(a);
     t.settle();
     t
 }
 
-/// F1..F3 of every `(vowel, length)`, measured on all threads.
-fn measure_all(jobs: &[(Phoneme, f32)]) -> Vec<[f32; 3]> {
+/// A physical voice of `length` holding phoneme `p`, settled.
+fn holding(p: Phoneme, length: f32) -> Trombone {
+    holding_articulation(&p.articulation(), length)
+}
+
+/// F1..F3 of every `(shape, length)`, measured on all threads.
+fn measure_all(jobs: &[(VowelKey, f32)]) -> Vec<[f32; 3]> {
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let chunk = jobs.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {
@@ -83,9 +79,9 @@ fn measure_all(jobs: &[(Phoneme, f32)]) -> Vec<[f32; 3]> {
                 s.spawn(move || {
                     let mut m = Meter::new();
                     part.iter()
-                        .map(|&(p, l)| {
-                            m.formants(&holding(p, l))
-                                .unwrap_or_else(|| panic!("{p} at {l}: no three formants"))
+                        .map(|&(k, l)| {
+                            m.formants(&holding_articulation(&articulation(k), l))
+                                .unwrap_or_else(|| panic!("{k} at {l}: no three formants"))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -98,49 +94,36 @@ fn measure_all(jobs: &[(Phoneme, f32)]) -> Vec<[f32; 3]> {
     })
 }
 
-/// Measure every vowel at `lengths` and hold F1 and F2 to [`LIMIT`] of
-/// `native / length` (or a [known miss](KNOWN_MISSES) to its figure).
+/// Measure every vowel shape at `lengths` and hold F1 and F2 to [`LIMIT`]
+/// of its target for that size; report F3 too.
 fn gate(name: &str, lengths: &[f32]) {
-    let natives = measure_all(&VOWELS.map(|p| (p, 1.0)));
-    let jobs: Vec<(Phoneme, f32)> = lengths
+    let jobs: Vec<(VowelKey, f32)> = lengths
         .iter()
-        .flat_map(|&l| VOWELS.map(|p| (p, l)))
+        .flat_map(|&l| TARGETS.iter().map(move |t| (t.key, l)))
         .collect();
     let got = measure_all(&jobs);
     let mut failures = Vec::new();
-    println!("{name}: error against native / length, F1 / F2 / F3 (worst vowel)");
+    println!("{name}: error against the target, F1 / F2 / F3 (worst shape)");
     for &l in lengths {
-        let mut worst = [(0.0f32, Phoneme::Aa); 3];
-        for ((&(p, jl), f), _) in jobs.iter().zip(&got).zip(0..) {
+        let mut worst = [(0.0f32, TARGETS[0].key); 3];
+        for (&(k, jl), f) in jobs.iter().zip(&got) {
             if jl.to_bits() != l.to_bits() {
                 continue;
             }
-            let v = VOWELS.iter().position(|&q| q == p).expect("a vowel");
-            let e = [0, 1, 2].map(|k| f[k] / (natives[v][k] / l) - 1.0);
-            for k in 0..3 {
-                if e[k].abs() > worst[k].0 {
-                    worst[k] = (e[k].abs(), p);
+            let t = vowel_targets::formants(k, l).expect("a target");
+            let e = [0, 1, 2].map(|i| f[i] / t[i] - 1.0);
+            for i in 0..3 {
+                if e[i].abs() > worst[i].0 {
+                    worst[i] = (e[i].abs(), k);
                 }
             }
-            let known = KNOWN_MISSES
-                .iter()
-                .find(|&&(q, ml, _)| q == p && (ml - l).abs() < 1e-4);
-            let (f1_limit, f2_limit) = known.map_or((LIMIT, LIMIT), |&(_, _, m)| (m, LIMIT));
-            if e[0].abs() > f1_limit || e[1].abs() > f2_limit {
+            if e[0].abs() > LIMIT || e[1].abs() > LIMIT {
                 failures.push(format!(
-                    "{p} at length {l}: F1 {:+.2} %, F2 {:+.2} % (F3 {:+.2} %)",
+                    "{k} at length {l}: F1 {:+.2} %, F2 {:+.2} % (F3 {:+.2} %)",
                     100.0 * e[0],
                     100.0 * e[1],
                     100.0 * e[2]
                 ));
-            }
-            if let Some(&(_, _, m)) = known {
-                println!(
-                    "  known miss {p} at {l}: F1 {:+.2} % (allowed {:.1} %), F2 {:+.2} %",
-                    100.0 * e[0],
-                    100.0 * m,
-                    100.0 * e[1]
-                );
             }
         }
         println!(
@@ -157,17 +140,65 @@ fn gate(name: &str, lengths: &[f32]) {
 }
 
 #[test]
-fn every_vowel_scales_with_the_tract_length() {
-    gate("table lengths", &[0.6, 0.7, 0.85, 1.0, 1.15, 1.3, 1.4]);
+fn every_vowel_meets_its_target_at_every_size() {
+    gate(
+        "table lengths",
+        &[0.6, 0.7, 0.8, 0.85, 1.0, 1.15, 1.2, 1.3, 1.4],
+    );
 }
 
 #[test]
-fn lengths_between_table_rows_scale_too() {
+fn lengths_between_table_rows_meet_it_too() {
     // The table has a row every 0.1; these fall between rows.
     gate(
         "between rows",
         &[0.55, 0.65, 0.75, 0.93, 0.97, 1.03, 1.25, 1.35],
     );
+}
+
+#[test]
+fn lax_and_tense_vowels_stay_apart() {
+    // The pairs a listener most easily confuses must be as far apart as
+    // their targets are (distance in ln F1 and ln F2), at every size.
+    let pairs = [
+        (Phoneme::Ih, Phoneme::Iy),
+        (Phoneme::Uh, Phoneme::Uw),
+        (Phoneme::Eh, Phoneme::Ae),
+        (Phoneme::Ah, Phoneme::Aa),
+    ];
+    let lengths = [0.6, 1.0, 1.4];
+    let jobs: Vec<(VowelKey, f32)> = lengths
+        .iter()
+        .flat_map(|&l| {
+            pairs
+                .iter()
+                .flat_map(move |&(a, b)| [(VowelKey::Vowel(a), l), (VowelKey::Vowel(b), l)])
+        })
+        .collect();
+    let got = measure_all(&jobs);
+    let distance = |a: [f32; 3], b: [f32; 3]| {
+        let d1 = (b[0] / a[0]).ln();
+        let d2 = (b[1] / a[1]).ln();
+        (d1 * d1 + d2 * d2).sqrt()
+    };
+    for (n, pair) in got.chunks(2).enumerate() {
+        let (ka, l) = jobs[2 * n];
+        let kb = jobs[2 * n + 1].0;
+        let want = distance(
+            vowel_targets::formants(ka, l).expect("a target"),
+            vowel_targets::formants(kb, l).expect("a target"),
+        );
+        let have = distance(pair[0], pair[1]);
+        println!(
+            "{ka}-{kb} at {l}: ΔF1 {:+.0} Hz, ΔF2 {:+.0} Hz, distance {:.3} (target {want:.3})",
+            pair[1][0] - pair[0][0],
+            pair[1][1] - pair[0][1],
+            have
+        );
+        // Each vowel may be up to 3 % off its target: together they may come
+        // that much closer than the targets are, no more.
+        assert!(have > want - LIMIT, "{ka}-{kb} at {l}: {have} vs {want}");
+    }
 }
 
 #[test]
@@ -224,9 +255,11 @@ fn the_native_length_is_unchanged() {
     assert_eq!(speak(false), speak(true));
 }
 
-/// Settled tract of `p` at `length`.
-fn tract(p: Phoneme, length: f32) -> Vec<f32> {
-    holding(p, length).target_diameters().to_vec()
+/// Settled tract of `key` at `length`.
+fn tract(key: VowelKey, length: f32) -> Vec<f32> {
+    holding_articulation(&articulation(key), length)
+        .target_diameters()
+        .to_vec()
 }
 
 #[test]
@@ -236,8 +269,8 @@ fn shapes_vary_smoothly_with_length() {
     // 0.025 per step (about 0.016 is the most they do), where a different
     // vowel moves some by 1 or more.
     let lengths: Vec<f32> = (0..=110).map(|k| 0.5 + 0.01 * k as f32).collect();
-    let mut worst = (0.0f32, Phoneme::Aa, 0.0f32);
-    for p in VOWELS {
+    let mut worst = (0.0f32, TARGETS[0].key, 0.0f32);
+    for p in TARGETS.iter().map(|t| t.key) {
         let tracts: Vec<Vec<f32>> = lengths.iter().map(|&l| tract(p, l)).collect();
         let steps: Vec<f32> = tracts
             .windows(2)
@@ -258,9 +291,8 @@ fn shapes_vary_smoothly_with_length() {
                 lengths[k + 1]
             );
         }
-        // Across the native length too: the table's first rows join the
-        // fitted shape without a jump.
-        let shape = |l: f32| p.physical_shape(l).expect("a vowel shape");
+        // Across the native length too.
+        let shape = |l: f32| articulation(p).physical_shape(l).expect("a vowel shape");
         let (below, at, above) = (shape(0.999), shape(1.0), shape(1.001));
         for s in [below, above] {
             assert!(
@@ -281,12 +313,13 @@ fn shapes_vary_smoothly_with_length() {
 
 #[test]
 fn no_shape_hisses_or_leaves_the_engine_range() {
-    // Never tighter than the tightest native vowels: lips 0.65 (/u/) and
-    // narrowing 0.7 (/i/, /u/).
-    for p in VOWELS {
+    // Never tighter than the tightest vowels may be without hissing: lips
+    // 0.65 and narrowing 0.7.
+    for t in TARGETS {
         for k in 0..=110 {
             let l = 0.5 + 0.01 * k as f32;
-            let s = p.physical_shape(l).expect("a vowel shape");
+            let p = t.key;
+            let s = articulation(p).physical_shape(l).expect("a vowel shape");
             assert!(
                 synthie_trombone::TONGUE_INDEX.contains(&s.tongue_index),
                 "{p} at {l}: {s:?}"
@@ -299,11 +332,7 @@ fn no_shape_hisses_or_leaves_the_engine_range() {
             let (at, d) = s.narrowing.expect("a narrowing");
             assert!(d >= 0.7 && (2.0..39.0).contains(&at), "{p} at {l}: {s:?}");
             // Spread vowels stay spread, rounded ones rounded.
-            assert_eq!(
-                s.lips.is_some(),
-                p.physical_shape(1.0).expect("a vowel shape").lips.is_some(),
-                "{p}"
-            );
+            assert_eq!(s.lips.is_some(), t.lips == Lips::Rounded, "{p} at {l}");
         }
     }
 }
@@ -325,7 +354,11 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
                 "{p} at {l}"
             );
             // A consonant spoken with this vowel's tongue (as the speech
-            // front end fills it in) gets the same tongue.
+            // front end fills it in) gets the same tongue. Not /w/'s: its
+            // classic tongue is that of /k g ŋ/, which have their own.
+            if p == Phoneme::W {
+                continue;
+            }
             let mut s = Phoneme::S.articulation();
             s.tongue = p.articulation().tongue;
             let mut c = Trombone::new(48_000.0);
@@ -334,7 +367,7 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             c.articulate(&s);
             assert_eq!(Some(c.tongue()), tongue, "{p} with /s/ at {l}");
         }
-        // Diphthongs glide between the shapes of their two vowels.
+        // Diphthongs glide between their own two shapes.
         for p in [
             Phoneme::Ay,
             Phoneme::Aw,
@@ -342,23 +375,30 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             Phoneme::Ow,
             Phoneme::Oy,
         ] {
-            let (from, to) = p.glide().expect("a diphthong");
             let start = p.physical_shape(l).expect("a start shape");
-            if p != Phoneme::Ow {
-                // OW starts on its own /o/; the others on their first vowel.
-                assert_eq!(Some(start), from.physical_shape(l), "{p} at {l}");
-            }
-            let end: Articulation = to.articulation();
-            let mut v = Trombone::new(48_000.0);
-            v.set_engine(Engine::Physical);
-            v.set_tract_length(l);
-            v.articulate(&end);
-            let shape = to.physical_shape(l).expect("an end shape");
+            assert_eq!(
+                Some(start),
+                articulation(VowelKey::Start(p)).physical_shape(l),
+                "{p} at {l}"
+            );
+            let end = articulation(VowelKey::End(p));
+            let v = holding_articulation(&end, l);
+            let shape = end.physical_shape(l).expect("an end shape");
             assert_eq!(
                 v.tongue(),
                 (shape.tongue_index, shape.tongue_diameter),
                 "{p} at {l}"
             );
+            assert_eq!(
+                v.constriction(SLOT_LIPS).map(|c| c.diameter),
+                shape.lips,
+                "{p} at {l}"
+            );
+        }
+        // /w/ is rounded, and so protrudes, as /u/ does.
+        for p in [Phoneme::W, Phoneme::Uw] {
+            let lips = p.physical_shape(l).and_then(|s| s.lips).expect("rounded");
+            assert!(lips < 1.0, "{p} at {l}: {lips}");
         }
         // /r/ borrows the tongue of /er/.
         let er = Phoneme::Er.physical_shape(l).expect("ER");

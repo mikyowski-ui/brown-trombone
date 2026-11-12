@@ -52,6 +52,10 @@ const FINGER_HISS: f32 = 0.5;
 const FINGER_OPEN: f32 = 0.9;
 /// Range of the `loud` control, cmH2O of lung pressure.
 pub const LOUD_RANGE: (f32, f32) = (2.0, 20.0);
+/// How long the voice keeps sounding after the last turn of a persona dial
+/// or glottis meter made while nothing else was sounding, so that the
+/// change can be heard.
+const PREVIEW_HOLD: Duration = Duration::from_millis(400);
 
 /// Vowels marked on the tract view; a click sets them.
 pub const LANDMARKS: [(&str, Phoneme); 5] = [
@@ -68,6 +72,17 @@ pub fn tongue_handle(tongue: (f32, f32)) -> (f32, f32) {
     let span = TONGUE_DIAMETER.end() - TONGUE_DIAMETER.start();
     let depth = (tongue.1 - TONGUE_DIAMETER.start()) / span;
     (tongue.0, -0.6 - 1.5 * depth)
+}
+
+/// `cells` read at a fractional cell `x`, straight between neighbours.
+#[must_use]
+pub fn lerp_cell(cells: &[f32], x: f64) -> f64 {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let lo = (x.floor().max(0.0) as usize).min(cells.len() - 1);
+    let hi = (lo + 1).min(cells.len() - 1);
+    #[allow(clippy::cast_precision_loss)]
+    let frac = (x - lo as f64).clamp(0.0, 1.0);
+    f64::from(cells[lo]) * (1.0 - frac) + f64::from(cells[hi]) * frac
 }
 
 /// Something in the glottis panel or header that the mouse can work.
@@ -108,12 +123,15 @@ impl Control {
 }
 
 /// What a mouse press has taken hold of.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Grab {
     /// A finger on the tract wall.
     Constriction,
-    /// The tongue handle (or Shift-drag).
-    Tongue,
+    /// The tongue handle (or Shift-drag), with how far the handle's own
+    /// place `(index, height)` lies from where it was pressed: the handle
+    /// is drawn inside the mouth, which is not always where the tongue's
+    /// height would put it, and taking hold of it should not move it.
+    Tongue((f32, f32)),
     /// Right-drag: the tongue, as the original maps it.
     TongueOld,
     Velum,
@@ -190,6 +208,12 @@ pub struct App {
     pub loud: f32,
     grab: Option<Grab>,
     pop_until: Option<Instant>,
+    /// The time of the latest [`tick`](Self::tick): the clock the timers
+    /// set from key and mouse handlers run on.
+    now: Instant,
+    /// While a dial or meter is being heard (see [`PREVIEW_HOLD`]): when
+    /// the voice it started stops.
+    preview_until: Option<Instant>,
     pub status: String,
     /// Mimic mode: copying what the microphone hears (`None` without a
     /// microphone).
@@ -246,6 +270,8 @@ impl App {
             loud: 8.0,
             grab: None,
             pop_until: None,
+            now: Instant::now(),
+            preview_until: None,
             status: String::new(),
             mimic: None,
             formant_lock: None,
@@ -293,6 +319,10 @@ impl App {
         if on && self.engine != Engine::Physical {
             self.toggle_engine();
         }
+        if on {
+            // The microphone takes over the voice.
+            self.end_preview();
+        }
         self.mimic = Some(on);
         self.send(Cmd::Mimic(on));
         self.status = if on {
@@ -332,6 +362,7 @@ impl App {
         }
         self.dial = k;
         self.voice_changed();
+        self.preview();
         self.status = format!("{name}: {value:.2}");
     }
 
@@ -366,6 +397,12 @@ impl App {
     /// Per-frame housekeeping: newest snapshot, timers, freeing old
     /// utterances.
     pub fn tick(&mut self) {
+        self.tick_at(Instant::now());
+    }
+
+    /// [`tick`](Self::tick) at time `now`.
+    pub fn tick_at(&mut self, now: Instant) {
+        self.now = now;
         while let Ok(s) = self.link.snapshots.try_recv() {
             self.snap = s;
         }
@@ -384,26 +421,60 @@ impl App {
                 "mimic: listening (wear headphones) · ` stops".into()
             };
         }
-        if self.pop_until.is_some_and(|t| Instant::now() >= t) {
+        if self.pop_until.is_some_and(|t| now >= t) {
             self.pop_until = None;
             self.send(Cmd::Constriction(SLOT_POP, None));
+        }
+        if self.preview_until.is_some_and(|t| now >= t) {
+            self.end_preview();
+        }
+    }
+
+    /// A persona dial or glottis meter changed: let it be heard. With
+    /// nothing sounding (no note held, no drone, no speech, no mimicking)
+    /// the voice sounds at the current note until [`PREVIEW_HOLD`] after
+    /// the last change.
+    fn preview(&mut self) {
+        if self.preview_until.is_none() {
+            let busy = self.held.is_some()
+                || self.drone
+                || self.snap.speaking.is_some()
+                || self.mimic == Some(true);
+            if busy {
+                return;
+            }
+            self.send(Cmd::NoteOn(self.note_f32()));
+        }
+        self.preview_until = Some(self.now + PREVIEW_HOLD);
+    }
+
+    /// Stop the voice a dial or meter started, if it is still sounding.
+    fn end_preview(&mut self) {
+        if self.preview_until.take().is_some() {
+            self.send(Cmd::NoteOff);
         }
     }
 
     /// Handle a key; returns `true` to quit.
     pub fn key(&mut self, key: Key) -> bool {
-        if key.ctrl && key.code == KeyCode::Char('c') {
-            return true;
-        }
-        match self.mode {
-            Mode::Play => self.play_key(key),
-            Mode::Type => {
-                if key.kind != KeyKind::Release {
-                    self.type_key(key);
+        let quit = if key.ctrl && key.code == KeyCode::Char('c') {
+            true
+        } else {
+            match self.mode {
+                Mode::Play => self.play_key(key),
+                Mode::Type => {
+                    if key.kind != KeyKind::Release {
+                        self.type_key(key);
+                    }
+                    false
                 }
-                false
             }
+        };
+        if quit {
+            // Leave nothing sounding behind.
+            self.end_preview();
         }
+        quit
     }
 
     fn play_key(&mut self, key: Key) -> bool {
@@ -431,6 +502,9 @@ impl App {
                     self.note = 12 * (self.octave + 1) + semi;
                     self.held = Some(c);
                     self.voiced = true;
+                    // The note takes over from a dial being heard; that
+                    // ending must not stop it.
+                    self.preview_until = None;
                     self.send(Cmd::NoteOn(self.note_f32()));
                 }
                 KeyKind::Release if self.held == Some(c) => {
@@ -483,10 +557,7 @@ impl App {
                 self.wobble = !self.wobble;
                 self.send(Cmd::Wobble(self.wobble));
             }
-            'i' => {
-                self.drone = !self.drone;
-                self.send(Cmd::Drone(self.drone));
-            }
+            'i' => self.toggle_drone(),
             'c' => {
                 for slot in 0..synthie_trombone::MAX_CONSTRICTIONS {
                     self.send(Cmd::Constriction(slot, None));
@@ -545,6 +616,7 @@ impl App {
             KeyCode::Delete => {
                 self.persona = Persona::NEUTRAL;
                 self.voice_changed();
+                self.preview();
                 self.status = "persona: neutral".into();
                 return;
             }
@@ -598,12 +670,24 @@ impl App {
     fn silence(&mut self) {
         self.held = None;
         self.voiced = false;
+        self.preview_until = None;
         if self.drone {
             self.drone = false;
             self.send(Cmd::Drone(false));
         }
         self.send(Cmd::NoteOff);
         self.send(Cmd::StopSpeaking);
+    }
+
+    /// Start or stop the drone. A dial being heard ends at once: the drone
+    /// keeps the voice going on its own, and a note left on would sound on
+    /// after the drone stops.
+    fn toggle_drone(&mut self) {
+        self.drone = !self.drone;
+        if self.drone {
+            self.end_preview();
+        }
+        self.send(Cmd::Drone(self.drone));
     }
 
     /// Switch between the classic and the physical sound model.
@@ -651,6 +735,8 @@ impl App {
             }
         }
         self.status = format!("“{text}” · {:.1} s", u.duration());
+        // Speech takes over the voice; a dial being heard stops first.
+        self.end_preview();
         self.send(Cmd::Speak(u));
     }
 
@@ -680,11 +766,13 @@ impl App {
     fn set_tenseness(&mut self, t: f32) {
         self.tenseness = t.clamp(0.0, 1.0);
         self.send(Cmd::Tenseness(self.tenseness));
+        self.preview();
     }
 
     fn set_vibrato(&mut self, v: f32) {
         self.vibrato = v.clamp(0.0, 0.05);
         self.send(Cmd::Vibrato(self.vibrato));
+        self.preview();
     }
 
     /// Map a terminal cell to tract coordinates `(index, y)`.
@@ -709,6 +797,43 @@ impl App {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let midline = a.y + (fy * f64::from(a.height)) as u16;
         row.abs_diff(midline)
+    }
+
+    /// The terminal cell the tract canvas paints a Braille dot for tract
+    /// coordinates `(x, y)` in (the canvas rounds to the nearest of its
+    /// 2×4 dots per cell). Text labels on a canvas are placed by a
+    /// different rule, up to a row higher, so whatever must line up with
+    /// the walls is placed with this instead.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn dot_cell(&self, x: f64, y: f64) -> (u16, u16) {
+        let a = self.tract_area;
+        let x = x.clamp(X_BOUNDS[0], X_BOUNDS[1]);
+        let y = y.clamp(Y_BOUNDS[0], Y_BOUNDS[1]);
+        let dots_x = f64::from(a.width) * 2.0 - 1.0;
+        let dots_y = f64::from(a.height) * 4.0 - 1.0;
+        let dx = ((x - X_BOUNDS[0]) * dots_x / (X_BOUNDS[1] - X_BOUNDS[0])).round() as u16;
+        let dy = ((Y_BOUNDS[1] - y) * dots_y / (Y_BOUNDS[1] - Y_BOUNDS[0])).round() as u16;
+        (a.x + dx / 2, a.y + dy / 4)
+    }
+
+    /// The cell the tongue handle `◆` is drawn in: at the tongue's place
+    /// along the tract and the height [`tongue_handle`] gives it, but held
+    /// between the walls there as they are drawn, so it never floats
+    /// outside the mouth. A press on it takes hold of the tongue. `None`
+    /// before the tract is drawn.
+    #[must_use]
+    pub fn tongue_cell(&self) -> Option<(u16, u16)> {
+        let a = self.tract_area;
+        if a.width == 0 || a.height == 0 {
+            return None;
+        }
+        let (hx, hy) = tongue_handle(self.snap.tongue);
+        let x = f64::from(hx);
+        let half = lerp_cell(&self.snap.diameters, x) / 2.0;
+        let (col, row) = self.dot_cell(x, f64::from(hy));
+        let (_, upper) = self.dot_cell(x, half);
+        let (_, lower) = self.dot_cell(x, -half);
+        Some((col, row.clamp(upper, lower)))
     }
 
     /// Hit areas of the glottis panel, given its inner area. Rows follow
@@ -793,10 +918,19 @@ impl App {
         if Self::in_nose(x, y) {
             return Some(Grab::Velum);
         }
-        // The handle is drawn from what the voice reports.
-        let (hx, hy) = tongue_handle(self.snap.tongue);
-        if shift || ((x - hx).abs() <= 1.6 && (y - hy).abs() <= 0.45) {
-            return Some(Grab::Tongue);
+        if shift {
+            return Some(Grab::Tongue((0.0, 0.0)));
+        }
+        // The handle is drawn from what the voice reports, in the cell
+        // `tongue_cell` gives; a press on or near that cell takes hold of
+        // it where it is.
+        let on_handle = self
+            .tongue_cell()
+            .and_then(|(c, r)| self.to_tract(c, r))
+            .is_some_and(|(hx, hy)| (x - hx).abs() <= 1.6 && (y - hy).abs() <= 0.45);
+        if on_handle {
+            let (ix, iy) = tongue_handle(self.snap.tongue);
+            return Some(Grab::Tongue((ix - x, iy - y)));
         }
         for (_, vowel) in LANDMARKS {
             if let Some((lx, ly)) = self.landmark(vowel)
@@ -874,10 +1008,15 @@ impl App {
                     Some(Constriction::new(index, diameter)),
                 ));
             }
-            Grab::Tongue => {
-                // The handle hangs below the midline: put it under the mouse.
+            Grab::Tongue((dx, dy)) => {
+                // The handle hangs below the midline: move it as far as the
+                // mouse has moved since the press.
+                let (x, y) = (x + dx, y + dy);
                 let depth = ((y.abs() - 0.6) / 1.5).clamp(0.0, 1.0);
-                self.set_tongue(index, TONGUE_DIAMETER.start() + depth * span);
+                self.set_tongue(
+                    x.clamp(2.0, N as f32 - 0.5),
+                    TONGUE_DIAMETER.start() + depth * span,
+                );
             }
             Grab::TongueOld => {
                 let d = TONGUE_DIAMETER.start() + (y.abs() / 1.75) * span;
@@ -940,6 +1079,7 @@ impl App {
             }
             _ => {}
         }
+        self.preview();
     }
 
     /// Click a button.
@@ -962,10 +1102,7 @@ impl App {
                 self.wobble = !self.wobble;
                 self.send(Cmd::Wobble(self.wobble));
             }
-            Control::Drone => {
-                self.drone = !self.drone;
-                self.send(Cmd::Drone(self.drone));
-            }
+            Control::Drone => self.toggle_drone(),
             Control::FormantLock => self.toggle_lock(),
             _ => {}
         }
@@ -990,17 +1127,17 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
 /// is shown, so the corner vowels come first.
 #[rustfmt::skip]
 pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
-    ("i", Phoneme::Iy, shape(28.08, 2.05, Some(0.86), (34.0, 0.7))),
-    ("u", Phoneme::Uw, shape(25.06, 2.05, Some(0.65), (23.13, 0.7))),
-    ("ɑ", Phoneme::Aa, shape(14.36, 2.65, None, (14.0, 1.028))),
-    ("æ", Phoneme::Ae, shape(12.57, 3.339, None, (28.82, 1.4))),
-    ("ɪ", Phoneme::Ih, shape(28.67, 3.053, Some(0.944), (32.33, 0.832))),
-    ("ɛ", Phoneme::Eh, shape(21.83, 2.912, None, (30.69, 0.942))),
-    ("ʌ", Phoneme::Ah, shape(12.0, 2.39, None, (24.02, 1.015))),
-    ("ɔ", Phoneme::Ao, shape(12.0, 2.08, Some(1.348), (22.96, 1.315))),
-    ("ʊ", Phoneme::Uh, shape(19.55, 2.273, Some(0.739), (32.28, 0.887))),
-    ("o", Phoneme::Ow, shape(16.1, 2.1, Some(1.108), (26.95, 0.955))),
-    ("ɝ", Phoneme::Er, shape(13.86, 2.696, Some(1.173), (30.15, 0.727))),
+    ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.648, 0.858))),
+    ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
+    ("ɑ", Phoneme::Aa, shape(16.514, 3.165, None, (10.0, 0.927))),
+    ("æ", Phoneme::Ae, shape(26.564, 2.93, None, (14.0, 1.621))),
+    ("ɪ", Phoneme::Ih, shape(26.372, 2.449, None, (24.0, 3.0))),
+    ("ɛ", Phoneme::Eh, shape(24.422, 2.663, None, (14.0, 1.486))),
+    ("ʌ", Phoneme::Ah, shape(15.41, 2.297, None, (29.283, 1.584))),
+    ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.829, 1.8))),
+    ("ʊ", Phoneme::Uh, shape(19.849, 2.38, Some(0.998), (32.217, 1.027))),
+    ("o", Phoneme::Ow, shape(15.493, 2.345, Some(0.989), (30.202, 1.519))),
+    ("ɝ", Phoneme::Er, shape(15.234, 2.777, Some(1.242), (30.498, 0.7))),
 ];
 
 /// The chart vowel `v`: its IPA letter and shape.
@@ -1526,10 +1663,12 @@ mod tests {
             .0;
         mouse(&mut app, DOWN, (r.x, r.y), PLAIN);
         mouse(&mut app, UP, (r.x, r.y), PLAIN);
+        // With nothing else sounding, the new voice is heard.
         let cmds = sent(&rx);
-        let [Cmd::Voice(small), Cmd::Note(note)] = cmds[..] else {
+        let [Cmd::Voice(small), Cmd::Note(note), Cmd::NoteOn(heard)] = cmds[..] else {
             panic!("{cmds:?}");
         };
+        assert!((heard - note).abs() < 1e-3, "{cmds:?}");
         let deep = Preset::Deep.settings();
         assert!(app.persona.size < 0.65, "{:?}", app.persona);
         assert!(small.tract_length < 0.65 * deep.tract_length + 0.02);
@@ -1641,8 +1780,14 @@ mod tests {
         let (mut app, rx) = laid_out();
         app.snap.tongue = (20.0, 2.5);
         let (hx, hy) = tongue_handle(app.snap.tongue);
-        let handle = cell(&app, f64::from(hx), f64::from(hy));
+        let handle = app.tongue_cell().unwrap();
         mouse(&mut app, DOWN, handle, PLAIN);
+        // Taking hold of it does not move it.
+        let cmds = sent(&rx);
+        let [Cmd::Tongue(i, d)] = cmds[..] else {
+            panic!("{cmds:?}");
+        };
+        assert!((i - hx).abs() < 1e-4 && (d - 2.5).abs() < 1e-4, "{cmds:?}");
         let to = cell(&app, 25.0, -1.5);
         mouse(&mut app, DRAG, to, PLAIN);
         mouse(&mut app, UP, to, PLAIN);
@@ -1655,9 +1800,13 @@ mod tests {
             panic!("{cmds:?}");
         };
         assert!((i - 25.0).abs() < 0.6, "{i}");
-        // Where it was dropped is where the handle is now drawn.
+        // The handle moved as far as the mouse did.
+        let (from, to) = (
+            app.to_tract(handle.0, handle.1).unwrap(),
+            app.to_tract(to.0, to.1).unwrap(),
+        );
         let (_, y) = tongue_handle((*i, *d));
-        assert!((y + 1.5).abs() < 0.2, "{y}");
+        assert!((y - (hy + to.1 - from.1)).abs() < 1e-3, "{y}");
     }
 
     #[test]
@@ -1685,6 +1834,8 @@ mod tests {
     #[test]
     fn panel_meters_follow_the_mouse() {
         let (mut app, rx) = laid_out();
+        // With the drone on, a meter sends only what it sets.
+        app.drone = true;
         let bar = |app: &App, c: Control, share: f32| {
             let r = app.controls.iter().find(|(_, k)| *k == c).unwrap().0;
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -1930,7 +2081,11 @@ mod tests {
         // Near /i/ the narrowing opens fast as F1 rises (about 0.15 of its
         // range per step, over several steps), but no single step jumps:
         // in particular the first step off the vowel's own shape is small.
-        assert!(coarse < 0.25, "{coarse}: {path:?}");
+        // On the coarse chart a step is 10 % of F1, and the last one, onto
+        // /ɑ/ (F1 above 760 Hz, which only a pharynx narrowed low reaches),
+        // moves the shape by up to 0.35; the fine chart shows that it is a
+        // big step, not a jump.
+        assert!(coarse < 0.35, "{coarse}: {path:?}");
         assert!(fine < 0.2, "{fine}: {path_fine:?}");
         let first = largest_step(&path_fine[..2]);
         println!("first step off the /i/ mark: {first:.3}");
@@ -2079,6 +2234,165 @@ mod tests {
                 assert!((a - b).abs() < 1e-4, "{name} cell {k}: {a} vs {b}");
             }
             assert!(predict_near(&s).is_some(), "{name}");
+        }
+    }
+
+    // ----- hearing a dial ---------------------------------------------
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    /// How many of `cmds` start the voice, and stop it.
+    fn note_ons(cmds: &[Cmd]) -> usize {
+        cmds.iter().filter(|c| matches!(c, Cmd::NoteOn(_))).count()
+    }
+    fn note_offs(cmds: &[Cmd]) -> usize {
+        cmds.iter().filter(|c| matches!(c, Cmd::NoteOff)).count()
+    }
+
+    /// Press a panel meter at a share of its width, drag it to another and
+    /// let go `release_at`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn drag_meter(app: &mut App, c: Control, from: f32, to: f32, release_at: (u16, u16)) {
+        let r = app.controls.iter().find(|(_, k)| *k == c).unwrap().0;
+        let at = |share: f32| (r.x + (share * f32::from(r.width)) as u16, r.y);
+        mouse(app, DOWN, at(from), PLAIN);
+        mouse(app, DRAG, at(to), PLAIN);
+        mouse(app, UP, release_at, PLAIN);
+    }
+
+    #[test]
+    fn turning_a_dial_in_silence_is_heard_until_it_rests() {
+        let (mut app, rx) = laid_out();
+        let t0 = Instant::now();
+        app.tick_at(t0);
+        app.key(arrow(KeyCode::PageUp));
+        let cmds = sent(&rx);
+        let Some(&Cmd::NoteOn(note)) = cmds.last() else {
+            panic!("{cmds:?}");
+        };
+        assert!((note - app.note_f32()).abs() < 1e-3, "at the current note");
+        // A further turn keeps the same voice going, for longer.
+        app.tick_at(t0 + ms(300));
+        app.key(arrow(KeyCode::PageUp));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (0, 0), "{cmds:?}");
+        app.tick_at(t0 + ms(699));
+        assert!(sent(&rx).is_empty());
+        app.tick_at(t0 + ms(300) + PREVIEW_HOLD);
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
+        app.tick_at(t0 + ms(2000));
+        assert!(sent(&rx).is_empty());
+
+        // A glottis meter likewise, even let go outside the panel; and the
+        // Del key.
+        let t1 = t0 + ms(3000);
+        app.tick_at(t1);
+        drag_meter(&mut app, Control::Loud, 0.3, 0.6, (120, 5));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (1, 0), "{cmds:?}");
+        app.tick_at(t1 + PREVIEW_HOLD);
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
+        app.key(arrow(KeyCode::Delete));
+        assert_eq!(note_ons(&sent(&rx)), 1);
+        // Leaving with it sounding stops it.
+        assert!(app.key(key('q', KeyKind::Press)));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
+    }
+
+    #[test]
+    fn a_dial_is_not_heard_over_a_note_the_drone_or_the_microphone() {
+        let t0 = Instant::now();
+        // A held note: the dial changes it, and its end is the key's.
+        let (mut app, rx) = laid_out();
+        app.tick_at(t0);
+        app.key(key('a', KeyKind::Press));
+        sent(&rx);
+        app.key(arrow(KeyCode::PageDown));
+        drag_meter(&mut app, Control::Tense, 0.2, 0.8, (5, 5));
+        app.tick_at(t0 + ms(1000));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (0, 0), "{cmds:?}");
+        app.key(key('a', KeyKind::Release));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
+        // The drone.
+        let (mut app, rx) = laid_out();
+        app.tick_at(t0);
+        app.key(key('i', KeyKind::Press));
+        app.key(arrow(KeyCode::PageUp));
+        drag_meter(&mut app, Control::Tense, 0.2, 0.8, (5, 5));
+        app.key(key(']', KeyKind::Press));
+        app.tick_at(t0 + ms(1000));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (0, 0), "{cmds:?}");
+        // Mimicking.
+        let (mut app, rx) = laid_out();
+        app.link.microphone = true;
+        app.key(key('`', KeyKind::Press));
+        app.key(arrow(KeyCode::PageUp));
+        app.tick_at(t0 + ms(1000));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (0, 0), "{cmds:?}");
+    }
+
+    #[test]
+    fn a_note_played_while_a_dial_is_heard_is_left_alone() {
+        let (mut app, rx) = laid_out();
+        let t0 = Instant::now();
+        app.tick_at(t0);
+        app.key(arrow(KeyCode::PageUp));
+        assert_eq!(note_ons(&sent(&rx)), 1);
+        app.tick_at(t0 + ms(100));
+        app.key(key('g', KeyKind::Press));
+        let cmds = sent(&rx);
+        assert!(matches!(cmds[..], [Cmd::NoteOn(_)]), "{cmds:?}");
+        // The dial turned while the note is held starts nothing new.
+        app.key(arrow(KeyCode::PageUp));
+        app.tick_at(t0 + ms(1000));
+        let cmds = sent(&rx);
+        assert_eq!((note_ons(&cmds), note_offs(&cmds)), (0, 0), "{cmds:?}");
+        app.key(key('g', KeyKind::Release));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
+    }
+
+    /// Something that takes over the voice.
+    type TakeOver = fn(&mut App);
+
+    #[test]
+    fn nothing_a_dial_starts_is_left_sounding() {
+        let t0 = Instant::now();
+        // Whatever takes over the voice while a dial is heard, the voice
+        // the dial started is stopped (and only once).
+        let takeovers: [(&str, TakeOver); 4] = [
+            ("drone", |app| {
+                app.key(key('i', KeyKind::Press));
+                app.key(key('i', KeyKind::Press));
+            }),
+            ("speech", |app| {
+                app.speak("hi");
+            }),
+            ("mimic", |app| {
+                app.link.microphone = true;
+                app.key(key('`', KeyKind::Press));
+            }),
+            ("engine", |app| {
+                app.key(key('\\', KeyKind::Press));
+            }),
+        ];
+        for (name, take_over) in takeovers {
+            let (mut app, rx) = laid_out();
+            app.tick_at(t0);
+            app.key(arrow(KeyCode::PageUp));
+            assert_eq!(note_ons(&sent(&rx)), 1, "{name}");
+            take_over(&mut app);
+            app.tick_at(t0 + ms(1000));
+            let cmds = sent(&rx);
+            assert_eq!(
+                (note_ons(&cmds), note_offs(&cmds)),
+                (0, 1),
+                "{name}: {cmds:?}"
+            );
         }
     }
 }
