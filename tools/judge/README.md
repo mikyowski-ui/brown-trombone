@@ -81,7 +81,7 @@ Targeted measurements for the vowel, voicing and consonant-place stages
 (`probes.py`, run through `judge.py`):
 
 ```sh
-uv run python judge.py vowels physical --profile ../../profiles/tuned-r3.json   # -> physical-tuned-r3
+uv run python judge.py vowels physical --profile ../../profiles/old/tuned-r3.json   # -> physical-tuned-r3
 uv run python judge.py voicing espeak
 uv run python judge.py confusions classic --name classic-x
 uv run python judge.py vowels physical --set human          # the same slots inside the LibriSpeech sentences
