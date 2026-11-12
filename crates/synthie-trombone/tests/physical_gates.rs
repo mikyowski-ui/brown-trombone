@@ -753,9 +753,9 @@ fn no_held_note_is_ever_silent() {
     // Every other note the terminal app can play (octaves 1 to 6), on an
     // open and two close vowels, breathy to pressed, on large and small
     // voices: sound within 150 ms, and still sounding half a second later.
-    // Slack folds are held closer together, notes below their range are
-    // sung as fry by the pulse source, and a note the folds keep stalling
-    // on is handed to the pulse.
+    // Slack folds are held closer together, and notes outside their range
+    // are sung by the pulse source (below it as fry). Inside it the folds
+    // sing every note themselves.
     let presets = [Preset::Deep, Preset::Giant, Preset::Bright, Preset::Critter];
     let vowels = [Phoneme::Aa, Phoneme::Iy, Phoneme::Uw];
     std::thread::scope(|scope| {
@@ -918,4 +918,85 @@ fn garbage_and_abuse_never_break_the_physical_engine() {
         assert!(buf.iter().all(|s| s.is_finite()), "step {step}");
         assert!(peak < 8.0, "step {step}: peak {peak}");
     }
+}
+
+/// The judge's sentences, `(id, text)`.
+fn judge_sentences() -> Vec<(String, String)> {
+    let mut lines = Vec::new();
+    for file in ["sentence_tune.tsv", "sentence_heldout.tsv"] {
+        let path = format!("../../tools/judge/material/{file}");
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        for row in text.lines().skip(1) {
+            let cols: Vec<&str> = row.split('\t').collect();
+            if cols.len() >= 3 {
+                lines.push((cols[0].to_string(), cols[2].to_string()));
+            }
+        }
+    }
+    lines
+}
+
+#[test]
+fn the_folds_carry_running_speech() {
+    // In running speech the pulse source may sing only notes outside the
+    // folds' range, never one inside it: not after a stall, not at the
+    // end of a voiced stop. Every voiced preset speaks the judge's twenty
+    // sentences; every voiced sample sung by the pulse is checked against
+    // the range the folds had at that moment.
+    use synthie_trombone::speech::{Speaker, Utterance};
+    let sentences = judge_sentences();
+    assert_eq!(sentences.len(), 20);
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = Preset::ALL
+            .into_iter()
+            .filter(|&p| p != Preset::Whisper)
+            .map(|preset| {
+                let sentences = &sentences;
+                let job = scope.spawn(move || {
+                    let settings = tuned(preset.settings()).with_engine(Engine::Physical);
+                    let (mut voiced, mut pulse, mut inside) = (0usize, 0usize, Vec::new());
+                    for (id, text) in sentences {
+                        let mut t = fresh();
+                        settings.apply(&mut t);
+                        Speaker::prepare(&mut t);
+                        let mut speaker = Speaker::new();
+                        speaker.speak(Utterance::from_text(text, &settings.prosody()));
+                        while speaker.is_speaking() {
+                            speaker.process(&mut t);
+                            match t.gauges().sounding {
+                                Some(GlottalSource::Pulse) => {
+                                    voiced += 1;
+                                    pulse += 1;
+                                    let (lo, hi) = t.fold_range();
+                                    let hz = t.frequency();
+                                    if (lo..=hi).contains(&hz) {
+                                        inside
+                                            .push(format!("{id} at {hz:.0} Hz ({lo:.0}-{hi:.0})"));
+                                    }
+                                }
+                                Some(GlottalSource::Folds) => voiced += 1,
+                                None => {}
+                            }
+                        }
+                    }
+                    (voiced, pulse, inside)
+                });
+                (preset, job)
+            })
+            .collect();
+        for (preset, job) in jobs {
+            let (voiced, pulse, inside) = job.join().expect("speech");
+            println!(
+                "{preset}: the pulse sang {:.2} % of {:.1} s voiced, all of it outside the folds' range",
+                100.0 * pulse as f32 / voiced.max(1) as f32,
+                voiced as f32 / SR
+            );
+            assert!(
+                inside.is_empty(),
+                "{preset}: the pulse sang {} samples inside the folds' range, first {}",
+                inside.len(),
+                inside[0]
+            );
+        }
+    });
 }
