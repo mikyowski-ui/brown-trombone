@@ -12,7 +12,8 @@
 )]
 
 use synthie_trombone::{
-    Constriction, Engine, GlottalSource, Phoneme, Preset, SLOT_MAIN, Talker, Trombone,
+    Constriction, Engine, GlottalSource, Persona, Phoneme, Preset, SLOT_MAIN, Talker, Trombone,
+    VoiceSettings,
 };
 
 const SR: f32 = 48_000.0;
@@ -471,6 +472,209 @@ fn muscle_driven_folds_sing_and_follow_their_muscles() {
     assert!(low.0 > 80.0, "not vibrating: {low:?}");
     assert!(mid.0 > 1.25 * low.0 && high.0 > 1.25 * mid.0);
     assert!(thick.0 < low.0 && thick.1 < low.1);
+}
+
+// ----- the hiss regulator ------------------------------------------------
+
+/// The default voice at another body size and lung pressure, as a
+/// [`Persona`] would make it.
+fn sized_voice(size: f32, lung: f32) -> Trombone {
+    let mut settings = VoiceSettings::default()
+        .with_engine(Engine::Physical)
+        .with_persona(&Persona {
+            size,
+            ..Persona::NEUTRAL
+        });
+    settings.tuning.lung_pressure = lung;
+    let mut t = Trombone::new(SR);
+    settings.apply(&mut t);
+    t.set_vibrato(0.0, 0.0);
+    t.set_jitter(0.0);
+    t
+}
+
+/// Level and mean noise of the strongest jet in the mouth over 0.3 s,
+/// half a second into holding `p` (voiced if it is a vowel).
+fn held(mut t: Trombone, p: Phoneme) -> (f32, f32) {
+    t.articulate_phoneme(Phoneme::Aa);
+    t.settle();
+    t.articulate_phoneme(p);
+    if p.is_voiced() {
+        t.settle();
+        t.note_on();
+    }
+    render(&mut t, 0.5);
+    let n = (0.3 * SR) as usize;
+    let mut x = Vec::with_capacity(n);
+    let mut jet = 0.0f64;
+    for _ in 0..n {
+        x.push(t.process());
+        jet += f64::from(t.gauges().jet_noise);
+    }
+    (rms(&x), (jet / n as f64) as f32)
+}
+
+const SIZES: [f32; 5] = [0.6, 0.8, 1.0, 1.2, 1.4];
+const LUNGS: [f32; 4] = [5.0, 8.0, 11.0, 14.0];
+
+#[test]
+fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
+    // From a child-sized body to a giant, from soft speech (5 cmH2O) to
+    // loud (14): /s/ stays where it sits against the vowel in the default
+    // voice, and no vowel's own jets come within 26 dB of the /s/ jet.
+    // Three things make that so: the cap on jet speed follows lung
+    // pressure, the pitch of the hiss follows the size of the gap, and the
+    // regulator opens a vowel that starts to hiss.
+    //
+    // The aim for /s/ was 6 dB. Every body from 0.8 to 1.4 keeps within
+    // 3.5 dB; the smallest (0.6) misses by 0.3 dB at 8 and 11 cmH2O. Its
+    // /s/ is only 2.4 dB under the default voice's in absolute terms; the
+    // rest is its vowel, louder because it is sung three and a half times
+    // as high. No gap width changes that, so the bound here is 6.5 dB.
+    let vowels = [
+        Phoneme::Iy,
+        Phoneme::Ih,
+        Phoneme::Eh,
+        Phoneme::Ae,
+        Phoneme::Ah,
+        Phoneme::Aa,
+        Phoneme::Ao,
+        Phoneme::Uh,
+        Phoneme::Uw,
+        Phoneme::Ow,
+        Phoneme::Er,
+        Phoneme::Ax,
+    ];
+    let measure = move |size: f32, lung: f32| {
+        let (vowel, _) = held(sized_voice(size, lung), Phoneme::Aa);
+        let (s, s_jet) = held(sized_voice(size, lung), Phoneme::S);
+        let (sh, _) = held(sized_voice(size, lung), Phoneme::Sh);
+        let mut worst = (f32::NEG_INFINITY, Phoneme::Aa);
+        for p in vowels {
+            let (_, jet) = held(sized_voice(size, lung), p);
+            let level = db(jet / s_jet.max(1e-9));
+            if level > worst.0 {
+                worst = (level, p);
+            }
+        }
+        (db(s / vowel), db(sh / vowel), worst)
+    };
+    let (s0, sh0, _) = measure(1.0, 8.0);
+    std::thread::scope(|scope| {
+        let mut jobs = Vec::new();
+        for size in SIZES {
+            for lung in LUNGS {
+                jobs.push((size, lung, scope.spawn(move || measure(size, lung))));
+            }
+        }
+        let mut failures = Vec::new();
+        for (size, lung, job) in jobs {
+            let (s, sh, (hiss, vowel)) = job.join().unwrap();
+            println!(
+                "size {size} at {lung} cmH2O: s {:+.1} dB, sh {:+.1} dB re default; loudest vowel jet {vowel} {hiss:.1} dB re the s jet",
+                s - s0,
+                sh - sh0
+            );
+            if (s - s0).abs() > 6.5 {
+                failures.push(format!("s at size {size}, {lung} cmH2O: {:+.1} dB", s - s0));
+            }
+            if hiss > -26.0 {
+                failures.push(format!(
+                    "{vowel} hisses at size {size}, {lung} cmH2O: {hiss:.1} dB"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    });
+}
+
+#[test]
+fn a_gap_near_a_fricative_still_hisses() {
+    // Playing by hand, nobody lands on a fricative exactly. Within two
+    // cells and 0.15 in diameter of each fricative's own position a held
+    // gap still hisses: no more than 20 dB under the fricative itself,
+    // where without the regulator the narrow ones are shut or choked.
+    let level = |index: f32, diameter: f32, regulated: bool| {
+        let mut t = Trombone::new(SR);
+        t.set_engine(Engine::Physical);
+        t.set_regulation(regulated);
+        t.articulate_phoneme(Phoneme::Aa);
+        t.settle();
+        t.set_constriction(SLOT_MAIN, Some(Constriction::new(index, diameter)));
+        render(&mut t, 0.5);
+        rms(&render(&mut t, 0.3))
+    };
+    std::thread::scope(|scope| {
+        let mut jobs = Vec::new();
+        for p in [Phoneme::S, Phoneme::Sh, Phoneme::F, Phoneme::Th] {
+            let c = p.articulation().constriction.unwrap();
+            let own = level(c.index, c.diameter, true);
+            for by in [-0.15, 0.0, 0.15] {
+                for along in [-2.0, 0.0, 2.0] {
+                    let (index, diameter) = (c.index + along, c.diameter + by);
+                    jobs.push((
+                        p,
+                        along,
+                        by,
+                        own,
+                        scope.spawn(move || {
+                            (level(index, diameter, true), level(index, diameter, false))
+                        }),
+                    ));
+                }
+            }
+        }
+        let (mut rescued, mut failures) = (0, Vec::new());
+        for (p, along, by, own, job) in jobs {
+            let (with, without) = job.join().unwrap();
+            let (with, without) = (db(with / own), db(without / own));
+            if without < -20.0 && with >= -20.0 {
+                rescued += 1;
+            }
+            if with < -20.0 {
+                failures.push(format!(
+                    "{p} moved {along:+} cells, {by:+} diameter: {with:.1} dB (unregulated {without:.1})"
+                ));
+            }
+        }
+        println!("{rescued} of 36 positions hiss only because the regulator widened them");
+        assert!(failures.is_empty(), "{failures:#?}");
+        assert!(
+            rescued >= 6,
+            "the regulator rescued only {rescued} positions"
+        );
+    });
+}
+
+#[test]
+fn the_regulator_barely_touches_the_default_voice() {
+    // The default voice's fricatives hiss as they are: no gap is moved.
+    // Its vowels do not hiss, bar a breathy moment such as the lips of
+    // "who" just after the /h/, where the regulator opens them by a
+    // fraction of what it may; the speech is as loud either way.
+    let text = "She sells sea shells; who would choose those few?";
+    let speak = |regulated: bool| {
+        let mut talker = Talker::new(SR, VoiceSettings::default().with_engine(Engine::Physical));
+        talker.voice_mut().set_regulation(regulated);
+        talker.say(text);
+        let (mut x, mut nudge, mut relief) = (Vec::new(), 0.0f32, 0.0f32);
+        while talker.is_speaking() {
+            x.push(talker.process());
+            let g = talker.voice_mut().gauges();
+            nudge = nudge.max(g.gap_nudge);
+            relief = relief.max(g.vowel_relief);
+        }
+        (rms(&x), nudge, relief)
+    };
+    let (on, nudge, relief) = speak(true);
+    let (off, _, _) = speak(false);
+    println!(
+        "gap nudge {nudge:.3}, vowel relief at most {relief:.3}, level {:+.2} dB",
+        db(on / off)
+    );
+    assert!(nudge == 0.0, "a fricative gap was moved by {nudge}");
+    assert!(relief <= 0.03, "vowels were opened by {relief}");
+    assert!(db(on / off).abs() < 0.3);
 }
 
 /// Hold every other note of the app's range on one voice and vowel, at

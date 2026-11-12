@@ -6,9 +6,9 @@ use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
-use crate::phys::source::{Source, SourceKind};
+use crate::phys::source::{Source, SourceKind, WHISPER_TENSENESS};
 use crate::phys::{CM_H2O, Drive, Phys};
-use crate::tract::{Constriction, Dynamics, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
+use crate::tract::{Constriction, Dynamics, HISS_WIDEST, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
@@ -17,7 +17,7 @@ const BLOCK: u32 = 512;
 /// Constriction slot used by [`Trombone::articulate`] for the main closure.
 pub const SLOT_MAIN: usize = 0;
 /// Constriction slot used by [`Trombone::articulate`] for lip rounding.
-pub const SLOT_LIPS: usize = 1;
+pub const SLOT_LIPS: usize = crate::tract::ROUNDING_SLOT;
 
 /// Output level of the physical engine: radiated flow derivative
 /// (cm³/s²) to sample units, set so both engines are about equally loud.
@@ -25,7 +25,7 @@ const PHYSICAL_GAIN: f32 = 2.5e-7;
 
 /// Widest opening (touch-diameter units) that still counts as a fricative;
 /// wider consonant openings are approximants.
-pub(crate) const FRICATIVE_WIDEST: f32 = 0.75;
+pub(crate) const FRICATIVE_WIDEST: f32 = HISS_WIDEST;
 
 /// Which model turns the articulation into sound.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -77,6 +77,18 @@ pub struct Gauges {
     /// Pitch the self-oscillating folds are actually producing, Hz (`0`
     /// while they are not vibrating or the pulse source is in use).
     pub fold_pitch: f32,
+    /// Noise pressure of the strongest jet in the mouth, cmH2O (`0` while
+    /// no stream there is fast enough to be turbulent).
+    pub jet_noise: f32,
+    /// Speed of that jet, cm/s.
+    pub jet_speed: f32,
+    /// The tract cell that jet leaves.
+    pub jet_cell: usize,
+    /// Furthest the hiss regulator has widened a fricative gap that would
+    /// not hiss, in [`Constriction`] diameter units.
+    pub gap_nudge: f32,
+    /// How far it is opening a vowel shape that hisses, same units.
+    pub vowel_relief: f32,
 }
 
 /// One Pink Trombone voice.
@@ -98,6 +110,7 @@ pub struct Trombone {
     /// Radiated flow at the previous internal sample (physical engine).
     phys_flow: f32,
     glottal_area: f32,
+    regulated: bool,
     tuning: Tuning,
     simplex: Simplex,
     rng: Rng,
@@ -156,6 +169,7 @@ impl Trombone {
             },
             phys_flow: 0.0,
             glottal_area: 0.0,
+            regulated: true,
             tuning: Tuning::DEFAULT,
             simplex,
             rng,
@@ -248,6 +262,19 @@ impl Trombone {
     #[must_use]
     pub fn tuning(&self) -> &Tuning {
         &self.tuning
+    }
+
+    /// Switch the hiss regulator of the physical engine on or off (it is on
+    /// by default). While on, the voice corrects itself from what its own
+    /// air is doing: a gap that is meant to hiss but does not is widened a
+    /// little, and a vowel that hisses is opened a little; neither by more
+    /// than 0.15 in [`Constriction`] diameter. What it learns about a
+    /// place of articulation it keeps until the voice changes size.
+    pub fn set_regulation(&mut self, on: bool) {
+        self.regulated = on;
+        if !on {
+            self.tract.forget();
+        }
     }
 
     /// Lung pressure of the physical engine while sounding, in cmH2O
@@ -439,6 +466,7 @@ impl Trombone {
         // (a few milliseconds of silence rather than a bang).
         self.phys.set_rate(0.5 / self.internal_rate, length);
         self.phys.reset();
+        self.tract.forget();
         self.source.set_size(length);
         self.source.reset();
         self.phys_flow = 0.0;
@@ -612,6 +640,11 @@ impl Trombone {
             skin_flow: g.u_skin,
             glottal_area: self.glottal_area,
             fold_pitch: self.source.measured,
+            jet_noise: g.jet / CM_H2O,
+            jet_speed: g.jet_speed,
+            jet_cell: g.jet_cell,
+            gap_nudge: self.tract.nudges().0,
+            vowel_relief: self.tract.nudges().1,
         }
     }
 
@@ -701,6 +734,16 @@ impl Trombone {
         if self.block_pos == 0 {
             let dt = BLOCK as f32 / self.internal_rate;
             self.glottis.update_block(dt, &self.simplex);
+            if self.engine == Engine::Physical {
+                self.phys.end_block();
+                if self.regulated {
+                    let breath = self.source.breath_is_up();
+                    let voiced = (self.glottis.voiced || self.glottis.always_voice)
+                        && self.glottis.block_tenseness().1 >= WHISPER_TENSENESS;
+                    let phys = &self.phys;
+                    self.tract.regulate(dt, breath, voiced, |i| phys.stream(i));
+                }
+            }
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
                 self.phys.begin_block(

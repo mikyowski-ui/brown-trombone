@@ -7,6 +7,7 @@
 
 use crate::INTERNAL_RATE;
 use crate::math::{cos, exp, lerp, move_towards, powf};
+use crate::phys::Stream;
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
@@ -41,6 +42,97 @@ const VELUM_OPEN: f32 = 0.4;
 const FRICATIVE_ATTACK: f32 = 0.1;
 const MAX_TRANSIENTS: usize = 8;
 const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
+/// The slot that holds lip rounding: a shaping of the vowel, never meant to
+/// hiss, however narrow.
+pub(crate) const ROUNDING_SLOT: usize = 1;
+
+// ----- the hiss regulator (physical engine) ------------------------------
+//
+// A speaker does not place the tongue by rule and hope: they listen, and
+// shift it until the /s/ hisses and the /u/ does not. `Tract::regulate`
+// does the same from what the air is doing (see `phys::Stream`).
+
+/// Narrowest opening that is meant as a fricative; anything tighter is a
+/// closure.
+const HISS_NARROWEST: f32 = 0.28;
+/// Widest opening that is meant as a fricative.
+pub(crate) const HISS_WIDEST: f32 = 0.75;
+/// Furthest the regulator will move a gap, either way (touch-diameter
+/// units): a nudge, not a different sound.
+pub(crate) const NUDGE: f32 = 0.15;
+/// Cells that share one remembered nudge (a place of articulation).
+const PLACE: usize = 2;
+/// How fast a fricative gap that fails to hiss is widened, per second.
+const WIDEN_RATE: f32 = 1.9;
+/// How long a gap must fail to hiss before it is moved, seconds: the air
+/// needs a moment to get going.
+const PATIENCE: f32 = 0.02;
+/// A gap is where it was sent once it is this close to its target and
+/// this slow, diameter units and units per second.
+const SETTLED: f32 = 0.03;
+const SETTLED_SPEED: f32 = 2.0;
+/// Share of the lung pressure that viscosity may take in a fricative gap
+/// before the gap counts as choked.
+const CHOKE: f32 = 0.25;
+/// A stream at least this fast (relative to the speed lung pressure gives)
+/// is held back by its own gap, not by the glottis...
+const FAST: f32 = 0.8;
+/// ...and it must then reach this Reynolds number to hiss fully: twice the
+/// critical one.
+const TURBULENT: f32 = 3400.0;
+/// Noise of a jet in a vowel, relative to a free jet at lung-pressure
+/// speed, above which the vowel is opened, and below which it is let back.
+/// The first is 5 dB under what `examples/hiss.rs` and the gates call a
+/// hissing vowel.
+const VOWEL_HISS: f32 = 0.016;
+const VOWEL_QUIET: f32 = 0.006;
+/// How long a vowel must hiss before it is opened, seconds.
+const VOWEL_PATIENCE: f32 = 0.03;
+/// How fast a hissing vowel is opened and let back, per second.
+const RELIEF_RATE: f32 = 1.5;
+const RELAX_RATE: f32 = 0.3;
+/// Half-width of the stretch that is opened, cells.
+const RELIEF_REACH: usize = 4;
+
+/// What a constriction is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Intent {
+    /// Shut: a stop or a nasal.
+    Closure,
+    /// A gap meant to hiss.
+    Hiss,
+    /// A shaping of the tract that is not meant to hiss.
+    Open,
+}
+
+fn intent(slot: usize, diameter: f32) -> Intent {
+    if slot == ROUNDING_SLOT {
+        if diameter <= 0.3 {
+            Intent::Closure
+        } else {
+            Intent::Open
+        }
+    } else if diameter < HISS_NARROWEST {
+        Intent::Closure
+    } else if diameter <= HISS_WIDEST {
+        Intent::Hiss
+    } else {
+        Intent::Open
+    }
+}
+
+/// How many cells either side of `index` a constriction there reshapes.
+#[allow(clippy::cast_precision_loss)]
+fn reach(index: f32) -> f32 {
+    if index < 25.0 {
+        10.0
+    } else if index >= TIP_START as f32 {
+        5.0
+    } else {
+        10.0 - 5.0 * (index - 25.0) / (TIP_START as f32 - 25.0)
+    }
+}
+
 // The damped articulators' natural frequency, how much faster they close
 // than open, the speed at which a closure lets go (a spring like these
 // peaks at 0.37 of `w·distance`; a release starts there) and how far past
@@ -85,6 +177,9 @@ struct Slot {
     alive: bool,
     /// Turbulence envelope, `0..1`, ramps on and off over 100 ms.
     fricative: f32,
+    /// Seconds the gap has sat where it was sent without hissing as meant
+    /// (hiss regulator).
+    failing: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -134,6 +229,14 @@ pub(crate) struct Tract {
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
     slots: [Option<Slot>; MAX_CONSTRICTIONS],
+    /// Hiss regulator: the widening each place of articulation has needed
+    /// to make its fricatives hiss, how far the vowel shape is being
+    /// opened to stop it hissing, and where.
+    trim: [f32; N / PLACE],
+    relief: f32,
+    relief_at: usize,
+    /// Seconds a vowel has been hissing.
+    hissing: f32,
     transients: [Transient; MAX_TRANSIENTS],
     transient_decay: f32,
     transient_life: u32,
@@ -175,6 +278,10 @@ impl Tract {
             velocity: [0.0; N],
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
+            trim: [0.0; N / PLACE],
+            relief: 0.0,
+            relief_at: 0,
+            hissing: 0.0,
             transients: [Transient::default(); MAX_TRANSIENTS],
             // Original: strength · 2^(−200·t) over 0.2 s.
             transient_decay: powf(2.0, -200.0 / TRACT_RATE),
@@ -264,6 +371,7 @@ impl Tract {
                     c: sanitize(c),
                     alive: true,
                     fricative: 0.0,
+                    failing: 0.0,
                 });
             }
             (None, Some(s)) => s.alive = false,
@@ -339,12 +447,166 @@ impl Tract {
             Dynamics::Linear => 0.0,
             Dynamics::Damped => -self.motion.closure_overshoot,
         };
-        for s in self.slots.iter().flatten().filter(|s| s.alive) {
-            carve(&mut self.target, s.c, floor);
+        for (k, s) in self.slots.iter().enumerate() {
+            let Some(s) = s.filter(|s| s.alive) else {
+                continue;
+            };
+            let mut c = s.c;
+            if intent(k, c.diameter) == Intent::Hiss {
+                c.diameter += self.trim[place(c.index)];
+            }
+            carve(&mut self.target, c, floor);
         }
         if let Some(c) = self.narrowing {
             carve(&mut self.target, c, floor);
         }
+        if self.relief > 0.0 {
+            self.relieve();
+        }
+    }
+
+    /// Open the vowel shape around the place that hisses, leaving alone
+    /// whatever a consonant is holding.
+    #[allow(clippy::cast_precision_loss)]
+    fn relieve(&mut self) {
+        let held = self.held();
+        let from = self.relief_at.saturating_sub(RELIEF_REACH);
+        let to = (self.relief_at + RELIEF_REACH).min(N - 1);
+        let cells = self.target.iter_mut().zip(&held).enumerate();
+        for (i, (target, _)) in cells
+            .take(to + 1)
+            .skip(from)
+            .filter(|(_, (_, held))| !**held)
+        {
+            let away = i.abs_diff(self.relief_at) as f32 / (RELIEF_REACH + 1) as f32;
+            *target += self.relief * 0.5 * (1.0 + cos(PI * away));
+        }
+    }
+
+    /// The cells a consonant (a closure or a fricative, live or just let
+    /// go) is shaping.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    fn held(&self) -> [bool; N] {
+        let mut held = [false; N];
+        for (k, s) in self.slots.iter().enumerate() {
+            let Some(s) = s else { continue };
+            if intent(k, s.c.diameter) == Intent::Open {
+                continue;
+            }
+            let width = reach(s.c.index);
+            let from = (s.c.index - width).max(0.0) as usize;
+            let to = ((s.c.index + width + 1.0) as usize).min(N - 1);
+            for h in &mut held[from..=to] {
+                *h = true;
+            }
+        }
+        held
+    }
+
+    /// The hiss regulator: one step, from what the air did over the last
+    /// block of `dt` seconds. `breath` says the lungs are pushing, `voiced`
+    /// that the folds are meant to be vibrating, and `stream` reports the
+    /// stream leaving a cell.
+    ///
+    /// * A gap that is meant to hiss, has arrived where it was sent, and is
+    ///   shut, choked by viscosity, or too fine for its fast stream to turn
+    ///   turbulent, is widened. The widening is remembered by place, so the
+    ///   next fricative there starts from it.
+    /// * A voiced shape that is not meant to hiss, but does, is opened a
+    ///   little around the place that hisses, and let back once it is quiet.
+    ///
+    /// Neither moves anything by more than [`NUDGE`].
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    pub(crate) fn regulate(
+        &mut self,
+        dt: f32,
+        breath: bool,
+        voiced: bool,
+        stream: impl Fn(usize) -> Stream,
+    ) {
+        if !breath {
+            self.relief = (self.relief - RELAX_RATE * dt).max(0.0);
+            self.hissing = 0.0;
+            return;
+        }
+        for k in 0..MAX_CONSTRICTIONS {
+            let Some(s) = self.slots[k].filter(|s| s.alive) else {
+                continue;
+            };
+            if intent(k, s.c.diameter) != Intent::Hiss {
+                continue;
+            }
+            // The narrowest cell of the gap.
+            let centre = ((s.c.index + 0.5) as usize).clamp(1, N - 2);
+            let mut c = centre;
+            for i in [centre - 1, centre + 1] {
+                if self.diameter[i] < self.diameter[c] {
+                    c = i;
+                }
+            }
+            let arrived = (self.diameter[c] - self.target[c]).abs() <= SETTLED
+                && self.velocity[c].abs() <= SETTLED_SPEED;
+            let air = stream(c);
+            let too_fine = air.share >= FAST && air.reynolds < TURBULENT;
+            let failing = arrived && (air.sealed || air.choke > CHOKE || too_fine);
+            let mut waited = 0.0;
+            if failing {
+                waited = s.failing + dt;
+                if waited >= PATIENCE {
+                    let t = &mut self.trim[place(s.c.index)];
+                    *t = (*t + WIDEN_RATE * dt).min(NUDGE);
+                }
+            }
+            if let Some(slot) = &mut self.slots[k] {
+                slot.failing = waited;
+            }
+        }
+
+        // The loudest jet that nobody asked for.
+        let held = self.held();
+        let (mut worst, mut at) = (0.0f32, 0);
+        for (i, _) in held.iter().enumerate().filter(|&(i, h)| i >= 2 && !h) {
+            let noise = stream(i).noise;
+            if noise > worst {
+                (worst, at) = (noise, i);
+            }
+        }
+        if voiced && worst > VOWEL_HISS {
+            // A breathy moment on the way into a vowel is not a hissing
+            // vowel: wait for it to last.
+            self.hissing += dt;
+            if self.hissing >= VOWEL_PATIENCE {
+                self.relief_at = at;
+                self.relief = (self.relief + RELIEF_RATE * dt).min(NUDGE);
+            }
+        } else {
+            self.hissing = 0.0;
+            if !voiced || worst < VOWEL_QUIET {
+                self.relief = (self.relief - RELAX_RATE * dt).max(0.0);
+            }
+        }
+    }
+
+    /// Forget what the regulator has learnt (a different voice).
+    pub(crate) fn forget(&mut self) {
+        self.trim = [0.0; N / PLACE];
+        self.relief = 0.0;
+        self.hissing = 0.0;
+    }
+
+    /// The largest widening of a fricative gap in use, and how far the
+    /// vowel shape is being opened.
+    pub(crate) fn nudges(&self) -> (f32, f32) {
+        let widest = self.trim.iter().fold(0.0f32, |m, &t| m.max(t));
+        (widest, self.relief)
     }
 
     /// Per-block articulation update: move the tract towards its target,
@@ -635,13 +897,7 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
     if !(2.0..N as f32).contains(&index) || d >= 3.0 {
         return;
     }
-    let width = if index < 25.0 {
-        10.0
-    } else if index >= TIP_START as f32 {
-        5.0
-    } else {
-        10.0 - 5.0 * (index - 25.0) / (TIP_START as f32 - 25.0)
-    };
+    let width = reach(index);
     let centre = (index + 0.5) as i32;
     let reach = width as i32 + 2;
     for k in -reach..=reach {
@@ -662,6 +918,13 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
             target[j] = d + (target[j] - d) * shrink;
         }
     }
+}
+
+/// The place of articulation (an entry of `Tract::trim`) a cell index
+/// belongs to.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn place(index: f32) -> usize {
+    ((index.max(0.0) as usize) / PLACE).min(N / PLACE - 1)
 }
 
 fn sanitize(c: Constriction) -> Constriction {

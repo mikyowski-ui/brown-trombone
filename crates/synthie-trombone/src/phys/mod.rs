@@ -33,7 +33,7 @@ use crate::tract::{N, NOSE_LEN, NOSE_START};
 use branch::{Branch, End, Resonator};
 use core::f32::consts::PI;
 use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
-use noise::{Turbulence, glottal_noise, jet_noise};
+use noise::{JET_HEADROOM, Turbulence, V_MAX, full_jet, glottal_noise, jet_noise, reynolds};
 use radiation::Radiation;
 
 /// Density of warm, moist air, g/cm³.
@@ -178,6 +178,24 @@ pub(crate) enum Drive {
     },
 }
 
+/// The stream leaving one cell over the last block, as the hiss regulator
+/// reads it (see [`Tract::regulate`](crate::tract::Tract::regulate)).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Stream {
+    /// The cell is shut.
+    pub sealed: bool,
+    /// Speed of the stream relative to the speed lung pressure alone would
+    /// give it.
+    pub share: f32,
+    /// Its Reynolds number.
+    pub reynolds: f32,
+    /// Share of the lung pressure lost to viscosity in and around the cell.
+    pub choke: f32,
+    /// Noise of the free jet it forms, relative to a jet at lung-pressure
+    /// speed.
+    pub noise: f32,
+}
+
 /// Readings from the last tick, for tests and measurements.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Gauge {
@@ -193,6 +211,11 @@ pub(crate) struct Gauge {
     pub u_nose: f32,
     /// Flow radiated through the skin.
     pub u_skin: f32,
+    /// Noise pressure of the strongest jet in the mouth, dyn/cm².
+    pub jet: f32,
+    /// Speed of that jet, cm/s, and the cell it leaves.
+    pub jet_speed: f32,
+    pub jet_cell: usize,
 }
 
 /// The physical tract.
@@ -256,6 +279,15 @@ pub(crate) struct Phys {
     jet_cell: usize,
     turbulence: Turbulence,
     noisy: bool,
+    /// Fastest jet the present lung pressure can drive, cm/s.
+    v_max: f32,
+    /// Flow through each joint and noise of the free jet there, summed
+    /// over the ticks of the current block, and their means over the last.
+    flow_sum: [f32; N + 1],
+    jet_sum: [f32; N + 1],
+    summed: f32,
+    flow_mean: [f32; N + 1],
+    jet_mean: [f32; N + 1],
 
     pub(crate) gauge: Gauge,
 }
@@ -306,6 +338,12 @@ impl Phys {
             jet_cell: TEETH_AT - 1,
             turbulence: Turbulence::new(0x7B0E_5EED),
             noisy: true,
+            v_max: V_MAX,
+            flow_sum: [0.0; N + 1],
+            jet_sum: [0.0; N + 1],
+            summed: 0.0,
+            flow_mean: [0.0; N + 1],
+            jet_mean: [0.0; N + 1],
             gauge: Gauge::default(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
@@ -348,7 +386,7 @@ impl Phys {
         self.glottal_visc = 12.0 * MU * fl * fl * FOLD_THICKNESS * len;
 
         self.configure_branches();
-        self.turbulence.set_rate(dt);
+        self.turbulence.set_rate(dt, len);
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
@@ -358,7 +396,7 @@ impl Phys {
     pub(crate) fn set_tuning(&mut self, tuning: &crate::Tuning) {
         self.nasal_port = tuning.nasal_port;
         self.turbulence.set_tuning(tuning);
-        self.turbulence.set_rate(self.dt);
+        self.turbulence.set_rate(self.dt, self.len);
     }
 
     /// Seed the turbulence. Equal seeds give equal sound.
@@ -368,7 +406,8 @@ impl Phys {
         self.turbulence.jet_eff = old.jet_eff;
         self.turbulence.teeth_eff = old.teeth_eff;
         self.turbulence.glottal_eff = old.glottal_eff;
-        self.turbulence.set_rate(self.dt);
+        self.turbulence.corner = old.corner;
+        self.turbulence.set_rate(self.dt, self.len);
     }
 
     /// Global cross-section scale (fitted once against vowel formants).
@@ -461,8 +500,57 @@ impl Phys {
         }
         self.lips.reset();
         self.flow = [0.0; N + 1];
+        self.flow_sum = [0.0; N + 1];
+        self.jet_sum = [0.0; N + 1];
+        self.summed = 0.0;
+        self.flow_mean = [0.0; N + 1];
+        self.jet_mean = [0.0; N + 1];
         self.turbulence.reset();
         self.gauge = Gauge::default();
+    }
+
+    /// Close the books on the block just played: average what the streams
+    /// did over it, for the hiss regulator.
+    pub(crate) fn end_block(&mut self) {
+        if self.summed > 0.0 {
+            let scale = 1.0 / self.summed;
+            for j in 0..=N {
+                self.flow_mean[j] = self.flow_sum[j] * scale;
+                self.jet_mean[j] = self.jet_sum[j] * scale;
+            }
+        }
+        self.flow_sum = [0.0; N + 1];
+        self.jet_sum = [0.0; N + 1];
+        self.summed = 0.0;
+    }
+
+    /// Speed, cm/s, that the present lung pressure alone would give a jet.
+    pub(crate) fn lung_speed(&self) -> f32 {
+        self.v_max / JET_HEADROOM
+    }
+
+    /// The stream that left cell `i` over the last block.
+    pub(crate) fn stream(&self, i: usize) -> Stream {
+        let speed = self.lung_speed();
+        if speed <= 0.0 {
+            return Stream::default();
+        }
+        let area = self.a1[i];
+        let flow = self.flow_mean[i + 1].max(0.0);
+        let inv = 1.0 / area.max(A_MIN);
+        // Viscous loss over the narrow stretch the cell sits in.
+        let mut drop = 0.0;
+        for k in i.saturating_sub(2)..(i + 3).min(N) {
+            let a = self.a1[k].max(A_MIN);
+            drop += self.visc * flow / (a * a);
+        }
+        Stream {
+            sealed: area < A_MIN,
+            share: flow * inv / speed,
+            reynolds: reynolds(flow, inv),
+            choke: drop / (0.5 * RHO * speed * speed),
+            noise: self.jet_mean[i + 1] / (self.turbulence.jet_eff * full_jet(speed)),
+        }
     }
 
     /// Take the articulation model's shape for the coming block. `velum` is
@@ -630,8 +718,10 @@ impl Phys {
             Drive::Flow(u) => {
                 nr[0] = self.l[0] + if y[0] >= Y_MIN { u / y[0] } else { 0.0 };
                 self.gauge.u_glottis = u;
+                self.v_max = V_MAX;
             }
             Drive::Glottis { area, lung } => {
+                self.v_max = JET_HEADROOM * sqrt(2.0 * lung.max(0.0) / RHO);
                 nr[0] = self.below_glottis(area, lung, y[0]);
             }
         }
@@ -644,6 +734,7 @@ impl Phys {
         } else {
             (0.0, 0.0)
         };
+        let mut jet = (0.0f32, 0usize);
         for j in 1..N {
             let i = j - 1;
             let mut shunt = self.wall_shunt(i);
@@ -666,11 +757,31 @@ impl Phys {
             // that strikes the teeth does so far more efficiently.
             let mut pn = 0.0;
             if self.noisy {
-                pn = hiss * jet_noise(self.flow[j], inv[i], inv[j], self.turbulence.jet_eff);
+                let free = jet_noise(
+                    self.flow[j],
+                    inv[i],
+                    inv[j],
+                    self.turbulence.jet_eff,
+                    self.v_max,
+                );
+                pn = hiss * free;
+                self.jet_sum[j] += free;
+                if free > jet.0 {
+                    jet = (free, i);
+                }
                 if j == TEETH_AT && self.jet_cell + 1 < TEETH_AT {
                     let c = self.jet_cell;
-                    pn += hiss_teeth
-                        * jet_noise(self.flow[c + 1], inv[c], inv[j], self.turbulence.teeth_eff);
+                    let struck = jet_noise(
+                        self.flow[c + 1],
+                        inv[c],
+                        inv[j],
+                        self.turbulence.teeth_eff,
+                        self.v_max,
+                    );
+                    pn += hiss_teeth * struck;
+                    if struck > jet.0 {
+                        jet = (struck, c);
+                    }
                 }
             }
             let s = solve(
@@ -690,6 +801,7 @@ impl Phys {
             nl[i] = s.out_left;
             nr[j] = s.out_right;
             self.flow[j] += (s.u - self.flow[j]) * self.flow_smooth;
+            self.flow_sum[j] += s.u;
             u_skin += self.wall_commit(i, s.p1);
             if nose_here {
                 for b in &mut self.nose {
@@ -722,7 +834,18 @@ impl Phys {
             joint.y2 = load.y;
             joint.k_fwd = load.k_out;
             if self.noisy {
-                joint.pn = hiss * jet_noise(self.flow[N], inv[i], 0.0, self.turbulence.jet_eff);
+                let free = jet_noise(
+                    self.flow[N],
+                    inv[i],
+                    0.0,
+                    self.turbulence.jet_eff,
+                    self.v_max,
+                );
+                joint.pn = hiss * free;
+                self.jet_sum[N] += free;
+                if free > jet.0 {
+                    jet = (free, i);
+                }
             }
             let s = solve(&joint, self.r[i], load.b);
             nl[i] = s.out_left;
@@ -735,6 +858,8 @@ impl Phys {
             u_skin += self.wall_commit(i, s.p1);
         }
         self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
+        self.flow_sum[N] += u_lips;
+        self.summed += 1.0;
         let u_skin = SKIN_RADIATION * u_skin;
 
         for i in 0..N {
@@ -744,6 +869,9 @@ impl Phys {
         self.gauge.u_lips = u_lips;
         self.gauge.u_nose = u_nose;
         self.gauge.u_skin = u_skin;
+        self.gauge.jet = jet.0;
+        self.gauge.jet_cell = jet.1;
+        self.gauge.jet_speed = (self.flow[jet.1 + 1] * inv[jet.1]).max(0.0);
         u_lips + u_nose + u_skin
     }
 
@@ -789,6 +917,7 @@ impl Phys {
                     inv_g,
                     FOLD_LENGTH * self.len,
                     self.turbulence.glottal_eff,
+                    self.v_max,
                 )
         } else {
             0.0

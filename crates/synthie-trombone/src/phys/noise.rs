@@ -38,10 +38,16 @@ const V_REF: f32 = 3000.0;
 // share for the jet between the folds; `hiss_corner` is the frequency above
 // which turbulence has less and less energy (12 dB per octave here;
 // radiation gives 6 of them back).
-/// Fastest jet the lungs can drive, cm/s (about 15 cmH2O). The averaged
-/// flow lags a closure that is opening or shutting, and dividing it by the
-/// instantaneous area would otherwise give speeds no breath could reach.
-const V_MAX: f32 = 5000.0;
+/// Fastest a jet can be, relative to the speed lung pressure alone would
+/// give it (`√(2P/ρ)`). A throat that widens gently behind its narrowest
+/// point wins back some pressure, so a steady jet runs up to a third faster
+/// than that; beyond it the figure is an artefact. The averaged flow lags a
+/// closure that is opening or shutting, and dividing it by the instantaneous
+/// area would otherwise give speeds no breath could reach.
+pub(crate) const JET_HEADROOM: f32 = 1.35;
+/// The cap while there is no lung pressure to go by (an ideal flow source):
+/// the one 8 cmH2O gives.
+pub(crate) const V_MAX: f32 = 5000.0;
 /// Seconds over which the flow that sets the noise level is averaged.
 /// Turbulence follows the stream, not each sound wave riding on it; it
 /// still follows the voice's own pulsing, as real voiced fricatives do.
@@ -51,10 +57,17 @@ const RUMBLE_CORNER: f32 = 400.0;
 
 /// Amplitude, dyn/cm², of the noise pressure at a joint where flow `u`
 /// (cm³/s, rightward) leaves a cell of inverse area `inv_narrow` for one of
-/// inverse area `inv_wide`, for a jet of the given `efficiency`. Zero unless
-/// the stream is leaving a narrowing, fast enough to be turbulent.
+/// inverse area `inv_wide`, for a jet of the given `efficiency` that can be
+/// no faster than `v_max`. Zero unless the stream is leaving a narrowing,
+/// fast enough to be turbulent.
 #[inline]
-pub(crate) fn jet_noise(u: f32, inv_narrow: f32, inv_wide: f32, efficiency: f32) -> f32 {
+pub(crate) fn jet_noise(
+    u: f32,
+    inv_narrow: f32,
+    inv_wide: f32,
+    efficiency: f32,
+    v_max: f32,
+) -> f32 {
     if u <= 0.0 || inv_narrow <= inv_wide {
         return 0.0;
     }
@@ -64,15 +77,36 @@ pub(crate) fn jet_noise(u: f32, inv_narrow: f32, inv_wide: f32, efficiency: f32)
         return 0.0;
     }
     let onset = 1.0 - RE_CRITICAL * RE_CRITICAL / re2;
-    let v = (u * inv_narrow).min(V_MAX);
+    let v = (u * inv_narrow).min(v_max);
     let widening = 1.0 - inv_wide / inv_narrow;
     efficiency * 0.5 * RHO * v * v * (v / V_REF) * widening * widening * onset
 }
 
-/// Amplitude of the noise pressure of the glottal jet: flow `u` through a
-/// slit of inverse area `inv_area` and length `fold_length`.
+/// Reynolds number of flow `u` through a round lumen of inverse area
+/// `inv_area`.
 #[inline]
-pub(crate) fn glottal_noise(u: f32, inv_area: f32, fold_length: f32, efficiency: f32) -> f32 {
+pub(crate) fn reynolds(u: f32, inv_area: f32) -> f32 {
+    crate::math::sqrt(4.0 * u * u * inv_area / PI) / NU
+}
+
+/// Noise pressure of a free jet as fast as lung pressure alone would make
+/// it (`speed`, cm/s), per unit efficiency: what jets are measured against.
+#[inline]
+pub(crate) fn full_jet(speed: f32) -> f32 {
+    0.5 * RHO * speed * speed * (speed / V_REF)
+}
+
+/// Amplitude of the noise pressure of the glottal jet: flow `u` through a
+/// slit of inverse area `inv_area` and length `fold_length`, no faster than
+/// `v_max`.
+#[inline]
+pub(crate) fn glottal_noise(
+    u: f32,
+    inv_area: f32,
+    fold_length: f32,
+    efficiency: f32,
+    v_max: f32,
+) -> f32 {
     let u = u.abs();
     // A slit's hydraulic diameter is twice its width.
     let re = 2.0 * u / (fold_length * NU);
@@ -80,7 +114,7 @@ pub(crate) fn glottal_noise(u: f32, inv_area: f32, fold_length: f32, efficiency:
         return 0.0;
     }
     let onset = 1.0 - RE_CRITICAL_GLOTTIS * RE_CRITICAL_GLOTTIS / (re * re);
-    let v = (u * inv_area).min(V_MAX);
+    let v = (u * inv_area).min(v_max);
     efficiency * 0.5 * RHO * v * v * (v / V_REF).min(2.0) * onset
 }
 
@@ -117,7 +151,7 @@ pub(crate) struct Turbulence {
     r: f32,
     k: f32,
     gain: f32,
-    corner: f32,
+    pub(crate) corner: f32,
     /// Efficiency of a free jet, of a jet on the teeth, and of the jet
     /// between the folds.
     pub(crate) jet_eff: f32,
@@ -150,9 +184,13 @@ impl Turbulence {
         self.glottal_eff = tuning.glottal_efficiency;
     }
 
-    pub(crate) fn set_rate(&mut self, dt: f32) {
+    /// Set the tick length and the speaker's relative size. A jet's hiss is
+    /// pitched by its speed over its width (a fixed Strouhal number), and a
+    /// small speaker's jets are as fast but narrower: the corner rises as
+    /// the body shrinks.
+    pub(crate) fn set_rate(&mut self, dt: f32, size: f32) {
         self.r = 1.0 / (1.0 + 2.0 * PI * RUMBLE_CORNER * dt);
-        let w = 2.0 * PI * self.corner * dt;
+        let w = 2.0 * PI * self.corner / size * dt;
         self.k = w / (1.0 + w);
         // Variance left by two equal one-pole low-passes in a row, for a
         // white input: k⁴·(1 + a²)/(1 − a²)³ with a = 1 − k. Scale the
@@ -195,17 +233,17 @@ mod tests {
     #[test]
     fn slow_or_widening_free_flow_is_silent() {
         // 200 cm³/s through 3 cm²: a vowel. No hiss.
-        assert_eq!(jet_noise(200.0, 1.0 / 3.0, 1.0 / 5.0, 1.0), 0.0);
+        assert_eq!(jet_noise(200.0, 1.0 / 3.0, 1.0 / 5.0, 1.0, V_MAX), 0.0);
         // Flow into a narrowing makes no jet.
-        assert_eq!(jet_noise(400.0, 1.0, 10.0, 1.0), 0.0);
+        assert_eq!(jet_noise(400.0, 1.0, 10.0, 1.0, V_MAX), 0.0);
         // Inhaling makes none here either.
-        assert_eq!(jet_noise(-400.0, 10.0, 1.0, 1.0), 0.0);
+        assert_eq!(jet_noise(-400.0, 10.0, 1.0, 1.0, V_MAX), 0.0);
     }
 
     #[test]
     fn noise_grows_with_the_cube_of_jet_speed() {
-        let a = jet_noise(200.0, 5.0, 0.5, 1.0);
-        let b = jet_noise(400.0, 5.0, 0.5, 1.0);
+        let a = jet_noise(200.0, 5.0, 0.5, 1.0, V_MAX);
+        let b = jet_noise(400.0, 5.0, 0.5, 1.0, V_MAX);
         assert!(a > 0.0);
         let ratio = b / a;
         // Cubic, plus the onset just above the critical Reynolds number.
@@ -217,7 +255,7 @@ mod tests {
         let mut t = Turbulence::new(3);
         // At any tick rate (the rate follows the tract length).
         for rate in [60_000.0, 96_000.0, 192_000.0] {
-            t.set_rate(1.0 / rate);
+            t.set_rate(1.0 / rate, 1.0);
             let (mut sum, mut sq) = (0.0f64, 0.0f64);
             let n = 300_000;
             for _ in 0..n {

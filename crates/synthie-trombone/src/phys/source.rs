@@ -69,6 +69,11 @@ const STALL_SWING: f32 = 0.03;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
 /// size.
 const VIBRATION_AREA: f32 = 0.14;
+/// Lung pressure at which the kinematic folds sweep `VIBRATION_AREA`,
+/// dyn/cm². Real folds swing wider the harder they are blown, and the
+/// self-oscillating ones here do; the kinematic ones follow the same way,
+/// so that loudness answers lung pressure whichever model is singing.
+const VIBRATION_PRESSURE: f32 = 8.0 * CM_H2O;
 /// Standing leak of a fully breathy voice (kinematic source), cm².
 const BREATHY_LEAK: f32 = 0.12;
 /// Point in the open phase where the kinematic area peaks.
@@ -85,7 +90,7 @@ const MODAL_TENSENESS: f32 = 0.65;
 const WIDEST_GAP: f32 = 0.014;
 /// Below this tenseness the edges themselves part and voicing gives way
 /// to a whisper.
-const WHISPER_TENSENESS: f32 = 0.12;
+pub(crate) const WHISPER_TENSENESS: f32 = 0.12;
 
 /// Pitch the folds settle at, Hz, by rest gap (rows, cm) and tension
 /// (columns, `TABLE_TENSION_START · TABLE_TENSION_RATIO^k`), at native size
@@ -325,6 +330,12 @@ impl Source {
         self.lung_base / CM_H2O
     }
 
+    /// Whether the lungs are pushing, and have been for long enough that
+    /// the pressure is all there (2 cmH2O at least).
+    pub(crate) fn breath_is_up(&self) -> bool {
+        self.lung_target > 2.0 * CM_H2O && self.lung >= 0.9 * self.lung_target
+    }
+
     /// Fold size follows the tract: `len` is the relative tract length.
     pub(crate) fn set_size(&mut self, len: f32) {
         self.size = len;
@@ -496,7 +507,9 @@ impl Source {
         };
         let engage = (tense / 0.3).min(1.0);
         let engage = engage * engage * (3.0 - 2.0 * engage);
-        let area = self.leak + self.size * self.size * VIBRATION_AREA * amp * engage * pulse;
+        let blown = (self.lung / VIBRATION_PRESSURE).clamp(0.25, 2.5);
+        let swing = self.size * self.size * VIBRATION_AREA * blown;
+        let area = self.leak + swing * amp * engage * pulse;
         (area, self.lung)
     }
 
