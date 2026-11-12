@@ -57,6 +57,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `\` | switch between the classic and the physical engine |
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
 | `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
+| `F5` | start or stop recording a take (see below) |
 | `Tab` | type a line; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
@@ -91,6 +92,47 @@ scope back and leaves the tract as it is.
 Notes stop when you let go of the key in terminals that report key releases
 (kitty, WezTerm, foot, Ghostty). In other terminals a note holds until you
 press `Space`.
+
+**Recording takes.** `F5` starts recording a take and `F5` again stops it
+(in either mode); meanwhile the header shows `● REC take-007 0:03`. A take
+is two files in `takes/` under the current directory, or in the directory
+given with `--record DIR`, numbered past the highest take already there so
+that nothing is overwritten:
+
+- `take-007.wav`: the voice as the engine made it, before the reverb (mono,
+  32-bit float, at the sound card's rate);
+- `take-007.jsonl`: a log, one JSON object per line. The first holds the
+  state of every control at the take's first sample (sound model, voice
+  settings, preset and persona, tongue, each constriction, velum,
+  tenseness, lung pressure, pitch and voicing, drone, wobble, vibrato,
+  reverb, mimic, the vowel shape), each further line one command with the
+  sample the audio thread applied it before (`t`; `s` is the same in
+  seconds), and the last one the take's length:
+
+  ```json
+  {"t":43200,"s":0.9,"cmd":"tongue","diameter":2.05,"index":23.5}
+  {"t":52800,"s":1.1,"cmd":"speak","id":2,"prosody":{…},"text":"a big red cat"}
+  ```
+
+  Typed speech is logged with its text, and in mimic mode every gesture
+  copied from the microphone. If the disk ever falls behind, the end line
+  and the status line say how much was lost.
+
+A take starts from silence: when recording starts, speech in progress stops
+and the voice is rebuilt from its controls, the same way a replay builds it,
+so start recording before you play. Replay a take offline with
+
+```sh
+cargo run -p synthie-trombone --example replay --release -- takes/take-007.jsonl \
+    --out replay.wav --trace trace.tsv
+```
+
+It plays the commands at their samples through the same code as the app
+and says whether the result is identical to the take's WAV file (it is,
+sample for sample). `--trace` writes a tab-separated row every 5 ms: the
+controls' targets, what the tract actually does (its narrowest points, each
+constriction, the velum and all 44 diameters), voicing, pitch, level, and
+F1–F3 of the tract at that moment.
 
 ## Voices
 
