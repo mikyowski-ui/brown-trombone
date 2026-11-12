@@ -61,6 +61,7 @@
 extern crate alloc;
 
 mod glottis;
+pub mod listen;
 mod math;
 #[cfg(feature = "alloc")]
 pub mod midi;
