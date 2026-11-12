@@ -904,6 +904,10 @@ fn lean_on_vowels(drafts: &mut [Draft]) {
     }
 }
 
+/// The dental closure an /ð/ starts with after a pause, seconds (physical
+/// engine).
+const DENTAL_ONSET: f32 = 0.025;
+
 /// The silence an utterance starts with on the physical engine, seconds:
 /// long enough for the tongue body (a 40 ms time constant) to get most of
 /// the way to the first vowel.
@@ -1135,6 +1139,22 @@ fn expand(
             } else {
                 voiceless
             };
+            let after_pause = out.last().is_none_or(|d| d.phoneme == Phoneme::Sil);
+            if p == Phoneme::Dh
+                && after_pause
+                && let Some(c) = a.constriction
+            {
+                // After a pause /ð/ starts as a dental stop ([d̪ð], "The
+                // ..."): out of silence a voiced gap alone is heard as
+                // /l/.
+                let shut = Articulation {
+                    constriction: Some(crate::Constriction::new(c.index, 0.0)),
+                    ..a
+                };
+                let closure = DENTAL_ONSET / rate;
+                out.push(with(draft(p, shut, closure, true), voiced_stop));
+                dur = (dur - closure).max(0.5 * dur);
+            }
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
         _ => out.push(draft(p, a, dur, a.voiced)),

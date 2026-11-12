@@ -298,22 +298,35 @@ def parse_engine_line(line: str) -> list[str]:
 
     ``say`` prints one symbol per *segment*: diphthongs and affricates are
     two segments, a voiceless stop before a vowel or approximant gets an
-    extra aspiration segment, pauses are ``SIL``.  This undoes that, so
-    ``AA P P AA B AY AY T`` reads ``AA P AA B AY T``.  A line that already
-    has one symbol per phoneme passes through unchanged.
+    extra aspiration segment, a stop before a pause (physical engine) an
+    extra release segment, a /DH/ after a pause (physical engine) a dental
+    closure first, and pauses are ``SIL``.  This undoes that, so
+    ``AA P P AA B AY AY T`` reads ``AA P AA B AY T`` and
+    ``SIL DH DH AX K AE T T SIL`` reads ``DH AX K AE T``.  A line that
+    already has one symbol per phoneme passes through unchanged.
     """
-    segs = [s for s in (strip_stress(x) for x in line.split()) if s in ENGINE_PHONEMES]
+    raw = [strip_stress(x) for x in line.split()]
+    # Pauses are kept here (as None) to tell what stands next to one.
+    segs = [s if s in ENGINE_PHONEMES else None for s in raw if s in ENGINE_PHONEMES or s == "SIL"]
     out: list[str] = []
     i = 0
     while i < len(segs):
         s = segs[i]
+        if s is None:
+            i += 1
+            continue
         nxt = segs[i + 1] if i + 1 < len(segs) else None
         after = segs[i + 2] if i + 2 < len(segs) else None
+        before = segs[i - 1] if i > 0 else None
         out.append(s)
         if nxt == s and (s in DIPHTHONGS or s in AFFRICATES):
             i += 2
         elif nxt == s and s in ("P", "T", "K") and (after in VOCALIC or after in APPROXIMANTS):
             i += 2
+        elif nxt == s and s in STOPS and i + 2 <= len(segs) and after is None:
+            i += 2  # a stop and its release before a pause
+        elif nxt == s and s == "DH" and before is None:
+            i += 2  # a dental closure and the /DH/ after a pause
         else:
             i += 1
     return out
