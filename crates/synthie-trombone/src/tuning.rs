@@ -1,4 +1,4 @@
-//! [`Tuning`]: the forty-five numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the forty-seven numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -234,6 +234,19 @@ tuning! {
     release_speed = 0.37, 0.1..=0.8, B;
     /// How far past contact a closing articulator aims (diameter units).
     closure_overshoot = 0.3, 0.1..=0.5, B;
+
+    // ----- B: two speeds of articulator (physical engine) --------------
+
+    /// Natural frequency of the tongue body and the jaw, rad/s at speed 1
+    /// (physical engine). They are heavy and slow (a time constant of
+    /// about 40 ms in speech), so the vowel shape glides from vowel to
+    /// vowel underneath the consonants; `articulation_rate` is that of the
+    /// light, quick tongue tip, blade and lips that make the consonants on
+    /// top of it.
+    body_rate = 11.4, 6.0..=25.0, B;
+    /// Natural frequency of the back of the tongue making a closure or a
+    /// gap (/k g ŋ/), rad/s at speed 1: between the two.
+    dorsum_rate = 20.0, 10.0..=40.0, B;
 }
 
 impl Default for Tuning {
@@ -256,10 +269,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_one_and_twenty_four() {
+    fn two_passes_of_twenty_one_and_twenty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (21, 24));
+        assert_eq!((a, b), (21, 26));
     }
 
     #[test]

@@ -1,0 +1,261 @@
+//! Where the physical engine makes its consonants, and what happens
+//! between them: the measurements behind the place-of-articulation gates.
+//!
+//! ```sh
+//! cargo run -p synthie-trombone --example place --release
+//! cargo run -p synthie-trombone --example place --release -- loci murmur
+//! ```
+//!
+//! Sections (all by default, or name some):
+//!
+//! * `loci`: F2 and F3 of the tract's transfer function 60, 30 and 10 ms
+//!   before each consonant and at the onset and middle of the vowel after
+//!   it, in `[V C V1]` for five vowels, and the locus equation fitted over
+//!   them. Published F2 loci: bilabial about 700 to 1100 Hz, alveolar 1700
+//!   to 1800 Hz, velar following the vowel with F2 and F3 close together.
+//! * `murmur`: the deepest notches of the transfer function while a nasal
+//!   is held. The closed mouth behind the closure is a side branch, whose
+//!   resonance is an antiresonance: about 800 to 1000 Hz for /m/, 1500 to
+//!   2000 Hz for /n/, above 3 kHz for /ŋ/.
+//! * `hiss`: level of each fricative above 2.5 kHz and between 70 and 300
+//!   Hz, against the vowel, and how much of it is voiced.
+//! * `final`: whether word-final stops are released: the loudest sample in
+//!   the 10 ms after the closure opens, against the vowel's.
+//! * `clusters`: in the judge's sentences, how wide the mouth gets between
+//!   two consonants that follow one another (a wide one is a vowel nobody
+//!   asked for), and how much of each kind of sound the tract spends near
+//!   its target.
+
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::too_many_lines
+)]
+
+#[path = "support/place.rs"]
+mod place;
+#[path = "support/spectrum.rs"]
+mod spectrum;
+#[path = "support/stops.rs"]
+mod stops;
+
+use synthie_trombone::{Manner, Phoneme, VoiceSettings};
+
+const VOWELS: [Phoneme; 5] = [
+    Phoneme::Iy,
+    Phoneme::Eh,
+    Phoneme::Aa,
+    Phoneme::Ao,
+    Phoneme::Uw,
+];
+
+const CONSONANTS: [Phoneme; 20] = [
+    Phoneme::B,
+    Phoneme::P,
+    Phoneme::M,
+    Phoneme::F,
+    Phoneme::V,
+    Phoneme::Th,
+    Phoneme::Dh,
+    Phoneme::D,
+    Phoneme::T,
+    Phoneme::N,
+    Phoneme::S,
+    Phoneme::Z,
+    Phoneme::Sh,
+    Phoneme::Ch,
+    Phoneme::L,
+    Phoneme::R,
+    Phoneme::Y,
+    Phoneme::G,
+    Phoneme::K,
+    Phoneme::Ng,
+];
+
+/// The judge's tuning and held-out sentences.
+const SENTENCES: &[&str] = &[
+    "The birch canoe slid on the smooth planks.",
+    "Glue the sheet to the dark blue background.",
+    "It's easy to tell the depth of a well.",
+    "These days a chicken leg is a rare dish.",
+    "Rice is often served in round bowls.",
+    "The juice of lemons makes fine punch.",
+    "The box was thrown beside the parked truck.",
+    "The hogs were fed chopped corn and garbage.",
+    "Four hours of steady work faced us.",
+    "A large size in stockings is hard to sell.",
+    "The boy was there when the sun rose.",
+    "A rod is used to catch pink salmon.",
+    "The source of the huge river is the clear spring.",
+    "Kick the ball straight and follow through.",
+    "Help the woman get back to her feet.",
+    "A pot of tea helps to pass the evening.",
+    "Smoky fires lack flame and heat.",
+    "The soft cushion broke the man's fall.",
+    "The salt breeze came across from the sea.",
+    "The girl at the booth sold fifty bonds.",
+];
+
+/// Run `f` over `items` on every core, keeping the order.
+fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let chunk = items.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = items
+            .chunks(chunk)
+            .map(|c| s.spawn(|| c.iter().map(&f).collect::<Vec<_>>()))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("a worker"))
+            .collect()
+    })
+}
+
+fn loci(settings: &VoiceSettings) {
+    println!("== loci: F2 (F3) in Hz; 'before' is 60/30/10 ms before the consonant");
+    let pairs: Vec<(Phoneme, Phoneme)> = CONSONANTS
+        .iter()
+        .flat_map(|&c| VOWELS.iter().map(move |&v| (c, v)))
+        .collect();
+    let all = parallel(&pairs, |&(c, v)| place::transition(settings, c, v));
+    for (ci, &c) in CONSONANTS.iter().enumerate() {
+        let rows = &all[ci * VOWELS.len()..(ci + 1) * VOWELS.len()];
+        let points: Vec<(f32, f32)> = rows
+            .iter()
+            .filter(|t| t.onset[0] > 0.0 && t.mid[0] > 0.0)
+            .map(|t| (t.mid[0], t.onset[0]))
+            .collect();
+        let (locus, k) = place::locus(&points);
+        let mut line = format!("{c:>3}: locus {locus:6.0} slope {k:4.2} |");
+        for (v, t) in VOWELS.iter().zip(rows) {
+            line += &format!(
+                " {v}: {:4.0}>{:4.0}({:4.0}) mid {:4.0} pre {:4.0}/{:4.0}/{:4.0} |",
+                t.onset[0], t.onset[0], t.onset[1], t.mid[0], t.before[0][0], t.before[1][0], t.before[2][0]
+            );
+        }
+        println!("{line}");
+    }
+}
+
+fn murmur(settings: &VoiceSettings) {
+    println!("== murmur: deepest notches of the transfer function, Hz (depth dB)");
+    for nasal in [Phoneme::M, Phoneme::N, Phoneme::Ng] {
+        for v in [Phoneme::Iy, Phoneme::Aa, Phoneme::Uw] {
+            let notches = place::murmur(settings, nasal, v);
+            let mut line = format!("{nasal:>3} after {v}:");
+            for n in notches.iter().take(4) {
+                line += &format!(" {:5.0} ({:4.1})", n.hz, n.depth);
+            }
+            println!("{line}");
+        }
+    }
+}
+
+fn hiss(settings: &VoiceSettings) {
+    println!("== hiss in [AA1 C AA]: dB re the vowel");
+    let fr = [
+        Phoneme::F,
+        Phoneme::Th,
+        Phoneme::S,
+        Phoneme::Sh,
+        Phoneme::V,
+        Phoneme::Dh,
+        Phoneme::Z,
+        Phoneme::Zh,
+        Phoneme::Hh,
+    ];
+    let all = parallel(&fr, |&p| {
+        stops::fricative(settings, &format!("[AA1 {p} AA]"), p)
+    });
+    for (p, m) in fr.iter().zip(all) {
+        println!(
+            "{p:>3}: hiss {:6.1}  voice bar {:6.1}  voiced {:3.0}%  length {:3.0} ms",
+            m.hiss,
+            m.voice_bar,
+            100.0 * m.voiced_share,
+            m.length
+        );
+    }
+}
+
+fn finals(settings: &VoiceSettings) {
+    println!("== final stops: burst peak re vowel peak, dB");
+    let texts: Vec<String> = ["P", "B", "T", "D", "K", "G"]
+        .iter()
+        .map(|c| format!("[AA1 {c}]"))
+        .chain(["dark.", "bed.", "the parked truck.", "round bowls.", "bonds."].map(String::from))
+        .collect();
+    let all = parallel(&texts, |t| {
+        let r = stops::record(settings, t);
+        stops::bursts(&r)
+    });
+    for (t, bursts) in texts.iter().zip(all) {
+        let mut line = format!("{t:>22}:");
+        for b in bursts {
+            line += &format!(" {} {:5.1}", b.phoneme, stops::db(b.peak) - stops::db(b.vowel));
+        }
+        println!("{line}");
+    }
+}
+
+fn clusters(settings: &VoiceSettings) {
+    println!("== clusters: widest opening between two consonants (diameter), ms wider than 0.8");
+    let spoken = parallel(SENTENCES, |t| place::speak(settings, t, false));
+    let mut wide = 0;
+    let mut total = 0;
+    for (t, s) in SENTENCES.iter().zip(&spoken) {
+        let mut line = format!("{:>48}:", &t[..t.len().min(48)]);
+        for (a, b, widest, ms) in place::cluster_openings(s, 0.8) {
+            total += 1;
+            if ms > 0.0 {
+                wide += 1;
+            }
+            line += &format!(" {a}-{b} {widest:.2}/{ms:.0}");
+        }
+        println!("{line}");
+    }
+    println!("clusters that open wider than 0.8: {wide} of {total}");
+    println!("== time near target (RMS shape error <= 0.25), by manner");
+    let mut sums: Vec<(Manner, usize, usize)> = Vec::new();
+    for s in &spoken {
+        for (m, near, n) in place::at_target(s, 0.25) {
+            match sums.iter_mut().find(|e| e.0 == m) {
+                Some(e) => {
+                    e.1 += near;
+                    e.2 += n;
+                }
+                None => sums.push((m, near, n)),
+            }
+        }
+    }
+    for (m, near, n) in sums {
+        println!(
+            "{m:?}: {:.0}% of {} frames",
+            100.0 * near as f32 / n.max(1) as f32,
+            n
+        );
+    }
+}
+
+fn main() {
+    let settings = stops::judge_voice();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let wants = |s: &str| args.is_empty() || args.iter().any(|a| a == s);
+    if wants("loci") {
+        loci(&settings);
+    }
+    if wants("murmur") {
+        murmur(&settings);
+    }
+    if wants("hiss") {
+        hiss(&settings);
+    }
+    if wants("final") {
+        finals(&settings);
+    }
+    if wants("clusters") {
+        clusters(&settings);
+    }
+}
