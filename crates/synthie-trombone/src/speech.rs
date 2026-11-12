@@ -511,8 +511,13 @@ impl Speaker {
                     voice.set_cavity_expansion(0.0);
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
-                    // own.
-                    if !physical {
+                    // own. The lungs stop pushing: an utterance that ends
+                    // without a pause (a single word) would otherwise go on
+                    // breathing through its last shape, a hiss or a murmur
+                    // after it.
+                    if physical {
+                        voice.set_breath(0.0);
+                    } else {
                         voice.articulate_phoneme(Phoneme::Sil);
                     }
                 }

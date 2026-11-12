@@ -199,3 +199,22 @@ fn hisses_are_broad_and_s_is_brighter_than_sh() {
         "SH peaks in band {top}"
     );
 }
+
+#[test]
+fn a_word_without_a_pause_ends_in_silence() {
+    // An utterance that ends without punctuation has no closing pause to
+    // let the breath go in: the lungs went on pushing through its last
+    // shape, a murmur 31 dB under the word's peak for as long as the voice
+    // ran on, and isolated words were heard worse for it (the judge's word
+    // set 52.8 → 56.8 % phoneme errors).
+    for text in ["[N AH1 M B ER]", "[HH AW1 S]", "[W AO1 T ER]"] {
+        let (audio, _) = say(text);
+        let rel = levels(&audio);
+        let tail = (0.12 * SR) as usize / HOP;
+        let loudest = rel[rel.len() - tail..]
+            .iter()
+            .fold(f32::MIN, |m, &v| m.max(v));
+        println!("{text}: tail at most {loudest:.1} dB");
+        assert!(loudest < -55.0, "{text}: {loudest:.1} dB after the word");
+    }
+}
