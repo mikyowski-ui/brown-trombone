@@ -479,6 +479,24 @@ fn inflected(w: &str, lex: Lexicon, depth: u8, verb: bool) -> Option<Pron> {
             return Some(p);
         }
     }
+    // -er where the stem plainly lost an e: organizer, dancer, judger.
+    for end in ["ers", "er"] {
+        let Some(stem) = w.strip_suffix(end) else {
+            continue;
+        };
+        if stem.len() >= 3
+            && (stem.ends_with("iz")
+                || stem.ends_with("yz")
+                || stem.ends_with("dg")
+                || stem.ends_with('c') && !stem.ends_with("cc"))
+        {
+            let mut e = String::from(stem);
+            e.push('e');
+            let mut p = analyse_as(&e, lex, depth, true);
+            p.push((P::Er, false));
+            return Some(if end == "ers" { add_s(p) } else { p });
+        }
+    }
     // -ly.
     if n >= 5 && w.ends_with("ly") {
         let stem = &w[..n - 2];
@@ -554,11 +572,19 @@ fn inflected(w: &str, lex: Lexicon, depth: u8, verb: bool) -> Option<Pron> {
         return Some(append(analyse(&stem, lex, depth), tail));
     }
     // Compounds whose second part is a common word: henhouse, notebook.
-    for second in SECOND {
+    // The longest second part: nonstop is non-stop, not nons-top.
+    let mut seconds: Vec<&&str> = SECOND.iter().filter(|s| w.ends_with(**s)).collect();
+    seconds.sort_by_key(|s| core::cmp::Reverse(s.len()));
+    for second in seconds {
         let Some(first) = w.strip_suffix(second) else {
             continue;
         };
-        if (first.len() >= 3 || matches!(first, "on" | "in" | "up" | "by")) && has_vowel(first) {
+        // -men after a vowel letter is a Latin ending: specimen, abdomen.
+        let latin = *second == "men" && first.ends_with(['a', 'i', 'o', 'u']);
+        if (first.len() >= 3 || matches!(first, "on" | "in" | "up" | "by"))
+            && has_vowel(first)
+            && !latin
+        {
             let head = analyse(first, lex, depth);
             let mut tail = analyse(second, lex, depth);
             for t in &mut tail {
@@ -594,8 +620,16 @@ const SECOND: &[&str] = &[
     "master", "mate", "mill", "mouth", "paper", "piece", "place", "point", "post", "proof", "road",
     "shore", "smith", "stand", "star", "stick", "stock", "store", "table", "tail", "tooth", "town",
     "tree", "walk", "wall", "ware", "wash", "watch", "wear", "weed", "weight", "wheel", "wide",
-    "wise", "woman", "women", "word", "words", "worm", "worth", "writer", "where", "father",
-    "mother", "made", "ever",
+    "wise", "woman", "women", "men", "word", "words", "over", "overs", "top", "tops", "stop",
+    "log", "logs", "guard", "guards", "wash", "bolt", "blood", "back", "backs", "down", "out",
+    "outs", "off", "ball", "lord", "lords", "born", "cast", "fall", "falls", "lock", "locks",
+    "mail", "port", "ports", "sight", "step", "steps", "stream", "strip", "cloth", "pot", "pots",
+    "bag", "bags", "box", "bed", "beds", "bell", "belt", "boy", "boys", "card", "cards", "chair",
+    "coat", "coats", "dog", "dogs", "door", "doors", "fly", "gun", "guns", "hat", "hats", "nut",
+    "nuts", "pipe", "rail", "rock", "rope", "sail", "salt", "shell", "shirt", "shoe", "shoes",
+    "skin", "smoke", "soap", "spoon", "storm", "suit", "wing", "wings", "wire", "heart", "hearted",
+    "minded", "blooded", "eyed", "headed", "worm", "worth", "writer", "where", "father", "mother",
+    "made", "ever",
 ];
 
 /// A stem before `-ed` or `-ing`, with a dropped `e` or a doubled consonant

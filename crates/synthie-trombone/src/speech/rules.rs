@@ -149,6 +149,31 @@ const SELF: &[&str] = &[
     "euse", "ade", "iety",
 ];
 
+/// Combining forms and the sounds they keep before another stem.
+const COMBINING: &[(&str, &[Phoneme])] = &[
+    ("auto", &[P::Ao, P::T, P::Ow]),
+    ("bio", &[P::B, P::Ay, P::Ow]),
+    ("geo", &[P::Jh, P::Iy, P::Ow]),
+    ("micro", &[P::M, P::Ay, P::K, P::R, P::Ow]),
+    ("macro", &[P::M, P::Ae, P::K, P::R, P::Ow]),
+    ("photo", &[P::F, P::Ow, P::T, P::Ow]),
+    ("hydro", &[P::Hh, P::Ay, P::D, P::R, P::Ow]),
+    ("electro", &[P::Ih, P::L, P::Eh, P::K, P::T, P::R, P::Ow]),
+    ("thermo", &[P::Th, P::Er, P::M, P::Ow]),
+    ("neuro", &[P::N, P::Uh, P::R, P::Ow]),
+    ("psycho", &[P::S, P::Ay, P::K, P::Ow]),
+    ("mono", &[P::M, P::Aa, P::N, P::Ow]),
+    ("stereo", &[P::S, P::T, P::Eh, P::R, P::Iy, P::Ow]),
+    ("cardio", &[P::K, P::Aa, P::R, P::D, P::Iy, P::Ow]),
+    ("astro", &[P::Ae, P::S, P::T, P::R, P::Ow]),
+    ("aero", &[P::Eh, P::R, P::Ow]),
+    ("retro", &[P::R, P::Eh, P::T, P::R, P::Ow]),
+    ("proto", &[P::P, P::R, P::Ow, P::T, P::Ow]),
+    ("turbo", &[P::T, P::Er, P::B, P::Ow]),
+    ("radio", &[P::R, P::Ey, P::D, P::Iy, P::Ow]),
+    ("video", &[P::V, P::Ih, P::D, P::Iy, P::Ow]),
+];
+
 /// Prefixes that do not take the accent of a word of two or three syllables.
 const PREFIXES: &[&str] = &[
     "be", "de", "re", "pre", "pro", "con", "com", "col", "cor", "dis", "ex", "em", "en", "im",
@@ -356,6 +381,35 @@ impl<'a> Spelling<'a> {
                 let c: &'static [Phoneme] = if c == [P::N] && velar { &[P::Ng] } else { c };
                 self.push(Unit::Cons(c), first + 1, k);
                 i = k;
+            }
+        }
+        // by- before a consonant: bystander, bypass.
+        if i == 0 && self.starts(0, "by") && self.n > 4 && !self.vowel(2) && onset(self.w, 2) {
+            self.push(Unit::Cons(&[P::B]), 0, 1);
+            self.push(Unit::Vowel(Vowel::fixed(&[P::Ay]).hint(Hint::Never)), 1, 2);
+            i = 2;
+        }
+        // Combining forms keep their full vowels before another stem:
+        // biomass, autoclave, photocopy; not biology, photography.
+        if i == 0 {
+            for &(pre, ph) in COMBINING {
+                let k = pre.len();
+                let rest = self.rest(k - 1);
+                let learned = [
+                    "olog", "ograph", "onom", "ometr", "ophon", "otom", "opath", "ocra", "ocrac",
+                ]
+                .iter()
+                .any(|s| rest.starts_with(s.as_bytes()));
+                if self.starts(0, pre)
+                    && self.n >= k + 3
+                    && !self.vowel(k)
+                    && !learned
+                    && self.rest(k).iter().any(|&c| is_vowel_letter(c))
+                {
+                    self.push(Unit::Cons(ph), 0, k);
+                    i = k;
+                    break;
+                }
             }
         }
         while i < self.n {
@@ -1703,7 +1757,13 @@ fn accent(w: &[u8], pieces: &mut [Piece]) {
     let pi = stressable.iter().position(|&k| k == p).unwrap_or(0);
     let mut sec: Vec<usize> = ary.into_iter().collect();
     if pi >= 2 {
-        let first = usize::from(pi >= 3 && starts_with_prefix(w, pieces, &nuclei));
+        // After a prefix the stem's own accent is one syllable in:
+        // con-sid-er-a-tion, ac-cep-ta-bil-i-ty.
+        let doubled = w.len() > 3
+            && matches!(w[0], b'a' | b'e' | b'o')
+            && w[1] == w[2]
+            && !is_vowel_letter(w[1]);
+        let first = usize::from(pi >= 3 && (starts_with_prefix(w, pieces, &nuclei) || doubled));
         let mut k = first;
         while k + 1 < pi {
             sec.push(stressable[k]);
@@ -1739,11 +1799,31 @@ fn starts_with_prefix(w: &[u8], pieces: &[Piece], nuclei: &[usize]) -> bool {
             && w[p.len()] != w[p.len() - 1]
             && w[p.len()] != w[p.len() + 1]
             && w[p.len()..].iter().any(|&c| is_vowel_letter(c))
+            && (p == b"ex" || onset(w, p.len()))
     }) || (w.len() > 5
         && w.starts_with(b"co")
         && w[2] == w[3]
         && matches!(w[2], b'm' | b'n' | b'l' | b'r')
         && first_end <= 2)
+}
+
+/// Whether the consonants starting at `k` can begin an English syllable:
+/// one consonant, a consonant and r, l or w, or s and a consonant. After a
+/// prefix they must (respect, betray); `beckon` and `empty` have none.
+fn onset(w: &[u8], k: usize) -> bool {
+    let n = w[k..].iter().take_while(|&&c| !is_vowel_letter(c)).count();
+    matches!(
+        &w[k..k + n],
+        [_] | [
+            b's',
+            b'p' | b't' | b'k' | b'c' | b'm' | b'n' | b'l' | b'w' | b'q'
+        ] | [b's', b'p' | b't' | b'c' | b'k', b'r' | b'l']
+            | [b's', b'c', b'h']
+            | [b'p' | b'b' | b't' | b'd' | b'k' | b'c' | b'g' | b'f', b'r']
+            | [b'p' | b'b' | b'k' | b'c' | b'g' | b'f', b'l']
+            | [b't' | b'd', b'w']
+            | [b'c' | b's' | b't' | b'p' | b'w', b'h']
+    )
 }
 
 /// Prefixes that are nearly always unaccented.
@@ -1755,6 +1835,7 @@ fn prefix_strong(w: &[u8]) -> bool {
             && !is_vowel_letter(w[k])
             && w[k] != w[k + 1]
             && w[k] != b'y'
+            && onset(w, k)
     })
 }
 
@@ -1762,8 +1843,8 @@ fn prefix_strong(w: &[u8]) -> bool {
 /// syllable even after a prefix: concert, absent, envy.
 const NOUNISH: &[&str] = &[
     "er", "or", "ar", "y", "ow", "en", "on", "el", "et", "ic", "ish", "ent", "ant", "ence", "ance",
-    "ism", "age", "ive", "ous", "us", "um", "a", "al", "ey", "ly", "ine", "ite", "ile", "o", "id",
-    "il", "op", "om", "em", "ate", "and", "ond", "ort",
+    "ism", "age", "ous", "us", "um", "a", "al", "ey", "ly", "ite", "ile", "o", "id", "il", "op",
+    "om", "em", "ate", "and", "ond", "ort",
 ];
 
 /// Noun endings after con-, com-, pro-, ob-, sub-, ab-: contact, project,
@@ -1775,8 +1856,8 @@ const NOUN_CLUSTER: &[&str] = &[
 
 /// The same after be-, de-, re-, pre- (recent, demon, relic).
 const STRONG_KEEP: &[&str] = &[
-    "ent", "al", "ant", "ic", "ish", "ism", "age", "ous", "um", "a", "o", "ey", "ly", "ine", "ile",
-    "id", "il", "op", "om", "em", "et", "it", "el", "en", "on", "us", "ence",
+    "ent", "al", "ant", "ic", "ish", "ism", "age", "ous", "um", "a", "o", "ey", "ly", "ile", "id",
+    "il", "op", "om", "em", "et", "it", "el", "en", "on", "us", "ence",
 ];
 
 /// The same after a vowel and a doubled consonant (attic, office, apple).
