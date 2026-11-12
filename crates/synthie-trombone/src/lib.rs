@@ -61,6 +61,7 @@
 extern crate alloc;
 
 mod glottis;
+pub mod inverse;
 pub mod listen;
 mod math;
 #[cfg(feature = "alloc")]
