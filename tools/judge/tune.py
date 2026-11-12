@@ -153,6 +153,18 @@ def load_params(path: Path) -> dict[str, dict]:
     return data
 
 
+def tunable(params: dict[str, dict], args, lock: dict[str, float]) -> list[str]:
+    """The parameters of the chosen passes, minus the locked ones and,
+    unless ``--with-classic``, those the classic engine reads too
+    (``"classic": true``): the classic engine is pinned bit for bit, so a
+    tuned value of those could not become a default."""
+    return [
+        n
+        for n, p in params.items()
+        if p["pass"] in args.pass_ and n not in lock and (args.with_classic or not p.get("classic"))
+    ]
+
+
 def load_lock(path: Path | None, params: dict[str, dict]) -> dict[str, float]:
     if path is None:
         return {}
@@ -382,7 +394,7 @@ def run(args) -> dict:
 
     params = load_params(args.params)
     lock = load_lock(args.lock, params)
-    names = [n for n, p in params.items() if p["pass"] in args.pass_ and n not in lock]
+    names = tunable(params, args, lock)
     shadowed = [n for n, p in params.items() if p["pass"] in args.pass_ and n in lock]
     if shadowed:
         print(f"[warn] locked, so not tuned: {', '.join(shadowed)}")
@@ -521,6 +533,84 @@ def fmt_sets(d: dict, pct: bool = True) -> str:
 
 
 # --------------------------------------------------------------------------
+# Sensitivity scan
+# --------------------------------------------------------------------------
+
+
+def scan_points(n: int) -> list[float]:
+    """Positions in a parameter's unit range, the default left out: both
+    ends and evenly between."""
+    return [k / (n - 1) for k in range(n)]
+
+
+def scan(args) -> dict:
+    """One parameter at a time across its range, the others at their
+    defaults (plus the lock): the objective, its parts, the naturalness
+    distance and the gates failed at every point. Logged to
+    ``out/scan-<out stem>.jsonl`` (``--resume`` reuses it); a table is
+    printed at the end."""
+    params = load_params(args.params)
+    lock = load_lock(args.lock, params)
+    names = tunable(params, args, lock)
+    space = Space(params, names, lock)
+    sets = args.sets.split(",")
+    heldout = [x for x in sets if x in HELDOUT_SETS]
+    if heldout:
+        raise SystemExit(f"held-out sets are never tuned on: {', '.join(heldout)}")
+    items = select_items(sets, args.subset)
+    out = Path(args.out).resolve()
+    log_path = OUT_DIR / f"scan-{out.stem}.jsonl"
+    meta = {"params": names, "sets": sets, "items": [it.id for it in items], "seed": None, "popsize": None,
+            "sigma0": None, "ll_weight": args.ll_weight, "prior_weight": args.prior_weight, "lock": lock,
+            "natural_weight": args.natural_weight, "binary": render.file_digest(render.say_bin()),
+            "gates": [str(g) for g in args.gates] if args.gates else None, "points": args.scan,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S")}  # fmt: skip
+    log = Log(log_path, meta, args.resume)
+    ev = Evaluator(items, space, args)
+    todo: list[tuple[str, float, np.ndarray]] = [("default", float("nan"), space.u0.copy())]
+    for k, name in enumerate(names):
+        for t in scan_points(args.scan):
+            u = space.u0.copy()
+            u[k] = t
+            if abs(t - space.u0[k]) > 1e-9:
+                todo.append((name, float(space.lo[k] + t * (space.hi[k] - space.lo[k])), u))
+    rows = []
+    chunk = args.popsize or 12
+    for c in range(0, len(todo), chunk):
+        part = todo[c : c + chunk]
+        cached = [log.cache.get(ukey(u)) for _, _, u in part]
+        fresh_k = [k for k, r in enumerate(cached) if r is None]
+        if fresh_k:
+            res = ev.evaluate([part[k][2] for k in fresh_k])
+            for k, r in zip(fresh_k, res):
+                name, value, u = part[k]
+                rec = {"kind": "eval", "param": name, "value": value, "u": [float(v) for v in u], **r}
+                log.append(rec)
+                log.cache[ukey(u)] = rec
+                cached[k] = rec
+        if c == 0:
+            ev.nat0 = cached[0].get("natural")
+        rows += cached
+        print(f"[scan] {min(c + chunk, len(todo))}/{len(todo)}", flush=True)
+    ev.close()
+    base = rows[0]
+    table = []
+    for name in names:
+        pts = [r for r in rows if r.get("param") == name]
+        table.append((name, pts))
+    print(f"\n[scan] default: objective {base['objective']:.4f}  mean PER {100 * base['mean_per']:.2f}  "
+          f"-ll {base['mean_nll']:.3f}  natural {base.get('natural', float('nan')):.3f}")
+    print(f"{'parameter':26s} {'value':>9s} {'dJ':>8s} {'dPER':>6s} {'d-ll':>6s} {'dnat':>6s}  gates failed")
+    for name, pts in table:
+        for r in pts:
+            dj = r["mean_per"] + args.ll_weight * r["mean_nll"] - base["mean_per"] - args.ll_weight * base["mean_nll"]
+            dn = (r.get("natural") or 0) - (base.get("natural") or 0)
+            print(f"{name:26s} {r['value']:9.4g} {dj:+8.4f} {100 * (r['mean_per'] - base['mean_per']):+6.2f} "
+                  f"{r['mean_nll'] - base['mean_nll']:+6.3f} {dn:+6.3f}  {','.join(r.get('gates_failed') or [])}")
+    return {"rows": rows}
+
+
+# --------------------------------------------------------------------------
 # Self-test
 # --------------------------------------------------------------------------
 
@@ -534,6 +624,7 @@ def self_test(args) -> int:
     args.popsize = 3
     args.lock = None
     args.pass_ = "a"
+    args.with_classic = False
     args.final_whisper = False
     args.out = str(OUT_DIR / "selftest-profile.json")
     args.resume = False
@@ -587,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sigma", type=float, default=0.25, help="initial step, in units of each parameter's range")
     ap.add_argument("--ll-weight", type=float, default=0.1, help="weight of -log-likelihood (nats/phoneme)")
     ap.add_argument("--prior-weight", type=float, default=0.1, help="weight of the distance-from-default penalty")
+    ap.add_argument("--with-classic", action="store_true",
+                    help="also tune the parameters the classic engine reads (marked classic in params.json)")
     ap.add_argument("--natural-weight", type=float, default=0.1,
                     help="weight of the naturalness distance above the default's (0: no guard)")
     ap.add_argument("--subset", type=int, default=None, help="use only N items per set (quick runs)")
@@ -604,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gate-jobs", type=int, default=4, help="candidates gated at once")
     ap.add_argument("--gate-threads", type=int, default=4, help="test threads per gate run")
     ap.add_argument("--no-final-whisper", dest="final_whisper", action="store_false")
+    ap.add_argument("--scan", type=int, default=None, metavar="N",
+                    help="sensitivity scan instead of tuning: each parameter alone at N points across its range")
     args = ap.parse_args(argv)
     if not args.pass_ or set(args.pass_) - set("abc"):
         ap.error("--pass takes the letters a, b and c")
@@ -612,6 +707,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return self_test(args)
     args.out = args.out or str(OUT_DIR / f"profile-{args.pass_}.json")
+    if args.scan:
+        scan(args)
+        return 0
     run(args)
     return 0
 

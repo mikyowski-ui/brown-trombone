@@ -799,6 +799,42 @@ FRIC_MEASURES = [
 ]
 
 
+#: The measures the tuner's naturalness guard reads (``distance``): every
+#: per-sentence measure the person varies on (his dead silence is always 0,
+#: so it has no spread and is left to the engine's gates), and the hiss of
+#: /s z/ and /f v th dh/ (/sh zh/ comes three times in his sentences).
+GUARD_KEYS = [k for k, _, _, _ in MEASURES if not k.startswith("dips.dead")] + [
+    f"fric.{g}.{k}"
+    for g in ("s z", "f v th dh")
+    for k in ("rise_ms", "fall_ms", "dur_ms", "vs_vowel_db", "centroid", "flatness")
+]
+#: z is clipped here, so one measure far off cannot outweigh the rest.
+GUARD_CLIP = 4.0
+#: The warped log-mel distance has no person-to-person spread; it enters
+#: the guard as dB over this.
+GUARD_DTW_DB = 1.0
+
+
+def distance(summary: dict, human: dict) -> tuple[float, dict]:
+    """How far a system's naturalness measures are from the person's: the
+    mean of |z| (clipped at ``GUARD_CLIP``) over ``GUARD_KEYS``, with the
+    warped log-mel distance (dB / ``GUARD_DTW_DB``) as one more term. 0 is
+    the person's average sentence; lower is closer. Returns the distance
+    and every term."""
+    terms: dict[str, float] = {}
+    for key in GUARD_KEYS:
+        h, v = human.get(key) or {}, (summary.get(key) or {}).get("mean")
+        if v is None or h.get("mean") is None or not h.get("sd"):
+            continue
+        terms[key] = float(np.clip((v - h["mean"]) / h["sd"], -GUARD_CLIP, GUARD_CLIP))
+    dtw_mean = (summary.get("dtw.mean") or {}).get("mean")
+    if dtw_mean is not None:
+        terms["dtw.mean"] = float(dtw_mean / GUARD_DTW_DB)
+    if not terms:
+        return float("nan"), terms
+    return float(np.mean([abs(v) for v in terms.values()])), terms
+
+
 def _get(d: dict, path: str):
     for k in path.split("."):
         if d is None:
