@@ -2,7 +2,9 @@
     dead_code,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
 )]
 //! The hiss of a fricative said between two vowels, measured the way the
 //! judge's naturalness measure does on recordings (`tools/judge/natural.py`):
@@ -70,7 +72,7 @@ fn high_pass(x: &[f32], hz: f32) -> Vec<f32> {
     let w = 2.0 * std::f64::consts::PI * f64::from(hz) / f64::from(SR);
     let alpha = w.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
     let a0 = 1.0 + alpha;
-    let (b0, b1) = ((1.0 + w.cos()) / 2.0 / a0, -(1.0 + w.cos()) / a0);
+    let (b0, b1) = (f64::midpoint(1.0, w.cos()) / a0, -(1.0 + w.cos()) / a0);
     let (a1, a2) = (-2.0 * w.cos() / a0, (1.0 - alpha) / a0);
     let (mut x1, mut x2, mut y1, mut y2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
     x.iter()
@@ -114,10 +116,12 @@ pub fn measure(settings: &VoiceSettings, phoneme: &str) -> Hiss {
         t += s.duration;
     }
     let audio = talker.bake_utterance(utterance);
-    let mid = (start + end) / 2.0;
+    let mid = f32::midpoint(start, end);
     let half = (0.2 * (end - start)).max(0.02);
     let core = &audio[((mid - half) * SR) as usize..((mid + half) * SR) as usize];
-    let fine: Vec<f32> = (0..80).map(|k| power(core, 50.0 + 100.0 * k as f32)).collect();
+    let fine: Vec<f32> = (0..80)
+        .map(|k| power(core, 50.0 + 100.0 * k as f32))
+        .collect();
     let mut bands: Vec<f32> = (0..BANDS)
         .map(|b| fine[5 * b..5 * b + 5].iter().sum::<f32>())
         .collect();
@@ -128,7 +132,12 @@ pub fn measure(settings: &VoiceSettings, phoneme: &str) -> Hiss {
     let hi = &fine[10..80];
     let freq = |k: usize| 50.0 + 100.0 * (k + 10) as f32;
     let total: f32 = hi.iter().sum();
-    let centroid = hi.iter().enumerate().map(|(k, &p)| freq(k) * p).sum::<f32>() / total;
+    let centroid = hi
+        .iter()
+        .enumerate()
+        .map(|(k, &p)| freq(k) * p)
+        .sum::<f32>()
+        / total;
     let log_mean = hi.iter().map(|&p| (p + 1e-20).ln()).sum::<f32>() / hi.len() as f32;
     let flatness = log_mean.exp() / (total / hi.len() as f32);
     let smooth: Vec<f32> = (0..hi.len())

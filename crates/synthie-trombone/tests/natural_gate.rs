@@ -90,7 +90,11 @@ fn phrases_swell_in_and_die_away() {
     for text in SENTENCES {
         let (audio, _) = say(text);
         let (rise, fall) = edges(&levels(&audio), -30.0, -6.0);
-        println!("{text}: rise {:.0} ms, fall {:.0} ms", rise * 1e3, fall * 1e3);
+        println!(
+            "{text}: rise {:.0} ms, fall {:.0} ms",
+            rise * 1e3,
+            fall * 1e3
+        );
         assert!((0.04..0.45).contains(&rise), "{text}: rise {rise}");
         falls += fall;
     }
@@ -179,12 +183,19 @@ fn hisses_are_broad_and_s_is_brighter_than_sh() {
         s.centroid, s.flatness, s.width6, sh.centroid, sh.flatness, sh.width6
     );
     assert!(s.centroid > 5000.0, "S centroid {}", s.centroid);
-    assert!((3500.0..5000.0).contains(&sh.centroid), "SH centroid {}", sh.centroid);
+    assert!(
+        (3500.0..5000.0).contains(&sh.centroid),
+        "SH centroid {}",
+        sh.centroid
+    );
     assert!(s.centroid > sh.centroid + 800.0);
     assert!(sh.flatness > 0.3 && sh.width6 >= 400.0, "SH {sh:?}");
     // Its loudest band lies above 1.5 kHz, not at the 1.25 kHz whistle.
     let top = (0..hiss::BANDS)
         .max_by(|&a, &b| sh.bands[a].total_cmp(&sh.bands[b]))
         .unwrap_or(0);
-    assert!(top as f32 * hiss::BAND_HZ >= 1500.0, "SH peaks in band {top}");
+    assert!(
+        top as f32 * hiss::BAND_HZ >= 1500.0,
+        "SH peaks in band {top}"
+    );
 }

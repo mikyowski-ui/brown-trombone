@@ -32,6 +32,7 @@ const SR: f32 = 48_000.0;
 const HOP: usize = 120;
 const WINDOW: usize = 480;
 
+#[allow(clippy::too_many_lines)] // one flat report
 fn main() -> std::io::Result<()> {
     let mut settings = Preset::Deep.settings().with_engine(Engine::Physical);
     let mut every_ms: Option<f32> = None;
@@ -115,7 +116,7 @@ fn main() -> std::io::Result<()> {
         let (lo, hi) = span
             .iter()
             .fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
-        let mid = ((start + end) / 2.0 * SR) as usize;
+        let mid = (f32::midpoint(start, end) * SR) as usize;
         println!(
             "{k:3} {:>4} {:6.3} s {:4.0} ms {:5.1}->{:5.1} Hz {} level {:6.1}..{:6.1} dB  Psub {:4.1}  f0 {:5.1}  jet {:6.3}",
             s.phoneme.to_string(),
@@ -150,10 +151,11 @@ fn main() -> std::io::Result<()> {
         start = end;
     }
 
-    let (at, top) = audio
-        .iter()
-        .enumerate()
-        .fold((0, 0.0f32), |(k, m), (i, v)| if v.abs() > m { (i, v.abs()) } else { (k, m) });
+    let (at, top) =
+        audio.iter().enumerate().fold(
+            (0, 0.0f32),
+            |(k, m), (i, v)| if v.abs() > m { (i, v.abs()) } else { (k, m) },
+        );
     println!(
         "\nloudest sample {top:.3} at {:.3} s in {}",
         at as f32 / SR,

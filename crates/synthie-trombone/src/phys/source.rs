@@ -724,7 +724,10 @@ impl Source {
                     self.restart_watch();
                 }
             }
-        } else if self.voicing && self.gap_override.is_none() && self.probe.monitor && !self.building()
+        } else if self.voicing
+            && self.gap_override.is_none()
+            && self.probe.monitor
+            && !self.building()
         {
             // Wanted but stalled: press together and start again.
             self.watch_lo = self.watch_lo.min(between);

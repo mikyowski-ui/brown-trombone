@@ -272,7 +272,6 @@ const QUIET_PRESSURE: f32 = 0.3;
 /// is let go anyway, seconds.
 const DEVOICE_WAIT: f32 = 0.025;
 
-
 // On the physical engine the articulators get a head start on each sound
 // (`Tuning::lead`): their tissue has inertia there, and people begin moving
 // towards a sound before it is due; without it every shape arrives late
@@ -1560,7 +1559,9 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
         let Some(first) = drafts.get(a).filter(|_| a < b) else {
             continue;
         };
-        let pause = a.checked_sub(1).filter(|&k| drafts[k].phoneme == Phoneme::Sil);
+        let pause = a
+            .checked_sub(1)
+            .filter(|&k| drafts[k].phoneme == Phoneme::Sil);
         // Seconds the lungs push before the phrase, the share of their
         // pressure they start from, and the seconds over which they build
         // up to all of it.
