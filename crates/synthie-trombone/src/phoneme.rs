@@ -497,7 +497,8 @@ impl Articulation {
             // /l r/: their own body. /r/'s is that of /ɚ/ (the classic
             // engine gives both the same), as the physical engine shapes it.
             if self.tongue == Phoneme::R.classic().tongue
-                && let Some((er, _, _)) = vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
+                && let Some((er, _, _)) =
+                    vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
             {
                 a.tongue = Some(er);
             }
@@ -526,9 +527,7 @@ impl Articulation {
         // is /r/'s) is drawn into its r-colouring by the back of the
         // tongue too.
         let own = |p: Phoneme| self.tongue == p.classic().tongue;
-        self.constriction.is_some()
-            && (own(Phoneme::K) || own(Phoneme::L)
-                || own(Phoneme::R))
+        self.constriction.is_some() && (own(Phoneme::K) || own(Phoneme::L) || own(Phoneme::R))
     }
 
     /// The vowel shape the physical engine holds for this articulation in

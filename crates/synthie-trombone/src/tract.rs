@@ -619,6 +619,7 @@ impl Tract {
     /// narrowing, exactly as before), kept as [`Tract::body`]; then each
     /// consonant carved into it with the shoulder of the articulator that
     /// makes it, and every cell assigned the articulator that moves it.
+    #[allow(clippy::needless_range_loop)] // five arrays, cell by cell
     fn compute_shaped_targets(&mut self, floor: f32) {
         // Lip rounding that belongs to a consonant (/ʃ ʒ tʃ dʒ r/) is the
         // lips' own gesture and moves at their speed; a vowel's moves with
@@ -632,9 +633,10 @@ impl Tract {
             let before = self.target;
             carve(&mut self.target, s.c, floor);
             if consonant {
-                for i in LIP_START..N {
-                    if self.target[i] < before[i] - CARVED {
-                        self.mover[i] = Mover::Tip;
+                let lips = self.target[LIP_START..].iter().zip(&before[LIP_START..]);
+                for (m, (t, b)) in self.mover[LIP_START..].iter_mut().zip(lips) {
+                    if *t < b - CARVED {
+                        *m = Mover::Tip;
                     }
                 }
             }

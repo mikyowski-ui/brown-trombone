@@ -31,6 +31,7 @@
 //!   its target.
 
 #![allow(
+    clippy::format_push_string,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -135,8 +136,8 @@ fn loci(settings: &VoiceSettings) {
         let mut line = format!("{c:>3}: locus {locus:6.0} slope {k:4.2} |");
         for (v, t) in VOWELS.iter().zip(rows) {
             line += &format!(
-                " {v}: {:4.0}>{:4.0}({:4.0}) mid {:4.0} pre {:4.0}/{:4.0}/{:4.0} |",
-                t.onset[0], t.onset[0], t.onset[1], t.mid[0], t.before[0][0], t.before[1][0], t.before[2][0]
+                " {v}: onset {:4.0}({:4.0}) mid {:4.0} pre {:4.0}/{:4.0}/{:4.0} |",
+                t.onset[0], t.onset[1], t.mid[0], t.before[0][0], t.before[1][0], t.before[2][0]
             );
         }
         println!("{line}");
@@ -189,7 +190,16 @@ fn finals(settings: &VoiceSettings) {
     let texts: Vec<String> = ["P", "B", "T", "D", "K", "G"]
         .iter()
         .map(|c| format!("[AA1 {c}]"))
-        .chain(["dark.", "bed.", "the parked truck.", "round bowls.", "bonds."].map(String::from))
+        .chain(
+            [
+                "dark.",
+                "bed.",
+                "the parked truck.",
+                "round bowls.",
+                "bonds.",
+            ]
+            .map(String::from),
+        )
         .collect();
     let all = parallel(&texts, |t| {
         let r = stops::record(settings, t);
@@ -198,7 +208,11 @@ fn finals(settings: &VoiceSettings) {
     for (t, bursts) in texts.iter().zip(all) {
         let mut line = format!("{t:>22}:");
         for b in bursts {
-            line += &format!(" {} {:5.1}", b.phoneme, stops::db(b.peak) - stops::db(b.vowel));
+            line += &format!(
+                " {} {:5.1}",
+                b.phoneme,
+                stops::db(b.peak) - stops::db(b.vowel)
+            );
         }
         println!("{line}");
     }

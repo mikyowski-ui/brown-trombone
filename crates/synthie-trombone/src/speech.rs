@@ -197,6 +197,7 @@ impl Utterance {
 
 /// Plays [`Utterance`]s on a [`Trombone`]. Never allocates.
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent flags
 pub struct Speaker {
     utterance: Utterance,
     index: usize,
@@ -1151,7 +1152,10 @@ fn expand(
                 medial_zh
             } else if p == Phoneme::Z {
                 Gesture {
-                    spread: 0.5 * (timing.voiced_fricative_spread + timing.voiced_sibilant_spread),
+                    spread: f32::midpoint(
+                        timing.voiced_fricative_spread,
+                        timing.voiced_sibilant_spread,
+                    ),
                     ..medial_zh
                 }
             } else if a.voiced {

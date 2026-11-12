@@ -116,11 +116,15 @@ pub fn speak(settings: &VoiceSettings, text: &str, formants: bool) -> Spoken {
             r.0 = r.0.min(s.audio.len());
             r.1 = s.audio.len() + 1;
         }
-        if s.audio.len() % FRAME == 0 {
+        if s.audio.len().is_multiple_of(FRAME) {
             let d = voice.diameters();
-            let (at, narrowest) = (ORAL_FROM..N)
-                .map(|i| (i, d[i]))
-                .fold((ORAL_FROM, f32::INFINITY), |m, x| if x.1 < m.1 { x } else { m });
+            let (at, narrowest) =
+                (ORAL_FROM..N)
+                    .map(|i| (i, d[i]))
+                    .fold(
+                        (ORAL_FROM, f32::INFINITY),
+                        |m, x| if x.1 < m.1 { x } else { m },
+                    );
             let off_target = targets.get(index).map_or(0.0, |t| {
                 let n = (N - ORAL_FROM) as f32;
                 ((ORAL_FROM..N).map(|i| (d[i] - t[i]).powi(2)).sum::<f32>() / n).sqrt()
@@ -204,7 +208,7 @@ pub fn transition(settings: &VoiceSettings, c: Phoneme, v: Phoneme) -> Transitio
     Transition {
         before: [-60.0, -30.0, -10.0].map(|ms| f23(s.formants_at(c0, ms))),
         onset: f23(s.formants_at(v0, 10.0)),
-        mid: f23(s.formants_at((v0 + v1) / 2, 0.0)),
+        mid: f23(s.formants_at(usize::midpoint(v0, v1), 0.0)),
     }
 }
 
@@ -303,7 +307,11 @@ pub fn cluster_openings(s: &Spoken, open: f32) -> Vec<(Phoneme, Phoneme, f32, f3
     let consonant = |p: Phoneme| {
         matches!(
             p.manner(),
-            Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Approximant
+            Manner::Stop
+                | Manner::Nasal
+                | Manner::Fricative
+                | Manner::Affricate
+                | Manner::Approximant
         )
     };
     let mut out = Vec::new();
@@ -317,8 +325,8 @@ pub fn cluster_openings(s: &Spoken, open: f32) -> Vec<(Phoneme, Phoneme, f32, f3
         if a0 == usize::MAX || b0 == usize::MAX {
             continue;
         }
-        let from = Spoken::frame_of((a0 + a1) / 2);
-        let to = Spoken::frame_of((b0 + b1) / 2).min(s.frames.len());
+        let from = Spoken::frame_of(usize::midpoint(a0, a1));
+        let to = Spoken::frame_of(usize::midpoint(b0, b1)).min(s.frames.len());
         let frames = &s.frames[from..to.max(from)];
         let widest = frames.iter().fold(0.0f32, |m, f| m.max(f.narrowest));
         let wide = frames.iter().filter(|f| f.narrowest > open).count();

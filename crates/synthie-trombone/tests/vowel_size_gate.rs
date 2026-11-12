@@ -372,7 +372,7 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             assert_eq!(Some(leaning(Phoneme::P)), tongue, "{p} with /p/ at {l}");
             // ...the tongue tip of /s/ draws it a little forward and up,
             // never further than the tongue's own reach.
-            let (index, diameter) = tongue.expect("a tongue");
+            let (index, diameter) = (shape.tongue_index, shape.tongue_diameter);
             let (si, sd) = leaning(Phoneme::S);
             assert!(
                 (si - index).abs() <= 0.35 * (26.5 - index).abs() + 1e-3
