@@ -1,0 +1,127 @@
+id	set	text	expected	ortho	meta
+car_tune_say_bvd_iy	carrier_tune	[S EY1] [B IY1 D] [AX0 G EH1 N].	S EY B IY D AX G EH N		target=IY;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_iy	carrier_tune	[S EY1] [HH IY1 D] [AX0 G EH1 N].	S EY HH IY D AX G EH N		target=IY;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_iy	carrier_tune	[S EY1] [K IY1 T] [AX0 G EH1 N].	S EY K IY T AX G EH N		target=IY;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_iy	carrier_tune	[S EY1] [S IY1 P] [AX0 G EH1 N].	S EY S IY P AX G EH N		target=IY;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ih	carrier_tune	[S EY1] [B IH1 D] [AX0 G EH1 N].	S EY B IH D AX G EH N		target=IH;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ih	carrier_tune	[S EY1] [HH IH1 D] [AX0 G EH1 N].	S EY HH IH D AX G EH N		target=IH;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ih	carrier_tune	[S EY1] [K IH1 T] [AX0 G EH1 N].	S EY K IH T AX G EH N		target=IH;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ih	carrier_tune	[S EY1] [S IH1 P] [AX0 G EH1 N].	S EY S IH P AX G EH N		target=IH;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_eh	carrier_tune	[S EY1] [B EH1 D] [AX0 G EH1 N].	S EY B EH D AX G EH N		target=EH;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_eh	carrier_tune	[S EY1] [HH EH1 D] [AX0 G EH1 N].	S EY HH EH D AX G EH N		target=EH;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_eh	carrier_tune	[S EY1] [K EH1 T] [AX0 G EH1 N].	S EY K EH T AX G EH N		target=EH;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_eh	carrier_tune	[S EY1] [S EH1 P] [AX0 G EH1 N].	S EY S EH P AX G EH N		target=EH;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ae	carrier_tune	[S EY1] [B AE1 D] [AX0 G EH1 N].	S EY B AE D AX G EH N		target=AE;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ae	carrier_tune	[S EY1] [HH AE1 D] [AX0 G EH1 N].	S EY HH AE D AX G EH N		target=AE;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ae	carrier_tune	[S EY1] [K AE1 T] [AX0 G EH1 N].	S EY K AE T AX G EH N		target=AE;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ae	carrier_tune	[S EY1] [S AE1 P] [AX0 G EH1 N].	S EY S AE P AX G EH N		target=AE;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ah	carrier_tune	[S EY1] [B AH1 D] [AX0 G EH1 N].	S EY B AH D AX G EH N		target=AH;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ah	carrier_tune	[S EY1] [HH AH1 D] [AX0 G EH1 N].	S EY HH AH D AX G EH N		target=AH;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ah	carrier_tune	[S EY1] [K AH1 T] [AX0 G EH1 N].	S EY K AH T AX G EH N		target=AH;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ah	carrier_tune	[S EY1] [S AH1 P] [AX0 G EH1 N].	S EY S AH P AX G EH N		target=AH;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_aa	carrier_tune	[S EY1] [B AA1 D] [AX0 G EH1 N].	S EY B AA D AX G EH N		target=AA;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_aa	carrier_tune	[S EY1] [HH AA1 D] [AX0 G EH1 N].	S EY HH AA D AX G EH N		target=AA;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_aa	carrier_tune	[S EY1] [K AA1 T] [AX0 G EH1 N].	S EY K AA T AX G EH N		target=AA;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_aa	carrier_tune	[S EY1] [S AA1 P] [AX0 G EH1 N].	S EY S AA P AX G EH N		target=AA;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ao	carrier_tune	[S EY1] [B AO1 D] [AX0 G EH1 N].	S EY B AO D AX G EH N		target=AO;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ao	carrier_tune	[S EY1] [HH AO1 D] [AX0 G EH1 N].	S EY HH AO D AX G EH N		target=AO;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ao	carrier_tune	[S EY1] [K AO1 T] [AX0 G EH1 N].	S EY K AO T AX G EH N		target=AO;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ao	carrier_tune	[S EY1] [S AO1 P] [AX0 G EH1 N].	S EY S AO P AX G EH N		target=AO;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_uh	carrier_tune	[S EY1] [B UH1 D] [AX0 G EH1 N].	S EY B UH D AX G EH N		target=UH;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_uh	carrier_tune	[S EY1] [HH UH1 D] [AX0 G EH1 N].	S EY HH UH D AX G EH N		target=UH;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_uh	carrier_tune	[S EY1] [K UH1 T] [AX0 G EH1 N].	S EY K UH T AX G EH N		target=UH;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_uh	carrier_tune	[S EY1] [S UH1 P] [AX0 G EH1 N].	S EY S UH P AX G EH N		target=UH;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_uw	carrier_tune	[S EY1] [B UW1 D] [AX0 G EH1 N].	S EY B UW D AX G EH N		target=UW;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_uw	carrier_tune	[S EY1] [HH UW1 D] [AX0 G EH1 N].	S EY HH UW D AX G EH N		target=UW;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_uw	carrier_tune	[S EY1] [K UW1 T] [AX0 G EH1 N].	S EY K UW T AX G EH N		target=UW;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_uw	carrier_tune	[S EY1] [S UW1 P] [AX0 G EH1 N].	S EY S UW P AX G EH N		target=UW;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_er	carrier_tune	[S EY1] [B ER1 D] [AX0 G EH1 N].	S EY B ER D AX G EH N		target=ER;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_er	carrier_tune	[S EY1] [HH ER1 D] [AX0 G EH1 N].	S EY HH ER D AX G EH N		target=ER;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_er	carrier_tune	[S EY1] [K ER1 T] [AX0 G EH1 N].	S EY K ER T AX G EH N		target=ER;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_er	carrier_tune	[S EY1] [S ER1 P] [AX0 G EH1 N].	S EY S ER P AX G EH N		target=ER;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ey	carrier_tune	[S EY1] [B EY1 D] [AX0 G EH1 N].	S EY B EY D AX G EH N		target=EY;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ey	carrier_tune	[S EY1] [HH EY1 D] [AX0 G EH1 N].	S EY HH EY D AX G EH N		target=EY;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ey	carrier_tune	[S EY1] [K EY1 T] [AX0 G EH1 N].	S EY K EY T AX G EH N		target=EY;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ey	carrier_tune	[S EY1] [S EY1 P] [AX0 G EH1 N].	S EY S EY P AX G EH N		target=EY;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ay	carrier_tune	[S EY1] [B AY1 D] [AX0 G EH1 N].	S EY B AY D AX G EH N		target=AY;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ay	carrier_tune	[S EY1] [HH AY1 D] [AX0 G EH1 N].	S EY HH AY D AX G EH N		target=AY;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ay	carrier_tune	[S EY1] [K AY1 T] [AX0 G EH1 N].	S EY K AY T AX G EH N		target=AY;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ay	carrier_tune	[S EY1] [S AY1 P] [AX0 G EH1 N].	S EY S AY P AX G EH N		target=AY;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_ow	carrier_tune	[S EY1] [B OW1 D] [AX0 G EH1 N].	S EY B OW D AX G EH N		target=OW;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_ow	carrier_tune	[S EY1] [HH OW1 D] [AX0 G EH1 N].	S EY HH OW D AX G EH N		target=OW;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_ow	carrier_tune	[S EY1] [K OW1 T] [AX0 G EH1 N].	S EY K OW T AX G EH N		target=OW;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_ow	carrier_tune	[S EY1] [S OW1 P] [AX0 G EH1 N].	S EY S OW P AX G EH N		target=OW;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_aw	carrier_tune	[S EY1] [B AW1 D] [AX0 G EH1 N].	S EY B AW D AX G EH N		target=AW;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_aw	carrier_tune	[S EY1] [HH AW1 D] [AX0 G EH1 N].	S EY HH AW D AX G EH N		target=AW;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_aw	carrier_tune	[S EY1] [K AW1 T] [AX0 G EH1 N].	S EY K AW T AX G EH N		target=AW;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_aw	carrier_tune	[S EY1] [S AW1 P] [AX0 G EH1 N].	S EY S AW P AX G EH N		target=AW;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_bvd_oy	carrier_tune	[S EY1] [B OY1 D] [AX0 G EH1 N].	S EY B OY D AX G EH N		target=OY;slot=3;frame=bvd;carrier=say;lex=carrier
+car_tune_say_hvd_oy	carrier_tune	[S EY1] [HH OY1 D] [AX0 G EH1 N].	S EY HH OY D AX G EH N		target=OY;slot=3;frame=hvd;carrier=say;lex=carrier
+car_tune_say_kvt_oy	carrier_tune	[S EY1] [K OY1 T] [AX0 G EH1 N].	S EY K OY T AX G EH N		target=OY;slot=3;frame=kvt;carrier=say;lex=carrier
+car_tune_say_svp_oy	carrier_tune	[S EY1] [S OY1 P] [AX0 G EH1 N].	S EY S OY P AX G EH N		target=OY;slot=3;frame=svp;carrier=say;lex=carrier
+car_tune_say_sofa_ax	carrier_tune	[S EY1] [S OW1 F AX] [AX0 G EH1 N].	S EY S OW F AX AX G EH N		target=AX;slot=5;frame=sofa;carrier=say;lex=carrier
+car_tune_say_panda_ax	carrier_tune	[S EY1] [P AE1 N D AX] [AX0 G EH1 N].	S EY P AE N D AX AX G EH N		target=AX;slot=6;frame=panda;carrier=say;lex=carrier
+car_tune_say_comma_ax	carrier_tune	[S EY1] [K AA1 M AX] [AX0 G EH1 N].	S EY K AA M AX AX G EH N		target=AX;slot=5;frame=comma;carrier=say;lex=carrier
+car_tune_word_bvd_iy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B IY1 D].	DH AX W ER D IH Z B IY D		target=IY;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_iy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH IY1 D].	DH AX W ER D IH Z HH IY D		target=IY;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_iy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K IY1 T].	DH AX W ER D IH Z K IY T		target=IY;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_iy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S IY1 P].	DH AX W ER D IH Z S IY P		target=IY;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ih	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B IH1 D].	DH AX W ER D IH Z B IH D		target=IH;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ih	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH IH1 D].	DH AX W ER D IH Z HH IH D		target=IH;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ih	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K IH1 T].	DH AX W ER D IH Z K IH T		target=IH;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ih	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S IH1 P].	DH AX W ER D IH Z S IH P		target=IH;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_eh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B EH1 D].	DH AX W ER D IH Z B EH D		target=EH;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_eh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH EH1 D].	DH AX W ER D IH Z HH EH D		target=EH;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_eh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K EH1 T].	DH AX W ER D IH Z K EH T		target=EH;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_eh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S EH1 P].	DH AX W ER D IH Z S EH P		target=EH;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ae	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AE1 D].	DH AX W ER D IH Z B AE D		target=AE;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ae	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AE1 D].	DH AX W ER D IH Z HH AE D		target=AE;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ae	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AE1 T].	DH AX W ER D IH Z K AE T		target=AE;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ae	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AE1 P].	DH AX W ER D IH Z S AE P		target=AE;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ah	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AH1 D].	DH AX W ER D IH Z B AH D		target=AH;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ah	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AH1 D].	DH AX W ER D IH Z HH AH D		target=AH;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ah	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AH1 T].	DH AX W ER D IH Z K AH T		target=AH;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ah	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AH1 P].	DH AX W ER D IH Z S AH P		target=AH;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_aa	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AA1 D].	DH AX W ER D IH Z B AA D		target=AA;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_aa	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AA1 D].	DH AX W ER D IH Z HH AA D		target=AA;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_aa	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AA1 T].	DH AX W ER D IH Z K AA T		target=AA;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_aa	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AA1 P].	DH AX W ER D IH Z S AA P		target=AA;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ao	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AO1 D].	DH AX W ER D IH Z B AO D		target=AO;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ao	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AO1 D].	DH AX W ER D IH Z HH AO D		target=AO;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ao	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AO1 T].	DH AX W ER D IH Z K AO T		target=AO;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ao	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AO1 P].	DH AX W ER D IH Z S AO P		target=AO;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_uh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B UH1 D].	DH AX W ER D IH Z B UH D		target=UH;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_uh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH UH1 D].	DH AX W ER D IH Z HH UH D		target=UH;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_uh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K UH1 T].	DH AX W ER D IH Z K UH T		target=UH;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_uh	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S UH1 P].	DH AX W ER D IH Z S UH P		target=UH;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_uw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B UW1 D].	DH AX W ER D IH Z B UW D		target=UW;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_uw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH UW1 D].	DH AX W ER D IH Z HH UW D		target=UW;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_uw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K UW1 T].	DH AX W ER D IH Z K UW T		target=UW;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_uw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S UW1 P].	DH AX W ER D IH Z S UW P		target=UW;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_er	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B ER1 D].	DH AX W ER D IH Z B ER D		target=ER;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_er	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH ER1 D].	DH AX W ER D IH Z HH ER D		target=ER;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_er	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K ER1 T].	DH AX W ER D IH Z K ER T		target=ER;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_er	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S ER1 P].	DH AX W ER D IH Z S ER P		target=ER;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ey	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B EY1 D].	DH AX W ER D IH Z B EY D		target=EY;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ey	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH EY1 D].	DH AX W ER D IH Z HH EY D		target=EY;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ey	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K EY1 T].	DH AX W ER D IH Z K EY T		target=EY;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ey	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S EY1 P].	DH AX W ER D IH Z S EY P		target=EY;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ay	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AY1 D].	DH AX W ER D IH Z B AY D		target=AY;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ay	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AY1 D].	DH AX W ER D IH Z HH AY D		target=AY;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ay	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AY1 T].	DH AX W ER D IH Z K AY T		target=AY;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ay	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AY1 P].	DH AX W ER D IH Z S AY P		target=AY;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_ow	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B OW1 D].	DH AX W ER D IH Z B OW D		target=OW;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_ow	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH OW1 D].	DH AX W ER D IH Z HH OW D		target=OW;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_ow	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K OW1 T].	DH AX W ER D IH Z K OW T		target=OW;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_ow	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S OW1 P].	DH AX W ER D IH Z S OW P		target=OW;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_aw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B AW1 D].	DH AX W ER D IH Z B AW D		target=AW;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_aw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH AW1 D].	DH AX W ER D IH Z HH AW D		target=AW;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_aw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AW1 T].	DH AX W ER D IH Z K AW T		target=AW;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_aw	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S AW1 P].	DH AX W ER D IH Z S AW P		target=AW;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_bvd_oy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [B OY1 D].	DH AX W ER D IH Z B OY D		target=OY;slot=8;frame=bvd;carrier=word;lex=carrier
+car_tune_word_hvd_oy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [HH OY1 D].	DH AX W ER D IH Z HH OY D		target=OY;slot=8;frame=hvd;carrier=word;lex=carrier
+car_tune_word_kvt_oy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K OY1 T].	DH AX W ER D IH Z K OY T		target=OY;slot=8;frame=kvt;carrier=word;lex=carrier
+car_tune_word_svp_oy	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S OY1 P].	DH AX W ER D IH Z S OY P		target=OY;slot=8;frame=svp;carrier=word;lex=carrier
+car_tune_word_sofa_ax	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [S OW1 F AX].	DH AX W ER D IH Z S OW F AX		target=AX;slot=10;frame=sofa;carrier=word;lex=carrier
+car_tune_word_panda_ax	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [P AE1 N D AX].	DH AX W ER D IH Z P AE N D AX		target=AX;slot=11;frame=panda;carrier=word;lex=carrier
+car_tune_word_comma_ax	carrier_tune	[DH AX0] [W ER1 D] [IH0 Z] [K AA1 M AX].	DH AX W ER D IH Z K AA M AX		target=AX;slot=10;frame=comma;carrier=word;lex=carrier

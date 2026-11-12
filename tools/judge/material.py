@@ -32,7 +32,11 @@ HERE = Path(__file__).resolve().parent
 MATERIAL_DIR = HERE / "material"
 SYNTH_SETS = ["vcv", "pair", "word", "sentence_tune", "sentence_heldout"]
 #: Targeted sets for ``probes.py`` (not part of the default scoreboard).
-PROBE_SETS = ["vowel", "voicing"]
+#: ``harvard_*`` and ``carrier_*`` are the vowel tuner's material: a tuning
+#: split it optimises on and a held-out split it never sees.
+PROBE_SETS = ["vowel", "voicing", "harvard_tune", "harvard_heldout", "carrier_tune", "carrier_heldout"]
+#: Sets of whole sentences: the probes score every slot in them.
+SENTENCE_SETS = ["human", "sentence_tune", "sentence_heldout", "harvard_tune", "harvard_heldout"]
 ALL_SETS = SYNTH_SETS + ["human"] + PROBE_SETS
 HEADER = ["id", "set", "text", "expected", "ortho"]
 META = "meta"
@@ -159,6 +163,72 @@ SENTENCES_HELDOUT = [
     "The salt breeze came across from the sea.",
     "The girl at the booth sold fifty bonds.",
 ]
+
+#: More Harvard sentences for the vowel tuner: lists 3 and 4 to tune on...
+HARVARD_TUNE = [
+    "The small pup gnawed a hole in the sock.",
+    "The fish twisted and turned on the bent hook.",
+    "Press the pants and sew a button on the vest.",
+    "The swan dive was far short of perfect.",
+    "The beauty of the view stunned the young boy.",
+    "Two blue fish swam in the tank.",
+    "Her purse was full of useless trash.",
+    "The colt reared and threw the tall rider.",
+    "It snowed, rained, and hailed the same morning.",
+    "Read verse out loud for pleasure.",
+    "Hoist the load to your left shoulder.",
+    "Take the winding path to reach the lake.",
+    "Note closely the size of the gas tank.",
+    "Wipe the grease off his dirty face.",
+    "Mend the coat before you go out.",
+    "The wrist was badly strained and hung limp.",
+    "The stray cat gave birth to kittens.",
+    "The young girl gave no clear response.",
+    "The meal was cooked before the bell rang.",
+    "What joy there is in living.",
+]
+
+#: ...and lists 5 and 6, held out.
+HARVARD_HELDOUT = [
+    "A king ruled the state in the early days.",
+    "The ship was torn apart on the sharp reef.",
+    "Sickness kept him home the third week.",
+    "The wide road shimmered in the hot sun.",
+    "The lazy cow lay in the cool grass.",
+    "Lift the square stone over the fence.",
+    "The rope will bind the seven books at once.",
+    "Hop over the fence and plunge in.",
+    "The friendly gang left the drug store.",
+    "Mesh wire keeps chicks inside.",
+    "The frosty air passed through the coat.",
+    "The crooked maze failed to fool the mouse.",
+    "Adding fast leads to wrong sums.",
+    "The show was a flop from the very start.",
+    "A saw is a tool used for making boards.",
+    "The wagon moved on well oiled wheels.",
+    "March the soldiers past the next hill.",
+    "A cup of sugar makes sweet fudge.",
+    "Place a rosebush near the porch steps.",
+    "Both lost their lives in the raging storm.",
+]
+
+# --- carrier phrases (vowel tuner) -------------------------------------------
+
+#: Every stressed vowel in CVC syllables inside short carrier phrases, given
+#: as phonemes; only the CVC's vowel is scored.  The tuning and held-out
+#: splits share no carrier and no consonant frame.
+CARRIER_SPLITS = {
+    "carrier_tune": {
+        "carriers": [("say", "[S EY1] {} [AX0 G EH1 N]."), ("word", "[DH AX0] [W ER1 D] [IH0 Z] {}.")],
+        "frames": [("bvd", "B {}1 D"), ("hvd", "HH {}1 D"), ("kvt", "K {}1 T"), ("svp", "S {}1 P")],
+        "ax": [("sofa", "S OW1 F AX", 3), ("panda", "P AE1 N D AX", 4), ("comma", "K AA1 M AX", 3)],
+    },
+    "carrier_heldout": {
+        "carriers": [("said", "[AY1] [S EH1 D] {} [T AX0 D EY1]."), ("write", "[R AY1 T] {} [W AH1 N S].")],
+        "frames": [("pvt", "P {}1 T"), ("dvg", "D {}1 G"), ("fvn", "F {}1 N"), ("tvk", "T {}1 K")],
+        "ax": [("about", "AX B AW1 T", 0), ("ago", "AX G OW1", 0), ("salad", "S AE1 L AX D", 3)],
+    },
+}
 
 # --- vowel probe ----------------------------------------------------------
 
@@ -294,13 +364,34 @@ def build_word() -> list[Item]:
     return [Item(f"word_{w}", "word", _bracket(a), tuple(A.parse_arpabet(a)), w) for w, a in WORDS]
 
 
-def build_sentences(name: str, sentences: list[str]) -> list[Item]:
+def build_sentences(name: str, sentences: list[str], stem: str = "sent") -> list[Item]:
     import espeak_util as E
 
     prefix = "tune" if name.endswith("tune") else "held"
     return [
-        Item(f"sent_{prefix}_{k + 1:02d}", name, s, tuple(E.phonemes(s)), s) for k, s in enumerate(sentences)
+        Item(f"{stem}_{prefix}_{k + 1:02d}", name, s, tuple(E.phonemes(s)), s) for k, s in enumerate(sentences)
     ]
+
+
+def build_carrier(name: str) -> list[Item]:
+    """Every stressed vowel in the split's CVC frames inside each of its
+    carrier phrases, and AX unstressed in real words.  ``slot`` is the index
+    of the scored vowel in ``expected``."""
+    split = CARRIER_SPLITS[name]
+    prefix = "tune" if name.endswith("tune") else "held"
+    items = []
+    for cname, carrier in split["carriers"]:
+        before = A.parse_arpabet(" ".join(carrier.split("{}")[0].replace("[", " ").replace("]", " ").split()))
+        words = [(v, f, pat.format(v)) for v in VOWEL_TARGETS if v != "AX" for f, pat in split["frames"]]
+        words += [("AX", w, arpa) for w, arpa, _ in split["ax"]]
+        for v, frame, arpa in words:
+            text = carrier.format(_bracket(arpa))
+            phones = A.parse_arpabet(" ".join(text.replace("[", " ").replace("]", " ").replace(".", " ").split()))
+            inner = A.parse_arpabet(arpa)
+            at = next(k for w, a, k in split["ax"] if w == frame) if v == "AX" else inner.index(v)
+            meta = _meta(target=v, slot=len(before) + at, frame=frame, carrier=cname, lex="carrier")
+            items.append(Item(f"car_{prefix}_{cname}_{frame}_{v.lower()}", name, text, tuple(phones), "", meta))
+    return items
 
 
 def _meta(**kv) -> str:
@@ -418,6 +509,10 @@ def build() -> None:
         "sentence_heldout": build_sentences("sentence_heldout", SENTENCES_HELDOUT),
         "vowel": build_vowel(),
         "voicing": build_voicing(),
+        "harvard_tune": build_sentences("harvard_tune", HARVARD_TUNE, "harv"),
+        "harvard_heldout": build_sentences("harvard_heldout", HARVARD_HELDOUT, "harv"),
+        "carrier_tune": build_carrier("carrier_tune"),
+        "carrier_heldout": build_carrier("carrier_heldout"),
     }
     for name, items in sets.items():
         write_tsv(MATERIAL_DIR / f"{name}.tsv", items)

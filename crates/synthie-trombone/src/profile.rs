@@ -120,6 +120,7 @@ pub fn tuning_parameters() -> String {
         let pass = match f.pass {
             Pass::A => "a",
             Pass::B => "b",
+            Pass::C => "c",
         };
         let comma = if k + 1 < Tuning::FIELDS.len() {
             ","

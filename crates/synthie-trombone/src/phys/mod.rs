@@ -167,6 +167,10 @@ const JET_REACH: usize = 9;
 const BLEED_TIME: f32 = 0.012;
 const BLEED_TAU: f32 = 0.002;
 
+/// First cell that counts for [`Gauge::shut`]: the pharynx below it is
+/// never closed by a consonant.
+const SEAL_FROM: usize = 10;
+
 /// Cells (glottis end first) whose walls a speaker widens to keep a voiced
 /// closure voiced: the pharynx, behind every place of closure. Lowering the
 /// larynx, pushing the tongue root forward and lifting the soft palate all
@@ -269,6 +273,9 @@ pub(crate) struct Stream {
 /// Readings from the last tick, for tests and measurements.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Gauge {
+    /// The mouth is shut somewhere in front of the pharynx (a cell from
+    /// `SEAL_FROM` on has no lumen).
+    pub shut: bool,
     /// Flow through the glottis, cm³/s.
     pub u_glottis: f32,
     /// Pressure just below the glottis, dyn/cm².
@@ -856,15 +863,18 @@ impl Phys {
             3.0 * l2 - 2.0 * l3,
             l3 - l2,
         );
+        let mut sealed = false;
         for i in 0..N {
             self.wall_y[i] *= keep;
             let d = h00 * self.d0[i] + h10 * self.m0[i] + h01 * self.d1[i] + h11 * self.m1[i];
             let a = self.area_of(d);
+            sealed |= i >= SEAL_FROM && a < A_MIN;
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);
             self.wall_s[i] = self.wall_s0[i] + (self.wall_s1[i] - self.wall_s0[i]) * lambda;
             self.adot[i] += (self.adot_target[i] - self.adot[i]) * self.adot_smooth;
         }
+        self.gauge.shut = sealed;
         let mut nr = [0.0f32; N];
         let mut nl = [0.0f32; N];
         let widen = self.widening();

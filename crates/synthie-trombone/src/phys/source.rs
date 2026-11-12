@@ -76,6 +76,13 @@ const SOFT_START: f32 = 4.5;
 /// Swing of the area between the folds, cm² at native size, below which
 /// they count as stalled.
 const STALL_SWING: f32 = 0.03;
+/// Seconds over which the voice is handed between the folds and the pulse
+/// source, the glottal area of one fading into the other's. Swapped in one
+/// tick, the two areas differed by up to 0.04 cm² (folds wide in their
+/// open phase, the pulse shut, or the reverse), and the water hammer of
+/// that step left the mouth as a click several times the vowel's peak:
+/// the critter's high notes cross its folds' range within a vowel.
+const HANDOVER_TIME: f32 = 0.006;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
 /// size.
 const VIBRATION_AREA: f32 = 0.14;
@@ -273,6 +280,9 @@ pub(crate) struct Source {
     /// Whether the folds are singing the current note (it lies inside
     /// their range, or the pulse is not allowed to take it).
     reachable: bool,
+    /// Share of the glottal area that comes from the folds while the voice
+    /// is handed over (1 when they sing, 0 when the pulse does).
+    blend: f32,
     tension0: f32,
     tension1: f32,
     /// Pitch tracking for the trim.
@@ -335,6 +345,7 @@ impl Source {
             watch_hi: 0.0,
             watch_for: 0.0,
             reachable: true,
+            blend: 1.0,
             tension0: 1.0,
             tension1: 1.0,
             mean_edge: 0.0,
@@ -558,9 +569,13 @@ impl Source {
             // to the pulse.
             let covered = covered || self.fallback == Fallback::Never;
             if voicing && covered != self.reachable {
-                // Handing over between the models: start the other cleanly.
+                // Handing over between the models: start the folds cleanly
+                // if they were silent; the areas cross-fade (see
+                // `HANDOVER_TIME`).
                 self.reachable = covered;
-                self.folds.reset();
+                if covered && self.blend <= 0.0 {
+                    self.folds.reset();
+                }
                 self.clean_cycles = 0;
                 self.trim = 0.0;
             }
@@ -601,15 +616,31 @@ impl Source {
         self.slack += (self.slack_target - self.slack) * (dt / arytenoids);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
-        if self.active() == SourceKind::Folds {
+        let to = if self.active() == SourceKind::Folds {
+            1.0
+        } else {
+            0.0
+        };
+        self.blend = if self.kind == SourceKind::Folds {
+            let step = dt / HANDOVER_TIME;
+            (self.blend + (to - self.blend).clamp(-step, step)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let mut folds = 0.0;
+        if self.blend > 0.0 {
             self.folds.hold_at(self.gap, dt);
             let tension = self.tension0 + (self.tension1 - self.tension0) * lambda;
             self.folds.tension = tension * exp(self.trim) * (1.0 - self.slack);
             let between = self.folds.area();
             let total = between + self.chink + self.spread;
             self.fold_share = if total > 0.0 { between / total } else { 1.0 };
-            self.edge_area = between;
-            return (total, self.lung);
+            if self.blend >= 1.0 {
+                self.edge_area = between;
+                return (total, self.lung);
+            }
+            folds = total;
         }
 
         self.phase += f * dt;
@@ -634,8 +665,11 @@ impl Source {
         let engage = engage * engage * (3.0 - 2.0 * engage);
         let blown = (self.lung / VIBRATION_PRESSURE).clamp(0.25, 2.5);
         let swing = self.size * self.size * VIBRATION_AREA * blown;
-        self.edge_area = swing * amp * engage * pulse;
-        (self.leak + self.spread + self.edge_area, self.lung)
+        let edge = swing * amp * engage * pulse;
+        let kinematic = self.leak + self.spread + edge;
+        let w = self.blend;
+        self.edge_area = w * self.folds.area() + (1.0 - w) * edge;
+        (w * folds + (1.0 - w) * kinematic, self.lung)
     }
 
     /// Which model is making the voice right now, or `None` while no voice
@@ -648,7 +682,7 @@ impl Source {
     /// pitch honest. `lambda` is the position within the block.
     #[inline]
     pub(crate) fn react(&mut self, gauge: &Gauge, lambda: f32, dt: f32) {
-        if self.active() != SourceKind::Folds {
+        if self.blend <= 0.0 {
             self.measured = 0.0;
             return;
         }
@@ -668,6 +702,12 @@ impl Source {
             let drop = (alone.p_sub - alone.p_supra).max(0.0);
             alone.u_glottis = area * sqrt(2.0 * drop / (1.1 * super::RHO));
             self.folds.step(&alone, self.fold_share, dt);
+        }
+
+        if self.active() != SourceKind::Folds {
+            // Fading out: the folds still move, but no longer sing.
+            self.measured = 0.0;
+            return;
         }
 
         // The attack ends once the folds touch with pressure behind them.

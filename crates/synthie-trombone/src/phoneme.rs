@@ -417,8 +417,11 @@ impl Phoneme {
 }
 
 impl VowelKey {
-    /// The articulation that stands for this shape.
-    const fn articulation(self) -> Option<Articulation> {
+    /// The articulation that stands for this shape: the phoneme's own for a
+    /// vowel, glide or diphthong start, its [`glide_end`](Phoneme::glide_end)
+    /// for a diphthong's end.
+    #[must_use]
+    pub const fn articulation(self) -> Option<Articulation> {
         match self {
             VowelKey::Vowel(p) | VowelKey::Start(p) => Some(p.articulation()),
             VowelKey::End(p) => p.glide_end(),
@@ -437,7 +440,17 @@ impl Articulation {
     /// The shapes are those for a voice of `tract_length` (see
     /// [`vowel_size`](crate::vowel_size)), so the formants follow the size.
     pub(crate) fn physical(self, tract_length: f32) -> (Self, Option<Constriction>) {
-        let (mut a, narrowing) = self.physical_shape_of(tract_length);
+        self.physical_in(tract_length, &vowel_size::OwnShapes::NONE)
+    }
+
+    /// [`physical`](Self::physical) for a voice that holds some vowel
+    /// shapes of its own (`held`) in place of the table's.
+    pub(crate) fn physical_in(
+        self,
+        tract_length: f32,
+        held: &vowel_size::OwnShapes,
+    ) -> (Self, Option<Constriction>) {
+        let (mut a, narrowing) = self.physical_shape_of(tract_length, held);
         // /l r/ are narrower on the physical engine: with the classic
         // engine's gap their F1 stood near 550 Hz, a vowel's, where an /l/
         // has 350 to 400.
@@ -454,8 +467,13 @@ impl Articulation {
         (a, narrowing)
     }
 
-    /// [`physical`](Self::physical) before the approximants are narrowed.
-    fn physical_shape_of(self, tract_length: f32) -> (Self, Option<Constriction>) {
+    /// [`physical_in`](Self::physical_in) before the approximants are
+    /// narrowed.
+    fn physical_shape_of(
+        self,
+        tract_length: f32,
+        held: &vowel_size::OwnShapes,
+    ) -> (Self, Option<Constriction>) {
         // The vowel this stands for, or else the first one whose tongue it
         // borrowed. Not /w/'s: its classic tongue is also that of /k g ŋ/,
         // which get their own (see `PHYSICAL_VELAR_TONGUE`).
@@ -474,7 +492,7 @@ impl Articulation {
             }
             return (self, None);
         };
-        let Some((tongue, lips, narrow)) = vowel_size::shape(key, tract_length) else {
+        let Some((tongue, lips, narrow)) = vowel_size::shape_in(key, tract_length, held) else {
             return (self, None);
         };
         let mut a = self;

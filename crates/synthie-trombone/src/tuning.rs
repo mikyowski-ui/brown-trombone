@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-one numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-two numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -12,13 +12,15 @@
 //! ([`Tuning::FIELDS`]); [`Tuning::clamped`] keeps a profile inside it, so a
 //! bad file cannot break the engine.
 //!
-//! The fields fall in two groups, tuned separately:
+//! The fields fall in three groups, tuned separately:
 //!
 //! * **A — how sounds are made:** the breath and the folds, the noise of
 //!   jets, and how wide consonant gaps are.
 //! * **B — how sounds follow one another:** how long each kind of sound
 //!   lasts, how early the articulators start for the next one, and how fast
 //!   they move.
+//! * **C — vowels (physical engine):** how long vowels are held, and each
+//!   kind against the others. The classic engine keeps every vowel alike.
 
 /// Which tuning pass a field belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +29,8 @@ pub enum Pass {
     A,
     /// How sounds follow one another: timing and speeds.
     B,
+    /// How long each vowel lasts and how it moves (physical engine).
+    C,
 }
 
 /// One field of [`Tuning`]: its name, default and allowed range.
@@ -268,6 +272,15 @@ tuning! {
     /// /ð/ or /d/.
     voiced_sibilant_length = 0.095, 0.06..=0.14, B;
 
+    // ----- C: vowels (physical engine) ---------------------------------
+
+    /// How much longer every vowel and diphthong is held on the physical
+    /// engine than `vowel_length` and `diphthong_length` say (those are the
+    /// classic engine's). Its tongue body is heavy and slow
+    /// (`body_rate`), and a vowel held for the classic engine's time ends
+    /// before the body has reached it.
+    vowel_hold = 1.18, 1.0..=1.6, C;
+
     // ----- A: the breath over a phrase (physical engine) ---------------
 
     /// Share of the lung pressure lost between the start and the end of a
@@ -346,6 +359,14 @@ mod tests {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
         assert_eq!((a, b), (28, 33));
+    }
+
+    #[test]
+    fn vowels_are_held_longer_on_the_physical_engine() {
+        let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
+        assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
+        let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
+        assert_eq!(c, 1);
     }
 
     #[test]

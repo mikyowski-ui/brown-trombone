@@ -13,7 +13,7 @@
 //! before voiceless and voiced codas.
 
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::{Engine, Manner, Phoneme, Preset, Trombone, VoiceSettings};
+use synthie_trombone::{Engine, GlottalSource, Manner, Phoneme, Preset, Trombone, VoiceSettings};
 
 /// Output rate of the measurements, Hz.
 pub const SR: f32 = 48_000.0;
@@ -39,7 +39,8 @@ pub struct Recording {
     pub phonemes: Vec<Phoneme>,
     pub durations: Vec<f32>,
     pub glottal_area: Vec<f32>,
-    /// The oral tract is shut somewhere in front of the larynx.
+    /// The mouth is shut somewhere in front of the pharynx, as the sound
+    /// sees it.
     pub sealed: Vec<bool>,
     /// Pressure, cmH2O, in the cell behind each place of closure (lips,
     /// tongue tip, tongue back) and below the glottis.
@@ -47,6 +48,8 @@ pub struct Recording {
     pub subglottal: Vec<f32>,
     /// Pitch the folds are measured at (0 while not vibrating), Hz.
     pub fold_pitch: Vec<f32>,
+    /// The pulse source is singing instead of the folds.
+    pub pulse: Vec<bool>,
 }
 
 /// Speak `text` with `settings` on the physical engine and record it.
@@ -71,6 +74,7 @@ pub fn record(settings: &VoiceSettings, text: &str) -> Recording {
         behind: Vec::new(),
         subglottal: Vec::new(),
         fold_pitch: Vec::new(),
+        pulse: Vec::new(),
     };
     let tail = (0.15 * SR) as usize;
     let mut after = 0;
@@ -83,12 +87,12 @@ pub fn record(settings: &VoiceSettings, text: &str) -> Recording {
         r.segment.push(index.unwrap_or(usize::MAX));
         let g = voice.gauges();
         r.glottal_area.push(g.glottal_area);
-        r.sealed
-            .push(voice.diameters()[10..].iter().any(|&d| d <= 0.0));
+        r.sealed.push(g.mouth_shut);
         r.behind
             .push([voice.pressure(38), voice.pressure(31), voice.pressure(16)]);
         r.subglottal.push(g.subglottal_pressure);
         r.fold_pitch.push(g.fold_pitch);
+        r.pulse.push(g.sounding == Some(GlottalSource::Pulse));
     }
     r
 }
@@ -446,6 +450,38 @@ pub struct Burst {
     /// to 10 ms after it.
     pub step: f32,
 }
+
+/// Largest click of a recording: a step between adjacent samples that
+/// stands out from the steps around it (more than `CLICK_CONTRAST` times
+/// their RMS over the 5 ms on each side). Noise, the hiss of a jet, has
+/// steps of its own, a few times their RMS at most; a discontinuity stands
+/// far above its neighbours. Zero if there is none.
+#[must_use]
+pub fn largest_click(r: &Recording) -> f32 {
+    const AROUND: usize = 240;
+    let d: Vec<f32> = r.out.windows(2).map(|w| w[1] - w[0]).collect();
+    // Running sum of squares for the neighbourhood RMS.
+    let mut sum = vec![0.0f64; d.len() + 1];
+    for (k, v) in d.iter().enumerate() {
+        sum[k + 1] = sum[k] + f64::from(*v) * f64::from(*v);
+    }
+    let mut worst = 0.0f32;
+    for k in 0..d.len() {
+        let lo = k.saturating_sub(AROUND);
+        let hi = (k + AROUND + 1).min(d.len());
+        let (a, b) = (k.saturating_sub(2), (k + 3).min(d.len()));
+        let energy = (sum[hi] - sum[lo]) - (sum[b] - sum[a]);
+        let n = (hi - lo) - (b - a);
+        let rms = (energy / n.max(1) as f64).sqrt() as f32;
+        if d[k].abs() > CLICK_CONTRAST * rms {
+            worst = worst.max(d[k].abs());
+        }
+    }
+    worst
+}
+
+/// How far above its neighbours' RMS a step must stand to count as a click.
+pub const CLICK_CONTRAST: f32 = 8.0;
 
 /// Every stop and affricate release of a recording.
 #[must_use]

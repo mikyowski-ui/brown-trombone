@@ -24,6 +24,20 @@
 //! open and further back. Neither study recorded schwa, glides or the ends
 //! of diphthongs; how those rows were made is said at each.
 //!
+//! # Tuned rows
+//!
+//! Rows marked `tuned` were moved from their published value against the
+//! phoneme recognizer of `tools/judge` (`vowel_tune.py`, on its tuning
+//! material only), by at most 12 % in F1 and 10 % in F2, keeping the
+//! vowels' order in F1 and F2. The moves bring the system closer to
+//! General American as the recognizer knows it: /ʌ/ further front and
+//! closer, so that it parts from /ɑ/ (whose Michigan F2 is as high), /æ/
+//! and /ɛ/ more open, the /a/ of /aɪ/ further back and that of /aʊ/ more
+//! open, /eɪ/ starting further front. /ɑ ɔ u/, the vowels the engine's
+//! other gates are measured on, were tuned too (/ɑ/ and /ɔ/ further back,
+//! /u/ a little front) but are kept at their published values here. The
+//! published value is in the comment beside each tuned row.
+//!
 //! # Size
 //!
 //! The native tract (tract length `1.0`) is 44 cells of 0.365 cm, 16.0 cm,
@@ -134,9 +148,9 @@ pub const TARGETS: &[Target] = &[
     //                              F1      F2      F3      Peterson & Barney
     vowel(Phoneme::Iy, [ 342.0, 2322.0, 3000.0], Lips::Spread),  // 270 2290 3010
     vowel(Phoneme::Ih, [ 427.0, 2034.0, 2684.0], Lips::Spread),  // 390 1990 2550
-    vowel(Phoneme::Eh, [ 580.0, 1799.0, 2605.0], Lips::Spread),  // 530 1840 2480
-    vowel(Phoneme::Ae, [ 588.0, 1952.0, 2601.0], Lips::Spread),  // 660 1720 2410
-    vowel(Phoneme::Ah, [ 623.0, 1200.0, 2550.0], Lips::Spread),  // 640 1190 2390
+    vowel(Phoneme::Eh, [ 609.0, 1799.0, 2605.0], Lips::Spread), // tuned; published 580 1799 2605; P&B 530 1840 2480
+    vowel(Phoneme::Ae, [ 630.0, 1880.0, 2601.0], Lips::Spread), // tuned; published 588 1952 2601; P&B 660 1720 2410
+    vowel(Phoneme::Ah, [ 593.0, 1260.0, 2550.0], Lips::Spread), // tuned; published 623 1200 2550; P&B 640 1190 2390
     vowel(Phoneme::Aa, [ 768.0, 1333.0, 2522.0], Lips::Spread),  // 730 1090 2440
     // American /ɔ/ is rounded only a little, if at all.
     vowel(Phoneme::Ao, [ 652.0,  997.0, 2538.0], Lips::Spread),  // 570  840 2410
@@ -152,25 +166,34 @@ pub const TARGETS: &[Target] = &[
     vowel(Phoneme::W,  [ 340.0,  800.0, 2300.0], Lips::Rounded),
     vowel(Phoneme::Y,  [ 310.0, 2250.0, 3000.0], Lips::Spread),
     // Diphthongs: where they start...
-    start(Phoneme::Ey, [ 476.0, 2089.0, 2691.0], Lips::Spread),  // Hillenbrand's /e/
+    start(Phoneme::Ey, [ 476.0, 2194.0, 2691.0], Lips::Spread), // tuned; published 476 2089 2691; Hillenbrand's /e/
     // ...the /a/ of "bite", a quarter of the way from /ɑ/ to /æ/...
-    start(Phoneme::Ay, [ 723.0, 1488.0, 2542.0], Lips::Spread),
+    start(Phoneme::Ay, [ 723.0, 1417.0, 2542.0], Lips::Spread), // tuned; published 723 1488 2542
     start(Phoneme::Ow, [ 497.0,  910.0, 2459.0], Lips::Rounded), // Hillenbrand's /o/
     // ...the /a/ of "bout", half-way from /ɑ/ to /æ/...
-    start(Phoneme::Aw, [ 678.0, 1643.0, 2562.0], Lips::Spread),
+    start(Phoneme::Aw, [ 712.0, 1643.0, 2562.0], Lips::Spread), // tuned; published 678 1643 2562
     start(Phoneme::Oy, [ 652.0,  997.0, 2538.0], Lips::Spread),  // /ɔ/
     // ...and where they end.
-    end(Phoneme::Ey, FRONT_OFFGLIDE, Lips::Spread),
+    end(Phoneme::Ey, [ 367.0, 2178.0, 2842.0], Lips::Spread), // tuned; published FRONT_OFFGLIDE
     end(Phoneme::Ay, FRONT_OFFGLIDE, Lips::Spread),
     end(Phoneme::Ow, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Aw, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Oy, FRONT_OFFGLIDE, Lips::Spread),
 ];
 
+/// How many vowel shapes there are (the length of [`TARGETS`]).
+pub const TARGET_COUNT: usize = TARGETS.len();
+
 /// The target of `key`, if it has one.
 #[must_use]
 pub fn target(key: VowelKey) -> Option<&'static Target> {
     TARGETS.iter().find(|t| t.key == key)
+}
+
+/// Where `key` is in [`TARGETS`], if it is there.
+#[must_use]
+pub fn position(key: VowelKey) -> Option<usize> {
+    TARGETS.iter().position(|t| t.key == key)
 }
 
 /// F1, F2 and F3, Hz, that `key` aims for in a voice of `tract_length`
