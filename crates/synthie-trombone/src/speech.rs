@@ -625,15 +625,18 @@ fn number_words(digits: &str) -> String {
 
 // ===== tokens → timed segments ============================================
 
-/// Base durations in seconds at rate 1.
-fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
+/// Base durations in seconds at rate 1 (`physical`: for the physical
+/// engine, which has a length of its own for /z ʒ/).
+fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
     let d = match p.manner() {
         Manner::Vowel => timing.vowel_length,
         Manner::Diphthong => timing.diphthong_length,
         Manner::Stop | Manner::Affricate => timing.stop_length,
         Manner::Nasal => timing.nasal_length,
         Manner::Fricative => {
-            if p.is_voiced() {
+            if matches!(p, Phoneme::Z | Phoneme::Zh) && physical {
+                timing.voiced_sibilant_length
+            } else if p.is_voiced() {
                 timing.voiced_fricative_length
             } else {
                 timing.fricative_length
@@ -916,7 +919,7 @@ fn expand(
     out: &mut Vec<Draft>,
 ) {
     let a = p.articulation();
-    let mut dur = base_duration(p, stressed, timing) / rate;
+    let mut dur = base_duration(p, stressed, timing, context.is_some()) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {
         phoneme,
@@ -1065,7 +1068,12 @@ fn expand(
             out.push(with(draft(p, fric.articulation(), dur, a.voiced), fg));
         }
         Manner::Fricative => {
-            let g = if a.voiced {
+            let g = if matches!(p, Phoneme::Z | Phoneme::Zh) {
+                Gesture {
+                    spread: timing.voiced_sibilant_spread,
+                    ..Gesture::default()
+                }
+            } else if a.voiced {
                 voiced_fricative
             } else {
                 voiceless

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the forty-seven numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the forty-nine numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -247,6 +247,22 @@ tuning! {
     /// Natural frequency of the back of the tongue making a closure or a
     /// gap (/k g ŋ/), rad/s at speed 1: between the two.
     dorsum_rate = 20.0, 10.0..=40.0, B;
+
+    // ----- A: voiced sibilants (physical engine) ------------------------
+
+    /// Opening left behind the vibrating folds in /z ʒ/, cm² at native
+    /// size: more than `voiced_fricative_spread`, since their hiss has to
+    /// be as plain as the voice under it (a /z/ with too little air is
+    /// heard as /ð/), while /v ð/ are weak and too much air makes them
+    /// breathy.
+    voiced_sibilant_spread = 0.05, 0.0..=0.12, A;
+
+    // ----- B: voiced sibilants (physical engine) ------------------------
+
+    /// Length of /z ʒ/, s: longer than the weak /v ð/
+    /// (`voiced_fricative_length`), as in English; a short /z/ is heard as
+    /// /ð/ or /d/.
+    voiced_sibilant_length = 0.095, 0.06..=0.14, B;
 }
 
 impl Default for Tuning {
@@ -269,10 +285,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_one_and_twenty_six() {
+    fn two_passes_of_twenty_two_and_twenty_seven() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (21, 26));
+        assert_eq!((a, b), (22, 27));
     }
 
     #[test]
