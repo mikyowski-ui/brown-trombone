@@ -565,7 +565,14 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
     // 3.5 dB; the smallest (0.6) misses by 0.3 dB at 8 and 11 cmH2O. Its
     // /s/ is only 2.4 dB under the default voice's in absolute terms; the
     // rest is its vowel, louder because it is sung three and a half times
-    // as high. No gap width changes that, so the bound here is 6.5 dB.
+    // as high. No gap width changes that, so the bound was 6.5 dB. Since
+    // the folds close firmly the vowel is louder again, by 1.8 dB in the
+    // default voice and 2.4 dB at size 0.6, while every /s/ is the same to
+    // 0.1 dB (-35.5 and -38.0 dB): the smallest body's /s/ now sits 6.8 dB
+    // under the default's against its vowel, and the bound is 7 dB. The
+    // hiss regulator has nothing to follow: no fricative changed.
+    /// Furthest /s/ may move against the vowel from the default voice, dB.
+    const S_REACH: f32 = 7.0;
     let vowels = [
         Phoneme::Iy,
         Phoneme::Ih,
@@ -610,7 +617,7 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
                 s - s0,
                 sh - sh0
             );
-            if (s - s0).abs() > 6.5 {
+            if (s - s0).abs() > S_REACH {
                 failures.push(format!("s at size {size}, {lung} cmH2O: {:+.1} dB", s - s0));
             }
             if hiss > -26.0 {
@@ -792,9 +799,13 @@ fn no_held_note_is_ever_silent() {
 #[test]
 fn the_voice_recovers_at_once_from_a_pinch() {
     // Hold a note, pinch the tract fully shut anywhere for 300 ms, let go.
-    // The folds are vibrating again within 10 ms of the tract reopening.
+    // The folds are vibrating again within 12 ms of the tract reopening.
     // (It used to take 16 to 43 ms: the mouth stayed pressurised by the
-    // air its walls had taken up, and the pressed folds let go slowly.)
+    // air its walls had taken up, and the pressed folds let go slowly.
+    // The bound was 10 ms, met at 8-10 ms, until the folds felt the
+    // viscous loss along the glottis: the first openings out of a pressed
+    // start, where the slit is narrowest and viscosity most of the drop,
+    // are now pushed apart less, and every cell takes 1 ms longer, 3-11 ms.)
     for index in [
         3.0f32, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0, 34.0, 37.0, 40.0, 42.5,
     ] {
@@ -837,7 +848,7 @@ fn the_voice_recovers_at_once_from_a_pinch() {
         }
         let delay = swinging.expect("the voice never came back") - reopened.unwrap();
         println!("pinch at cell {index}: folds vibrating {delay} ms after it reopens");
-        assert!(delay <= 10, "cell {index}: {delay} ms");
+        assert!(delay <= 12, "cell {index}: {delay} ms");
     }
 }
 
