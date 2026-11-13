@@ -298,7 +298,10 @@ against. A few of the figures:
 - The folds sing within a cent of the requested note over every preset's
   range, stop below about 3.4 cmH2O of lung pressure, and keep voicing for
   some 40 ms into a /b/ before the mouth fills.
-- /s/ and /sh/ come out 15 to 20 dB louder than /f/ and /th/.
+- /s/ and /sh/ come out about 20 dB louder than /f/ and /th/. For /s z/
+  the jaw brings the incisors together: the jet strikes them through a
+  narrow gap, and the small cavity behind them puts the peak of /s/ at 7
+  to 8 kHz (centroid 6 kHz, as a speaker's), with /sh/ 2.5 kHz lower.
 
 It costs more: about 6 times faster than real time on one core at the
 native tract length, against 170 for the classic engine. With the default

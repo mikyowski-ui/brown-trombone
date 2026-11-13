@@ -12,7 +12,8 @@
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
 )]
 
 use synthie_trombone::speech::{Speaker, Utterance};
@@ -205,7 +206,8 @@ fn s_peaks_where_a_speakers_does_and_sh_far_below() {
 fn s_is_as_loud_as_a_speakers() {
     // Against the peak of the vowel next to it, the core of the reader's
     // /s/ is 4.2 dB down below 8 kHz and the listener's 13.8 dB down. The
-    // engine's was 20 dB down in the same sentences.
+    // engine's was 15 dB down in the same sentences, quieter than its /ʃ/
+    // (7 dB down), where both speakers' /s/ and /ʃ/ are within 3 dB.
     let (audio, segments) = say(SEASHELLS, 1.0);
     let s = levels(&audio, &segments, Phoneme::S);
     let sh = levels(&audio, &segments, Phoneme::Sh);
@@ -228,7 +230,7 @@ fn s_is_as_loud_as_a_speakers() {
 fn the_teeth_tune_the_cavity_in_front_of_s_at_every_size() {
     // The jaw brings the incisors together for /s z/: the jet strikes them
     // through a narrow gap, and the small cavity between the tongue tip and
-    // the teeth resonates near 9.5 kHz at the native size, scaling with the
+    // the teeth resonates near 9.8 kHz at the native size, scaling with the
     // body, as a speaker's does (the source's own fall above 5.5 kHz puts
     // the hiss's peak at 7 to 8 kHz). Without the teeth the mouth before
     // the tongue was a horn with its first resonance at 13 to 15 kHz.
