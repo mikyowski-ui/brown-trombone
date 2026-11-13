@@ -481,76 +481,104 @@ machine understands, a naturalness measure compares its level, pitch,
 timing and hiss with a person reading the same text, and CMA-ES searches
 the `Tuning` numbers for a better score, rejecting any candidate that
 fails the gates or moves away from the person. The scoreboard at the end of
-round 4, on material never tuned on (95 % intervals in brackets, from
+round 5, on material never tuned on (95 % intervals in brackets, from
 resampling the sentences; one render each, since rendering is
 deterministic):
 
-| | Phoneme error, held-out sentences (30) | Words Whisper gets | Vowels heard wrong, in sentences | Voicing, forced choice, in sentences | Consonants right, in sentences |
+| | Phoneme error, held-out sentences (30) | Words Whisper gets, held-out sentences | Vowels heard wrong (vowel lab, held out) | Voicing, forced choice, in sentences | Consonants right, in sentences |
 |---|---|---|---|---|---|
 | a person (LibriSpeech, his own 16 sentences) | 6 % [4, 8] | 96 % [92, 99] | 9 % [4, 13] | 99.5 % | 96 % [94, 98] |
 | eSpeak NG | 16 % [13, 19] | 87 % [78, 93] | 17 % [14, 21] | 93 % [87, 98] | 89 % [84, 93] |
 | classic engine | 77 % [72, 81] | 21 % [15, 28] | 88 % [85, 91] | 80 % [74, 86] | 46 % [40, 51] |
-| physical engine, start of round 4 | 70 % (ten sentences) | 25 % | – | 80 % | 50 % |
-| physical engine now | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
-| physical, round-3 profile (`profiles/old/`) | 49 % [44, 53] | 44 % [35, 53] | 46 % [40, 52] | 97 % [94, 100] | 77 % [73, 81] |
-| physical, round-4 candidate (`profiles/tuned-r4-candidate.json`) | 30 % [25, 35] | 63 % [55, 71] | 36 % [32, 41] | 99 % [98, 100] | 84 % [80, 88] |
+| physical engine, start of round 5 | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
+| physical engine now | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
+| physical, lax vowels at the round 4 length (`profiles/long-lax.json`) | 28 % [23, 32] | 63 % [54, 71] | 34 % [29, 39] | 98 % [96, 100] | 89 % [85, 92] |
+| physical, round-5 pass a, rejected (`profiles/tuned-r5a-candidate.json`) | 30 % [25, 36] | 65 % [56, 74] | 33 % [29, 37] | 98 % [96, 100] | 87 % [83, 91] |
 
-The round-4 candidate came out of one CMA-ES pass of 300 evaluations over
-19 of the sound-making numbers (the breath, the folds, the larynx in
-consonants, the hiss and the breath over a phrase), on the tuning split
-only, with every gate as a hard constraint. On the held-out material it is
-better beyond the noise: phoneme error 3.5 points lower over all 156
-held-out items (95 % interval 1.7 to 5.3, paired), Whisper finds 7 points
-more of the words (2 to 12), and voicing, consonants and vowels all
-improve. Its main moves: a fifth of the breath noise (`glottal_efficiency`
-0.043 to 0.011), a smaller velar port (`nasal_port` 0.8 to 0.32), a closer
-glottis behind the folds in voice and in voiceless consonants. It passes
-every gate and the tuner's naturalness distance is a little better (1.305
-against 1.321), but it is **not the default**: its voice starts its sounds
-more abruptly than the defaults' and much more than the person's (the 95th
-percentile of the level rise 16.9 dB per 10 ms against 14.8 and his 12.2,
-steeper in all 16 sentences; 4.0 level walls a second against 3.4 and his
-1.1), which is just the kind of thing a recognizer likes and a listener
-does not. It is kept to listen to and to start the next tune from; the
-round-3 profiles, which now score worse than the defaults, are in
-`profiles/old/`.
+Round 5 changed the sounds, not the tuning: nasals keep a mouth cavity of
+their own, /ð/ has a dental blade, /p t k/ shut for at least 22 ms, the
+voice dies away into a voiceless closure, the incisors close for /s z/,
+and lax vowels are shorter and glide towards schwa. Against the start of
+the round that is 9 points less phoneme error on the held-out sentences
+[4.6, 13.6] and 4 points less over all 156 held-out items [2.4, 6.4]; the
+consonants heard right in sentences went from 80 to 91 %. On its own
+first ten held-out sentences it now scores 22 % [17, 27] with 67 % of the
+words [53, 82].
 
-The held-out sentences are Harvard lists 2, 5 and 6; the first of them
-alone (the ten sentences of the start-of-round figure) now scores 28 %
-[21, 36] with 61 % of the words. Vowels are every vowel slot of the
-held-out sentences, carrier phrases and LibriSpeech texts (673 slots; the
-person's figure is on his own recordings); voicing and consonants are the
-slots of the 16 LibriSpeech texts. Isolated items are another matter: the
-judge is harsh on them even for a person (vowels in words cut out of the
-LibriSpeech recordings: 49 % wrong), and the engine's isolated words score
-54 % phoneme error [46, 63] (eSpeak 51 %). How natural it sounds is in
-`tools/judge/report/natural.md`: of all the systems, the physical engine
-is now the closest to the person on the guard's distance (1.32, eSpeak
-1.63, classic 1.43; 0 is the person's average sentence).
+The owner's targets for the round, on the held-out material:
+
+| target | now | |
+|---|---|---|
+| phoneme error, held-out sentences, under 25 % | 22.0 % (first ten); 25.8 % over all 30 | met on the ten, at the line over 30 |
+| Whisper word accuracy, held-out sentences, over 75 % | 67.1 % (first ten); 61.7 % over 30 | missed |
+| vowel error in sentences, under 22 % | 26.9 % (LibriSpeech texts); 30.3 % over the vowel lab | missed |
+| consonant error in sentences, under 22 % | 9.0 % | met |
+
+The lax vowels' length was chosen by ear over the recognizer: at 0.62 of a
+tense vowel's length (the default) against round 4's 0.905, the tuning
+sentences score 7.1 points worse [2.9, 12.3], the held-out ones within
+noise (pooled −1.0 [−2.8, 0.6]), and the vowel lab's held-out vowels 3.4
+points better [0.4, 6.7].
+
+**The round-5 tune.** The tuner was repaired first: its naturalness guard
+charges every measure, unclipped, for moving further from the person than
+the defaults, and bars any candidate whose level walls, level rises or
+naturalness distance are worse than the defaults' beyond noise (round 4's
+candidate made its rises steeper in all 16 sentences unseen); the sibilant
+and lax-vowel gates are in the loop, nearly no gate is skipped, the best
+candidates are run through every gate before one is chosen, and Whisper's
+word errors are part of the objective (`tools/judge/README.md`). Pass a
+(21 of the sound-making numbers, 209 evaluations, about 3 hours, the lax
+lengths held at 0.62) improved the tuning split well beyond noise (phoneme
+error −3.8 [−5.4, −2.2], Whisper +8.1 [3.0, 14.2]) and passed every gate,
+but held out it is **worse** beyond noise (+2.9 [1.1, 4.8], worst on the
+Harvard sentences, +5.2), with fewer consonants heard right in sentences:
+it learned the tuning sentences, so it is kept as a rejected candidate.
+About half of all candidates were barred by a gate: the voice bar in
+closures, the onset pitch kick, the affricates, the pinch recovery and the
+regulator sit close to their bounds at the defaults.
+
+Vowels are every vowel slot of the held-out sentences, carrier phrases and
+LibriSpeech texts (673 slots; the person's figure is on his own
+recordings); voicing and consonants are the slots of the 16 LibriSpeech
+texts. Isolated items are another matter: the judge is harsh on them even
+for a person (vowels in words cut out of the LibriSpeech recordings: 49 %
+wrong), and the engine's isolated words score 58 % phoneme error [50, 66]
+(eSpeak 51 %). How natural it sounds is in `tools/judge/report/natural.md`:
+of all the systems, the physical engine is the closest to the person on
+the guard's distance (1.11, eSpeak 1.63, classic 1.43; 0 is the person's
+average sentence).
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong about 30 % of the time in the
-  LibriSpeech texts and 34 % over the vowel lab's held-out material
-  (eSpeak 15 and 17 %, the person 9 %). The lax vowels of *hid, head, had,
-  hud* are each heard most often as themselves, /ɪ/ still often as /eɪ/;
-  /ʊ/ comes through about a quarter of the time (eSpeak's no better), /ɔ/
-  is mostly heard as /ɑ/, /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as
-  /u/ or /ɚ/. Lax vowels as short as a speaker's (`lax_length` and
-  `unstressed_lax_length` 0.62, the default, chosen by ear) are heard
-  better (3 points), but the recognizer scores the sentences around them
-  worse than at 0.905 (`profiles/long-lax.json`).
-- **Isolated words** score about 54 % phoneme error, against a 13-of-26
+- **Vowels in sentences** are heard wrong 27 % of the time in the
+  LibriSpeech texts and 30 % over the vowel lab's held-out material
+  (eSpeak 15 and 17 %, the person 9 %; the round's target was 22 %). /ʊ/
+  comes through about a quarter of the time, /ɔ/ is mostly heard as /ɑ/,
+  /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as /u/ or /ɚ/. The tongue
+  root (`Shape::pharynx`) is there but the built-in vowels leave it at
+  rest.
+- **Lax vowels are longer than a speaker's** at the round 4 length and
+  as short as one's at the default (0.62, chosen by ear); the recognizer
+  scores the tuning sentences better at the longer length.
+- **Whisper gets 62 to 67 % of the held-out words** (target 75 %). In the
+  four listening sentences it hears "makes fine" as "makes pine": the /s/
+  of "makes" cuts off in about 10 ms where a reader's fades over 20 to
+  30 ms, and the /f/ source radiates about 23 dB less than the /s/ source,
+  so the /f/ is lost after the /s/; two attempts at it (branches
+  `r5-sibilants-sf-wip` and `r5-sibilants-sf-wip2`) are not merged.
+- **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
-- **Remaining confusions**: /ð/ heard as /l/ (the most common consonant
-  error in every set), /z/ as /ð/, /m/ and /n/ swapped, /d/ heard as /n/
-  in carrier phrases, /t/ dropped or heard as /d/.
-- **/s/ is darker and quieter** than a person's: its centroid is about
-  4 kHz in sentences against his 5.8 kHz, and it sits about 5 dB further
-  under the neighbouring vowel.
-- **Hard level walls at stop releases**: about 3.4 jumps of 20 dB in 10 ms
-  per second against the person's 1.1.
+- **Remaining confusions**: /n/ still heard as /ŋ/ before some
+  consonants, stops dropped (/t/ and /d/ in clusters, /d/ heard as /n/ in
+  carrier phrases), /z/ as /ð/.
+- **/s/ is darker** than a person's in sentences.
+- **Closures are steeper than a person's**: about 3.4 level walls (20 dB
+  in 10 ms) a second against his 1.1, and level rises of 15 dB per 10 ms
+  (95th percentile) against his 12. About 70 % of that gap is the room in
+  his recordings (the engine's output is dry), so the tuner holds walls
+  and rises to the defaults rather than to his figures.
 - **The listener's F1 bias on close vowels**: the recognizer hears the
   engine's /ɪ/ as /eɪ/ and its schwa as /ɪ/ or /u/, which is partly its own
   F1 bias on close vowels and partly the engine.
@@ -563,12 +591,13 @@ is now the closest to the person on the guard's distance (1.32, eSpeak
 - **Mimic's tract arrives slower** than before: the copy's tract is in
   place within 95 ms of a change (the bound was 60 ms before the tongue
   body was made heavy and slow).
-- **Voice matching** is less sure on real speech this round (four of six
+- **Voice matching** is less sure on real speech (four of six
   recordings within its limits, above).
 - **The gates leave the tuner little room**: the defaults sit close to
   many gate bounds, so moving one number by a few per cent often fails a
-  gate (the pinch recovery, the onset pitch kick, the regulator, the
-  voiced fricatives, clicks).
+  gate (the voice bar, the onset pitch kick, the affricates, the pinch
+  recovery, the regulator); half of round 5's candidates were barred, and
+  the tuning sets are small enough to learn (pass a did).
 
 ## Making your game talk
 
