@@ -289,7 +289,26 @@ batch of judging and lets it go while it renders and runs the gates.
   point, the change in objective, PER, log-likelihood and naturalness
   distance and the gates that failed.
 
-TIMING_PLACEHOLDER
+Measured on the RTX 3070 / 16 threads machine (shared with other work):
+a pass over the tuning split (156 items, plus the 16 naturalness texts and
+both gate binaries per candidate, the slow gates the scan never saw fail
+skipped with `--gate-skip`) took **25 s per evaluation**, a 300-evaluation
+pass about two hours; the scan of 51 parameters at 4 points, 198
+evaluations, about 1.5 hours.
+
+**What the round-4 scan found.** The defaults sit close to many gate
+bounds: of the 51 parameters the tuner may move, 12 fail a gate at every
+scanned point away from the default (`lung_pressure`, `adduction_time`,
+`attack_hold`, `jet_efficiency`, `teeth_gain`, `abduction_time`,
+`postalveolar_lips`, `frication_ramp`, `fortis_closure`,
+`articulation_rate`, `closing_ratio`, `vowel_hold`), mostly on the pinch
+recovery (12 ms), the onset pitch kick, the regulator, voiced fricatives,
+clicks and the level of /s/ and /ʃ/. `frication_widening` does nothing
+while `frication_ramp` is 0. Points next to the default move the mean
+phoneme error by about a point either way, which is the noise floor of a
+single scan point. The parameters that move it most and pass the gates are
+the breath noise (`glottal_efficiency`, less is better), the velar port
+(`nasal_port`, less is better) and the breath over a phrase (`final_drop`).
 
 ## Files
 

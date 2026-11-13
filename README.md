@@ -475,8 +475,27 @@ deterministic):
 | physical engine, start of round 4 | 70 % (ten sentences) | 25 % | – | 80 % | 50 % |
 | physical engine now | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
 | physical, round-3 profile (`profiles/old/`) | 49 % [44, 53] | 44 % [35, 53] | 46 % [40, 52] | 97 % [94, 100] | 77 % [73, 81] |
+| physical, round-4 candidate (`profiles/tuned-r4-candidate.json`) | 30 % [25, 35] | 63 % [55, 71] | 36 % [32, 41] | 99 % [98, 100] | 84 % [80, 88] |
 
-TUNED_PARAGRAPH
+The round-4 candidate came out of one CMA-ES pass of 300 evaluations over
+19 of the sound-making numbers (the breath, the folds, the larynx in
+consonants, the hiss and the breath over a phrase), on the tuning split
+only, with every gate as a hard constraint. On the held-out material it is
+better beyond the noise: phoneme error 3.5 points lower over all 156
+held-out items (95 % interval 1.7 to 5.3, paired), Whisper finds 7 points
+more of the words (2 to 12), and voicing, consonants and vowels all
+improve. Its main moves: a fifth of the breath noise (`glottal_efficiency`
+0.043 to 0.011), a smaller velar port (`nasal_port` 0.8 to 0.32), a closer
+glottis behind the folds in voice and in voiceless consonants. It passes
+every gate and the tuner's naturalness distance is a little better (1.305
+against 1.321), but it is **not the default**: its voice starts its sounds
+more abruptly than the defaults' and much more than the person's (the 95th
+percentile of the level rise 16.9 dB per 10 ms against 14.8 and his 12.2,
+steeper in all 16 sentences; 4.0 level walls a second against 3.4 and his
+1.1), which is just the kind of thing a recognizer likes and a listener
+does not. It is kept to listen to and to start the next tune from; the
+round-3 profiles, which now score worse than the defaults, are in
+`profiles/old/`.
 
 The held-out sentences are Harvard lists 2, 5 and 6; the first of them
 alone (the ten sentences of the start-of-round figure) now scores 28 %
