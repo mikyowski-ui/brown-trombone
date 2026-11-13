@@ -973,11 +973,34 @@ impl App {
         }
         let (hx, hy) = tongue_handle(self.snap.tongue);
         let x = f64::from(hx);
-        let half = lerp_cell(&self.snap.diameters, x) / 2.0;
         let (col, row) = self.dot_cell(x, f64::from(hy));
+        let half = lerp_cell(&self.snap.diameters, x) / 2.0;
         let (_, upper) = self.dot_cell(x, half);
         let (_, lower) = self.dot_cell(x, -half);
-        Some((col, row.clamp(upper, lower)))
+        if (upper..=lower).contains(&row) || half < 0.05 {
+            return Some((col, row.clamp(upper, lower)));
+        }
+        // Held at a wall: where the canvas draws it. It puts a point in the
+        // dot below it (it rounds down), and at a steep wall, as a narrowed
+        // pharynx makes, the two columns of dots of a cell differ.
+        let dots_x = f64::from(a.width) * 2.0 - 1.0;
+        let dots_y = f64::from(a.height) * 4.0 - 1.0;
+        let dot_x = |d: u16| X_BOUNDS[0] + f64::from(d) * (X_BOUNDS[1] - X_BOUNDS[0]) / dots_x;
+        let first = 2 * (col - a.x);
+        let drawn = [first, first + 1]
+            .map(|d| lerp_cell(&self.snap.diameters, dot_x(d).min(X_BOUNDS[1])) / 2.0)
+            .into_iter()
+            .fold(0.0f64, f64::max);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let wall_row = |y: f64| {
+            let y = y.clamp(Y_BOUNDS[0], Y_BOUNDS[1]);
+            a.y + ((Y_BOUNDS[1] - y) * dots_y / (Y_BOUNDS[1] - Y_BOUNDS[0])).floor() as u16 / 4
+        };
+        Some((
+            col,
+            row.clamp(upper, lower)
+                .clamp(wall_row(drawn), wall_row(-drawn).max(wall_row(drawn))),
+        ))
     }
 
     /// Hit areas of the glottis panel, given its inner area. Rows follow
@@ -2399,7 +2422,6 @@ mod tests {
 
     // ----- Formant Lock -------------------------------------------------
 
-    use synthie_trombone::Trombone;
 
     /// `laid_out()` with Formant Lock on and a vowel chart the size a
     /// 120×34 terminal draws it (26×9 cells), clear of the other areas.
@@ -2579,11 +2601,17 @@ mod tests {
         // range per step, over several steps), but no single step jumps:
         // in particular the first step off the vowel's own shape is small.
         // On the coarse chart a step is 10 % of F1, and the last one, onto
-        // /ɑ/ (F1 above 760 Hz, which only a pharynx narrowed low reaches),
-        // moves the shape by up to 0.35; the fine chart shows that it is a
-        // big step, not a jump.
-        assert!(coarse < 0.35, "{coarse}: {path:?}");
-        assert!(fine < 0.2, "{fine}: {path_fine:?}");
+        // /ɑ/ (F1 above 760 Hz and F2 near 1200, which only a pharynx
+        // narrowed low reaches), moves the shape by up to 0.6: the
+        // narrowing drops from the palate to the pharynx there, on the fine
+        // chart too (0.71 there). Before /ɑ/ moved back to the F2 a
+        // listener hears as /ɑ/ (from 1360 Hz to 1200) the step was 0.35,
+        // and 0.2 on the fine chart. Every step before it is small (0.22).
+        assert!(coarse < 0.6, "{coarse}: {path:?}");
+        assert!(fine < 0.75, "{fine}: {path_fine:?}");
+        let before_a = largest_step(&path_fine[..path_fine.len() - 1]);
+        println!("largest step before the last: {before_a:.3}");
+        assert!(before_a < 0.25, "{before_a}: {path_fine:?}");
         let first = largest_step(&path_fine[..2]);
         println!("first step off the /i/ mark: {first:.3}");
         assert!(first < 0.1, "{first}: {path_fine:?}");
@@ -2609,7 +2637,13 @@ mod tests {
         assert!(error(got, edge) < 0.03, "{got:?} vs {edge:?}");
         assert!(app.status.contains("out of reach"), "{}", app.status);
         // A drag that leaves the chart is held at its edge as well.
-        let inside = (a.x + 3, a.y + 2);
+        // (From a cell that is not a vowel's mark: a press on one is that
+        // vowel.)
+        let marks = app.chart_marks();
+        let inside = (a.x + 3..a.x + 12)
+            .map(|c| (c, a.y + 2))
+            .find(|at| marks.iter().all(|m| m.2 != *at))
+            .expect("a cell without a mark");
         mouse(&mut app, DOWN, inside, PLAIN);
         mouse(&mut app, DRAG, (a.x, a.y + 30), PLAIN);
         mouse(&mut app, UP, (a.x, a.y + 30), PLAIN);
