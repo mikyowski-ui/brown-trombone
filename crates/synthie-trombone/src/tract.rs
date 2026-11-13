@@ -777,11 +777,11 @@ impl Tract {
             } else if opened[i] {
                 // Lowered behind a nasal's closure.
                 self.mover[i] = Mover::Cavity;
-            } else if self.quick_body && i < LIP_START {
+            } else if self.quick_body && !(i >= LIP_START && self.mover[i] == Mover::Tip) {
                 // The back of the tongue making a consonant of its own. Not
-                // the lips: parting from a /b p/ into an /l r/, they moved
-                // at the tongue's speed, half their own, the burst came
-                // out of lips barely apart and was lost.
+                // lips letting go of a consonant of theirs: parting from a
+                // /b p/ into an /l r/ they moved at the tongue's speed, half
+                // their own, and the burst came out of lips barely apart.
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
