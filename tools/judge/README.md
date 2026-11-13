@@ -398,6 +398,17 @@ H1*-H2*. `tests/test_match_voice.py` checks this on eight hidden engine voices
 (pitch 90..300 Hz, tract length 0.7..1.25, tenseness 0.35..0.85) and prints
 the errors and the recovered settings.
 
+Recalibrated for round 4's engine (folds that close on every cycle, a
+brighter voice): on the eight hidden voices the re-analysis lands within
+1.0 % on pitch, 0.6 % on formant scale and 0.7 dB on H1*-H2* (with last
+round's calibration, which still passes on this engine: 1.1 %, 0.3 %,
+0.6 dB). The settings themselves are not always recovered: three of the
+eight come back with a tract length 16 to 38 % off the hidden one (two
+with the old calibration), measuring alike, and the hidden tenseness only
+below about 220 Hz. On six LibriSpeech recordings of one reader four pass
+the gate; one is matched 5.7 % low in pitch, and in one the formant scale
+reads 0.63 and the tract goes to the end of its range (1.5).
+
 ### Limits
 
 - The engine cannot make every voice. With an adult tract (length near 1)

@@ -447,7 +447,7 @@ cargo run --release -p synthie-trombone-cli -- --engine physical --profile tools
 Recalibrated on this round's engine (the folds now close on every cycle and
 the voice is brighter), it re-measures eight hidden engine voices within
 1 % on pitch, 0.6 % on formant scale and 0.7 dB on H1-H2; for three of
-them it gets there with a tract length 17 to 38 % off the hidden one,
+them it gets there with a tract length 16 to 38 % off the hidden one,
 because the formant-scale measure has near-equal answers about 25 % apart.
 On six recordings of a human reader it meets those limits on four (on
 last round's engine it met them on all six): one is matched 5.7 % low
