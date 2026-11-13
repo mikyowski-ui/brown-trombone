@@ -529,12 +529,15 @@ is now the closest to the person on the guard's distance (1.32, eSpeak
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong about 27 % of the time in the
-  LibriSpeech texts and 30 % over the vowel lab's held-out material
+- **Vowels in sentences** are heard wrong about 30 % of the time in the
+  LibriSpeech texts and 34 % over the vowel lab's held-out material
   (eSpeak 15 and 17 %, the person 9 %). The lax vowels of *hid, head, had,
-  hud* are now each heard most often as themselves; /ʊ/ comes through
-  about a quarter of the time (eSpeak's no better), /ɔ/ is mostly heard as
-  /ɑ/, /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as /u/ or /ɚ/.
+  hud* are each heard most often as themselves, /ɪ/ still often as /eɪ/;
+  /ʊ/ comes through about a quarter of the time (eSpeak's no better), /ɔ/
+  is mostly heard as /ɑ/, /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as
+  /u/ or /ɚ/. Lax vowels as short as a speaker's (`lax_length` and
+  `unstressed_lax_length` 0.62) are heard better (3 points), but the
+  sentences around them worse.
 - **Isolated words** score about 54 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
