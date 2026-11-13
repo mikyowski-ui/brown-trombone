@@ -107,12 +107,12 @@ def gate_binaries(paths: list[Path]) -> list[Path]:
     return [p.resolve() for p in out]
 
 
-def run_gates(binaries: Path | list[Path], profile: Path, threads: int = 4) -> list[str]:
+def run_gates(binaries: Path | list[Path], profile: Path, threads: int = 4, skip: list[str] | None = None) -> list[str]:
     """Names of the gate tests `profile` fails (empty when it passes)."""
     failed: list[str] = []
     for binary in [binaries] if isinstance(binaries, Path) else binaries:
         cmd = [str(binary), "--test-threads", str(threads)]
-        for name in GATE_SKIP:
+        for name in GATE_SKIP + (skip or []):
             cmd += ["--skip", name]
         env = dict(os.environ, **{GATE_ENV: str(profile.resolve())})
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=900)
@@ -311,7 +311,10 @@ class Evaluator:
             gates = None
             if self.args.gates:
                 pool = ThreadPoolExecutor(max_workers=self.args.gate_jobs)
-                gates = [pool.submit(run_gates, self.args.gates, p, self.args.gate_threads) for p in profiles]
+                gates = [
+                    pool.submit(run_gates, self.args.gates, p, self.args.gate_threads, self.args.gate_skip)
+                    for p in profiles
+                ]
             out = []
             n = len(self.items)
             nat_jobs = []
@@ -444,6 +447,7 @@ def run(args) -> dict:
         "binary": render.file_digest(render.say_bin()),
         "voice": args.voice,
         "gates": [str(g) for g in args.gates] if args.gates else None,
+        "gate_skip": args.gate_skip,
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     log = Log(log_path, meta, args.resume)
@@ -716,6 +720,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--natural-jobs", type=int, default=4, help="worker processes for the naturalness guard")
     ap.add_argument("--gate-jobs", type=int, default=4, help="candidates gated at once")
     ap.add_argument("--gate-threads", type=int, default=4, help="test threads per gate run")
+    ap.add_argument("--gate-skip", type=lambda x: [n for n in x.split(",") if n], default=[],
+                    help="more gates to skip in the loop (comma-separated name filters), e.g. slow ones the "
+                    "sensitivity scan never saw fail; run the whole suite on the result")
     ap.add_argument("--no-final-whisper", dest="final_whisper", action="store_false")
     ap.add_argument("--scan", type=int, default=None, metavar="N",
                     help="sensitivity scan instead of tuning: each parameter alone at N points across its range")
