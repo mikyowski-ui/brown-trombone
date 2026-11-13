@@ -662,6 +662,7 @@ impl Tract {
             carve(&mut self.target, c, floor);
         }
         self.body = self.target;
+        let opened = self.open_nasal_cavity();
         let mut by = [None; N];
         for (k, s) in self.slots.iter().enumerate() {
             let Some(s) = s.filter(|s| s.alive) else {
@@ -689,7 +690,6 @@ impl Tract {
                 }
             }
         }
-        let opened = self.open_nasal_cavity();
         for i in 0..N {
             if self.target[i] < self.body[i] - CARVED
                 && let Some(m) = by[i]
@@ -753,12 +753,9 @@ impl Tract {
             // A velar closure: nothing of the mouth is left behind it.
             return moved;
         }
-        let shoulder = if index >= LIP_PLACE {
-            LIP_SHOULDER
-        } else {
-            TIP_SHOULDER_BACK
-        };
-        let cavity_end = ((index - shoulder - 1.0).max(0.0) as usize).min(N);
+        // Up to the closure: the tip's or the lips' shoulder is carved into
+        // the lowered tongue afterwards.
+        let cavity_end = (index.max(0.0) as usize).min(LIP_START).min(N);
         let floor = self.motion.nasal_cavity;
         for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
             .iter_mut()
