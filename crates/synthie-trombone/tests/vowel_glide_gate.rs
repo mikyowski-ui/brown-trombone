@@ -17,14 +17,39 @@
 #[path = "../examples/support/spectrum.rs"]
 mod spectrum;
 
+use std::sync::OnceLock;
+
 use synthie_trombone::speech::{Speaker, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
-use synthie_trombone::{Engine, Phoneme, Preset, Trombone, Tuning, VoiceSettings};
+use synthie_trombone::{Engine, Phoneme, Preset, Trombone, VoiceSettings};
 
 const SR: f32 = 48_000.0;
 
+/// The tuning under test laid over `settings`: the default one, or, when
+/// the environment variable `SYNTHIE_TROMBONE_PROFILE` names a profile
+/// file, that profile's (as in `physical_gates`, so the tuner can hold a
+/// candidate to these gates too).
+fn tuned(settings: VoiceSettings) -> VoiceSettings {
+    static PROFILE: OnceLock<Option<String>> = OnceLock::new();
+    let profile = PROFILE.get_or_init(|| {
+        let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("gates run with the profile {path}");
+        Some(text)
+    });
+    let Some(profile) = profile else {
+        return settings;
+    };
+    let laid = settings.with_profile(profile).expect("a voice profile");
+    VoiceSettings {
+        tuning: laid.tuning,
+        ..settings
+    }
+}
+
+/// The deep voice on the physical engine with the tuning under test.
 fn physical() -> VoiceSettings {
-    Preset::Deep.settings().with_engine(Engine::Physical)
+    tuned(Preset::Deep.settings().with_engine(Engine::Physical))
 }
 
 /// The physical voice with its lax vowels as much shorter than its tense
@@ -191,7 +216,7 @@ fn trajectory_with(p: Phoneme, nucleus: f32) -> ((f32, f32), (f32, f32)) {
 
 /// [`trajectory_with`] the voice's own nucleus.
 fn trajectory(p: Phoneme) -> ((f32, f32), (f32, f32)) {
-    trajectory_with(p, Tuning::DEFAULT.lax_nucleus)
+    trajectory_with(p, physical().tuning.lax_nucleus)
 }
 
 /// How far a vowel has moved from `a` to `b`, as a share of the way from

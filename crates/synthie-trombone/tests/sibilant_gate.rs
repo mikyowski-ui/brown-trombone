@@ -16,19 +16,43 @@
     clippy::many_single_char_names
 )]
 
+use std::sync::OnceLock;
+
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::{Engine, Phoneme, Preset, Trombone};
+use synthie_trombone::{Engine, Phoneme, Preset, Trombone, VoiceSettings};
 
 const SR: f32 = 48_000.0;
 /// Spectrum bins, Hz.
 const STEP: f32 = 100.0;
 const TOP: f32 = 16_000.0;
 
+/// The tuning under test laid over `settings`: the default one, or, when
+/// the environment variable `SYNTHIE_TROMBONE_PROFILE` names a profile
+/// file, that profile's (as in `physical_gates`, so the tuner can hold a
+/// candidate to these gates too).
+fn tuned(settings: VoiceSettings) -> VoiceSettings {
+    static PROFILE: OnceLock<Option<String>> = OnceLock::new();
+    let profile = PROFILE.get_or_init(|| {
+        let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("gates run with the profile {path}");
+        Some(text)
+    });
+    let Some(profile) = profile else {
+        return settings;
+    };
+    let laid = settings.with_profile(profile).expect("a voice profile");
+    VoiceSettings {
+        tuning: laid.tuning,
+        ..settings
+    }
+}
+
 /// A sentence said by the deep voice of the given size on the physical
 /// engine: the audio, and each segment's phoneme with its start and end,
 /// seconds.
 fn say(text: &str, size: f32) -> (Vec<f32>, Vec<(Phoneme, f32, f32)>) {
-    let mut settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let mut settings = tuned(Preset::Deep.settings().with_engine(Engine::Physical));
     settings.tract_length = size;
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);

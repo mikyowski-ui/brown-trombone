@@ -815,18 +815,19 @@ GUARD_CLIP = 4.0
 GUARD_DTW_DB = 1.0
 
 
-def distance(summary: dict, human: dict) -> tuple[float, dict]:
+def distance(summary: dict, human: dict, clip: float | None = GUARD_CLIP) -> tuple[float, dict]:
     """How far a system's naturalness measures are from the person's: the
-    mean of |z| (clipped at ``GUARD_CLIP``) over ``GUARD_KEYS``, with the
-    warped log-mel distance (dB / ``GUARD_DTW_DB``) as one more term. 0 is
-    the person's average sentence; lower is closer. Returns the distance
-    and every term."""
+    mean of |z| (clipped at ``clip``, by default ``GUARD_CLIP``; ``None``
+    leaves z as it is) over ``GUARD_KEYS``, with the warped log-mel distance
+    (dB / ``GUARD_DTW_DB``) as one more term. 0 is the person's average
+    sentence; lower is closer. Returns the distance and every term."""
     terms: dict[str, float] = {}
     for key in GUARD_KEYS:
         h, v = human.get(key) or {}, (summary.get(key) or {}).get("mean")
         if v is None or h.get("mean") is None or not h.get("sd"):
             continue
-        terms[key] = float(np.clip((v - h["mean"]) / h["sd"], -GUARD_CLIP, GUARD_CLIP))
+        z = (v - h["mean"]) / h["sd"]
+        terms[key] = float(z if clip is None else np.clip(z, -clip, clip))
     dtw_mean = (summary.get("dtw.mean") or {}).get("mean")
     if dtw_mean is not None:
         terms["dtw.mean"] = float(dtw_mean / GUARD_DTW_DB)
