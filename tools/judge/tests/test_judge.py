@@ -24,11 +24,11 @@ def test_word_hits():
 def test_params_file_matches_brief():
     params = T.load_params(HERE / "params.json")
     # Every field of the engine's `Tuning`, in its passes (a: how sounds are
-    # made, b: how they follow one another, c: vowel hold).
-    assert sum(p["pass"] == "a" for p in params.values()) == 29
-    assert sum(p["pass"] == "b" for p in params.values()) == 33
-    assert sum(p["pass"] == "c" for p in params.values()) == 1
-    assert len(params) == 63
+    # made, b: how they follow one another, c: vowel lengths).
+    assert sum(p["pass"] == "a" for p in params.values()) == 31
+    assert sum(p["pass"] == "b" for p in params.values()) == 36
+    assert sum(p["pass"] == "c" for p in params.values()) == 4
+    assert len(params) == 71
     # The twelve the classic engine reads as well are not tuned by default.
     shared = {n for n, p in params.items() if p.get("classic")}
     assert len(shared) == 12 and {"vowel_length", "stop_length", "aspiration"} <= shared

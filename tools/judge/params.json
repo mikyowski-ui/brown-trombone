@@ -7,7 +7,7 @@
   "posterior_gap": {"lo": 0.05, "hi": 0.5, "default": 0.25, "pass": "a"},
   "abducted_area": {"lo": 0.1, "hi": 0.5, "default": 0.25, "pass": "a"},
   "jet_efficiency": {"lo": 0.015, "hi": 0.2, "default": 0.057, "pass": "a"},
-  "teeth_gain": {"lo": 0.07, "hi": 1, "default": 0.28, "pass": "a"},
+  "teeth_gain": {"lo": 0.07, "hi": 1, "default": 0.38, "pass": "a"},
   "glottal_efficiency": {"lo": 0.01, "hi": 0.15, "default": 0.043, "pass": "a"},
   "hiss_corner": {"lo": 2500, "hi": 8000, "default": 4500, "pass": "a"},
   "fricative_gap": {"lo": -0.1, "hi": 0.15, "default": 0, "pass": "a", "classic": true},
@@ -61,5 +61,13 @@
   "accent_decay": {"lo": 0.1, "hi": 0.35, "default": 0.2, "pass": "b"},
   "declination": {"lo": 2, "hi": 10, "default": 6, "pass": "b"},
   "final_fall": {"lo": 3, "hi": 12, "default": 8, "pass": "b"},
-  "phrase_onset": {"lo": 0.08, "hi": 0.25, "default": 0.15, "pass": "b"}
+  "phrase_onset": {"lo": 0.08, "hi": 0.25, "default": 0.15, "pass": "b"},
+  "nasal_cavity": {"lo": 0.6, "hi": 2, "default": 1.6, "pass": "a"},
+  "velum_lead": {"lo": 0, "hi": 0.05, "default": 0.03, "pass": "b"},
+  "closure_floor": {"lo": 0, "hi": 0.04, "default": 0.022, "pass": "b"},
+  "voicing_tail": {"lo": 0, "hi": 0.03, "default": 0.012, "pass": "b"},
+  "sibilant_teeth": {"lo": 0.3, "hi": 1.2, "default": 0.6, "pass": "a"},
+  "lax_length": {"lo": 0.5, "hi": 1, "default": 0.905, "pass": "c"},
+  "lax_nucleus": {"lo": 0.4, "hi": 1, "default": 0.67, "pass": "c"},
+  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.905, "pass": "c"}
 }
