@@ -220,3 +220,17 @@ def test_pooled_sums_give_the_same_distance_as_summarize():
     sub = [rows[i] for i in (0, 0, 3, 5, 7)]
     S, C, hm, hs, _ = T.text_sums(sub, human)
     assert abs(float(T.sums_distance(S.sum(0), C.sum(0), hm, hs)) - N.distance(N.summarize(sub), human, clip=None)[0]) < 1e-9
+
+
+def test_box_narrows_a_parameter_to_its_free_side():
+    import pytest
+
+    params = T.load_params(HERE / "params.json")
+    space = T.Space(params, ["lead", "closure_floor", "body_rate"], {})
+    lo, hi = space.box({"lead": [0.03, 0.036], "closure_floor": [0.022, 0.04]})
+    p = params["lead"]
+    assert lo[0] == pytest.approx((0.03 - p["lo"]) / (p["hi"] - p["lo"]))
+    assert hi[0] == pytest.approx((0.036 - p["lo"]) / (p["hi"] - p["lo"]))
+    assert hi[1] == 1.0 and (lo[2], hi[2]) == (0.0, 1.0)
+    with pytest.raises(SystemExit, match="default"):
+        space.box({"lead": [0.04, 0.05]})

@@ -336,6 +336,22 @@ class Space:
     def penalty(self, u) -> float:
         return float(np.mean((np.clip(np.asarray(u, float), 0, 1) - self.u0) ** 2))
 
+    def box(self, limits: dict[str, list[float]]) -> tuple[np.ndarray, np.ndarray]:
+        """Unit-box bounds per parameter: 0..1 except where ``limits``
+        narrows a parameter to ``[lo, hi]`` (parameter units), e.g. to the
+        side of its default where a gate scan found it free. The default
+        must lie inside."""
+        lo, hi = np.zeros(len(self.names)), np.ones(len(self.names))
+        for k, n in enumerate(self.names):
+            if n in limits:
+                a, b = limits[n]
+                ua = (a - self.lo[k]) / (self.hi[k] - self.lo[k])
+                ub = (b - self.lo[k]) / (self.hi[k] - self.lo[k])
+                lo[k], hi[k] = max(0.0, min(ua, ub)), min(1.0, max(ua, ub))
+                if not lo[k] - 1e-9 <= self.u0[k] <= hi[k] + 1e-9:
+                    raise SystemExit(f"--box: {n} {limits[n]} leaves out its default {self.default[k]}")
+        return lo, hi
+
 
 def ukey(u) -> str:
     return ",".join(f"{float(v):.10f}" for v in u)
@@ -540,7 +556,7 @@ class Log:
             lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
             old = next((x for x in lines if x.get("kind") == "meta"), None)
             keys = ("params", "sets", "items", "seed", "popsize", "sigma0", "ll_weight", "prior_weight", "lock",
-                    "natural_weight", "natural_hold", "word_weight", "binary")
+                    "natural_weight", "natural_hold", "word_weight", "box", "binary")
             if old is not None:
                 diff = [k for k in keys if old.get(k) != meta.get(k)]
                 if diff:
@@ -598,6 +614,10 @@ def run(args) -> dict:
     if not names:
         raise SystemExit(f"no parameters to tune in pass {args.pass_}")
     space = Space(params, names, lock)
+    box = json.loads(Path(args.box).read_text()) if args.box else {}
+    unknown = [n for n in box if n not in names]
+    if unknown:
+        raise SystemExit(f"--box: not tuned in this run: {', '.join(unknown)}")
     sets = args.sets.split(",")
     heldout = [x for x in sets if x in HELDOUT_SETS]
     if heldout:
@@ -620,6 +640,7 @@ def run(args) -> dict:
         "natural_weight": args.natural_weight,
         "natural_hold": args.natural_hold,
         "word_weight": args.word_weight,
+        "box": box,
         "budget": args.budget,
         "binary": render.file_digest(render.say_bin()),
         "voice": args.voice,
@@ -680,15 +701,17 @@ def run(args) -> dict:
     print(f"[base] J {base['objective']:.4f}  PER {fmt_sets(base['per'])}  ll {fmt_sets(base['ll'], pct=False)}"
           f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}", flush=True)
 
+    blo, bhi = space.box(box)
     es = cma.CMAEvolutionStrategy(
         list(space.u0),
         args.sigma,
-        {"bounds": [0, 1], "seed": args.seed, "popsize": popsize, "verbose": -9, "maxfevals": args.budget},
+        {"bounds": [list(blo), list(bhi)], "seed": args.seed, "popsize": popsize, "verbose": -9,
+         "maxfevals": args.budget},  # fmt: skip
     )
     gen = 0
     while not es.stop() and n_eval - 1 < args.budget:
         us = es.ask()
-        us = [np.clip(u, 0, 1) for u in us]
+        us = [np.clip(u, blo, bhi) for u in us]
         res = run_batch(us, gen)
         es.tell(us, [r["objective"] for r in res])
         gbest = min(res, key=lambda r: r["objective"])
@@ -957,6 +980,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--exclude", type=lambda x: [n for n in x.split(",") if n], default=[],
                     help="parameters of the chosen passes left at their defaults (comma-separated), e.g. those "
                     "the sensitivity scan found pinned by gates")
+    ap.add_argument("--box", type=Path, default=None,
+                    help="JSON {name: [lo, hi]} narrowing parameters to a sub-range around the default (e.g. "
+                    "the side a gate scan found free)")
     ap.add_argument("--final-check", type=int, default=0, metavar="K",
                     help="run the K best candidates through every gate with nothing skipped; the first that "
                     "passes becomes --out")
