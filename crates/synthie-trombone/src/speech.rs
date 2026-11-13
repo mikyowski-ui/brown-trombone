@@ -418,7 +418,19 @@ impl Speaker {
                     && voice.is_voiced()
                     && !voice.mouth_shut();
                 self.devoice_at = defer.then_some(self.clock + DEVOICE_WAIT);
-                // A voice dying away in a closure already made is let be.
+                // A voice dying away in a closure already made is let be;
+                // into a voiceless stop from a nasal's closure, the voice of
+                // the murmur dies away the same way.
+                let closed_already = physical
+                    && !seg.voiced
+                    && matches!(seg.phoneme.manner(), Manner::Stop | Manner::Affricate)
+                    && voice.is_voiced()
+                    && voice.mouth_shut()
+                    && self.tail_until.is_none();
+                if closed_already {
+                    self.tail_until = Some(self.clock + self.utterance.voicing_tail);
+                    voice.set_glottal_spread(seg.gesture.spread);
+                }
                 let dying = physical && self.tail_until.is_some() && !seg.voiced;
                 if !dying {
                     self.tail_until = None;

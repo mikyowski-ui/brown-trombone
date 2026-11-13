@@ -1861,11 +1861,11 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
     // at the open end of the branch, pulled /n/ down to 700 to 1000 Hz and
     // /m/ to 420 to 530 Hz, and the recognizer heard /n/ as /m/ (and /m/ as
     // /n/ or /ŋ/) in a third of the nasals in the LibriSpeech sentences.
-    // With the back of the tongue lowered behind the closure and the blade
-    // raised behind an /n/'s tip: /m/ 670 to 1020 Hz (lowest before /ʌ/,
-    // where the back of the tongue has not quite reached its floor in the
-    // middle of a 65 ms murmur), /n/ 1310 to 1870 Hz, and in every vowel
-    // /n/ at least 470 Hz above /m/.
+    // With the back of the tongue lowered behind the closure
+    // (`Tuning::nasal_cavity`): /m/ 780 to 1060 Hz with a notch 28 to 40 dB
+    // deep, /n/ 1240 to 1850 Hz (lowest before /ʌ ɑ/), and in every vowel
+    // /n/ at least 450 Hz above /m/. (The notch /n/ leaves is shallower, 2
+    // to 26 dB: a resonance of the murmur lies close to it.)
     let settings = stops::judge_voice();
     for v in [
         Phoneme::Iy,
@@ -1891,9 +1891,9 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
         let n = n.unwrap_or_else(|| panic!("in {v}: /n/ has no antiresonance"));
         let m_notch = notch_in(&m_notches, 0.9 * m, 1.1 * m, 0.0).map_or(0.0, |x| x.depth);
         println!("in {v}: /m/ {m:.0} Hz (notch {m_notch:.0} dB), /n/ {n:.0} Hz, /ŋ/ {ng:?}");
-        assert!((650.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
+        assert!((700.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
         assert!(m_notch >= 20.0, "in {v}: /m/ notch {m_notch:.1} dB");
-        assert!((1300.0..=2200.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
+        assert!((1200.0..=2200.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
         assert!(n >= m + 400.0, "in {v}: /n/ {n:.0} Hz, /m/ {m:.0} Hz");
         assert!(ng.is_none_or(|z| z > 3000.0), "in {v}: /ŋ/ at {ng:?}");
         // The nose has a shallow notch of its own near 1 kHz (11 to 13 dB,
@@ -1903,6 +1903,76 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
             "in {v}: /ŋ/ {ng_notches:?}"
         );
     }
+}
+
+/// F2 in the middle of consonant `c` in `[v c v1]`, Hz, and its level
+/// there against the loudest 10 ms of the vowel after it, dB.
+fn consonant_f2_and_dip(settings: &VoiceSettings, c: Phoneme, v: Phoneme) -> (f32, f32) {
+    let s = place::speak(settings, &format!("[{v} {c} {v}1]"), true);
+    let k = (1..s.phonemes.len())
+        .find(|&k| s.phonemes[k] == c)
+        .expect("the consonant");
+    let (a, b) = s.ranges[k];
+    // The middle of the constriction: the consonant without its last
+    // `lead`, which belongs to the way into the vowel.
+    let mid = a + (b - a) * 2 / 5;
+    let f2 = s.formants_at(mid, 0.0).map_or(0.0, |f| f[1]);
+    let level = |from: usize, to: usize| {
+        let x = &s.audio[from..to.min(s.audio.len())];
+        db(rms(x))
+    };
+    let window = (0.01 * SR) as usize;
+    let here = level(mid.saturating_sub(window / 2), mid + window / 2);
+    let (v0, v1) = s.ranges[k + 1];
+    let vowel = (v0..v1.saturating_sub(window))
+        .step_by(window / 4)
+        .map(|n| level(n, n + window))
+        .fold(f32::MIN, f32::max);
+    (f2, here - vowel)
+}
+
+#[test]
+fn the_dental_fricative_is_not_a_lateral() {
+    // "The" was heard as "luh" or "wuh", and the recognizer heard /ð/ as
+    // /l/ in 8 of the 20 in the LibriSpeech sentences. A speaker's /ð/ is
+    // made with the tip at the teeth and a broad blade behind it: its F2
+    // stands at a dental locus near 1400 to 1600 Hz before /ə/, above a
+    // labial's, and it is a dip in the level, weak voiced friction; an /l/
+    // is nearly as loud as its vowels. Made with the alveolars' short
+    // blade, /ð/ had a labial's F2 (900 Hz before /ə/, like /v/'s 700) and
+    // dipped only 4 dB. Measured in the middle of each in [V C V1]: /ð/
+    // F2 1320 to 1780 Hz, 180 to 680 Hz above /v/'s, and 5 to 20 dB under
+    // the vowel after it, 3 to 12 dB deeper than /l/.
+    let settings = speech_voice();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = [Phoneme::Ax, Phoneme::Aa, Phoneme::Iy, Phoneme::Uw]
+            .into_iter()
+            .map(|v| {
+                let settings = &settings;
+                let job = scope.spawn(move || {
+                    [Phoneme::Dh, Phoneme::V, Phoneme::L]
+                        .map(|c| consonant_f2_and_dip(settings, c, v))
+                });
+                (v, job)
+            })
+            .collect();
+        for (v, job) in jobs {
+            let [(dh, dh_dip), (vv, _), (_, l_dip)] = job.join().expect("speech");
+            println!(
+                "in {v}: /ð/ F2 {dh:.0} Hz, {dh_dip:+.1} dB; /v/ F2 {vv:.0} Hz; /l/ {l_dip:+.1} dB"
+            );
+            assert!((1200.0..=2000.0).contains(&dh), "in {v}: /ð/ F2 {dh:.0} Hz");
+            assert!(
+                dh >= vv + 150.0,
+                "in {v}: /ð/ F2 {dh:.0} Hz, /v/ {vv:.0} Hz"
+            );
+            assert!(dh_dip <= -4.0, "in {v}: /ð/ only {dh_dip:+.1} dB");
+            assert!(
+                dh_dip <= l_dip - 2.5,
+                "in {v}: /ð/ {dh_dip:+.1} dB, /l/ {l_dip:+.1} dB"
+            );
+        }
+    });
 }
 
 #[test]

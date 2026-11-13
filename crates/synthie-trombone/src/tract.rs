@@ -116,9 +116,6 @@ const DENTAL_BLADE_BACK: f32 = 9.0;
 /// Shoulder of a closure of the lips, cells either way: the lips are the
 /// last four cells of the tract, and closing them leaves the tongue alone.
 const LIP_SHOULDER: f32 = 2.5;
-/// Cells behind an /n/'s closure that its raised blade narrows (see
-/// `Tract::open_nasal_cavity`).
-const BLADE_CELLS: f32 = 7.0;
 /// Where the lips begin, as a constriction index (labials sit at 40.5 to
 /// 41).
 const LIP_PLACE: f32 = 40.0;
@@ -698,8 +695,8 @@ impl Tract {
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
-            } else if let Some(m) = opened[i] {
-                self.mover[i] = m;
+            } else if opened[i] {
+                self.mover[i] = Mover::Dorsum;
             } else if self.quick_body {
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
@@ -718,24 +715,21 @@ impl Tract {
     /// and the closure is a closed side branch of the nose, and its own
     /// resonance is the murmur's antiresonance: near 1 kHz for /m/, 1.5 to
     /// 2 kHz for /n/, above 3 kHz for /ŋ/, whatever the vowel around them.
-    /// Left in the vowel's shape the cavity follows the vowel instead: the
+    /// Left in the vowel's shape the cavity followed the vowel instead: the
     /// hump of a central or back vowel's body near the velum, a narrow neck
     /// at the cavity's open end, pulled /n/'s antiresonance down to 700 to
     /// 1000 Hz before /ʌ ə ɔ oʊ/ and /m/'s to 450 Hz, where /m/ and nothing
     /// are heard. So the back of the tongue drops behind a nasal closure,
-    /// to at least [`Tuning::nasal_cavity`] from the velum to the tip's
-    /// shoulder; and behind an /n/ the blade rises towards the palate, no
-    /// wider than [`Tuning::nasal_blade`] over the cells just behind the
-    /// tip, which narrows the closed end of the branch and raises its
-    /// resonance above /m/'s. Returns the articulator that moves each cell
-    /// it changed: the back of the tongue, or the blade.
+    /// to at least [`Tuning::nasal_cavity`] from the velum to the tip's or
+    /// the lips' shoulder. Returns the cells it moved (the back of the
+    /// tongue moves them, at its speed).
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
-    fn open_nasal_cavity(&mut self) -> [Option<Mover>; N] {
-        let mut moved = [None; N];
+    fn open_nasal_cavity(&mut self) -> [bool; N] {
+        let mut moved = [false; N];
         if !self.nasal {
             return moved;
         }
@@ -759,28 +753,20 @@ impl Tract {
             // A velar closure: nothing of the mouth is left behind it.
             return moved;
         }
-        let lips = index >= LIP_PLACE;
-        let shoulder = if lips {
+        let shoulder = if index >= LIP_PLACE {
             LIP_SHOULDER
         } else {
             TIP_SHOULDER_BACK
         };
-        let cavity_end = (index - shoulder - 1.0).max(0.0) as usize;
-        for i in NOSE_START..cavity_end.min(N) {
-            let floor = self.motion.nasal_cavity;
-            if self.target[i] < floor {
-                self.target[i] = floor;
-                moved[i] = Some(Mover::Dorsum);
-            }
-        }
-        if !lips {
-            let blade_from = (index - BLADE_CELLS).max(0.0) as usize;
-            for i in blade_from..(index as usize).min(N) {
-                let cap = self.motion.nasal_blade;
-                if self.target[i] > cap {
-                    self.target[i] = cap;
-                    moved[i] = Some(Mover::Tip);
-                }
+        let cavity_end = ((index - shoulder - 1.0).max(0.0) as usize).min(N);
+        let floor = self.motion.nasal_cavity;
+        for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
+            .iter_mut()
+            .zip(&mut moved[NOSE_START..])
+        {
+            if *target < floor {
+                *target = floor;
+                *moved = true;
             }
         }
         moved

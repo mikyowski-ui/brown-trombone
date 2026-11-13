@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-three numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-seven numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -347,15 +347,10 @@ tuning! {
     /// diameter units: the back of the tongue drops so that the closed
     /// mouth is a side branch of the nose with its antiresonance where a
     /// speaker's is (near 1 kHz for /m/, 1.5 to 2 kHz for /n/), whatever
-    /// the vowel's body around it. Below about 0.8 a central or back
-    /// vowel's hump pulls /n/ down to /m/'s.
-    nasal_cavity = 1.2, 0.6..=1.6, A;
-    /// Widest the mouth may be just behind an /n/'s closure, diameter
-    /// units: the blade raised towards the palate behind the tip. Narrowing
-    /// the closed end of the side branch raises its antiresonance above
-    /// /m/'s; wider than about 1.3, /n/ before an open or back vowel has it
-    /// near 1.2 kHz.
-    nasal_blade = 0.9, 0.6..=1.6, A;
+    /// the vowel's body around it. Below about 1.0 a central or back
+    /// vowel's hump pulls /n/ down towards /m/'s, and the notch /n/ leaves
+    /// in the murmur grows shallow.
+    nasal_cavity = 1.6, 0.6..=2.0, A;
 
     // ----- B: nasals, dentals and stops (physical engine) ---------------
 
@@ -399,10 +394,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_one_and_thirty_six() {
+    fn two_passes_of_thirty_and_thirty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (31, 36));
+        assert_eq!((a, b), (30, 36));
     }
 
     #[test]
