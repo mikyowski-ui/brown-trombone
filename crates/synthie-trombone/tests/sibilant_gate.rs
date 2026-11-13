@@ -320,3 +320,146 @@ fn z_hisses_in_the_band_of_s_under_its_voice() {
     assert!(gap < 9.0, "z {gap:.1} dB under s at 5-8 kHz");
     assert!(cz > 5000.0, "z centroid {cz:.0} Hz");
 }
+
+/// [`say`] with the flow out of the lips, cm³/s, at every sample.
+fn say_with_lips(text: &str) -> (Vec<f32>, Vec<(Phoneme, f32, f32)>, Vec<f32>) {
+    let settings = tuned(Preset::Deep.settings().with_engine(Engine::Physical));
+    let mut voice = Trombone::new(SR);
+    settings.apply(&mut voice);
+    Speaker::prepare(&mut voice);
+    let utterance = Utterance::from_text(text, &settings.prosody());
+    let mut t = 0.0;
+    let segments = utterance
+        .segments()
+        .iter()
+        .map(|s| {
+            t += s.duration;
+            (s.phoneme, t - s.duration, t)
+        })
+        .collect();
+    let mut speaker = Speaker::new();
+    speaker.speak(utterance);
+    let (mut audio, mut lips) = (Vec::new(), Vec::new());
+    while speaker.is_speaking() {
+        audio.push(speaker.process(&mut voice));
+        lips.push(voice.gauges().lip_flow);
+    }
+    (audio, segments, lips)
+}
+
+/// Level of `audio` between `lo` and `hi` Hz in 10 ms frames every 2.5 ms
+/// from `from` to `to` seconds, dB (the units of [`band`]).
+fn frames(audio: &[f32], from: f32, to: f32, lo: f32, hi: f32) -> Vec<f32> {
+    let (win, hop) = ((0.01 * SR) as usize, (0.0025 * SR) as usize);
+    let (mut a, end) = ((from * SR) as usize, ((to * SR) as usize).min(audio.len()));
+    let mut out = Vec::new();
+    while a + win <= end {
+        out.push(band(&power(&audio[a..a + win]), lo, hi));
+        a += hop;
+    }
+    out
+}
+
+/// What the way out of each /s/ into an /f/ in `text` looks like: the
+/// lowest 10 ms frame (below 8 kHz) between the middle of the /s/ and the
+/// core of the /f/ against the frames of that core, how long the band of
+/// the /s/ (2 to 8 kHz) takes from 3 to 10 dB under its level in the first
+/// half of the /s/, and the largest flow out of the lips from the middle of
+/// the /s/ to the end of the core of the /f/.
+fn hand_overs(text: &str) -> Vec<(f32, f32, f32)> {
+    let (audio, segments, lips) = say_with_lips(text);
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+    let mut out = Vec::new();
+    for w in segments.windows(2) {
+        let (s, f) = (w[0], w[1]);
+        if s.0 != Phoneme::S || f.0 != Phoneme::F {
+            continue;
+        }
+        let mid = s.1 + 0.5 * (s.2 - s.1);
+        let (fa, fb) = (f.1 + 0.25 * (f.2 - f.1), f.2 - 0.25 * (f.2 - f.1));
+        let plateau =
+            mean(&frames(&audio, f.1 - 0.0, fb, 0.0, 8000.0)[(((fa - f.1) / 0.0025) as usize)..]);
+        let between = frames(&audio, mid, fa, 0.0, 8000.0);
+        let dip = between.iter().fold(f32::MAX, |m, &v| m.min(v)) - plateau;
+        let hiss = mean(&frames(
+            &audio,
+            s.1 + 0.2 * (s.2 - s.1),
+            mid,
+            2000.0,
+            8000.0,
+        ));
+        let fall = frames(&audio, mid - 0.02, fb, 2000.0, 8000.0);
+        let first = |db: f32| {
+            fall.iter()
+                .position(|&v| v < hiss - db)
+                .unwrap_or(fall.len())
+        };
+        let fall_ms = 2.5 * (first(10.0) as f32 - first(3.0) as f32);
+        let (a, b) = ((mid * SR) as usize, ((fb * SR) as usize).min(lips.len()));
+        let surge = lips[a..b].iter().fold(0.0f32, |m, &v| m.max(v));
+        out.push((dip, fall_ms, surge));
+    }
+    out
+}
+
+#[test]
+fn s_fades_into_f_without_a_gap_or_a_puff() {
+    // Into an /f/ the LibriSpeech reader's /s/ fades by 10 dB over some 25
+    // ms, and the level between them never falls more than about 3 dB
+    // under the /f/. The engine's tongue used to let go at once: its /s/
+    // stopped within 4 ms, the air rushed out of the open mouth (lip flow
+    // from about 120 to 950 cm³/s), and only then did the lip shut on a
+    // faint /f/: a gap, a puff and a hiss, the pattern of /p/, and "makes
+    // fine" was heard as "makes pine".
+    for text in [
+        "The juice of lemons makes fine punch.",
+        "He makes fine tea.",
+        "This fact is clear.",
+    ] {
+        let found = hand_overs(text);
+        assert!(!found.is_empty(), "{text}: no /s f/");
+        for (dip, fall, surge) in found {
+            println!(
+                "{text}: dip {dip:+.1} dB re /f/, /s/ falls 10 dB in {fall:.1} ms, lip flow up to {surge:.0} cm³/s"
+            );
+            // Let go at once: dips of 3 to 6.5 dB, falls of 0 to 2.5 ms,
+            // 950 to 1090 cm³/s. Now some 0 to 2 dB, 18 to 20 ms, 460 to
+            // 490 cm³/s (about 120 to 180 in the /s/ itself).
+            assert!(dip > -2.5, "{text}: {dip:.1} dB under the /f/");
+            assert!(fall >= 12.0, "{text}: /s/ falls 10 dB in {fall:.1} ms");
+            assert!(surge < 650.0, "{text}: lip flow {surge:.0} cm³/s");
+        }
+    }
+}
+
+#[test]
+fn f_and_v_are_as_loud_as_a_speakers() {
+    // Between vowels the reader's /f/ is 16 dB under the louder vowel's
+    // peak (below 8 kHz, n = 9) and his /v/, mostly voice, 19 dB under.
+    // The engine's /f/ was 27 to 36 dB under, the free jet in the lip's
+    // gap alone, and heard as /p/; the jet's force on the edges of the
+    // teeth and the lip (`Tuning::labial_edge`) puts it 22 dB under (the
+    // mean; 18 to 30).
+    // It adds no air to the gap, so /v/ keeps its voice.
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+    let (mut f, mut v) = (Vec::new(), Vec::new());
+    for text in [
+        "A cup of coffee.",
+        "They often laugh.",
+        "Five of them gave over.",
+        "She was fond of a safe offer.",
+    ] {
+        let (audio, segments) = say(text, 1.0);
+        f.extend(levels(&audio, &segments, Phoneme::F));
+        v.extend(levels(&audio, &segments, Phoneme::V));
+    }
+    println!(
+        "re the vowel: f {f:.1?} (mean {:.1}), v {v:.1?} (mean {:.1})",
+        mean(&f),
+        mean(&v)
+    );
+    assert!(f.len() >= 5 && v.len() >= 3);
+    assert!((-24.0..-12.0).contains(&mean(&f)), "f {:.1} dB", mean(&f));
+    assert!(f.iter().all(|&x| x < -10.0), "f {f:.1?}");
+    assert!((-16.0..-4.0).contains(&mean(&v)), "v {:.1} dB", mean(&v));
+}

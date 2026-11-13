@@ -775,8 +775,8 @@ impl Phys {
     /// of the gap). It adds nothing to the flow through the gap. Call
     /// before [`begin_block`](Self::begin_block).
     pub(crate) fn set_edge(&mut self, (dental, labial): (f32, f32)) {
-        self.edge_target = dental.clamp(0.0, 1.0) * self.dental_edge
-            + labial.clamp(0.0, 1.0) * self.labial_edge;
+        self.edge_target =
+            dental.clamp(0.0, 1.0) * self.dental_edge + labial.clamp(0.0, 1.0) * self.labial_edge;
     }
 
     /// How fast each cell's diameter will be changing at the end of the

@@ -302,7 +302,6 @@ const LABIAL_SLOT: usize = 2;
 /// sibilant into /f v/: the widest that still counts as a fricative.
 const SIBILANT_LET_GO: f32 = 0.8;
 
-
 /// How long the voice must have been let go in a pause before the
 /// articulators are set for the sound after it, seconds (physical engine).
 ///
@@ -573,9 +572,9 @@ impl Speaker {
                 }
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration)
                     && !self.holding_closure(&seg)
-                    && self.labial.is_none_or(|l| {
-                        self.clock - l.since >= self.utterance.sibilant_exit
-                    })
+                    && self
+                        .labial
+                        .is_none_or(|l| self.clock - l.since >= self.utterance.sibilant_exit)
                 {
                     voice.articulate(&entry_shape(&next));
                     self.ahead = true;
@@ -799,7 +798,10 @@ impl Speaker {
         let t = (since / self.utterance.labial_closing.max(1e-6)).min(1.0);
         let eased = t * t * (3.0 - 2.0 * t);
         let lip = l.open + (l.lip.diameter - l.open) * eased;
-        voice.set_constriction(LABIAL_SLOT, Some(crate::Constriction::new(l.lip.index, lip)));
+        voice.set_constriction(
+            LABIAL_SLOT,
+            Some(crate::Constriction::new(l.lip.index, lip)),
+        );
         let s = l.sibilant;
         let t = (since / self.utterance.sibilant_exit.max(1e-6)).min(1.0);
         let d = s.diameter + (SIBILANT_LET_GO - s.diameter).max(0.0) * t;

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-three numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy-six numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -455,10 +455,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_three_and_thirty_six() {
+    fn two_passes_of_thirty_three_and_thirty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (33, 36));
+        assert_eq!((a, b), (33, 39));
     }
 
     #[test]
