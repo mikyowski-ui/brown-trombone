@@ -146,19 +146,20 @@ const BACK_OFFGLIDE: [f32; 3] = [424.0, 1060.0, 2389.0];
 #[rustfmt::skip]
 pub const TARGETS: &[Target] = &[
     //                              F1      F2      F3      Peterson & Barney
-    vowel(Phoneme::Iy, [ 342.0, 2322.0, 3000.0], Lips::Spread),  // 270 2290 3010
-    vowel(Phoneme::Ih, [ 427.0, 2034.0, 2684.0], Lips::Spread),  // 390 1990 2550
-    vowel(Phoneme::Eh, [ 609.0, 1799.0, 2605.0], Lips::Spread), // tuned; published 580 1799 2605; P&B 530 1840 2480
-    vowel(Phoneme::Ae, [ 630.0, 1880.0, 2601.0], Lips::Spread), // tuned; published 588 1952 2601; P&B 660 1720 2410
-    vowel(Phoneme::Ah, [ 593.0, 1260.0, 2550.0], Lips::Spread), // tuned; published 623 1200 2550; P&B 640 1190 2390
-    vowel(Phoneme::Aa, [ 768.0, 1333.0, 2522.0], Lips::Spread),  // 730 1090 2440
+    vowel(Phoneme::Iy, [ 315.0, 2322.0, 3000.0], Lips::Spread), // tuned; published 342 2322 3000; P&B 270 2290 3010
+    vowel(Phoneme::Ih, [ 395.0, 1990.0, 2640.0], Lips::Spread), // tuned; published 427 2034 2684; P&B 390 1990 2550
+    vowel(Phoneme::Eh, [ 565.0, 1815.0, 2590.0], Lips::Spread), // tuned; published 580 1799 2605; P&B 530 1840 2480
+    vowel(Phoneme::Ae, [ 640.0, 1730.0, 2530.0], Lips::Spread), // tuned; published 588 1952 2601; P&B 660 1720 2410
+    vowel(Phoneme::Ah, [ 575.0, 1255.0, 2510.0], Lips::Spread), // tuned; published 623 1200 2550; P&B 640 1190 2390
+    vowel(Phoneme::Aa, [ 750.0, 1180.0, 2520.0], Lips::Spread), // tuned; published 768 1333 2522; P&B 730 1090 2440
     // American /ɔ/ is rounded only a little, if at all.
-    vowel(Phoneme::Ao, [ 652.0,  997.0, 2538.0], Lips::Spread),  // 570  840 2410
-    vowel(Phoneme::Uh, [ 469.0, 1122.0, 2434.0], Lips::Rounded), // 440 1020 2240
-    vowel(Phoneme::Uw, [ 378.0,  997.0, 2343.0], Lips::Rounded), // 300  870 2240
+    vowel(Phoneme::Ao, [ 600.0,  960.0, 2500.0], Lips::Spread), // tuned; published 652 997 2538; P&B 570 840 2410
+    vowel(Phoneme::Uh, [ 430.0, 1050.0, 2440.0], Lips::Rounded), // tuned; published 469 1122 2434; P&B 440 1020 2240
+    vowel(Phoneme::Uw, [ 335.0, 1100.0, 2300.0], Lips::Rounded), // tuned; published 378 997 2343; P&B 300 870 2240
     vowel(Phoneme::Er, [ 474.0, 1379.0, 1710.0], Lips::Rounded), // 490 1350 1690
-    // Schwa: the uniform tube of the same man, (2n − 1)·c / 4L.
-    vowel(Phoneme::Ax, [ 510.0, 1530.0, 2550.0], Lips::Spread),
+    // Schwa: the uniform tube of the same man, (2n − 1)·c / 4L, would be
+    // 510 1530 2550; schwa in running speech is further back and lower.
+    vowel(Phoneme::Ax, [ 515.0, 1430.0, 2450.0], Lips::Spread), // tuned
     // The glides are their vowels made closer: F1 about 10 % under their
     // vowel's, /w/'s F2 lower than /u/'s, /j/'s F2 a little under /i/'s.
     // (Much closer still and a long tract cannot follow: its yielding
@@ -166,17 +167,19 @@ pub const TARGETS: &[Target] = &[
     vowel(Phoneme::W,  [ 340.0,  800.0, 2300.0], Lips::Rounded),
     vowel(Phoneme::Y,  [ 310.0, 2250.0, 3000.0], Lips::Spread),
     // Diphthongs: where they start...
-    start(Phoneme::Ey, [ 476.0, 2194.0, 2691.0], Lips::Spread), // tuned; published 476 2089 2691; Hillenbrand's /e/
+    start(Phoneme::Ey, [ 480.0, 1950.0, 2620.0], Lips::Spread), // tuned; published 476 2089 2691; Hillenbrand's /e/
     // ...the /a/ of "bite", a quarter of the way from /ɑ/ to /æ/...
-    start(Phoneme::Ay, [ 723.0, 1417.0, 2542.0], Lips::Spread), // tuned; published 723 1488 2542
-    start(Phoneme::Ow, [ 497.0,  910.0, 2459.0], Lips::Rounded), // Hillenbrand's /o/
+    start(Phoneme::Ay, [ 750.0, 1300.0, 2542.0], Lips::Spread), // tuned; published 723 1488 2542
+    start(Phoneme::Ow, [ 520.0, 1050.0, 2400.0], Lips::Rounded), // tuned; published 497 910 2459; Hillenbrand's /o/
     // ...the /a/ of "bout", half-way from /ɑ/ to /æ/...
-    start(Phoneme::Aw, [ 712.0, 1643.0, 2562.0], Lips::Spread), // tuned; published 678 1643 2562
-    start(Phoneme::Oy, [ 652.0,  997.0, 2538.0], Lips::Spread),  // /ɔ/
-    // ...and where they end.
-    end(Phoneme::Ey, [ 367.0, 2178.0, 2842.0], Lips::Spread), // tuned; published FRONT_OFFGLIDE
+    start(Phoneme::Aw, [ 740.0, 1450.0, 2562.0], Lips::Spread), // tuned; published 678 1643 2562
+    start(Phoneme::Oy, [ 580.0,  920.0, 2500.0], Lips::Spread), // tuned; published /ɔ/
+    // ...and where they end: /eɪ/ and /oʊ/ glide the whole way, as a
+    // speaker's do, F1 falling by some 120 Hz and F2 rising (/eɪ/) or
+    // falling (/oʊ/) by 150 to 200.
+    end(Phoneme::Ey, [ 360.0, 2150.0, 2800.0], Lips::Spread), // tuned; published FRONT_OFFGLIDE
     end(Phoneme::Ay, FRONT_OFFGLIDE, Lips::Spread),
-    end(Phoneme::Ow, BACK_OFFGLIDE, Lips::Rounded),
+    end(Phoneme::Ow, [ 400.0,  900.0, 2350.0], Lips::Rounded), // tuned; published BACK_OFFGLIDE
     end(Phoneme::Aw, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Oy, FRONT_OFFGLIDE, Lips::Spread),
     // Where the lax vowels glide to over their last third: 40 % of the
@@ -184,10 +187,10 @@ pub const TARGETS: &[Target] = &[
     // a little under half of the way there before the next sound takes
     // it, so the vowel ends some 15 to 20 % of the way to schwa, as
     // English lax vowels do (they centralise; the tense ones do not).
-    end(Phoneme::Ih, [ 460.0, 1832.0, 2630.0], Lips::Spread),
-    end(Phoneme::Eh, [ 569.0, 1691.0, 2583.0], Lips::Spread),
-    end(Phoneme::Ah, [ 560.0, 1368.0, 2550.0], Lips::Spread),
-    end(Phoneme::Uh, [ 485.0, 1285.0, 2480.0], Lips::Rounded),
+    end(Phoneme::Ih, [ 443.0, 1766.0, 2564.0], Lips::Spread),
+    end(Phoneme::Eh, [ 545.0, 1661.0, 2534.0], Lips::Spread),
+    end(Phoneme::Ah, [ 551.0, 1325.0, 2486.0], Lips::Spread),
+    end(Phoneme::Uh, [ 464.0, 1202.0, 2444.0], Lips::Rounded),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).
