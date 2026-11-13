@@ -240,6 +240,7 @@ reads the rest as well:
 | gaps | `fricative_gap`, `approximant_gap`, `nasal_port` |
 | larynx in consonants | `abduction_time`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `voiced_stop_slack`, `cavity_expansion`, `onset_kick`, `kick_time` |
 | lengths | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `voiced_sibilant_length`, `approximant_length`, `aspirate_length`, `aspiration`, `stress_stretch`, `vowel_hold` |
+| lax vowels | `lax_length`, `reduced_length`, `lax_nucleus` |
 | voicing timing | `vot_labial`, `vot_alveolar`, `vot_velar`, `devoicing_lead`, `unstressed_vot`, `fortis_closure`, `prefortis_clip`, `prelenis_stretch` |
 | articulators | `lead`, `release_lead`, `articulation_rate`, `body_rate`, `dorsum_rate`, `closing_ratio`, `release_speed`, `closure_overshoot` |
 | breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
@@ -377,11 +378,19 @@ as the model goes:
   the consonants on top of it, and the back of the tongue is in between. A
   consonant is made on the body of the vowel it leads into.
 - **Vowels** are the averages for the 45 men of Hillenbrand, Getty, Clark
-  & Wheeler (1995), solved into shapes through the babble map, with lip
-  protrusion and a jaw; six of them were moved by a few per cent against
+  & Wheeler (1995), solved into shapes against the engine itself, with lip
+  protrusion and a jaw; some of them were moved by a few per cent against
   the speech recognizer (`src/vowel_targets.rs` says which and by how
   much). They are held longer than the classic engine's, since the slow
-  tongue body needs the time to get there.
+  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are
+  35 to 40 % shorter than the tense ones and glide part of the way
+  towards schwa over their last third, and /eɪ/ glides the whole way. A
+  vowel shape may also set the tongue root, which widens or narrows the
+  pharynx on its own and stays with the tongue body under the consonants
+  around the vowel (`Shape::pharynx`); the built-in vowels leave it at
+  rest (`examples/vowel_size.rs` says why). `examples/nucleus.rs`
+  measures, for every vowel of a list of sentences, its length and its
+  formants through it.
 - **Phrases.** The lungs build their pressure up over the start of a
   phrase, run down over it and let go over its last vowel, so a sentence
   swells in and dies away. Each stressed vowel gets a pitch accent that
@@ -415,7 +424,10 @@ it). Two hundred random reachable targets land within 1.7 % on F1 and
 0.8 % on F2 when measured back through the engine. It covers F1 from about
 250 to 710 Hz and F2 from 550 to 2550 Hz at the native tract length, so a
 very open /a/ is pulled in a little. Formant Lock in the app is built on
-it.
+it. The map is measured with the tongue root at rest: `solve` leaves it
+there, and `predict` gives nothing for a shape whose root is not (the
+vowel chart holds, for each vowel, the map's shape with that vowel's
+formants).
 
 **Mimic** copies a microphone: `--mimic` in the app, or in code a
 `listen::Listener` (pitch, three formants, voicing, and how much and how

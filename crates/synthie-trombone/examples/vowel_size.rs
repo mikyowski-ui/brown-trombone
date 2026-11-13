@@ -92,8 +92,35 @@ const ROOT_PULL: f32 = 0.5;
 /// consonants is often over before it has formed, so the shapes lean on
 /// the tongue, its root and the lips first.
 const NARROWING_PULL: f32 = 1.0;
-/// The tongue roots the engine allows (`synthie_trombone::PHARYNX`).
-const PHARYNX: (f32, f32) = (-1.2, 0.8);
+/// The tongue roots the shapes may take: all the engine allows pulled back
+/// (`synthie_trombone::PHARYNX`), but drawn forward by at most a third of
+/// what it allows. Drawn further, the root of /i/ and /ɑ/ went to the
+/// limit for the last per cent of F3, and the pharynx it left under the
+/// consonants on either side moved them (an /s/ quieter, a vowel between
+/// the /s/ and /t/ of "street").
+const PHARYNX: (f32, f32) = (-1.2, 0.3);
+/// The shapes whose tongue root is solved; every other keeps it at rest.
+///
+/// None, for now. Solved free (and the narrowing kept out of the pharynx,
+/// so that the root does what it did there), the mid and close vowels
+/// whose shapes narrowed the pharynx took a root of their own: drawn
+/// forward for /i eɪ/, pulled back for /ɪ ɛ ʊ u/ and schwa. Carried under
+/// the consonants around a vowel (see `Articulation::physical_root`) it
+/// mended the short vowels, which had never had the time to form their
+/// narrowing (the recognizer's vowel error in sentences fell from 30 to
+/// 26 %), but it moved the consonants made on those bodies out of their
+/// gates in `tests/physical_gates.rs`, `tests/listen_gate.rs` and
+/// `tests/mimic_gate.rs` (/ð/ after schwa, the hiss regulator, a sung
+/// sequence copied by the mimic). List keys here, regenerate, and run
+/// those gates to try it again: `Vowel(Phoneme::Ih)`, `Vowel(Phoneme::Eh)`,
+/// `Vowel(Phoneme::Uh)`, `Vowel(Phoneme::Uw)`, `Vowel(Phoneme::Ax)` and
+/// the lax vowels' ends were the set measured.
+const ROOT_SOLVED: &[VowelKey] = &[];
+
+/// Whether the root of `key` is solved.
+fn root_free(key: VowelKey) -> bool {
+    ROOT_SOLVED.contains(&key)
+}
 /// Natural tongue root of the tense vowels /i e u o/ (and their glides):
 /// drawn forward, widening the pharynx; the others' is at rest.
 const TENSE_ROOT: f32 = 0.25;
@@ -117,6 +144,8 @@ const NARROWING_AT: (f32, f32) = (10.0, 38.0);
 /// consonants on either side of a vowel; a narrowing there belonged to the
 /// vowel alone, came only with it and was never made in a short vowel...
 const ORAL: f32 = 20.0;
+/// ...and for the vowels whose root stays at rest.
+const ORAL_AT_REST: f32 = 14.0;
 /// ...and the F1 (adult man, Hz) from which a vowel counts as open.
 const THROAT_F1: f32 = 640.0;
 /// Narrowing openings searched.
@@ -415,7 +444,11 @@ fn prior(t: &Target) -> [f32; D] {
         tongue_diameter: diameter,
         lips,
         narrowing,
-        pharynx: natural_root(t.key),
+        pharynx: if root_free(t.key) {
+            natural_root(t.key)
+        } else {
+            0.0
+        },
     });
     if narrowing.is_none() {
         x[3] = 0.5;
@@ -445,7 +478,8 @@ fn natural_root(key: VowelKey) -> f32 {
 fn lowest(t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
-        lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
+        let oral = if root_free(t.key) { ORAL } else { ORAL_AT_REST };
+        lo[3] = (oral - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
     }
     lo
 }
@@ -481,10 +515,14 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
         t: f.map(f32::ln),
         near: home,
         ahead: home,
-        free: [true, true, rounded, true, true, true],
+        free: [true, true, rounded, true, true, root_free(t.key)],
         // Tongue and lips have a natural place; the narrowing is there to
         // place F3 and is let go wherever that needs it.
-        pull: NATURAL_PULL,
+        pull: if root_free(t.key) {
+            NATURAL_PULL
+        } else {
+            [1.0, 1.0, 1.0, 0.1, 0.1, ROOT_PULL]
+        },
         lo: lowest(t),
         rounded,
         length: 1.0,
@@ -525,7 +563,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solve
     // which upsets the balance of /s/ against /a/ that the physical gates
     // hold). Its tongue still moves.
     let throat = t.key == VowelKey::Vowel(Phoneme::Aa) && !up;
-    let free = [true, true, rounded, !throat, !throat, true];
+    let free = [true, true, rounded, !throat, !throat, root_free(t.key)];
     let rows: Vec<usize> = if up {
         (NATIVE_ROW + 1..ROWS).collect()
     } else {

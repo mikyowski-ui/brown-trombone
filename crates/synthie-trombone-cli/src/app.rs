@@ -973,34 +973,11 @@ impl App {
         }
         let (hx, hy) = tongue_handle(self.snap.tongue);
         let x = f64::from(hx);
-        let (col, row) = self.dot_cell(x, f64::from(hy));
         let half = lerp_cell(&self.snap.diameters, x) / 2.0;
+        let (col, row) = self.dot_cell(x, f64::from(hy));
         let (_, upper) = self.dot_cell(x, half);
         let (_, lower) = self.dot_cell(x, -half);
-        if (upper..=lower).contains(&row) || half < 0.05 {
-            return Some((col, row.clamp(upper, lower)));
-        }
-        // Held at a wall: where the canvas draws it. It puts a point in the
-        // dot below it (it rounds down), and at a steep wall, as a narrowed
-        // pharynx makes, the two columns of dots of a cell differ.
-        let dots_x = f64::from(a.width) * 2.0 - 1.0;
-        let dots_y = f64::from(a.height) * 4.0 - 1.0;
-        let column_x = |d: u16| X_BOUNDS[0] + f64::from(d) * (X_BOUNDS[1] - X_BOUNDS[0]) / dots_x;
-        let first = 2 * (col - a.x);
-        let drawn = [first, first + 1]
-            .map(|d| lerp_cell(&self.snap.diameters, column_x(d).min(X_BOUNDS[1])) / 2.0)
-            .into_iter()
-            .fold(0.0f64, f64::max);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let wall_row = |y: f64| {
-            let y = y.clamp(Y_BOUNDS[0], Y_BOUNDS[1]);
-            a.y + ((Y_BOUNDS[1] - y) * dots_y / (Y_BOUNDS[1] - Y_BOUNDS[0])).floor() as u16 / 4
-        };
-        Some((
-            col,
-            row.clamp(upper, lower)
-                .clamp(wall_row(drawn), wall_row(-drawn).max(wall_row(drawn))),
-        ))
+        Some((col, row.clamp(upper, lower)))
     }
 
     /// Hit areas of the glottis panel, given its inner area. Rows follow
@@ -1422,26 +1399,23 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
     }
 }
 
-/// Vowels marked on the vowel chart: IPA letter, phoneme, and a shape of
-/// the babble map that makes the physical engine's formants for it. The
-/// library's own vowel shapes move the tongue root as well, which the map
-/// does not know, so the chart holds the map's shape with the same F1, F2
-/// and F3, the root at rest (a test checks that they still agree). Where
-/// two marks share a cell the first is shown, so the corner vowels come
-/// first.
+/// Vowels marked on the vowel chart: IPA letter, phoneme, and the shape the
+/// physical engine gives it (the library's physical vowel shapes; a test
+/// checks that they still agree). Where two marks share a cell the first
+/// is shown, so the corner vowels come first.
 #[rustfmt::skip]
 pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
-    ("i", Phoneme::Iy, shape(29.0, 2.292, Some(2.999), (22.07, 0.714))),
-    ("u", Phoneme::Uw, shape(25.953, 2.119, Some(0.725), (12.306, 1.299))),
-    ("ɑ", Phoneme::Aa, shape(15.692, 2.8, Some(2.844), (8.0, 0.739))),
-    ("æ", Phoneme::Ae, shape(25.99, 3.093, None, (12.111, 1.541))),
-    ("ɪ", Phoneme::Ih, shape(27.202, 2.284, Some(1.599), (16.028, 1.952))),
-    ("ɛ", Phoneme::Eh, shape(25.507, 2.775, Some(1.994), (14.737, 1.575))),
-    ("ʌ", Phoneme::Ah, shape(16.477, 2.275, Some(2.882), (30.0, 1.446))),
-    ("ɔ", Phoneme::Ao, shape(12.0, 2.113, Some(3.01), (26.349, 1.912))),
-    ("ʊ", Phoneme::Uh, shape(24.924, 2.304, Some(0.83), (12.667, 1.286))),
-    ("o", Phoneme::Ow, shape(13.156, 2.337, Some(1.043), (28.0, 1.749))),
-    ("ɝ", Phoneme::Er, shape(13.692, 2.897, Some(1.18), (30.0, 0.743))),
+    ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.648, 0.858))),
+    ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
+    ("ɑ", Phoneme::Aa, shape(16.514, 3.165, None, (10.0, 0.927))),
+    ("æ", Phoneme::Ae, shape(19.852, 3.321, None, (28.611, 1.314))),
+    ("ɪ", Phoneme::Ih, shape(26.372, 2.449, None, (24.0, 3.0))),
+    ("ɛ", Phoneme::Eh, shape(24.3, 2.811, None, (14.0, 1.483))),
+    ("ʌ", Phoneme::Ah, shape(16.588, 2.269, None, (30.423, 1.46))),
+    ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.829, 1.8))),
+    ("ʊ", Phoneme::Uh, shape(19.849, 2.38, Some(0.998), (32.217, 1.027))),
+    ("o", Phoneme::Ow, shape(15.493, 2.345, Some(0.989), (30.202, 1.519))),
+    ("ɝ", Phoneme::Er, shape(15.234, 2.777, Some(1.242), (30.498, 0.7))),
 ];
 
 /// The chart vowel `v`: its IPA letter and shape.
@@ -2422,6 +2396,8 @@ mod tests {
 
     // ----- Formant Lock -------------------------------------------------
 
+    use synthie_trombone::Trombone;
+
     /// `laid_out()` with Formant Lock on and a vowel chart the size a
     /// 120×34 terminal draws it (26×9 cells), clear of the other areas.
     fn locked() -> (App, Receiver<Cmd>) {
@@ -2600,17 +2576,11 @@ mod tests {
         // range per step, over several steps), but no single step jumps:
         // in particular the first step off the vowel's own shape is small.
         // On the coarse chart a step is 10 % of F1, and the last one, onto
-        // /ɑ/ (F1 above 760 Hz and F2 near 1200, which only a pharynx
-        // narrowed low reaches), moves the shape by up to 0.6: the
-        // narrowing drops from the palate to the pharynx there, on the fine
-        // chart too (0.71 there). Before /ɑ/ moved back to the F2 a
-        // listener hears as /ɑ/ (from 1360 Hz to 1200) the step was 0.35,
-        // and 0.2 on the fine chart. Every step before it is small (0.22).
-        assert!(coarse < 0.6, "{coarse}: {path:?}");
-        assert!(fine < 0.75, "{fine}: {path_fine:?}");
-        let before_a = largest_step(&path_fine[..path_fine.len() - 1]);
-        println!("largest step before the last: {before_a:.3}");
-        assert!(before_a < 0.25, "{before_a}: {path_fine:?}");
+        // /ɑ/ (F1 above 760 Hz, which only a pharynx narrowed low reaches),
+        // moves the shape by up to 0.35; the fine chart shows that it is a
+        // big step, not a jump.
+        assert!(coarse < 0.35, "{coarse}: {path:?}");
+        assert!(fine < 0.2, "{fine}: {path_fine:?}");
         let first = largest_step(&path_fine[..2]);
         println!("first step off the /i/ mark: {first:.3}");
         assert!(first < 0.1, "{first}: {path_fine:?}");
@@ -2636,13 +2606,7 @@ mod tests {
         assert!(error(got, edge) < 0.03, "{got:?} vs {edge:?}");
         assert!(app.status.contains("out of reach"), "{}", app.status);
         // A drag that leaves the chart is held at its edge as well.
-        // (From a cell that is not a vowel's mark: a press on one is that
-        // vowel.)
-        let marks = app.chart_marks();
-        let inside = (a.x + 3..a.x + 12)
-            .map(|c| (c, a.y + 2))
-            .find(|at| marks.iter().all(|m| m.2 != *at))
-            .expect("a cell without a mark");
+        let inside = (a.x + 3, a.y + 2);
         mouse(&mut app, DOWN, inside, PLAIN);
         mouse(&mut app, DRAG, (a.x, a.y + 30), PLAIN);
         mouse(&mut app, UP, (a.x, a.y + 30), PLAIN);
@@ -2743,27 +2707,27 @@ mod tests {
 
     #[test]
     fn chart_vowels_are_the_physical_engines_vowels() {
-        use synthie_trombone::vowel_targets::{self, VowelKey};
         for (name, v, s) in CHART_VOWELS {
-            // Where the physical engine's own vowel lands (its target, which
-            // it meets within 3 %), as the babble map makes it.
-            let key = if v == Phoneme::Ow {
-                VowelKey::Start(v)
-            } else {
-                VowelKey::Vowel(v)
-            };
-            let want = vowel_targets::formants(key, 1.0).expect("a target");
-            let got = predict_near(&s).expect("the map knows the shape");
-            for k in 0..2 {
-                assert!(
-                    (got[k] / want[k] - 1.0).abs() < 0.02,
-                    "{name} F{}: {} vs {}",
-                    k + 1,
-                    got[k],
-                    want[k]
-                );
+            let mut said = Trombone::new(48_000.0);
+            let mut held = Trombone::new(48_000.0);
+            for voice in [&mut said, &mut held] {
+                voice.set_engine(Engine::Physical);
             }
-            assert!(s.pharynx.abs() < f32::EPSILON, "{name}");
+            said.articulate_phoneme(v);
+            held.set_shape(&s);
+            let mut buf = [0.0; 256];
+            said.render(&mut buf);
+            held.render(&mut buf);
+            assert_eq!(said.tongue(), held.tongue(), "{name}");
+            for (k, (a, b)) in said
+                .target_diameters()
+                .iter()
+                .zip(held.target_diameters())
+                .enumerate()
+            {
+                assert!((a - b).abs() < 1e-4, "{name} cell {k}: {a} vs {b}");
+            }
+            assert!(predict_near(&s).is_some(), "{name}");
         }
     }
 

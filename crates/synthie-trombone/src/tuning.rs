@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-one numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -391,8 +391,6 @@ tuning! {
     /// in the same place. English holds them apart by length as much as by
     /// their formants: in sentences a lax vowel is 35 to 40 % shorter.
     lax_length = 0.62, 0.5..=1.0, C;
-    /// Length of schwa (/ə/) against a tense vowel's: the shortest vowel.
-    reduced_length = 0.55, 0.4..=1.0, C;
     /// Share of a lax vowel held on its own shape before it glides towards
     /// schwa (to its end shape in `vowel_targets`) for the rest.
     lax_nucleus = 0.67, 0.4..=1.0, C;
@@ -429,10 +427,10 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 4);
-        // Lax vowels and schwa are shorter than the others, whatever the
-        // profile says.
-        for name in ["lax_length", "reduced_length"] {
+        assert_eq!(c, 3);
+        // Lax vowels are shorter than the others, whatever the profile
+        // says.
+        for name in ["lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);
             assert!(f.is_some_and(|f| f.default < 0.7 && f.hi <= 1.0), "{name}");
         }

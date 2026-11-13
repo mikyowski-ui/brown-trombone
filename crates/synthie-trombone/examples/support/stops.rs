@@ -520,7 +520,14 @@ pub fn bursts(r: &Recording) -> Vec<Burst> {
         let Some(v) = after else {
             continue;
         };
-        let (vs, ve) = span(r, v);
+        // The whole vowel: a diphthong's glide and a lax vowel's glide
+        // towards schwa are segments of their own.
+        let (vs, mut ve) = span(r, v);
+        let mut w = v + 1;
+        while w < r.phonemes.len() && r.phonemes[w] == r.phonemes[v] {
+            ve = span(r, w).1.max(ve);
+            w += 1;
+        }
         let vowel = r.out[vs..ve].iter().fold(0.0f32, |m, x| m.max(x.abs()));
         let end = (release + 480).min(r.out.len());
         let burst = r.out[release.min(end)..end]

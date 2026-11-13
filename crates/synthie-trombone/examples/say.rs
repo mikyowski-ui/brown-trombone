@@ -203,8 +203,17 @@ fn main() -> std::io::Result<()> {
     talker.voice_mut().set_glottal_source(source);
     hold_vowels(talker.voice_mut(), &vowels);
     let utterance = talker.compile(&text);
+    // One symbol per segment, as the judge reads it; a lax vowel's glide
+    // towards schwa is part of the vowel, not a segment of its own.
+    let mut last = None;
     for s in utterance.segments() {
-        print!("{} ", s.phoneme);
+        let offglide = s.phoneme.manner() == Manner::Vowel
+            && s.articulation.vowel == Some(VowelKey::End(s.phoneme))
+            && last == Some(s.phoneme);
+        if !offglide {
+            print!("{} ", s.phoneme);
+        }
+        last = Some(s.phoneme);
     }
     println!();
     let started = Instant::now();
