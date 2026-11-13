@@ -87,6 +87,15 @@ pub struct Shape {
     pub lips: Option<f32>,
     /// Narrowing along the tongue, `(cell, touch diameter)`, or `None`.
     pub narrowing: Option<(f32, f32)>,
+    /// The tongue root: `ln` of how much it widens the middle of the
+    /// pharynx (positive drawn forward, as in the tense vowels; negative
+    /// pulled back, as in /ɑ/), `0.0` at rest. It belongs to the tongue
+    /// body: consonants made on a vowel keep its root. The babble map is
+    /// measured with the root at rest: [`solve`] leaves it there and
+    /// [`predict`] knows only such shapes. The physical vowels of
+    /// [`vowel_targets`](crate::vowel_targets) are solved with it free,
+    /// against the engine itself.
+    pub pharynx: f32,
 }
 
 /// Position of `v` in `range`, `0‥1`.
@@ -165,6 +174,7 @@ impl Shape {
                     from_unit_log(x[4], NARROWING),
                 )
             }),
+            pharynx: 0.0,
         }
     }
 }
@@ -298,9 +308,14 @@ fn eval(x: &[f32; 5]) -> Option<Eval> {
 }
 
 /// The babble map's estimate of a shape's F1, F2 and F3, Hz, at the native
-/// tract length; `None` where the map has no data (a few extreme shapes).
+/// tract length; `None` where the map has no data (a few extreme shapes)
+/// and for a shape whose tongue root is not at rest (the map is measured
+/// with it at rest, and what the root does depends on the whole shape).
 #[must_use]
 pub fn predict(shape: &Shape) -> Option<[f32; 3]> {
+    if shape.pharynx.abs() > f32::EPSILON {
+        return None;
+    }
     eval(&shape.coordinates()).map(|e| e.f.map(exp))
 }
 

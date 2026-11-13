@@ -166,19 +166,29 @@ pub const TARGETS: &[Target] = &[
     vowel(Phoneme::W,  [ 340.0,  800.0, 2300.0], Lips::Rounded),
     vowel(Phoneme::Y,  [ 310.0, 2250.0, 3000.0], Lips::Spread),
     // Diphthongs: where they start...
-    start(Phoneme::Ey, [ 476.0, 2194.0, 2691.0], Lips::Spread), // tuned; published 476 2089 2691; Hillenbrand's /e/
+    start(Phoneme::Ey, [ 480.0, 1950.0, 2620.0], Lips::Spread), // tuned; published 476 2089 2691; Hillenbrand's /e/
     // ...the /a/ of "bite", a quarter of the way from /ɑ/ to /æ/...
     start(Phoneme::Ay, [ 723.0, 1417.0, 2542.0], Lips::Spread), // tuned; published 723 1488 2542
     start(Phoneme::Ow, [ 497.0,  910.0, 2459.0], Lips::Rounded), // Hillenbrand's /o/
     // ...the /a/ of "bout", half-way from /ɑ/ to /æ/...
     start(Phoneme::Aw, [ 712.0, 1643.0, 2562.0], Lips::Spread), // tuned; published 678 1643 2562
     start(Phoneme::Oy, [ 652.0,  997.0, 2538.0], Lips::Spread),  // /ɔ/
-    // ...and where they end.
-    end(Phoneme::Ey, [ 367.0, 2178.0, 2842.0], Lips::Spread), // tuned; published FRONT_OFFGLIDE
+    // ...and where they end: /eɪ/ glides the whole way, as a speaker's
+    // does, F1 falling by some 120 Hz and F2 rising by some 200.
+    end(Phoneme::Ey, [ 360.0, 2150.0, 2800.0], Lips::Spread), // tuned; published FRONT_OFFGLIDE
     end(Phoneme::Ay, FRONT_OFFGLIDE, Lips::Spread),
     end(Phoneme::Ow, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Aw, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Oy, FRONT_OFFGLIDE, Lips::Spread),
+    // Where the lax vowels glide to over their last third: 60 % of the
+    // way from the vowel to schwa (AX above). The heavy tongue body gets
+    // a little over a third of the way there before the next sound takes
+    // it, so the vowel ends some 15 % of the way to schwa, as English lax
+    // vowels do (they centralise; the tense ones do not).
+    end(Phoneme::Ih, [ 477.0, 1732.0, 2604.0], Lips::Spread),
+    end(Phoneme::Eh, [ 550.0, 1638.0, 2572.0], Lips::Spread),
+    end(Phoneme::Ah, [ 543.0, 1422.0, 2550.0], Lips::Spread),
+    end(Phoneme::Uh, [ 494.0, 1367.0, 2504.0], Lips::Rounded),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

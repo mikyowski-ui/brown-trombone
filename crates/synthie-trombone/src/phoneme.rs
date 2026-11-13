@@ -423,12 +423,19 @@ impl Phoneme {
 impl VowelKey {
     /// The articulation that stands for this shape: the phoneme's own for a
     /// vowel, glide or diphthong start, its [`glide_end`](Phoneme::glide_end)
-    /// for a diphthong's end.
+    /// for a diphthong's end, and the vowel's own (standing for its end) for
+    /// the end of a vowel that glides on its own (a lax vowel's offglide).
     #[must_use]
     pub const fn articulation(self) -> Option<Articulation> {
         match self {
             VowelKey::Vowel(p) | VowelKey::Start(p) => Some(p.articulation()),
-            VowelKey::End(p) => p.glide_end(),
+            VowelKey::End(p) => match p.glide_end() {
+                Some(a) => Some(a),
+                None if matches!(p.manner(), Manner::Vowel) => {
+                    Some(p.classic().standing_for(VowelKey::End(p)))
+                }
+                None => None,
+            },
         }
     }
 }
@@ -471,6 +478,33 @@ impl Articulation {
         (a, narrowing)
     }
 
+    /// The vowel shape this stands for, or else the first one whose tongue
+    /// it borrowed. Not /w/'s: its classic tongue is also that of /k g ŋ/,
+    /// which get their own (see `PHYSICAL_VELAR_TONGUE`).
+    fn vowel_shape_key(self) -> Option<VowelKey> {
+        self.vowel.or_else(|| {
+            vowel_targets::TARGETS
+                .iter()
+                .map(|t| t.key)
+                .filter(|k| k.phoneme() != Phoneme::W)
+                .find(|k| k.articulation().is_some_and(|a| a.tongue == self.tongue))
+        })
+    }
+
+    /// The tongue root the physical engine holds for this articulation (see
+    /// [`Shape::pharynx`](crate::inverse::Shape::pharynx)): a vowel's own,
+    /// and a consonant's that of the vowel it is made on, since the root
+    /// belongs to the tongue body that glides from vowel to vowel under the
+    /// consonants. `None` (leave it where it is) for what has no vowel.
+    pub(crate) fn physical_root(
+        self,
+        tract_length: f32,
+        held: &vowel_size::OwnShapes,
+    ) -> Option<f32> {
+        let key = self.vowel_shape_key()?;
+        vowel_size::shape_in(key, tract_length, held).map(|s| s.3)
+    }
+
     /// [`physical_in`](Self::physical_in) before the approximants are
     /// narrowed.
     fn physical_shape_of(
@@ -478,17 +512,10 @@ impl Articulation {
         tract_length: f32,
         held: &vowel_size::OwnShapes,
     ) -> (Self, Option<Constriction>) {
-        // The vowel this stands for, or else the first one whose tongue it
-        // borrowed. Not /w/'s: its classic tongue is also that of /k g ŋ/,
-        // which get their own (see `PHYSICAL_VELAR_TONGUE`).
-        let key = self.vowel.or_else(|| {
-            vowel_targets::TARGETS
-                .iter()
-                .map(|t| t.key)
-                .filter(|k| k.phoneme() != Phoneme::W)
-                .find(|k| k.articulation().is_some_and(|a| a.tongue == self.tongue))
-        });
-        let Some((key, own)) = key.and_then(|k| Some((k, k.articulation()?))) else {
+        let Some((key, own)) = self
+            .vowel_shape_key()
+            .and_then(|k| Some((k, k.articulation()?)))
+        else {
             if self.tongue == Some(VELAR_TONGUE) {
                 let mut a = self;
                 a.tongue = Some(PHYSICAL_VELAR_TONGUE);
@@ -496,7 +523,7 @@ impl Articulation {
             }
             return (self, None);
         };
-        let Some((tongue, lips, narrow)) = vowel_size::shape_in(key, tract_length, held) else {
+        let Some((tongue, lips, narrow, _)) = vowel_size::shape_in(key, tract_length, held) else {
             return (self, None);
         };
         let mut a = self;
@@ -543,7 +570,7 @@ impl Articulation {
             // /l r/: their own body. /r/'s is that of /ɚ/ (the classic
             // engine gives both the same), as the physical engine shapes it.
             if self.tongue == Phoneme::R.classic().tongue
-                && let Some((er, _, _)) =
+                && let Some((er, _, _, _)) =
                     vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
             {
                 a.tongue = Some(er);
@@ -592,6 +619,9 @@ impl Articulation {
             tongue_diameter,
             lips: a.lips.map(|c| c.diameter),
             narrowing: Some((narrowing.index, narrowing.diameter)),
+            pharynx: self
+                .physical_root(tract_length, &vowel_size::OwnShapes::NONE)
+                .unwrap_or(0.0),
         })
     }
 

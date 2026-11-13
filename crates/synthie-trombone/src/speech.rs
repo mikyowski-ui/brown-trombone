@@ -24,6 +24,7 @@
 
 use crate::math::{exp, lerp};
 use crate::phoneme::{Articulation, Manner, Phoneme};
+use crate::vowel_targets::VowelKey;
 use crate::{Engine, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -977,14 +978,12 @@ fn number_words(digits: &str) -> String {
 
 // English vowels have lengths of their own. In the hVd words of
 // Hillenbrand et al. (1995) the men's lax /ɪ ɛ ʌ ʊ/ last about 0.81 of
-// their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1).
-// Running speech holds these apart less than words said one by one, so the
-// factors here are half-way between 1 and those ratios (the full ratios
-// also shortened the vowels around stops enough to move their bursts and
-// voice onsets past `tests/physical_gates.rs`).
+// their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1). In
+// running speech the lax vowels are shorter still against the tense ones
+// (a speaker reading LibriSpeech holds his stressed /ɪ ɛ ʌ/ for about 60 %
+// of his /i eɪ æ ɔ/): stressed lax vowels take `Tuning::lax_length` of a
+// tense vowel's length, unstressed ones `Tuning::unstressed_lax_length`.
 
-/// Length of the lax vowels /ɪ ɛ ʌ ʊ/ against the others (physical engine).
-const LAX_LENGTH: f32 = 0.905;
 /// Length of the long tense vowels /æ ɑ ɔ ɝ/ against the others (physical
 /// engine).
 const LONG_LENGTH: f32 = 1.085;
@@ -996,14 +995,22 @@ const WIDE_DIPHTHONG_LENGTH: f32 = 1.05;
 /// glides to its end.
 const NUCLEUS: f32 = 0.55;
 
+/// The lax vowels /ɪ ɛ ʌ ʊ/: short, and gliding towards schwa as they end
+/// (physical engine).
+fn is_lax(p: Phoneme) -> bool {
+    matches!(p, Phoneme::Ih | Phoneme::Eh | Phoneme::Ah | Phoneme::Uh)
+}
+
 /// How long vowel or diphthong `p` lasts against others of its kind, on
 /// the physical engine (pass C of the tuning): every vowel is held longer
 /// than on the classic engine (`Tuning::vowel_hold`), lax vowels are
-/// shorter than long tense ones, /aɪ aʊ ɔɪ/ longer than /eɪ oʊ/.
-fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
+/// shorter than tense ones, long tense ones longer, /aɪ aʊ ɔɪ/ longer than
+/// /eɪ oʊ/.
+fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
-        P::Ih | P::Eh | P::Ah | P::Uh => LAX_LENGTH * timing.vowel_hold,
+        _ if is_lax(p) && stressed => timing.lax_length * timing.vowel_hold,
+        _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
         P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
         P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
         _ => timing.vowel_hold,
@@ -1015,7 +1022,7 @@ fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
 fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
     let own = |d: f32| {
         if physical {
-            d * own_length(p, timing)
+            d * own_length(p, stressed, timing)
         } else {
             d
         }
@@ -1052,6 +1059,19 @@ enum Part {
     Head,
     /// A diphthong's glide to its end.
     Glide,
+    /// A lax vowel's glide towards schwa (physical engine): part of the
+    /// vowel, not a sound after it, for the phrase's pitch and breath.
+    Offglide,
+}
+
+/// The first draft of the vowel whose last draft is `k` (a lax vowel's
+/// offglide belongs to the vowel before it).
+fn vowel_head(drafts: &[Draft], k: usize) -> usize {
+    if k > 0 && drafts[k].part == Part::Offglide {
+        k - 1
+    } else {
+        k
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1663,6 +1683,21 @@ fn expand(
             };
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
+        Manner::Vowel if is_lax(p) => {
+            // A lax vowel holds its shape for `lax_nucleus` of its length
+            // and then glides towards schwa, as English lax vowels do (the
+            // tense ones hold theirs): its end shape is part of the way
+            // there (see `vowel_targets`).
+            let head = timing.lax_nucleus;
+            let end = VowelKey::End(p).articulation().unwrap_or(a);
+            out.push(draft(p, a, dur * head, true));
+            if head < 1.0 {
+                let mut tail = draft(p, end, dur * (1.0 - head), true);
+                tail.accent = 0.0;
+                tail.part = Part::Offglide;
+                out.push(tail);
+            }
+        }
         _ => out.push(draft(p, a, dur, a.voiced)),
     }
 }
@@ -1713,8 +1748,12 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
         let phrase = &drafts[a..b];
         let total: f32 = phrase.iter().map(|d| d.duration).sum();
         let last_vowel = phrase.iter().rposition(|d| d.vowel).unwrap_or(0);
-        let final_start: f32 = phrase[..last_vowel].iter().map(|d| d.duration).sum();
-        let final_end = final_start + phrase.get(last_vowel).map_or(0.0, |d| d.duration);
+        let final_start: f32 = phrase[..vowel_head(phrase, last_vowel)]
+            .iter()
+            .map(|d| d.duration)
+            .sum();
+        let final_end = phrase[..last_vowel].iter().map(|d| d.duration).sum::<f32>()
+            + phrase.get(last_vowel).map_or(0.0, |d| d.duration);
         let final_drop = match brk {
             Break::Comma => 0.5 * timing.final_drop,
             _ => timing.final_drop,
@@ -1819,7 +1858,10 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
         spans.push((t, t + d.duration));
         t += d.duration;
     }
-    let last_vowel = drafts.iter().rposition(|d| d.vowel);
+    // The last vowel's last draft, and its first (a lax vowel's offglide
+    // is part of it).
+    let last_draft = drafts.iter().rposition(|d| d.vowel);
+    let last_vowel = last_draft.map(|k| vowel_head(drafts, k));
     let falling = matches!(brk, Break::Period | Break::Exclamation);
     let accents: Vec<(f32, f32)> = drafts
         .iter()
@@ -1827,6 +1869,10 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
         .enumerate()
         .filter(|(_, (d, _))| d.accent > 0.0 && d.vowel)
         .map(|(k, (_, &(a, b)))| {
+            let b = match drafts.get(k + 1) {
+                Some(n) if n.part == Part::Offglide => spans[k + 1].1,
+                _ => b,
+            };
             // The nucleus of a statement peaks as its vowel begins, its rise
             // carried by the sounds before it, and falls from there.
             if falling && Some(k) == last_vowel {
@@ -1858,7 +1904,9 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
             })
             .fold(0.0f32, f32::max)
     };
-    let (vowel_start, vowel_end) = last_vowel.map_or((total, total), |k| spans[k]);
+    let (vowel_start, vowel_end) = last_vowel
+        .zip(last_draft)
+        .map_or((total, total), |(k, end)| (spans[k].0, spans[end].1));
     let boundary = |t: f32| {
         let x = ((t - vowel_start) / (vowel_end - vowel_start).max(1e-3)).clamp(0.0, 1.0);
         let shape = x * x * (3.0 - 2.0 * x);
@@ -1875,7 +1923,7 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
         d.accent = crate::math::powf(2.0, semitones(end) / 12.0);
     }
     // After a question's rise the consonants stay up.
-    if let (Some(v), Break::Question) = (last_vowel, brk) {
+    if let (Some(v), Break::Question) = (last_draft, brk) {
         let top = drafts[v].accent;
         for d in &mut drafts[v + 1..] {
             d.accent = top;

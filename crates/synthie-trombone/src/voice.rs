@@ -677,8 +677,14 @@ impl Trombone {
         // Vowel shapes are tuned per engine.
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),
-            // Physical vowel shapes also follow the speaker's size.
-            Engine::Physical => a.physical_in(self.tract_length, &self.own_vowels),
+            // Physical vowel shapes also follow the speaker's size, and the
+            // tongue root goes with the tongue body.
+            Engine::Physical => {
+                if let Some(root) = a.physical_root(self.tract_length, &self.own_vowels) {
+                    self.tract.set_pharynx(root);
+                }
+                a.physical_in(self.tract_length, &self.own_vowels)
+            }
         };
         self.tract.set_narrowing(narrowing);
         if let Some((index, diameter)) = a.tongue {
@@ -752,6 +758,7 @@ impl Trombone {
         self.tract.set_constriction(SLOT_LIPS, lips);
         self.tract
             .set_narrowing(shape.narrowing.map(|(at, d)| Constriction::new(at, d)));
+        self.tract.set_pharynx(shape.pharynx);
     }
 
     // ----- inspection --------------------------------------------------

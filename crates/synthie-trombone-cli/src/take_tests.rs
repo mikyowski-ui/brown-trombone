@@ -407,6 +407,7 @@ fn header_and_commands_round_trip() {
         tongue_diameter: 2.718_281_7,
         lips: Some(0.733),
         narrowing: Some((14.0, 1.203)),
+        pharynx: -0.25,
     };
     let mut voice = Preset::Critter.settings();
     voice.tuning.lung_pressure = 9.37;

@@ -1395,6 +1395,7 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
         tongue_diameter: height,
         lips,
         narrowing: Some(narrowing),
+        pharynx: 0.0,
     }
 }
 
@@ -1404,16 +1405,16 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
 /// is shown, so the corner vowels come first.
 #[rustfmt::skip]
 pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
-    ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.648, 0.858))),
+    ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.649, 0.858))),
     ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
-    ("ɑ", Phoneme::Aa, shape(16.514, 3.165, None, (10.0, 0.927))),
+    ("ɑ", Phoneme::Aa, shape(16.513, 3.165, None, (10.0, 0.927))),
     ("æ", Phoneme::Ae, shape(19.852, 3.321, None, (28.611, 1.314))),
     ("ɪ", Phoneme::Ih, shape(26.372, 2.449, None, (24.0, 3.0))),
     ("ɛ", Phoneme::Eh, shape(24.3, 2.811, None, (14.0, 1.483))),
     ("ʌ", Phoneme::Ah, shape(16.588, 2.269, None, (30.423, 1.46))),
-    ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.829, 1.8))),
-    ("ʊ", Phoneme::Uh, shape(19.849, 2.38, Some(0.998), (32.217, 1.027))),
-    ("o", Phoneme::Ow, shape(15.493, 2.345, Some(0.989), (30.202, 1.519))),
+    ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.828, 1.8))),
+    ("ʊ", Phoneme::Uh, shape(19.945, 2.387, Some(1.004), (32.018, 1.022))),
+    ("o", Phoneme::Ow, shape(15.494, 2.345, Some(0.989), (30.201, 1.519))),
     ("ɝ", Phoneme::Er, shape(15.234, 2.777, Some(1.242), (30.498, 0.7))),
 ];
 
@@ -1595,6 +1596,7 @@ impl App {
                 tongue_diameter: self.tongue.1,
                 lips: None,
                 narrowing: None,
+                pharynx: 0.0,
             },
         };
         if self.shape_formants(&start).is_some() {

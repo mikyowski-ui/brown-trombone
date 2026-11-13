@@ -16,15 +16,15 @@
 //! [`MIN_NARROWING`], so no shape hisses.
 
 use crate::inverse::Shape;
-use crate::tract::{TONGUE_DIAMETER, TONGUE_INDEX};
+use crate::tract::{PHARYNX, TONGUE_DIAMETER, TONGUE_INDEX};
 use crate::vowel_targets::{TARGET_COUNT, VowelKey, position};
 
 #[path = "vowel_size_table.rs"]
 mod table;
 
 /// A physical vowel shape: tongue body `(index, diameter)`, lip rounding,
-/// and the narrowing along the tongue `(cell, diameter)`.
-pub(crate) type VowelShape = ((f32, f32), Option<f32>, (f32, f32));
+/// the narrowing along the tongue `(cell, diameter)` and the tongue root.
+pub(crate) type VowelShape = ((f32, f32), Option<f32>, (f32, f32), f32);
 
 /// Tightest lip rounding a vowel may have (that of /u/); tighter lips
 /// would hiss.
@@ -67,6 +67,7 @@ impl OwnShapes {
                 s.lips.map(|d| d.max(MIN_LIPS)),
                 s.narrowing
                     .map_or(NO_NARROWING, |(at, d)| (at, d.max(MIN_NARROWING))),
+                root(s.pharynx),
             )
         });
         true
@@ -84,6 +85,15 @@ impl Default for OwnShapes {
     }
 }
 
+/// A tongue root inside what the engine allows; at rest if not finite.
+fn root(pharynx: f32) -> f32 {
+    if pharynx.is_finite() {
+        pharynx.clamp(*PHARYNX.start(), *PHARYNX.end())
+    } else {
+        0.0
+    }
+}
+
 /// [`shape`], unless `own` holds a shape of its own for `key`.
 pub(crate) fn shape_in(key: VowelKey, tract_length: f32, own: &OwnShapes) -> Option<VowelShape> {
     own.get(key).or_else(|| shape(key, tract_length))
@@ -91,9 +101,9 @@ pub(crate) fn shape_in(key: VowelKey, tract_length: f32, own: &OwnShapes) -> Opt
 
 /// The shape of `key` at `tract_length`, or `None` for a key the table
 /// does not know. Lengths outside the table are clamped into it; at
-/// exactly `1.0` the native row is returned as it is. The tongue stays
-/// where the engine lets it go, and lips and narrowing are never tighter
-/// than [`MIN_LIPS`] and [`MIN_NARROWING`].
+/// exactly `1.0` the native row is returned as it is. The tongue and its
+/// root stay where the engine lets them go, and lips and narrowing are
+/// never tighter than [`MIN_LIPS`] and [`MIN_NARROWING`].
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
@@ -111,8 +121,8 @@ pub(crate) fn shape(key: VowelKey, tract_length: f32) -> Option<VowelShape> {
         (row, pos - row as f32)
     };
     let v = |k: usize| {
-        let lo = f32::from(rows[row][k]);
-        let hi = rows.get(row + 1).map_or(lo, |r| f32::from(r[k]));
+        let lo = rows[row][k] as f32;
+        let hi = rows.get(row + 1).map_or(lo, |r| r[k] as f32);
         // Divided, not multiplied by 0.001: a row then decodes to exactly
         // the number written in it.
         (lo + (hi - lo) * frac) / PER_UNIT
@@ -125,6 +135,7 @@ pub(crate) fn shape(key: VowelKey, tract_length: f32) -> Option<VowelShape> {
         // Spread lips are stored as 0.
         (rows[row][2] > 0).then(|| v(2).max(MIN_LIPS)),
         (v(3), v(4).max(MIN_NARROWING)),
+        root(v(5)),
     ))
 }
 

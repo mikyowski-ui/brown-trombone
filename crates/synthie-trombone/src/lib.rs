@@ -98,8 +98,8 @@ pub use profile::{ProfileError, tuning_parameters};
 #[cfg(feature = "alloc")]
 pub use talker::{Talker, bake, normalize};
 pub use tract::{
-    BLADE_START, Constriction, LIP_START, MAX_CONSTRICTIONS, N, NOSE_LEN, NOSE_START, TIP_START,
-    TONGUE_DIAMETER, TONGUE_INDEX,
+    BLADE_START, Constriction, LIP_START, MAX_CONSTRICTIONS, N, NOSE_LEN, NOSE_START, PHARYNX,
+    TIP_START, TONGUE_DIAMETER, TONGUE_INDEX,
 };
 pub use tuning::{Field, Pass, Tuning};
 pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};

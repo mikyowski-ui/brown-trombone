@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-eight numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy-one numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -384,6 +384,23 @@ tuning! {
     /// behind them is what gives /s/ its peak at 5 to 8 kHz. Narrower is
     /// brighter and quieter.
     sibilant_teeth = 0.6, 0.3..=1.2, A;
+
+    // ----- C: lax vowels (physical engine) -------------------------------
+
+    /// Length of a stressed lax vowel /ɪ ɛ ʌ ʊ/ against a tense vowel's
+    /// (/i u/) in the same place. A speaker reading LibriSpeech holds his
+    /// stressed lax vowels for some 60 % of his tense ones, and at 0.62 the
+    /// recognizer heard the vowels better (vowel lab held-out −2.7 points),
+    /// but the sentences of the tuning material lost 6 points of phoneme
+    /// accuracy and Whisper 8.5 of words; so it is left at the round 4
+    /// value, the most these sentences take.
+    lax_length = 0.905, 0.5..=1.0, C;
+    /// Share of a lax vowel held on its own shape before it glides towards
+    /// schwa (to its end shape in `vowel_targets`) for the rest.
+    lax_nucleus = 0.67, 0.4..=1.0, C;
+    /// The same as `lax_length` for an unstressed lax vowel ("it", "-ing"),
+    /// which the stress already makes shorter.
+    unstressed_lax_length = 0.905, 0.5..=1.0, C;
 }
 
 impl Default for Tuning {
@@ -417,7 +434,12 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 1);
+        assert_eq!(c, 4);
+        // Lax vowels are never longer than tense ones.
+        for name in ["lax_length", "unstressed_lax_length"] {
+            let f = Tuning::FIELDS.iter().find(|f| f.name == name);
+            assert!(f.is_some_and(|f| f.default <= 1.0 && f.hi <= 1.0), "{name}");
+        }
     }
 
     #[test]
