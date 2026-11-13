@@ -219,6 +219,12 @@ measure on synthetic signals.
 
 ## Tuning
 
+**Retired after Round 5.** The CMA-ES search below is no longer run. In Rounds 4 and 5 every tuned
+profile fitted the tuning sentences and was no better, or worse, on the held-out ones (Round 5: held-out
+phoneme error +2.9 [1.1, 4.8] and +1.6 [0.1, 3.0] for the two passes), so the engine is now improved by
+changes to its mechanisms, scored directly with `judge.py`. `tune.py` and its tests stay for the gate
+runner, the one-parameter scans and the record; the rejected profiles are in `profiles/`.
+
 ```sh
 uv run python tune.py --self-test                    # 7 evaluations on 12 items, then a resume check
 uv run python tune.py --pass a --scan 4 --gates bin --out out/scan-a.json        # sensitivity scan
