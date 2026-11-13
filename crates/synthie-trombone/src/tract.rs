@@ -128,7 +128,7 @@ const BLADE_PLACE: f32 = 34.5;
 /// The front shoulder of /s z/: their jet crosses a short, narrow channel
 /// to the teeth (the jaw is raised), whose small cavity gives them their
 /// high hiss.
-const SIBILANT_SHOULDER_FRONT: f32 = 4.0;
+const SIBILANT_SHOULDER_FRONT: f32 = 5.0;
 /// Constriction index from which the tongue tip is at the teeth (/θ ð/):
 /// nothing in front of it but the lips.
 const DENTAL_PLACE: f32 = 38.5;
@@ -567,6 +567,25 @@ impl Tract {
     /// Set or clear the vowel shape's own narrowing.
     pub(crate) fn set_narrowing(&mut self, c: Option<Constriction>) {
         self.narrowing = c.map(sanitize);
+    }
+
+    /// How far the jaw brings the incisors together (physical engine): all
+    /// the way while a gap meant to hiss is held between the tongue tip and
+    /// the alveolar ridge (/s z/), not at all otherwise. The physical tract
+    /// narrows the gap between the teeth by it (`Phys::set_teeth`).
+    pub(crate) fn teeth(&self) -> f32 {
+        if self.dynamics != Dynamics::Damped {
+            return 0.0;
+        }
+        let sibilant = self.slots.iter().enumerate().any(|(k, s)| {
+            s.is_some_and(|s| {
+                s.alive
+                    && k != ROUNDING_SLOT
+                    && intent(k, s.c.diameter) == Intent::Hiss
+                    && (BLADE_PLACE..DENTAL_PLACE).contains(&s.c.index)
+            })
+        });
+        if sibilant { 1.0 } else { 0.0 }
     }
 
     /// Whether any constriction is being held.

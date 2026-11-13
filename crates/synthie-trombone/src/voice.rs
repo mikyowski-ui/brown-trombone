@@ -859,6 +859,7 @@ impl Trombone {
         for _ in 0..400 {
             self.tract.update_block(dt);
         }
+        self.phys.set_teeth(self.tract.teeth());
         self.phys
             .snap(&self.tract.diameter, self.tract.velum_openness());
     }
@@ -927,6 +928,56 @@ impl Trombone {
         }
     }
 
+    /// The physical tract's response, as flow at the lips, nostrils and
+    /// skin per tick, to a pressure impulse (per dyn/cm²) in series at
+    /// joint `joint` (between cells `joint − 1` and `joint`): how a noise
+    /// source there is heard. With `lung` (cmH2O) above zero the glottis is
+    /// held open at `area` (cm²) and the steady stream through the tract
+    /// settles first, so a narrow gap resists as its jet does; otherwise
+    /// the glottis is closed and nothing flows. The noise sources are off.
+    /// Its spectrum times frequency is the radiated sound. For measuring;
+    /// the classic engine gives zeros.
+    #[doc(hidden)]
+    pub fn source_response(&self, joint: usize, area: f32, lung: f32, out: &mut [f32]) {
+        out.fill(0.0);
+        if self.engine != Engine::Physical {
+            return;
+        }
+        let mut quiet = self.phys.clone();
+        quiet.reset();
+        quiet.freeze();
+        quiet.set_noisy(false);
+        let drive = if lung > 0.0 {
+            Drive::Glottis {
+                area,
+                lung: lung * CM_H2O,
+            }
+        } else {
+            Drive::Flow(0.0)
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let settle = if lung > 0.0 {
+            (0.8 * self.internal_rate) as usize
+        } else {
+            0
+        };
+        for _ in 0..settle {
+            quiet.tick(1.0, drive);
+        }
+        let mut kicked = quiet.clone();
+        // A kick of 0.1 cmH2O: small next to the stream's own pressures.
+        let kick = 0.1 * CM_H2O;
+        kicked.kick(joint, kick);
+        for o in out.iter_mut() {
+            let a = if lung > 0.0 {
+                quiet.tick(1.0, drive)
+            } else {
+                0.0
+            };
+            *o = (kicked.tick(1.0, drive) - a) / kick;
+        }
+    }
+
     // ----- audio -------------------------------------------------------
 
     /// Output gain (default `1.0`).
@@ -979,6 +1030,7 @@ impl Trombone {
             self.tract.update_block(dt);
             if self.engine == Engine::Physical {
                 self.phys.set_motion(self.tract.velocity());
+                self.phys.set_teeth(self.tract.teeth());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),
