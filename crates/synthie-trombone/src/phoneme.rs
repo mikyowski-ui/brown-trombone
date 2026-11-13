@@ -144,6 +144,10 @@ const APPROXIMANT_WIDEST: f32 = 1.3;
 /// 1800 Hz comes from a body held forward by the tip.
 const ALVEOLAR_PULL: f32 = 0.3;
 const POSTALVEOLAR_PULL: f32 = 0.45;
+/// The same for /θ ð/: a tip held against the teeth draws the body
+/// forward too, and with it the F2 at the gap up to the dental locus near
+/// 1400 to 1600 Hz (on the vowel's body alone it had a labial's).
+const DENTAL_PULL: f32 = 0.5;
 
 /// Where /k g ŋ/ close before a vowel whose body is at tongue index
 /// `index`: at the classic closure ([`VELAR`]) before back vowels, further
@@ -540,8 +544,8 @@ impl Articulation {
     /// engine): the heavy body stays the vowel's and glides from vowel to
     /// vowel underneath, and the consonant is a gesture of the tip or the
     /// lips added to it, whose release comes out of a body still on its
-    /// way: the locus transitions. Alveolar and postalveolar tongue-tip
-    /// sounds draw the body a little forward and up with the tip.
+    /// way: the locus transitions. Dental, alveolar and postalveolar
+    /// tongue-tip sounds draw the body a little forward and up with the tip.
     ///
     /// Consonants with a tongue body of their own (/k g ŋ l r/; /r/ that of
     /// /ɚ/; see
@@ -571,11 +575,15 @@ impl Articulation {
             {
                 a.tongue = Some(er);
             }
-        } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0 {
+        } else if (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0
+            || c.index == TEETH
+        {
             // (An /n/ leaves the body be: drawn up and forward behind a
             // nasal closure it is heard as /ŋ/.)
             let w = if c.index < ALVEOLAR - 1.0 {
                 POSTALVEOLAR_PULL
+            } else if c.index == TEETH {
+                DENTAL_PULL
             } else {
                 ALVEOLAR_PULL
             };
