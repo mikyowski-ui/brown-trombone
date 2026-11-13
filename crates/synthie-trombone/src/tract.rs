@@ -741,7 +741,7 @@ impl Tract {
             carve(&mut self.target, c, floor);
         }
         self.body = self.target;
-        let opened = self.open_nasal_cavity();
+        let (opened, cavity) = self.open_nasal_cavity();
         let mut by = [None; N];
         for (k, s) in self.slots.iter().enumerate() {
             let Some(s) = s.filter(|s| s.alive) else {
@@ -776,7 +776,7 @@ impl Tract {
                 self.mover[i] = m;
             } else if opened[i] {
                 // Lowered behind a nasal's closure.
-                self.mover[i] = Mover::Cavity;
+                self.mover[i] = cavity;
             } else if self.quick_body && !(i >= LIP_START && self.mover[i] == Mover::Tip) {
                 // The back of the tongue making a consonant of its own. Not
                 // lips letting go of a consonant of theirs: parting from a
@@ -810,16 +810,16 @@ impl Tract {
     /// the closed end of the branch, /n/'s antiresonance rose to 1.75 to
     /// 1.9 kHz, and the recognizer heard such an /n/ as /ŋ/ (8 of the 38
     /// above 1.7 kHz in the sentences, 2 of the 37 below 1.4 kHz). Returns
-    /// the cells it moved (they move at `Tuning::nasal_cavity_rate`).
+    /// the cells it moved and the articulator that moves them.
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
-    fn open_nasal_cavity(&mut self) -> [bool; N] {
+    fn open_nasal_cavity(&mut self) -> ([bool; N], Mover) {
         let mut moved = [false; N];
         if !self.nasal {
-            return moved;
+            return (moved, Mover::Dorsum);
         }
         // The closure furthest back in front of the velum.
         let closure = self
@@ -835,11 +835,11 @@ impl Tract {
             .map(|(_, c)| c.index)
             .fold(None, |m: Option<f32>, i| Some(m.map_or(i, |m| m.min(i))));
         let Some(index) = closure else {
-            return moved;
+            return (moved, Mover::Dorsum);
         };
         if index < TIP_START as f32 - 2.0 {
             // A velar closure: nothing of the mouth is left behind it.
-            return moved;
+            return (moved, Mover::Dorsum);
         }
         // Up to the closure: the tip's or the lips' shoulder is carved into
         // the lowered tongue afterwards.
@@ -854,7 +854,15 @@ impl Tract {
                 *moved = true;
             }
         }
-        moved
+        // Behind the tongue tip the blade drops as the tip rises, quickly
+        // (`Tuning::nasal_cavity_rate`); behind the lips the tongue body
+        // lowers at the back of the tongue's speed.
+        let mover = if index < LIP_PLACE {
+            Mover::Cavity
+        } else {
+            Mover::Dorsum
+        };
+        (moved, mover)
     }
 
     /// Open the vowel shape around the place that hisses, leaving alone
