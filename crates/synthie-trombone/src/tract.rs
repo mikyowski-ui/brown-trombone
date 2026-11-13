@@ -864,12 +864,12 @@ impl Tract {
         // Behind the tongue tip the blade drops as the tip rises, quickly
         // (`Tuning::nasal_cavity_rate`); behind the lips the tongue body
         // lowers at the back of the tongue's speed.
-        let mover = if index < LIP_PLACE {
+        let by = if index < LIP_PLACE {
             Mover::Cavity
         } else {
             Mover::Dorsum
         };
-        (moved, mover)
+        (moved, by)
     }
 
     /// Open the vowel shape around the place that hisses, leaving alone

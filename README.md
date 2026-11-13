@@ -246,6 +246,7 @@ reads the rest as well:
 | breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
 | hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
 | intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
+| stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -371,7 +372,18 @@ as the model goes:
   is shorter before a voiceless consonant that ends its syllable and
   longer before a voiced one, as in English.
 - **Stops** build pressure behind the closure and burst by themselves,
-  without a click at the release.
+  without a click at the release. Released into an /l r/ ("blue",
+  "play", "cream"), a stop is made on the liquid's tongue body, its lips
+  or tongue back let go first, and the liquid's tip follows some 20 ms
+  later (`liquid_transition`), so the burst and the stop's own transition
+  are heard before the liquid; after /p k/ the start of the liquid is
+  voiceless.
+- **Nasals** close the mouth with the velum open, and the tongue drops
+  behind the closure so that the closed mouth is a side branch of the
+  nose with the antiresonance of its place (`nasal_cavity`); behind the
+  tip of /n/ it drops quickly (`nasal_cavity_rate`), so the antiresonance
+  is at 1.45 to 1.55 kHz from the start of the murmur, also before a
+  consonant.
 - **Two speeds of articulator.** The tongue body and the jaw are heavy and
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
@@ -598,9 +610,10 @@ average sentence).
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
-- **Remaining confusions**: /n/ still heard as /ŋ/ before some
-  consonants, stops dropped (/t/ and /d/ in clusters, /d/ heard as /n/ in
-  carrier phrases), /z/ as /ð/.
+- **Remaining confusions**: stops dropped (/t/ and /d/ in clusters, /d/
+  heard as /n/ in carrier phrases), /z/ as /ð/, and /l/ before /u/
+  ("blue", "glue") often heard as a schwa: its F1 stands near 500 Hz,
+  where a speaker's /l/ has 350 to 400.
 - **/s/ is darker** than a person's in sentences.
 - **Closures are steeper than a person's**: about 3.4 level walls (20 dB
   in 10 ms) a second against his 1.1, and level rises of 15 dB per 10 ms

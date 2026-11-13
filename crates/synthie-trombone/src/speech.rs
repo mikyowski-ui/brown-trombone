@@ -1093,6 +1093,7 @@ fn vowel_head(drafts: &[Draft], k: usize) -> usize {
 }
 
 #[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // independent flags
 struct Draft {
     phoneme: Phoneme,
     articulation: Articulation,

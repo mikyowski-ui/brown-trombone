@@ -1971,7 +1971,7 @@ fn high_pass(x: &[f32], hz: f32) -> Vec<f32> {
     let w = 2.0 * std::f32::consts::PI * hz / SR;
     let alpha = w.sin() / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
     let a0 = 1.0 + alpha;
-    let (b0, b1) = ((1.0 + w.cos()) / 2.0 / a0, -(1.0 + w.cos()) / a0);
+    let (b0, b1) = (f32::midpoint(1.0, w.cos()) / a0, -(1.0 + w.cos()) / a0);
     let (a1, a2) = (-2.0 * w.cos() / a0, (1.0 - alpha) / a0);
     let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     x.iter()
@@ -2041,7 +2041,11 @@ fn stops_are_released_into_liquids_with_a_burst_and_a_transition() {
         let (level, release) = burst(&s, stop);
         // The liquid's narrowing: the diameter at its place in the middle
         // of the liquid.
-        let k = s.phonemes.iter().position(|&p| p == liquid).expect("the liquid");
+        let k = s
+            .phonemes
+            .iter()
+            .position(|&p| p == liquid)
+            .expect("the liquid");
         let span: Vec<usize> = (0..s.out.len()).filter(|&n| s.segment[n] == k).collect();
         let narrow = s.diameters[span[span.len() / 2]][cell];
         let reached = (release..s.out.len())
@@ -2065,7 +2069,10 @@ fn stops_are_released_into_liquids_with_a_burst_and_a_transition() {
         );
         if matches!(stop, Phoneme::B | Phoneme::P) {
             let open = if liquid == Phoneme::L { 0.45 } else { 0.25 };
-            assert!(lips >= open, "{word}: lips {lips:.2} apart 10 ms after the release");
+            assert!(
+                lips >= open,
+                "{word}: lips {lips:.2} apart 10 ms after the release"
+            );
         }
         if stop == Phoneme::B && liquid == Phoneme::L {
             assert!(
@@ -2101,11 +2108,19 @@ fn the_antiresonance_of_n_holds_through_its_murmur_before_a_consonant() {
         "[D AA1 N T]",
     ] {
         let s = say_traced(&settings, text);
-        let k = s.phonemes.iter().position(|&p| p == Phoneme::N).expect("/n/");
+        let k = s
+            .phonemes
+            .iter()
+            .position(|&p| p == Phoneme::N)
+            .expect("/n/");
         let murmur: Vec<usize> = (0..s.out.len())
             .filter(|&n| s.shut[n] && s.velum[n] > 0.1 && s.segment[n].abs_diff(k) <= 1)
             .collect();
-        assert!(murmur.len() as f32 > 0.03 * SR, "{text}: murmur {} samples", murmur.len());
+        assert!(
+            murmur.len() as f32 > 0.03 * SR,
+            "{text}: murmur {} samples",
+            murmur.len()
+        );
         let zeros: Vec<f32> = [0.25, 0.5, 0.75]
             .iter()
             .map(|&q| {
