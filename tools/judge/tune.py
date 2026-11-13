@@ -175,24 +175,61 @@ def paired_worse(cand: np.ndarray, base: np.ndarray, n_boot: int = NATURAL_BOOT,
     return float(d.mean()), float(np.percentile(means, 2.5))
 
 
-def distance_worse(cand: list[dict], base: list[dict], human: dict, n_boot: int = NATURAL_BOOT // 2,
+def text_sums(rows: list[dict], human: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per text and naturalness-guard term, the sum and the count of the
+    values that ``natural.summarize`` pools for that term (a sentence
+    measure: its one value; a hiss measure: every hiss of the group), the
+    person's mean and sd per term and which terms are the warped distance:
+    the parts from which the distance of any resampling of the texts is
+    put together without summarising again."""
+    import natural as N
+
+    scale = {m[0]: m[3] for m in N.MEASURES}
+    keys = [k for k in N.GUARD_KEYS if (human.get(k) or {}).get("mean") is not None and (human.get(k) or {}).get("sd")]
+    keys.append("dtw.mean")
+    S = np.zeros((len(rows), len(keys)))
+    C = np.zeros((len(rows), len(keys)))
+    for i, r in enumerate(rows):
+        for j, k in enumerate(keys):
+            if k == "dtw.mean":
+                vals = [N._get(r, "dtw.mean")]
+            elif k.startswith("fric."):
+                _, g, m = k.split(".")
+                vals = [f[m] for f in r["analysis"]["fricatives"] if f["group"] == g]
+            else:
+                vals = [N._get(r["analysis"], k)]
+            vals = [float(v) for v in vals if v is not None and np.isfinite(v)]
+            S[i, j], C[i, j] = sum(vals) * scale.get(k, 1), len(vals)
+    hm = np.array([0.0 if k == "dtw.mean" else human[k]["mean"] for k in keys])
+    hs = np.array([N.GUARD_DTW_DB if k == "dtw.mean" else human[k]["sd"] for k in keys])
+    dtw = np.array([k == "dtw.mean" for k in keys])
+    return S, C, hm, hs, dtw
+
+
+def sums_distance(S: np.ndarray, C: np.ndarray, hm: np.ndarray, hs: np.ndarray) -> np.ndarray:
+    """The unclipped naturalness distance from pooled sums and counts (the
+    last axis is the term; any leading axes are resamplings)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = np.abs((S / C - hm) / hs)
+    z = np.where(C > 0, z, np.nan)
+    return np.nanmean(z, axis=-1)
+
+
+def distance_worse(cand: list[dict], base: list[dict], human: dict, n_boot: int = NATURAL_BOOT,
                    seed: int = 0) -> tuple[float, float]:
     """The naturalness distance (``natural.distance``, unclipped) of the
     candidate minus the defaults', and the lower end of its 95 % paired
     bootstrap interval over the texts."""
-    import natural as N
-
     cand = sorted(cand, key=lambda r: r["id"])
     base = sorted(base, key=lambda r: r["id"])
-    dist = lambda rows: N.distance(N.summarize(rows), human, clip=None)[0]  # noqa: E731
-    d0 = dist(cand) - dist(base)
+    Sc, Cc, hm, hs, _ = text_sums(cand, human)
+    Sb, Cb, _, _, _ = text_sums(base, human)
+    d0 = float(sums_distance(Sc.sum(0), Cc.sum(0), hm, hs) - sums_distance(Sb.sum(0), Cb.sum(0), hm, hs))
     rng = np.random.default_rng(seed)
     n = len(cand)
-    bs = []
-    for _ in range(n_boot):
-        idx = rng.integers(0, n, n)
-        bs.append(dist([cand[i] for i in idx]) - dist([base[i] for i in idx]))
-    return float(d0), float(np.percentile(bs, 2.5))
+    idx = rng.integers(0, n, (n_boot, n))
+    bs = sums_distance(Sc[idx].sum(1), Cc[idx].sum(1), hm, hs) - sums_distance(Sb[idx].sum(1), Cb[idx].sum(1), hm, hs)
+    return d0, float(np.percentile(bs, 2.5))
 
 
 def natural_excess(z: dict, z0: dict) -> float:
@@ -215,7 +252,7 @@ def natural_barred(cand: list[dict], base: list[dict], human: dict, n_boot: int 
         diffs[key] = [m, lo]
         if lo > 0:
             bad.append(f"natural:{key}")
-    m, lo = distance_worse(cand, base, human, max(50, n_boot // 2))
+    m, lo = distance_worse(cand, base, human, n_boot)
     diffs["distance"] = [m, lo]
     if lo > 0:
         bad.append("natural:distance")
@@ -641,7 +678,7 @@ def run(args) -> dict:
     best = dict(base)
     write_profile(out, base["values"])
     print(f"[base] J {base['objective']:.4f}  PER {fmt_sets(base['per'])}  ll {fmt_sets(base['ll'], pct=False)}"
-          f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}")
+          f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}", flush=True)
 
     es = cma.CMAEvolutionStrategy(
         list(space.u0),
@@ -725,7 +762,16 @@ def final_check(log: "Log", args, out: Path) -> dict | None:
     if not args.gates:
         raise SystemExit("--final-check needs --gates")
     records = [r for r in log.cache.values() if r.get("kind") == "eval"]
+    lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    checked = {x["eval"]: x["failed"] for x in lines if x.get("kind") == "final_check"}
     for r in ranked(records, args.final_check):
+        if r["eval"] in checked:  # a resumed run: checked before
+            failed = checked[r["eval"]]
+            print(f"[final-check] eval {r['eval']} (logged): {'passes' if not failed else 'fails ' + ', '.join(failed)}")
+            if not failed:
+                write_profile(out, r["values"])
+                return dict(r, final_gates=[])
+            continue
         tmp = out.with_name(f".{out.stem}-check.json")
         write_profile(tmp, r["values"])
         global GATE_SKIP

@@ -196,3 +196,27 @@ def test_inserted_segments_count_only_what_was_not_asked_for():
     # A substitution is not an insertion; a deletion neither.
     assert J.inserted_segments(["S", "L", "IH", "D"], ["S", "R", "IH"]) == 0
     assert J.inserted_segments(["L"], ["L", "AA"]) == 1
+
+
+def test_pooled_sums_give_the_same_distance_as_summarize():
+    import natural as N
+
+    rng = np.random.default_rng(2)
+    rows = _texts(rng.normal(3, 1, 16), rng.normal(14, 2, 16))
+    for k, r in enumerate(rows):
+        r["dtw"] = {"mean": float(rng.normal(15, 1))}
+        r["analysis"]["rate"] = {"syll_per_s": float(rng.normal(4, 0.5))}
+        # Hisses pooled over every token of a group, two or none per text.
+        r["analysis"]["fricatives"] = [
+            {"group": "s z", "rise_ms": float(rng.normal(25, 5)), "fall_ms": None, "dur_ms": 80.0, "vs_vowel_db": -9.0,
+             "centroid": 5000.0 + k, "flatness": 0.3, "prominence": 6.0, "width6": 900.0} for _ in range(k % 3)
+        ]  # fmt: skip
+    human = {"steps.walls_per_s": {"mean": 1.1, "sd": 0.5}, "steps.p95_up": {"mean": 12.0, "sd": 1.5},
+             "rate.syll_per_s": {"mean": 4.5, "sd": 0.4}, "fric.s z.rise_ms": {"mean": 31.0, "sd": 8.0},
+             "fric.s z.centroid": {"mean": 5800.0, "sd": 600.0}}  # fmt: skip
+    S, C, hm, hs, _ = T.text_sums(rows, human)
+    want = N.distance(N.summarize(rows), human, clip=None)[0]
+    assert abs(float(T.sums_distance(S.sum(0), C.sum(0), hm, hs)) - want) < 1e-9
+    sub = [rows[i] for i in (0, 0, 3, 5, 7)]
+    S, C, hm, hs, _ = T.text_sums(sub, human)
+    assert abs(float(T.sums_distance(S.sum(0), C.sum(0), hm, hs)) - N.distance(N.summarize(sub), human, clip=None)[0]) < 1e-9
