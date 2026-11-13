@@ -152,3 +152,17 @@ def test_turning_points_alternate():
     vals = [y[k] for k in pts]
     diffs = np.sign(np.diff(vals))
     assert all(diffs[i] != diffs[i + 1] for i in range(len(diffs) - 1)), (pts, vals)
+
+
+def test_distance_is_mean_clipped_z_with_the_warped_distance():
+    human = {"pitch.range_st": {"mean": 10.0, "sd": 2.0}, "rate.syll_per_s": {"mean": 4.5, "sd": 0.5},
+             "steps.walls_per_s": {"mean": 1.0, "sd": 0.5}}  # fmt: skip
+    same = {k: {"mean": v["mean"]} for k, v in human.items()}
+    d, terms = N.distance(same, human)
+    assert d == 0.0 and set(terms) == set(human)
+    off = dict(same, **{"pitch.range_st": {"mean": 6.0}, "steps.walls_per_s": {"mean": 9.0}, "dtw.mean": {"mean": 3.0}})
+    d, terms = N.distance(off, human)
+    assert terms["pitch.range_st"] == -2.0
+    assert terms["steps.walls_per_s"] == N.GUARD_CLIP  # 16 sd, clipped
+    assert terms["dtw.mean"] == 3.0 / N.GUARD_DTW_DB
+    assert abs(d - (2.0 + N.GUARD_CLIP + 0.0 + 3.0) / 4) < 1e-12

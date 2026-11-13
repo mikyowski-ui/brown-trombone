@@ -14,19 +14,44 @@
 #[path = "../examples/support/hiss.rs"]
 mod hiss;
 
+use std::sync::OnceLock;
+
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::{Engine, Preset, Trombone};
+use synthie_trombone::{Engine, Preset, Trombone, VoiceSettings};
 
 const SR: f32 = 48_000.0;
 /// Level frames: 25 ms windows every 10 ms, as the judge's.
 const HOP: usize = 480;
 const WINDOW: usize = 1200;
 
+/// The default voice on the physical engine, with the tuning under test:
+/// the default one, or, when the environment variable
+/// `SYNTHIE_TROMBONE_PROFILE` names a profile file, that profile's (as in
+/// `physical_gates`, so the tuner can hold a candidate to these gates too).
+fn voice_settings() -> VoiceSettings {
+    static PROFILE: OnceLock<Option<String>> = OnceLock::new();
+    let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let profile = PROFILE.get_or_init(|| {
+        let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("gates run with the profile {path}");
+        Some(text)
+    });
+    let Some(profile) = profile else {
+        return settings;
+    };
+    let laid = settings.with_profile(profile).expect("a voice profile");
+    VoiceSettings {
+        tuning: laid.tuning,
+        ..settings
+    }
+}
+
 /// A sentence said by the default voice on the physical engine: the
 /// audio, and the pitch the folds produced per sample (0 while not
 /// vibrating).
 fn say(text: &str) -> (Vec<f32>, Vec<f32>) {
-    let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let settings = voice_settings();
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
     Speaker::prepare(&mut voice);
@@ -175,7 +200,7 @@ fn hisses_are_broad_and_s_is_brighter_than_sh() {
     // flatness of 0.39. The engine's /ʃ/ rang as one narrow, low resonance:
     // centroid 2.8 kHz, 250 Hz wide, flatness 0.31 in sentences, a peak at
     // 1.25 kHz alone.
-    let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let settings = voice_settings();
     let s = hiss::measure(&settings, "S");
     let sh = hiss::measure(&settings, "SH");
     println!(

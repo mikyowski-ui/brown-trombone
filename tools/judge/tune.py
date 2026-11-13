@@ -1,18 +1,29 @@
 """CMA-ES tuner for the physical engine's tuning parameters.
 
     uv run python tune.py --self-test
-    uv run python tune.py --pass a --sets vcv,pair --budget 300 --seed 1 --out out/profile-a.json
-    uv run python tune.py --pass b --lock out/profile-a.json --sets word,sentence_tune \\
+    uv run python tune.py --pass a --gates bin --budget 300 --seed 1 --out out/profile-a.json
+    uv run python tune.py --pass bc --lock out/profile-a.json --gates bin \\
         --budget 300 --seed 1 --out out/profile-b.json
 
-Search space: the parameters of one pass in ``params.json`` (minus any fixed
-by ``--lock``), each mapped to 0..1 over its lo..hi range, so CMA-ES sees a
-unit box (hard bounds) and starts at the defaults.
+Search space: the parameters of the chosen passes in ``params.json`` (``a``,
+``b``, ``c`` or several letters, minus any fixed by ``--lock``), each mapped
+to 0..1 over its lo..hi range, so CMA-ES sees a unit box (hard bounds) and
+starts at the defaults.
 
-Objective (lower is better), averaged over the chosen material sets::
+Objective (lower is better), averaged over the chosen material sets (by
+default the tuning split ``sentence_tune``, ``harvard_tune``,
+``carrier_tune``; the held-out sets are refused)::
 
     J = mean(PER) + ll_weight * mean(-CTC log-likelihood per phoneme)
         + prior_weight * mean(((x - default) / (hi - lo))^2)
+        + natural_weight * max(0, D - D_default)
+
+where ``D`` is the naturalness distance of the candidate saying the 16
+LibriSpeech texts (``natural.distance``: the mean clipped |z| of its
+loudness, pitch, timing and hiss measures against the person's), so a
+candidate the recognizer likes better but that sounds less like a person
+pays for it.  Only the naturalness measures of those texts are read, never
+their phoneme or word scores.
 
 Every candidate is rendered by ``bin/say --engine physical --profile ...``
 (all items of a whole CMA-ES generation in parallel across cores, into a
@@ -31,14 +42,16 @@ the log are not evaluated again.  The best profile so far is rewritten to
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
+import multiprocessing
 import os
 import shutil
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -59,7 +72,9 @@ SYSTEM = "physical"
 # compiled test binary of `crates/synthie-trombone/tests/physical_gates.rs`,
 # which reads the profile from the environment variable below. The slow
 # gates and those no tuning value can affect are skipped inside the loop;
-# run the whole suite on the final profile.
+# run the whole suite on the final profile. `--gates bin` runs both
+# `physical_gates` and `natural_gate` (a copy of each in `bin/`).
+GATE_BINARIES = ["physical_gates", "natural_gate"]
 GATE_ENV = "SYNTHIE_TROMBONE_PROFILE"
 GATE_SKIP = ["no_held_note", "in_any_voice", "a_gap_near", "every_preset", "same_seed", "garbage", "muscle"]
 # Added to the objective of a candidate that fails gates: a wall higher than
@@ -69,21 +84,56 @@ GATE_WALL = 1.0
 GATE_SLOPE = 0.05
 
 
-def run_gates(binary: Path, profile: Path) -> list[str]:
+#: Material the tuner never scores on: the held-out split.
+HELDOUT_SETS = ["sentence_heldout", "harvard_heldout", "carrier_heldout", "human"]
+TUNE_SETS = ["sentence_tune", "harvard_tune", "carrier_tune"]
+
+
+def gate_binaries(paths: list[Path]) -> list[Path]:
+    """The gate test binaries: a directory stands for every one of
+    ``GATE_BINARIES`` in it."""
+    out = []
+    for p in paths:
+        p = Path(p)
+        if p.is_dir():
+            found = [p / b for b in GATE_BINARIES if (p / b).exists()]
+            if len(found) != len(GATE_BINARIES):
+                raise SystemExit(f"{p}: needs {', '.join(GATE_BINARIES)}")
+            out += found
+        elif p.exists():
+            out.append(p)
+        else:
+            raise SystemExit(f"gate binary not found: {p}")
+    return [p.resolve() for p in out]
+
+
+def run_gates(binaries: Path | list[Path], profile: Path, threads: int = 4, skip: list[str] | None = None) -> list[str]:
     """Names of the gate tests `profile` fails (empty when it passes)."""
-    cmd = [str(binary), "--test-threads", "4"]
-    for name in GATE_SKIP:
-        cmd += ["--skip", name]
-    env = dict(os.environ, **{GATE_ENV: str(profile.resolve())})
-    proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
-    failed = [
-        line.split()[1]
-        for line in proc.stdout.splitlines()
-        if line.startswith("test ") and line.rstrip().endswith("FAILED")
-    ]
-    if proc.returncode != 0 and not failed:
-        failed = ["gate-run-error"]
+    failed: list[str] = []
+    for binary in [binaries] if isinstance(binaries, Path) else binaries:
+        cmd = [str(binary), "--test-threads", str(threads)]
+        for name in GATE_SKIP + (skip or []):
+            cmd += ["--skip", name]
+        env = dict(os.environ, **{GATE_ENV: str(profile.resolve())})
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=900)
+        bad = [
+            line.split()[1]
+            for line in proc.stdout.splitlines()
+            if line.startswith("test ") and line.rstrip().endswith("FAILED")
+        ]
+        if proc.returncode != 0 and not bad:
+            bad = [f"{binary.name}-run-error"]
+        failed += bad
     return failed
+
+
+@contextlib.contextmanager
+def gpu_lock():
+    """The shared GPU lock, held for one batch of judging (see ``vowel_lab``)."""
+    import vowel_lab
+
+    with vowel_lab.gpu_lock():
+        yield
 
 
 # --------------------------------------------------------------------------
@@ -102,6 +152,18 @@ def load_params(path: Path) -> dict[str, dict]:
         if not p["lo"] < p["hi"] or not p["lo"] <= p["default"] <= p["hi"]:
             raise ValueError(f"{path}: {name} has a bad range {p}")
     return data
+
+
+def tunable(params: dict[str, dict], args, lock: dict[str, float]) -> list[str]:
+    """The parameters of the chosen passes, minus the locked ones and,
+    unless ``--with-classic``, those the classic engine reads too
+    (``"classic": true``): the classic engine is pinned bit for bit, so a
+    tuned value of those could not become a default."""
+    return [
+        n
+        for n, p in params.items()
+        if p["pass"] in args.pass_ and n not in lock and (args.with_classic or not p.get("classic"))
+    ]
 
 
 def load_lock(path: Path | None, params: dict[str, dict]) -> dict[str, float]:
@@ -155,28 +217,46 @@ def ukey(u) -> str:
 class Evaluator:
     def __init__(self, items: list[material.Item], space: Space, args):
         self.items, self.space, self.args = items, space, args
-        self.sets = sorted({it.set for it in items}, key=lambda s: J.SET_ORDER.index(s))
+        order = J.SET_ORDER + [s for s in material.PROBE_SETS if s not in J.SET_ORDER]
+        self.sets = sorted({it.set for it in items}, key=order.index)
         binary = render.say_bin()
         if not binary.exists():
             raise SystemExit(f"renderer not found: {binary} (set SAY_BIN)")
-        self.judge = J.PhonemeJudge()
+        #: The naturalness guard's texts and the person's analyses of them.
+        self.nat_items: list[material.Item] = []
+        self.humans: dict = {}
+        #: The starting point's naturalness distance (set after evaluation 0).
+        self.nat0: float | None = None
+        self.pool: ProcessPoolExecutor | None = None
+        with gpu_lock():
+            self.judge = J.PhonemeJudge()
+            if args.natural_weight > 0:
+                import natural as N
+
+                self.nat_items = N.reference_items(None)
+                self.humans = N.human_reference(self.judge, None)
+                self.human_summary = N.summarize(N.run_system(self.judge, "human", self.humans, None, "", None))
 
     def close(self) -> None:
+        if self.pool is not None:
+            self.pool.shutdown()
         self.judge.close()
 
     def render_population(self, profiles: list[Path], scratch: Path) -> list[list[render.Rendered]]:
+        """Every item (then every naturalness text) of every candidate."""
+        every = self.items + self.nat_items
         jobs = []
         for k, prof in enumerate(profiles):
             dest = scratch / f"c{k:02d}"
             dest.mkdir(parents=True, exist_ok=True)
-            for it in self.items:
+            for it in every:
                 jobs.append((k, it, prof, dest))
-        out: list[list] = [[None] * len(self.items) for _ in profiles]
-        index = {it.id: n for n, it in enumerate(self.items)}
+        out: list[list] = [[None] * len(every) for _ in profiles]
+        index = {(it.set, it.id): n for n, it in enumerate(every)}
 
         def one(job):
             k, it, prof, dest = job
-            return k, index[it.id], render._render_one(it, SYSTEM, self.args.voice, prof, dest, "", False)
+            return k, index[(it.set, it.id)], render._render_one(it, SYSTEM, self.args.voice, prof, dest, "", False)
 
         with ThreadPoolExecutor(max_workers=self.args.jobs or os.cpu_count() or 4) as pool:
             for k, n, r in pool.map(one, jobs):
@@ -194,6 +274,28 @@ class Evaluator:
         obj = mper + self.args.ll_weight * mnll + self.args.prior_weight * pen
         return {"objective": obj, "per": per, "ll": ll, "mean_per": mper, "mean_nll": mnll, "penalty": pen}
 
+    def natural_jobs(self, rendered: list[render.Rendered]) -> list:
+        """Align one candidate's renders of the LibriSpeech texts (needs the
+        model) and return the per-sentence comparisons to run on the CPU
+        (``natural.compare``)."""
+        import natural as N
+
+        audios = [render.load_audio(r.path) for r in rendered]
+        lps = self.judge.log_probs(audios, batch_size=2)
+        jobs = []
+        for it, au, lp in zip(self.nat_items, audios, lps):
+            segs = N.align(self.judge, au, list(it.expected), lp)
+            h = self.humans[it.id]
+            jobs.append((it.id, it.set, au, segs, N.syllables(it.expected), h.audio, h.segs))
+        return jobs
+
+    def naturalness(self, per_item: list[dict]) -> dict:
+        """The naturalness distance of one candidate (``natural.distance``)."""
+        import natural as N
+
+        d, zs = N.distance(N.summarize(per_item), self.human_summary)
+        return {"distance": d, "z": zs}
+
     def evaluate(self, us: list) -> list[dict]:
         scratch = render.scratch_dir("tune-")
         try:
@@ -205,18 +307,47 @@ class Evaluator:
             t0 = time.perf_counter()
             rendered = self.render_population(profiles, scratch)
             t1 = time.perf_counter()
-            out = []
-            for u, rs in zip(us, rendered):
-                scores = J.score_phonemes(self.judge, rs, batch_size=self.args.batch)
-                out.append(self.objective(scores, u))
-            t2 = time.perf_counter()
+            # The gates run on the CPU while the GPU judges.
+            gates = None
             if self.args.gates:
-                with ThreadPoolExecutor(max_workers=4) as pool:
-                    failures = list(pool.map(lambda p: run_gates(self.args.gates, p), profiles))
-                for r, failed in zip(out, failures):
+                pool = ThreadPoolExecutor(max_workers=self.args.gate_jobs)
+                gates = [
+                    pool.submit(run_gates, self.args.gates, p, self.args.gate_threads, self.args.gate_skip)
+                    for p in profiles
+                ]
+            out = []
+            n = len(self.items)
+            nat_jobs = []
+            with gpu_lock():
+                for u, rs in zip(us, rendered):
+                    scores = J.score_phonemes(self.judge, rs[:n], batch_size=self.args.batch)
+                    out.append(self.objective(scores, u))
+                    if self.nat_items:
+                        nat_jobs.append(self.natural_jobs(rs[n:]))
+            # The naturalness measures are plain numpy: worker processes,
+            # with the GPU lock let go.
+            if nat_jobs:
+                import natural as N
+
+                if self.pool is None:
+                    ctx = multiprocessing.get_context("spawn")  # the parent holds CUDA: no fork
+                    self.pool = ProcessPoolExecutor(max_workers=self.args.natural_jobs, mp_context=ctx)
+                futs = [[self.pool.submit(N.compare, *job) for job in jobs] for jobs in nat_jobs]
+                for r, fs in zip(out, futs):
+                    nat = self.naturalness([f.result() for f in fs])
+                    r["natural"] = nat["distance"]
+                    r["natural_z"] = nat["z"]
+                    if self.nat0 is not None:
+                        r["natural_penalty"] = max(0.0, nat["distance"] - self.nat0)
+                        r["objective"] += self.args.natural_weight * r["natural_penalty"]
+            t2 = time.perf_counter()
+            if gates is not None:
+                for r, fut in zip(out, gates):
+                    failed = fut.result()
                     r["gates_failed"] = failed
                     if failed:
                         r["objective"] += GATE_WALL + GATE_SLOPE * len(failed)
+                pool.shutdown()
             t3 = time.perf_counter()
             for r in out:
                 r["render_s"] = (t1 - t0) / len(us)
@@ -240,7 +371,8 @@ class Log:
         if resume and path.exists():
             lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
             old = next((x for x in lines if x.get("kind") == "meta"), None)
-            keys = ("params", "sets", "items", "seed", "popsize", "sigma0", "ll_weight", "prior_weight", "lock", "binary")
+            keys = ("params", "sets", "items", "seed", "popsize", "sigma0", "ll_weight", "prior_weight", "lock",
+                    "natural_weight", "binary")
             if old is not None:
                 diff = [k for k in keys if old.get(k) != meta.get(k)]
                 if diff:
@@ -284,14 +416,17 @@ def run(args) -> dict:
 
     params = load_params(args.params)
     lock = load_lock(args.lock, params)
-    names = [n for n, p in params.items() if p["pass"] == args.pass_ and n not in lock]
-    shadowed = [n for n, p in params.items() if p["pass"] == args.pass_ and n in lock]
+    names = tunable(params, args, lock)
+    shadowed = [n for n, p in params.items() if p["pass"] in args.pass_ and n in lock]
     if shadowed:
         print(f"[warn] locked, so not tuned: {', '.join(shadowed)}")
     if not names:
         raise SystemExit(f"no parameters to tune in pass {args.pass_}")
     space = Space(params, names, lock)
     sets = args.sets.split(",")
+    heldout = [x for x in sets if x in HELDOUT_SETS]
+    if heldout:
+        raise SystemExit(f"held-out sets are never tuned on: {', '.join(heldout)}")
     items = select_items(sets, args.subset)
     out = Path(args.out).resolve()
     log_path = OUT_DIR / f"tune-{out.stem}.jsonl"
@@ -307,10 +442,12 @@ def run(args) -> dict:
         "ll_weight": args.ll_weight,
         "prior_weight": args.prior_weight,
         "lock": lock,
+        "natural_weight": args.natural_weight,
         "budget": args.budget,
         "binary": render.file_digest(render.say_bin()),
         "voice": args.voice,
-        "gates": str(args.gates) if args.gates else None,
+        "gates": [str(g) for g in args.gates] if args.gates else None,
+        "gate_skip": args.gate_skip,
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     log = Log(log_path, meta, args.resume)
@@ -356,9 +493,11 @@ def run(args) -> dict:
 
     # Baseline: the defaults (with the lock applied), evaluation 0.
     base = run_batch([space.u0.copy()], gen=-1)[0]
+    ev.nat0 = base.get("natural")
     best = dict(base)
     write_profile(out, base["values"])
-    print(f"[base] J {base['objective']:.4f}  PER {fmt_sets(base['per'])}  ll {fmt_sets(base['ll'], pct=False)}")
+    print(f"[base] J {base['objective']:.4f}  PER {fmt_sets(base['per'])}  ll {fmt_sets(base['ll'], pct=False)}"
+          f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}")
 
     es = cma.CMAEvolutionStrategy(
         list(space.u0),
@@ -379,7 +518,8 @@ def run(args) -> dict:
         barred = sum(1 for r in res if r.get("gates_failed"))
         print(
             f"[gen {gen:3d}] evals {n_eval:4d}  barred by gates {barred:2d}  gen best J {gbest['objective']:.4f}  "
-            f"best J {best['objective']:.4f} (PER {fmt_sets(best['per'])})  {el:6.0f} s",
+            f"best J {best['objective']:.4f} (PER {fmt_sets(best['per'])}, natural "
+            f"{best.get('natural', float('nan')):.3f})  {el:6.0f} s",
             flush=True,
         )
         gen += 1
@@ -392,7 +532,7 @@ def run(args) -> dict:
         "seconds_per_eval": float(np.mean(fresh_seconds)) if fresh_seconds else None,
         "wall_seconds": time.perf_counter() - t_start,
         "baseline": {k: base[k] for k in ("objective", "per", "ll")},
-        "best": {k: best[k] for k in ("objective", "per", "ll", "eval")},
+        "best": {k: best.get(k) for k in ("objective", "per", "ll", "eval", "natural", "gates_failed")},
         "profile": str(out),
         "log": str(log_path),
     }
@@ -407,12 +547,91 @@ def run(args) -> dict:
 
     if args.final_whisper:
         print("[final] scoring the best profile with phonemes + Whisper on the tuning sets")
-        J.score([SYSTEM], sets, profile=out, name=f"{SYSTEM}-{out.stem}", whisper=True, voice=args.voice)
+        with gpu_lock():
+            J.score([SYSTEM], sets, profile=out, name=f"{SYSTEM}-{out.stem}", whisper=True, voice=args.voice)
     return summary
 
 
 def fmt_sets(d: dict, pct: bool = True) -> str:
     return " ".join(f"{s}:{100 * v:.1f}" if pct else f"{s}:{v:.2f}" for s, v in d.items())
+
+
+# --------------------------------------------------------------------------
+# Sensitivity scan
+# --------------------------------------------------------------------------
+
+
+def scan_points(n: int) -> list[float]:
+    """Positions in a parameter's unit range, the default left out: both
+    ends and evenly between."""
+    return [k / (n - 1) for k in range(n)]
+
+
+def scan(args) -> dict:
+    """One parameter at a time across its range, the others at their
+    defaults (plus the lock): the objective, its parts, the naturalness
+    distance and the gates failed at every point. Logged to
+    ``out/scan-<out stem>.jsonl`` (``--resume`` reuses it); a table is
+    printed at the end."""
+    params = load_params(args.params)
+    lock = load_lock(args.lock, params)
+    names = tunable(params, args, lock)
+    space = Space(params, names, lock)
+    sets = args.sets.split(",")
+    heldout = [x for x in sets if x in HELDOUT_SETS]
+    if heldout:
+        raise SystemExit(f"held-out sets are never tuned on: {', '.join(heldout)}")
+    items = select_items(sets, args.subset)
+    out = Path(args.out).resolve()
+    log_path = OUT_DIR / f"scan-{out.stem}.jsonl"
+    meta = {"params": names, "sets": sets, "items": [it.id for it in items], "seed": None, "popsize": None,
+            "sigma0": None, "ll_weight": args.ll_weight, "prior_weight": args.prior_weight, "lock": lock,
+            "natural_weight": args.natural_weight, "binary": render.file_digest(render.say_bin()),
+            "gates": [str(g) for g in args.gates] if args.gates else None, "points": args.scan,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S")}  # fmt: skip
+    log = Log(log_path, meta, args.resume)
+    ev = Evaluator(items, space, args)
+    todo: list[tuple[str, float, np.ndarray]] = [("default", float("nan"), space.u0.copy())]
+    for k, name in enumerate(names):
+        for t in scan_points(args.scan):
+            u = space.u0.copy()
+            u[k] = t
+            if abs(t - space.u0[k]) > 1e-9:
+                todo.append((name, float(space.lo[k] + t * (space.hi[k] - space.lo[k])), u))
+    rows = []
+    chunk = args.popsize or 12
+    for c in range(0, len(todo), chunk):
+        part = todo[c : c + chunk]
+        cached = [log.cache.get(ukey(u)) for _, _, u in part]
+        fresh_k = [k for k, r in enumerate(cached) if r is None]
+        if fresh_k:
+            res = ev.evaluate([part[k][2] for k in fresh_k])
+            for k, r in zip(fresh_k, res):
+                name, value, u = part[k]
+                rec = {"kind": "eval", "param": name, "value": value, "u": [float(v) for v in u], **r}
+                log.append(rec)
+                log.cache[ukey(u)] = rec
+                cached[k] = rec
+        if c == 0:
+            ev.nat0 = cached[0].get("natural")
+        rows += cached
+        print(f"[scan] {min(c + chunk, len(todo))}/{len(todo)}", flush=True)
+    ev.close()
+    base = rows[0]
+    table = []
+    for name in names:
+        pts = [r for r in rows if r.get("param") == name]
+        table.append((name, pts))
+    print(f"\n[scan] default: objective {base['objective']:.4f}  mean PER {100 * base['mean_per']:.2f}  "
+          f"-ll {base['mean_nll']:.3f}  natural {base.get('natural', float('nan')):.3f}")
+    print(f"{'parameter':26s} {'value':>9s} {'dJ':>8s} {'dPER':>6s} {'d-ll':>6s} {'dnat':>6s}  gates failed")
+    for name, pts in table:
+        for r in pts:
+            dj = r["mean_per"] + args.ll_weight * r["mean_nll"] - base["mean_per"] - args.ll_weight * base["mean_nll"]
+            dn = (r.get("natural") or 0) - (base.get("natural") or 0)
+            print(f"{name:26s} {r['value']:9.4g} {dj:+8.4f} {100 * (r['mean_per'] - base['mean_per']):+6.2f} "
+                  f"{r['mean_nll'] - base['mean_nll']:+6.3f} {dn:+6.3f}  {','.join(r.get('gates_failed') or [])}")
+    return {"rows": rows}
 
 
 # --------------------------------------------------------------------------
@@ -428,6 +647,8 @@ def self_test(args) -> int:
     args.budget = 6
     args.popsize = 3
     args.lock = None
+    args.pass_ = "a"
+    args.with_classic = False
     args.final_whisper = False
     args.out = str(OUT_DIR / "selftest-profile.json")
     args.resume = False
@@ -468,9 +689,10 @@ def self_test(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--params", type=Path, default=HERE / "params.json")
-    ap.add_argument("--pass", dest="pass_", choices=["a", "b"], default="a")
+    ap.add_argument("--pass", dest="pass_", default="a", help="pass letters to tune together: a, b, c or e.g. bc")
     ap.add_argument("--lock", type=Path, default=None, help="profile whose tuning values stay fixed")
-    ap.add_argument("--sets", default="vcv,pair", help="comma-separated material sets to score on")
+    ap.add_argument("--sets", default=",".join(TUNE_SETS), help="comma-separated material sets to score on "
+                    "(default: the tuning split; held-out sets are refused)")
     ap.add_argument("--budget", type=int, default=300, help="CMA-ES evaluations (the baseline is extra)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default=None, help="best profile (default: out/profile-<pass>.json)")
@@ -480,6 +702,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sigma", type=float, default=0.25, help="initial step, in units of each parameter's range")
     ap.add_argument("--ll-weight", type=float, default=0.1, help="weight of -log-likelihood (nats/phoneme)")
     ap.add_argument("--prior-weight", type=float, default=0.1, help="weight of the distance-from-default penalty")
+    ap.add_argument("--with-classic", action="store_true",
+                    help="also tune the parameters the classic engine reads (marked classic in params.json)")
+    ap.add_argument("--natural-weight", type=float, default=0.1,
+                    help="weight of the naturalness distance above the default's (0: no guard)")
     ap.add_argument("--subset", type=int, default=None, help="use only N items per set (quick runs)")
     ap.add_argument("--jobs", type=int, default=None, help="render threads (default: all cores)")
     ap.add_argument("--batch", type=int, default=8, help="GPU batch size")
@@ -487,14 +713,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--gates",
         type=Path,
+        nargs="+",
         default=None,
-        help="compiled physical_gates test binary; candidates that fail its gates are rejected",
+        help="compiled gate test binaries, or a folder with physical_gates and natural_gate; "
+        "candidates that fail a gate are rejected",
     )
+    ap.add_argument("--natural-jobs", type=int, default=4, help="worker processes for the naturalness guard")
+    ap.add_argument("--gate-jobs", type=int, default=4, help="candidates gated at once")
+    ap.add_argument("--gate-threads", type=int, default=4, help="test threads per gate run")
+    ap.add_argument("--gate-skip", type=lambda x: [n for n in x.split(",") if n], default=[],
+                    help="more gates to skip in the loop (comma-separated name filters), e.g. slow ones the "
+                    "sensitivity scan never saw fail; run the whole suite on the result")
     ap.add_argument("--no-final-whisper", dest="final_whisper", action="store_false")
+    ap.add_argument("--scan", type=int, default=None, metavar="N",
+                    help="sensitivity scan instead of tuning: each parameter alone at N points across its range")
     args = ap.parse_args(argv)
+    if not args.pass_ or set(args.pass_) - set("abc"):
+        ap.error("--pass takes the letters a, b and c")
+    if args.gates:
+        args.gates = gate_binaries(args.gates)
     if args.self_test:
         return self_test(args)
     args.out = args.out or str(OUT_DIR / f"profile-{args.pass_}.json")
+    if args.scan:
+        scan(args)
+        return 0
     run(args)
     return 0
 
