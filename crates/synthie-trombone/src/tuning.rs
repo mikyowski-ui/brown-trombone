@@ -430,10 +430,8 @@ mod tests {
         assert_eq!(c, 3);
         // Lax vowels are shorter than the others, whatever the profile
         // says.
-        for name in ["lax_length"] {
-            let f = Tuning::FIELDS.iter().find(|f| f.name == name);
-            assert!(f.is_some_and(|f| f.default < 0.7 && f.hi <= 1.0), "{name}");
-        }
+        let lax = Tuning::FIELDS.iter().find(|f| f.name == "lax_length");
+        assert!(lax.is_some_and(|f| f.default < 0.7 && f.hi <= 1.0));
     }
 
     #[test]
