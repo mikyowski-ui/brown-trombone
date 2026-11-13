@@ -15,21 +15,31 @@ default the tuning split ``sentence_tune``, ``harvard_tune``,
 ``carrier_tune``; the held-out sets are refused)::
 
     J = mean(PER) + ll_weight * mean(-CTC log-likelihood per phoneme)
+        + word_weight * (1 - Whisper word accuracy on the tuning sentences)
         + prior_weight * mean(((x - default) / (hi - lo))^2)
-        + natural_weight * max(0, D - D_default)
+        + natural_weight * mean_k max(0, |z_k| - |z_k default|)
 
-where ``D`` is the naturalness distance of the candidate saying the 16
-LibriSpeech texts (``natural.distance``: the mean clipped |z| of its
-loudness, pitch, timing and hiss measures against the person's), so a
-candidate the recognizer likes better but that sounds less like a person
-pays for it.  Only the naturalness measures of those texts are read, never
-their phoneme or word scores.
+where ``z_k`` are the naturalness measures of the candidate saying the 16
+LibriSpeech texts against the person's (``natural.distance`` unclipped:
+loudness, pitch, timing and hiss), so a candidate pays for every measure it
+moves further from the person, however far off the measure already is.  On
+top of that the candidate is barred, like a gate failure, when its level
+walls per second, its level rises (95th percentile) or its naturalness
+distance are worse than the defaults' beyond noise (a paired bootstrap over
+the 16 texts: ``NATURAL_HOLD``).  Only the naturalness measures of those
+texts are read, never their phoneme or word scores.
 
 Every candidate is rendered by ``bin/say --engine physical --profile ...``
 (all items of a whole CMA-ES generation in parallel across cores, into a
 throwaway folder) and judged by the wav2vec2 phoneme model on the GPU, loaded
 once.  Whisper is not used inside the loop; at the end the best profile is
-scored by ``judge.py`` with Whisper on the same sets.
+scored by ``judge.py`` with Whisper on the same sets.  With
+``--word-weight`` above 0 Whisper also judges every candidate's tuning
+sentences inside the loop (loaded on the GPU next to the phoneme model).
+
+With ``--final-check K`` the K best candidates that passed the loop's gates
+and guard are run, best first, through every gate binary with nothing
+skipped; the first that passes them all becomes ``--out``.
 
 Every evaluation is appended to ``out/tune-<out stem>.jsonl`` (parameters,
 objective, per-set PER and log-likelihood).  ``--resume`` replays that log:
@@ -74,14 +84,27 @@ SYSTEM = "physical"
 # gates and those no tuning value can affect are skipped inside the loop;
 # run the whole suite on the final profile. `--gates bin` runs both
 # `physical_gates` and `natural_gate` (a copy of each in `bin/`).
-GATE_BINARIES = ["physical_gates", "natural_gate"]
+GATE_BINARIES = ["physical_gates", "natural_gate", "sibilant_gate", "vowel_glide_gate"]
 GATE_ENV = "SYNTHIE_TROMBONE_PROFILE"
-GATE_SKIP = ["no_held_note", "in_any_voice", "a_gap_near", "every_preset", "same_seed", "garbage", "muscle"]
+# Skipped in the loop: the slowest gate (about 70 s; `--final-check` runs
+# it) and determinism, which no tuning value changes. Round 4 skipped more,
+# and its best candidate failed one of them
+# (`fricatives_..._in_any_voice`).
+GATE_SKIP = ["no_held_note", "same_seed"]
 # Added to the objective of a candidate that fails gates: a wall higher than
 # any phoneme error rate, plus a slope by the number of gates failed so the
 # search can find its way back.
 GATE_WALL = 1.0
 GATE_SLOPE = 0.05
+
+#: Naturalness held to the defaults (higher is worse for each): a candidate
+#: worse than the defaults on one of these beyond noise is barred like a
+#: gate failure. Round 4's winner made the level walls 3.4 -> 4.0 a second
+#: and its rises steeper in 16 of 16 sentences, unseen by a guard that
+#: clipped each z at 4.
+NATURAL_HOLD = ["steps.walls_per_s", "steps.p95_up"]
+#: Resamples of the paired bootstrap over the naturalness texts.
+NATURAL_BOOT = 400
 
 
 #: Material the tuner never scores on: the held-out split.
@@ -125,6 +148,115 @@ def run_gates(binaries: Path | list[Path], profile: Path, threads: int = 4, skip
             bad = [f"{binary.name}-run-error"]
         failed += bad
     return failed
+
+
+def per_text(per_item: list[dict], key: str) -> np.ndarray:
+    """One naturalness measure per text (``natural.analyse`` key path), in
+    text order; NaN where a text has none."""
+    import natural as N
+
+    vals = []
+    for r in sorted(per_item, key=lambda r: r["id"]):
+        v = N._get(r["analysis"], key)
+        vals.append(np.nan if v is None else float(v))
+    return np.array(vals, float)
+
+
+def paired_worse(cand: np.ndarray, base: np.ndarray, n_boot: int = NATURAL_BOOT, seed: int = 0) -> tuple[float, float]:
+    """Mean of ``cand - base`` over the texts both have, and the lower end of
+    its 95 % paired bootstrap interval: worse beyond noise when that is
+    above 0 (for a measure where higher is worse)."""
+    d = np.asarray(cand, float) - np.asarray(base, float)
+    d = d[np.isfinite(d)]
+    if not len(d):
+        return 0.0, 0.0
+    rng = np.random.default_rng(seed)
+    means = d[rng.integers(0, len(d), (n_boot, len(d)))].mean(axis=1)
+    return float(d.mean()), float(np.percentile(means, 2.5))
+
+
+def text_sums(rows: list[dict], human: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per text and naturalness-guard term, the sum and the count of the
+    values that ``natural.summarize`` pools for that term (a sentence
+    measure: its one value; a hiss measure: every hiss of the group), the
+    person's mean and sd per term and which terms are the warped distance:
+    the parts from which the distance of any resampling of the texts is
+    put together without summarising again."""
+    import natural as N
+
+    scale = {m[0]: m[3] for m in N.MEASURES}
+    keys = [k for k in N.GUARD_KEYS if (human.get(k) or {}).get("mean") is not None and (human.get(k) or {}).get("sd")]
+    keys.append("dtw.mean")
+    S = np.zeros((len(rows), len(keys)))
+    C = np.zeros((len(rows), len(keys)))
+    for i, r in enumerate(rows):
+        for j, k in enumerate(keys):
+            if k == "dtw.mean":
+                vals = [N._get(r, "dtw.mean")]
+            elif k.startswith("fric."):
+                _, g, m = k.split(".")
+                vals = [f[m] for f in r["analysis"]["fricatives"] if f["group"] == g]
+            else:
+                vals = [N._get(r["analysis"], k)]
+            vals = [float(v) for v in vals if v is not None and np.isfinite(v)]
+            S[i, j], C[i, j] = sum(vals) * scale.get(k, 1), len(vals)
+    hm = np.array([0.0 if k == "dtw.mean" else human[k]["mean"] for k in keys])
+    hs = np.array([N.GUARD_DTW_DB if k == "dtw.mean" else human[k]["sd"] for k in keys])
+    dtw = np.array([k == "dtw.mean" for k in keys])
+    return S, C, hm, hs, dtw
+
+
+def sums_distance(S: np.ndarray, C: np.ndarray, hm: np.ndarray, hs: np.ndarray) -> np.ndarray:
+    """The unclipped naturalness distance from pooled sums and counts (the
+    last axis is the term; any leading axes are resamplings)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = np.abs((S / C - hm) / hs)
+    z = np.where(C > 0, z, np.nan)
+    return np.nanmean(z, axis=-1)
+
+
+def distance_worse(cand: list[dict], base: list[dict], human: dict, n_boot: int = NATURAL_BOOT,
+                   seed: int = 0) -> tuple[float, float]:
+    """The naturalness distance (``natural.distance``, unclipped) of the
+    candidate minus the defaults', and the lower end of its 95 % paired
+    bootstrap interval over the texts."""
+    cand = sorted(cand, key=lambda r: r["id"])
+    base = sorted(base, key=lambda r: r["id"])
+    Sc, Cc, hm, hs, _ = text_sums(cand, human)
+    Sb, Cb, _, _, _ = text_sums(base, human)
+    d0 = float(sums_distance(Sc.sum(0), Cc.sum(0), hm, hs) - sums_distance(Sb.sum(0), Cb.sum(0), hm, hs))
+    rng = np.random.default_rng(seed)
+    n = len(cand)
+    idx = rng.integers(0, n, (n_boot, n))
+    bs = sums_distance(Sc[idx].sum(1), Cc[idx].sum(1), hm, hs) - sums_distance(Sb[idx].sum(1), Cb[idx].sum(1), hm, hs)
+    return d0, float(np.percentile(bs, 2.5))
+
+
+def natural_excess(z: dict, z0: dict) -> float:
+    """Mean over the measures of how much further from the person a
+    candidate is than the defaults: max(0, |z| - |z0|), unclipped; a
+    measure only the defaults have counts 0, one only the candidate has
+    counts its |z|."""
+    keys = set(z) | set(z0)
+    if not keys:
+        return 0.0
+    return float(np.mean([max(0.0, abs(z.get(k, 0.0)) - abs(z0.get(k, 0.0))) if k in z else 0.0 for k in keys]))
+
+
+def natural_barred(cand: list[dict], base: list[dict], human: dict, n_boot: int = NATURAL_BOOT) -> tuple[list[str], dict]:
+    """The ``NATURAL_HOLD`` measures (and the distance) on which ``cand`` is
+    worse than ``base`` beyond noise, with every paired difference."""
+    bad, diffs = [], {}
+    for key in NATURAL_HOLD:
+        m, lo = paired_worse(per_text(cand, key), per_text(base, key), n_boot)
+        diffs[key] = [m, lo]
+        if lo > 0:
+            bad.append(f"natural:{key}")
+    m, lo = distance_worse(cand, base, human, n_boot)
+    diffs["distance"] = [m, lo]
+    if lo > 0:
+        bad.append("natural:distance")
+    return bad, diffs
 
 
 @contextlib.contextmanager
@@ -204,6 +336,22 @@ class Space:
     def penalty(self, u) -> float:
         return float(np.mean((np.clip(np.asarray(u, float), 0, 1) - self.u0) ** 2))
 
+    def box(self, limits: dict[str, list[float]]) -> tuple[np.ndarray, np.ndarray]:
+        """Unit-box bounds per parameter: 0..1 except where ``limits``
+        narrows a parameter to ``[lo, hi]`` (parameter units), e.g. to the
+        side of its default where a gate scan found it free. The default
+        must lie inside."""
+        lo, hi = np.zeros(len(self.names)), np.ones(len(self.names))
+        for k, n in enumerate(self.names):
+            if n in limits:
+                a, b = limits[n]
+                ua = (a - self.lo[k]) / (self.hi[k] - self.lo[k])
+                ub = (b - self.lo[k]) / (self.hi[k] - self.lo[k])
+                lo[k], hi[k] = max(0.0, min(ua, ub)), min(1.0, max(ua, ub))
+                if not lo[k] - 1e-9 <= self.u0[k] <= hi[k] + 1e-9:
+                    raise SystemExit(f"--box: {n} {limits[n]} leaves out its default {self.default[k]}")
+        return lo, hi
+
 
 def ukey(u) -> str:
     return ",".join(f"{float(v):.10f}" for v in u)
@@ -225,11 +373,16 @@ class Evaluator:
         #: The naturalness guard's texts and the person's analyses of them.
         self.nat_items: list[material.Item] = []
         self.humans: dict = {}
-        #: The starting point's naturalness distance (set after evaluation 0).
-        self.nat0: float | None = None
+        #: The starting point's naturalness: its per-text analyses and its
+        #: z per measure (set after evaluation 0, ``set_base``).
+        self.nat0_items: list[dict] | None = None
+        self.nat0_z: dict | None = None
         self.pool: ProcessPoolExecutor | None = None
+        self.words = None
         with gpu_lock():
             self.judge = J.PhonemeJudge()
+            if getattr(args, "word_weight", 0) > 0:
+                self.words = J.WordJudge()
             if args.natural_weight > 0:
                 import natural as N
 
@@ -240,7 +393,15 @@ class Evaluator:
     def close(self) -> None:
         if self.pool is not None:
             self.pool.shutdown()
+        if self.words is not None:
+            self.words.close()
         self.judge.close()
+
+    def set_base(self, rec: dict) -> None:
+        """Hold every later candidate to the naturalness of ``rec`` (the
+        starting point's record, with its ``natural_items``)."""
+        self.nat0_items = rec.get("natural_items")
+        self.nat0_z = rec.get("natural_z")
 
     def render_population(self, profiles: list[Path], scratch: Path) -> list[list[render.Rendered]]:
         """Every item (then every naturalness text) of every candidate."""
@@ -272,7 +433,16 @@ class Evaluator:
         mnll = float(np.mean([-v for v in ll.values()]))
         pen = self.space.penalty(u)
         obj = mper + self.args.ll_weight * mnll + self.args.prior_weight * pen
-        return {"objective": obj, "per": per, "ll": ll, "mean_per": mper, "mean_nll": mnll, "penalty": pen}
+        out = {"objective": obj, "per": per, "ll": ll, "mean_per": mper, "mean_nll": mnll, "penalty": pen}
+        wsc = [x for x in scores if x.word_n]
+        if wsc:
+            # Pooled over the sentences, as the scoreboard counts words.
+            acc = sum(x.word_hits or 0 for x in wsc) / max(1, sum(x.word_n or 0 for x in wsc))
+            out["word_acc"] = acc
+            out["words"] = {s: J.summarize_set([x for x in wsc if x.set == s]).get("word_acc")
+                            for s in self.sets if any(x.set == s for x in wsc)}  # fmt: skip
+            out["objective"] += self.args.word_weight * (1.0 - acc)
+        return out
 
     def natural_jobs(self, rendered: list[render.Rendered]) -> list:
         """Align one candidate's renders of the LibriSpeech texts (needs the
@@ -290,11 +460,15 @@ class Evaluator:
         return jobs
 
     def naturalness(self, per_item: list[dict]) -> dict:
-        """The naturalness distance of one candidate (``natural.distance``)."""
+        """The naturalness distance of one candidate (``natural.distance``,
+        clipped as the reports print it, and unclipped) and its z per
+        measure, unclipped."""
         import natural as N
 
-        d, zs = N.distance(N.summarize(per_item), self.human_summary)
-        return {"distance": d, "z": zs}
+        summary = N.summarize(per_item)
+        d, _ = N.distance(summary, self.human_summary)
+        du, zs = N.distance(summary, self.human_summary, clip=None)
+        return {"distance": d, "distance_unclipped": du, "z": zs}
 
     def evaluate(self, us: list) -> list[dict]:
         scratch = render.scratch_dir("tune-")
@@ -321,6 +495,8 @@ class Evaluator:
             with gpu_lock():
                 for u, rs in zip(us, rendered):
                     scores = J.score_phonemes(self.judge, rs[:n], batch_size=self.args.batch)
+                    if self.words is not None:
+                        J.score_words(self.words, rs[:n], scores, batch_size=self.args.batch)
                     out.append(self.objective(scores, u))
                     if self.nat_items:
                         nat_jobs.append(self.natural_jobs(rs[n:]))
@@ -334,19 +510,27 @@ class Evaluator:
                     self.pool = ProcessPoolExecutor(max_workers=self.args.natural_jobs, mp_context=ctx)
                 futs = [[self.pool.submit(N.compare, *job) for job in jobs] for jobs in nat_jobs]
                 for r, fs in zip(out, futs):
-                    nat = self.naturalness([f.result() for f in fs])
+                    items = [f.result() for f in fs]
+                    nat = self.naturalness(items)
                     r["natural"] = nat["distance"]
+                    r["natural_unclipped"] = nat["distance_unclipped"]
                     r["natural_z"] = nat["z"]
-                    if self.nat0 is not None:
-                        r["natural_penalty"] = max(0.0, nat["distance"] - self.nat0)
+                    r["natural_items"] = items
+                    if self.nat0_z is not None:
+                        r["natural_penalty"] = natural_excess(nat["z"], self.nat0_z)
                         r["objective"] += self.args.natural_weight * r["natural_penalty"]
+                    if self.nat0_items is not None and self.args.natural_hold:
+                        bad, diffs = natural_barred(items, self.nat0_items, self.human_summary)
+                        r["natural_vs_default"] = diffs
+                        r["natural_barred"] = bad
             t2 = time.perf_counter()
-            if gates is not None:
-                for r, fut in zip(out, gates):
-                    failed = fut.result()
+            for k, r in enumerate(out):
+                failed = (gates[k].result() if gates is not None else []) + r.get("natural_barred", [])
+                if gates is not None or "natural_barred" in r:
                     r["gates_failed"] = failed
-                    if failed:
-                        r["objective"] += GATE_WALL + GATE_SLOPE * len(failed)
+                if failed:
+                    r["objective"] += GATE_WALL + GATE_SLOPE * len(failed)
+            if gates is not None:
                 pool.shutdown()
             t3 = time.perf_counter()
             for r in out:
@@ -372,7 +556,7 @@ class Log:
             lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
             old = next((x for x in lines if x.get("kind") == "meta"), None)
             keys = ("params", "sets", "items", "seed", "popsize", "sigma0", "ll_weight", "prior_weight", "lock",
-                    "natural_weight", "binary")
+                    "natural_weight", "natural_hold", "word_weight", "box", "binary")
             if old is not None:
                 diff = [k for k in keys if old.get(k) != meta.get(k)]
                 if diff:
@@ -417,12 +601,23 @@ def run(args) -> dict:
     params = load_params(args.params)
     lock = load_lock(args.lock, params)
     names = tunable(params, args, lock)
+    excluded = [n for n in names if n in args.exclude]
+    names = [n for n in names if n not in args.exclude]
+    unknown = [n for n in args.exclude if n not in params]
+    if unknown:
+        raise SystemExit(f"--exclude: unknown parameters {', '.join(unknown)}")
+    if excluded:
+        print(f"[tune] left at their defaults: {', '.join(excluded)}")
     shadowed = [n for n, p in params.items() if p["pass"] in args.pass_ and n in lock]
     if shadowed:
         print(f"[warn] locked, so not tuned: {', '.join(shadowed)}")
     if not names:
         raise SystemExit(f"no parameters to tune in pass {args.pass_}")
     space = Space(params, names, lock)
+    box = json.loads(Path(args.box).read_text()) if args.box else {}
+    unknown = [n for n in box if n not in names]
+    if unknown:
+        raise SystemExit(f"--box: not tuned in this run: {', '.join(unknown)}")
     sets = args.sets.split(",")
     heldout = [x for x in sets if x in HELDOUT_SETS]
     if heldout:
@@ -443,6 +638,9 @@ def run(args) -> dict:
         "prior_weight": args.prior_weight,
         "lock": lock,
         "natural_weight": args.natural_weight,
+        "natural_hold": args.natural_hold,
+        "word_weight": args.word_weight,
+        "box": box,
         "budget": args.budget,
         "binary": render.file_digest(render.say_bin()),
         "voice": args.voice,
@@ -472,6 +670,10 @@ def run(args) -> dict:
             dt = (time.perf_counter() - t0) / len(todo)
             fresh_seconds.extend([dt] * len(todo))
             for k, r in zip(todo, fresh):
+                if gen != -1:
+                    # Only the starting point keeps its per-text analyses
+                    # (every later candidate is held to them).
+                    r.pop("natural_items", None)
                 rec = {
                     "kind": "eval",
                     "eval": None,
@@ -493,21 +695,23 @@ def run(args) -> dict:
 
     # Baseline: the defaults (with the lock applied), evaluation 0.
     base = run_batch([space.u0.copy()], gen=-1)[0]
-    ev.nat0 = base.get("natural")
+    ev.set_base(base)
     best = dict(base)
     write_profile(out, base["values"])
     print(f"[base] J {base['objective']:.4f}  PER {fmt_sets(base['per'])}  ll {fmt_sets(base['ll'], pct=False)}"
-          f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}")
+          f"  natural {base.get('natural', float('nan')):.3f}  gates failed {base.get('gates_failed')}", flush=True)
 
+    blo, bhi = space.box(box)
     es = cma.CMAEvolutionStrategy(
         list(space.u0),
         args.sigma,
-        {"bounds": [0, 1], "seed": args.seed, "popsize": popsize, "verbose": -9, "maxfevals": args.budget},
+        {"bounds": [list(blo), list(bhi)], "seed": args.seed, "popsize": popsize, "verbose": -9,
+         "maxfevals": args.budget},  # fmt: skip
     )
     gen = 0
     while not es.stop() and n_eval - 1 < args.budget:
         us = es.ask()
-        us = [np.clip(u, 0, 1) for u in us]
+        us = [np.clip(u, blo, bhi) for u in us]
         res = run_batch(us, gen)
         es.tell(us, [r["objective"] for r in res])
         gbest = min(res, key=lambda r: r["objective"])
@@ -526,13 +730,19 @@ def run(args) -> dict:
     ev.close()
     del ev
 
+    if args.final_check:
+        chosen = final_check(log, args, out)
+        if chosen is not None:
+            best = chosen
+
     summary = {
         "evaluations": n_eval,
         "fresh_evaluations": len(fresh_seconds),
         "seconds_per_eval": float(np.mean(fresh_seconds)) if fresh_seconds else None,
         "wall_seconds": time.perf_counter() - t_start,
         "baseline": {k: base[k] for k in ("objective", "per", "ll")},
-        "best": {k: best.get(k) for k in ("objective", "per", "ll", "eval", "natural", "gates_failed")},
+        "best": {k: best.get(k) for k in ("objective", "per", "ll", "eval", "natural", "gates_failed", "word_acc",
+                                          "final_gates")},
         "profile": str(out),
         "log": str(log_path),
     }
@@ -550,6 +760,58 @@ def run(args) -> dict:
         with gpu_lock():
             J.score([SYSTEM], sets, profile=out, name=f"{SYSTEM}-{out.stem}", whisper=True, voice=args.voice)
     return summary
+
+
+def ranked(records: list[dict], k: int) -> list[dict]:
+    """The ``k`` best evaluations that passed the loop's gates and guard,
+    best first, one per distinct point."""
+    seen, out = set(), []
+    for r in sorted(records, key=lambda r: r["objective"]):
+        key = ukey(r["u"])
+        if r.get("gates_failed") or key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+        if len(out) == k:
+            break
+    return out
+
+
+def final_check(log: "Log", args, out: Path) -> dict | None:
+    """Run the best ``--final-check`` candidates through every gate binary
+    with nothing skipped (the loop skips ``GATE_SKIP``), best first; the
+    first that passes them all is written to ``out``. Returns its record
+    (``None`` when none passes, and ``out`` is left as the loop's best)."""
+    if not args.gates:
+        raise SystemExit("--final-check needs --gates")
+    records = [r for r in log.cache.values() if r.get("kind") == "eval"]
+    lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    checked = {x["eval"]: x["failed"] for x in lines if x.get("kind") == "final_check"}
+    for r in ranked(records, args.final_check):
+        if r["eval"] in checked:  # a resumed run: checked before
+            failed = checked[r["eval"]]
+            print(f"[final-check] eval {r['eval']} (logged): {'passes' if not failed else 'fails ' + ', '.join(failed)}")
+            if not failed:
+                write_profile(out, r["values"])
+                return dict(r, final_gates=[])
+            continue
+        tmp = out.with_name(f".{out.stem}-check.json")
+        write_profile(tmp, r["values"])
+        global GATE_SKIP
+        saved, GATE_SKIP = GATE_SKIP, []
+        try:
+            failed = run_gates(args.gates, tmp, threads=args.gate_threads * args.gate_jobs)
+        finally:
+            GATE_SKIP = saved
+            tmp.unlink(missing_ok=True)
+        print(f"[final-check] eval {r['eval']} J {r['objective']:.4f}: "
+              f"{'passes every gate' if not failed else 'fails ' + ', '.join(failed)}", flush=True)
+        log.append({"kind": "final_check", "eval": r["eval"], "failed": failed})
+        if not failed:
+            write_profile(out, r["values"])
+            return dict(r, final_gates=[])
+    print("[final-check] no candidate passes every gate; --out keeps the loop's best")
+    return None
 
 
 def fmt_sets(d: dict, pct: bool = True) -> str:
@@ -586,7 +848,8 @@ def scan(args) -> dict:
     log_path = OUT_DIR / f"scan-{out.stem}.jsonl"
     meta = {"params": names, "sets": sets, "items": [it.id for it in items], "seed": None, "popsize": None,
             "sigma0": None, "ll_weight": args.ll_weight, "prior_weight": args.prior_weight, "lock": lock,
-            "natural_weight": args.natural_weight, "binary": render.file_digest(render.say_bin()),
+            "natural_weight": args.natural_weight, "natural_hold": args.natural_hold,
+            "word_weight": args.word_weight, "binary": render.file_digest(render.say_bin()),
             "gates": [str(g) for g in args.gates] if args.gates else None, "points": args.scan,
             "started": time.strftime("%Y-%m-%d %H:%M:%S")}  # fmt: skip
     log = Log(log_path, meta, args.resume)
@@ -608,12 +871,14 @@ def scan(args) -> dict:
             res = ev.evaluate([part[k][2] for k in fresh_k])
             for k, r in zip(fresh_k, res):
                 name, value, u = part[k]
+                if name != "default":
+                    r.pop("natural_items", None)
                 rec = {"kind": "eval", "param": name, "value": value, "u": [float(v) for v in u], **r}
                 log.append(rec)
                 log.cache[ukey(u)] = rec
                 cached[k] = rec
         if c == 0:
-            ev.nat0 = cached[0].get("natural")
+            ev.set_base(cached[0])
         rows += cached
         print(f"[scan] {min(c + chunk, len(todo))}/{len(todo)}", flush=True)
     ev.close()
@@ -705,7 +970,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--with-classic", action="store_true",
                     help="also tune the parameters the classic engine reads (marked classic in params.json)")
     ap.add_argument("--natural-weight", type=float, default=0.1,
-                    help="weight of the naturalness distance above the default's (0: no guard)")
+                    help="weight of the naturalness measures' moves away from the person beyond the defaults' "
+                    "(0: no guard)")
+    ap.add_argument("--no-natural-hold", dest="natural_hold", action="store_false",
+                    help="do not bar candidates whose level walls, level rises or naturalness distance are worse "
+                    "than the defaults' beyond noise")
+    ap.add_argument("--word-weight", type=float, default=0.0,
+                    help="weight of Whisper's word error on the tuning sentences (0: Whisper not used in the loop)")
+    ap.add_argument("--exclude", type=lambda x: [n for n in x.split(",") if n], default=[],
+                    help="parameters of the chosen passes left at their defaults (comma-separated), e.g. those "
+                    "the sensitivity scan found pinned by gates")
+    ap.add_argument("--box", type=Path, default=None,
+                    help="JSON {name: [lo, hi]} narrowing parameters to a sub-range around the default (e.g. "
+                    "the side a gate scan found free)")
+    ap.add_argument("--final-check", type=int, default=0, metavar="K",
+                    help="run the K best candidates through every gate with nothing skipped; the first that "
+                    "passes becomes --out")
     ap.add_argument("--subset", type=int, default=None, help="use only N items per set (quick runs)")
     ap.add_argument("--jobs", type=int, default=None, help="render threads (default: all cores)")
     ap.add_argument("--batch", type=int, default=8, help="GPU batch size")

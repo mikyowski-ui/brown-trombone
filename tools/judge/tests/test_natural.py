@@ -166,3 +166,12 @@ def test_distance_is_mean_clipped_z_with_the_warped_distance():
     assert terms["steps.walls_per_s"] == N.GUARD_CLIP  # 16 sd, clipped
     assert terms["dtw.mean"] == 3.0 / N.GUARD_DTW_DB
     assert abs(d - (2.0 + N.GUARD_CLIP + 0.0 + 3.0) / 4) < 1e-12
+
+
+def test_distance_can_leave_z_unclipped():
+    human = {"steps.walls_per_s": {"mean": 1.0, "sd": 0.5}, "pitch.range_st": {"mean": 10.0, "sd": 2.0}}
+    off = {"steps.walls_per_s": {"mean": 9.0}, "pitch.range_st": {"mean": 6.0}}
+    d, terms = N.distance(off, human, clip=None)
+    assert terms["steps.walls_per_s"] == 16.0 and terms["pitch.range_st"] == -2.0
+    assert d == 9.0
+    assert N.distance(off, human)[1]["steps.walls_per_s"] == N.GUARD_CLIP
