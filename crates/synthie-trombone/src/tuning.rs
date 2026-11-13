@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-one numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy-three numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -402,6 +402,25 @@ tuning! {
     /// The same as `lax_length` for an unstressed lax vowel ("it", "-ing"),
     /// which the stress already makes shorter.
     unstressed_lax_length = 0.62, 0.5..=1.0, C;
+
+    // ----- A and B: the weak fricatives and the end of a sibilant -------
+
+    /// Strength of the sound the jet of /f v/ makes where it strikes the
+    /// edges of the upper incisors and the upper lip (physical engine): the
+    /// face its eddies load, in areas of the lip gap (see `Phys::set_edge`).
+    /// At 0 the hiss of /f/ was the free jet's alone, 27 dB under the
+    /// vowel beside it in sentences, where the LibriSpeech reader's is 16
+    /// dB under, and Whisper heard "makes fine" as "makes pine" (7 of 24
+    /// /f/ words right in short sentences); at 7 the engine's /f/ is 16 dB
+    /// under its vowel, flat from 2 to 7 kHz (centroid 4.8 kHz), and 16 to
+    /// 18 of the 24 words are heard.
+    labial_edge = 7.0, 0.0..=40.0, A;
+    /// The same for the jet of /θ ð/ out of the gap between the tongue tip
+    /// and the edges of the upper incisors. Held low: the reader's /ð/ has
+    /// some 9 dB more hiss above 2 kHz than the engine's without it, but
+    /// at 5 to 7 the recognizer starts to hear /ð/ as /z/; at 3 it hears
+    /// /ð/ as /l/ less often and nothing else changes beyond noise.
+    dental_edge = 3.0, 0.0..=40.0, A;
 }
 
 impl Default for Tuning {
@@ -424,10 +443,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_one_and_thirty_six() {
+    fn two_passes_of_thirty_three_and_thirty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (31, 36));
+        assert_eq!((a, b), (33, 36));
     }
 
     #[test]

@@ -52,6 +52,8 @@ pub(crate) const V_MAX: f32 = 5000.0;
 /// Turbulence follows the stream, not each sound wave riding on it; it
 /// still follows the voice's own pulsing, as real voiced fricatives do.
 pub(crate) const FLOW_AVERAGING: f32 = 0.001;
+/// Mixed into the seed of the edge source's generator.
+const EDGE_SEED: u32 = 0x00ED_6E5E;
 /// Corner of the high-pass that removes rumble from the noise of free jets
 /// and of the breath, Hz.
 const RUMBLE_CORNER: f32 = 400.0;
@@ -164,9 +166,13 @@ impl Hiss {
 #[derive(Clone, Debug)]
 pub(crate) struct Turbulence {
     rng: Rng,
+    /// The edge source's own generator, so the rest of the noise is as it
+    /// would be without it.
+    edge_rng: Rng,
     jets: Hiss,
     teeth: Hiss,
     glottis: Hiss,
+    edge: Hiss,
     /// High-pass and low-pass coefficients and gain of the noise of free
     /// jets and of the breath, and of the jet that strikes the teeth.
     r: f32,
@@ -193,9 +199,11 @@ impl Turbulence {
     pub(crate) fn new(seed: u32) -> Self {
         Self {
             rng: Rng::new(seed),
+            edge_rng: Rng::new(seed ^ EDGE_SEED),
             jets: Hiss::default(),
             teeth: Hiss::default(),
             glottis: Hiss::default(),
+            edge: Hiss::default(),
             r: 1.0,
             k: 1.0,
             gain: 1.0,
@@ -232,7 +240,12 @@ impl Turbulence {
     }
 
     pub(crate) fn reset(&mut self) {
-        for h in [&mut self.jets, &mut self.teeth, &mut self.glottis] {
+        for h in [
+            &mut self.jets,
+            &mut self.teeth,
+            &mut self.glottis,
+            &mut self.edge,
+        ] {
             *h = Hiss::default();
         }
     }
@@ -249,6 +262,15 @@ impl Turbulence {
             self.jets.next(&mut self.rng, r, k, gain),
             self.teeth.next(&mut self.rng, rt, kt, gt),
         )
+    }
+
+    /// This tick's noise for a jet striking the edges of the upper incisors
+    /// and the lip in front of them (/f v θ ð/): an obstacle's noise, shaped
+    /// like that of the jet on the teeth, from a generator of its own.
+    #[inline]
+    pub(crate) fn edge_hiss(&mut self) -> f32 {
+        let (r, k, gain) = (self.r_teeth, self.k_teeth, self.gain_teeth);
+        self.edge.next(&mut self.edge_rng, r, k, gain)
     }
 
     /// This tick's noise for the glottal jet.

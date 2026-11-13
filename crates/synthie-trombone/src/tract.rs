@@ -588,6 +588,31 @@ impl Tract {
         if sibilant { 1.0 } else { 0.0 }
     }
 
+    /// Whether a gap meant to hiss is held at the edges of the upper
+    /// incisors (physical engine), as `(dental, labiodental)`, each `0` or
+    /// `1`: the tongue tip against them (/θ ð/) or the lower lip (/f v/).
+    /// The jet out of such a gap strikes the edges of the teeth and the
+    /// upper lip at once (`Phys::set_edge`).
+    pub(crate) fn edges(&self) -> (f32, f32) {
+        if self.dynamics != Dynamics::Damped {
+            return (0.0, 0.0);
+        }
+        let at = |range: core::ops::Range<f32>| {
+            self.slots.iter().enumerate().any(|(k, s)| {
+                s.is_some_and(|s| {
+                    s.alive
+                        && k != ROUNDING_SLOT
+                        && intent(k, s.c.diameter) == Intent::Hiss
+                        && range.contains(&s.c.index)
+                })
+            })
+        };
+        let dental = at(DENTAL_PLACE..LIP_PLACE);
+        #[allow(clippy::cast_precision_loss)]
+        let labial = at(LIP_PLACE..N as f32 + 1.0);
+        (f32::from(u8::from(dental)), f32::from(u8::from(labial)))
+    }
+
     /// Whether any constriction is being held.
     pub(crate) fn any_constriction(&self) -> bool {
         self.slots.iter().flatten().any(|s| s.alive)
