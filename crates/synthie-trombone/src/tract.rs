@@ -810,7 +810,7 @@ impl Tract {
     /// the closed end of the branch, /n/'s antiresonance rose to 1.75 to
     /// 1.9 kHz, and the recognizer heard such an /n/ as /ŋ/ (8 of the 38
     /// above 1.7 kHz in the sentences, 2 of the 37 below 1.4 kHz). Returns
-    /// the cells it moved (the back of the tongue moves them, at its speed).
+    /// the cells it moved (they move at `Tuning::nasal_cavity_rate`).
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,

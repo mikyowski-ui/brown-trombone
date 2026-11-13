@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-one numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy-four numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -412,13 +412,22 @@ tuning! {
     /// transition are heard before the liquid takes over. `0` sends the
     /// liquid with the release, as before.
     liquid_transition = 0.018, 0.0..=0.04, B;
-    /// How far the velum opens for /n/, against /m ŋ/: a speaker lowers it
-    /// less for the alveolar nasal.
+    /// How far the velum opens for /n/, against /m ŋ/ (1: as far). Lowered
+    /// less, the murmur of /n/ grew weaker and was lost to other sounds
+    /// (at 0.7, 86 of 94 /n/ before consonants heard right against 85,
+    /// with fewer heard as /ŋ/ but more as nothing or as /l/), so it opens
+    /// as far by default.
     alveolar_velum = 1.0, 0.5..=1.0, A;
     /// Natural frequency of the tongue as it drops behind a nasal's
-    /// closure to [`nasal_cavity`](Self::nasal_cavity), rad/s, scaled with
-    /// the articulators' speed as `articulation_rate` is.
-    nasal_cavity_rate = 20.0, 10.0..=70.0, B;
+    /// closure to [`nasal_cavity`](Self::nasal_cavity), rad/s at speed 1,
+    /// as `articulation_rate` is. At the back of the tongue's own speed (20)
+    /// the mouth behind an /n/ after /ʌ ə ɛ ɑ aʊ/ was still the vowel's for
+    /// the first third of the murmur, its antiresonance 1.2 to 1.35 kHz
+    /// rising to 1.5 kHz only as the murmur ended, and 5 of 94 /n/ before
+    /// consonants were heard as /ŋ/. Lowered this quickly (with the tip
+    /// rising, the jaw and the blade under it drop), it stands at 1.45 to
+    /// 1.55 kHz from the start of the murmur.
+    nasal_cavity_rate = 60.0, 10.0..=70.0, B;
 }
 
 impl Default for Tuning {
