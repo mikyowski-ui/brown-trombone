@@ -102,6 +102,17 @@ const SIBILANT_SHOULDER_FRONT: f32 = 4.0;
 /// Constriction index from which the tongue tip is at the teeth (/θ ð/):
 /// nothing in front of it but the lips.
 const DENTAL_PLACE: f32 = 38.5;
+/// The blade of /θ ð/: raised to this diameter just behind the tip, and
+/// less over [`DENTAL_BLADE_BACK`] cells behind it. A dental's broad, flat
+/// blade lies along the ridge and the front of the palate, so the mouth
+/// in front of the tongue body is shallow, but the narrow gap is the
+/// tip's alone (a long narrow channel chokes the air). With the
+/// alveolars' shoulder alone the gap at the teeth was a pinch at the end
+/// of an open mouth, and the formants into and out of it a labial's (F2
+/// near 900 Hz before /ə/, where a speaker's /ð/ has some 1400 to 1600):
+/// with the low F1 of the narrow gap and next to no hiss, an /l/ or /w/.
+const DENTAL_BLADE: f32 = 0.5;
+const DENTAL_BLADE_BACK: f32 = 9.0;
 /// Shoulder of a closure of the lips, cells either way: the lips are the
 /// last four cells of the tract, and closing them leaves the tongue alone.
 const LIP_SHOULDER: f32 = 2.5;
@@ -333,6 +344,11 @@ pub(crate) struct Tract {
     /// r/): it moves at the back of the tongue's speed, until it is back
     /// with the vowels.
     pub(crate) quick_body: bool,
+    /// The sound being made is a nasal (the velum is lowered for it): the
+    /// mouth behind its closure is shaped as the nose's side branch (see
+    /// [`Tract::open_nasal_cavity`]), until another sound is articulated,
+    /// even while the velum already rises for what follows.
+    pub(crate) nasal: bool,
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
@@ -389,6 +405,7 @@ impl Tract {
             body: [0.0; N],
             mover: [Mover::Body; N],
             quick_body: false,
+            nasal: false,
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             trim: [0.0; N / PLACE],
@@ -672,12 +689,15 @@ impl Tract {
                 }
             }
         }
+        let opened = self.open_nasal_cavity();
         for i in 0..N {
             if self.target[i] < self.body[i] - CARVED
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
-            } else if self.quick_body {
+            } else if opened[i] || self.quick_body {
+                // The back of the tongue: lowered behind a nasal's closure,
+                // or making a consonant of its own.
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
@@ -688,6 +708,68 @@ impl Tract {
         if self.relief > 0.0 {
             self.relieve();
         }
+    }
+
+    /// The mouth behind a nasal's closure (physical engine). With the velum
+    /// open and the mouth shut in front of it, the mouth between the velum
+    /// and the closure is a closed side branch of the nose, and its own
+    /// resonance is the murmur's antiresonance: near 1 kHz for /m/, 1.5 to
+    /// 2 kHz for /n/, above 3 kHz for /ŋ/, whatever the vowel around them.
+    /// Left in the vowel's shape the cavity followed the vowel instead: the
+    /// hump of a central or back vowel's body near the velum, a narrow neck
+    /// at the cavity's open end, pulled /n/'s antiresonance down to 700 to
+    /// 1000 Hz before /ʌ ə ɔ oʊ/ and /m/'s to 450 Hz, where /m/ and nothing
+    /// are heard. So the back of the tongue drops behind a nasal closure,
+    /// to at least [`Tuning::nasal_cavity`] from the velum to the tip's or
+    /// the lips' shoulder. Returns the cells it moved (the back of the
+    /// tongue moves them, at its speed).
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    fn open_nasal_cavity(&mut self) -> [bool; N] {
+        let mut moved = [false; N];
+        if !self.nasal {
+            return moved;
+        }
+        // The closure furthest back in front of the velum.
+        let closure = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(k, s)| s.filter(|s| s.alive).map(|s| (k, s.c)))
+            .filter(|&(k, c)| {
+                k != ROUNDING_SLOT
+                    && intent(k, c.diameter) == Intent::Closure
+                    && c.index >= (NOSE_START + 3) as f32
+            })
+            .map(|(_, c)| c.index)
+            .fold(None, |m: Option<f32>, i| Some(m.map_or(i, |m| m.min(i))));
+        let Some(index) = closure else {
+            return moved;
+        };
+        if index < TIP_START as f32 - 2.0 {
+            // A velar closure: nothing of the mouth is left behind it.
+            return moved;
+        }
+        let shoulder = if index >= LIP_PLACE {
+            LIP_SHOULDER
+        } else {
+            TIP_SHOULDER_BACK
+        };
+        let cavity_end = ((index - shoulder - 1.0).max(0.0) as usize).min(N);
+        let floor = self.motion.nasal_cavity;
+        for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
+            .iter_mut()
+            .zip(&mut moved[NOSE_START..])
+        {
+            if *target < floor {
+                *target = floor;
+                *moved = true;
+            }
+        }
+        moved
     }
 
     /// Open the vowel shape around the place that hisses, leaving alone
@@ -1184,6 +1266,29 @@ fn carve_consonant(target: &mut [f32; N], c: Constriction, floor: f32, hiss: boo
     } else {
         (reach(index), reach(index))
     };
+    shoulder(target, index, d, back, front);
+    if (DENTAL_PLACE..LIP_PLACE).contains(&index) {
+        // The broad blade of a dental, raised along the ridge behind the
+        // tip, but open: the narrow gap is the tip's alone.
+        shoulder(
+            target,
+            index - 1.0,
+            DENTAL_BLADE.max(d),
+            DENTAL_BLADE_BACK,
+            0.5,
+        );
+    }
+}
+
+/// Narrow `target` to `d` at `index`, with raised-cosine shoulders `back`
+/// cells towards the glottis and `front` cells towards the lips.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn shoulder(target: &mut [f32; N], index: f32, d: f32, back: f32, front: f32) {
     let centre = (index + 0.5) as i32;
     let span = back.max(front) as i32 + 2;
     for k in -span..=span {

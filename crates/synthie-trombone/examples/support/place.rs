@@ -263,8 +263,89 @@ pub fn murmur(settings: &VoiceSettings, nasal: Phoneme, v: Phoneme) -> Vec<Notch
     t.settle();
     t.articulate(&a);
     t.settle();
+    notches(&t)
+}
+
+/// Cell of the main tract where the nose branches off (the velum).
+const VELUM_CELL: usize = 17;
+
+/// The antiresonances that the mouth behind an oral closure puts into a
+/// nasal murmur, Hz up to 6 kHz: the frequencies at which the closed side
+/// branch from the velum to the first shut cell in front of it has no
+/// impedance, computed from the diameters as a lossless tube of cells
+/// (the engine's areas, `1.6·π/4·d²`, and its cell length, the speed of
+/// sound over `tick_rate`). Empty when the mouth is shut at the velum or
+/// open to the air.
+#[must_use]
+pub fn branch_zeros(diameters: &[f32; N], tick_rate: f32) -> Vec<f32> {
+    let dx = 35_000.0 / f64::from(tick_rate);
+    let Some(close) = (VELUM_CELL..N).find(|&i| diameters[i] <= 0.0) else {
+        return Vec::new();
+    };
+    let reactance = |f: f64| {
+        let t = (2.0 * std::f64::consts::PI * f / 35_000.0 * dx).tan();
+        let mut x: Option<f64> = None;
+        for i in (VELUM_CELL..close).rev() {
+            let zc = 1.0 / (std::f64::consts::FRAC_PI_4 * 1.6 * f64::from(diameters[i]).powi(2));
+            x = Some(match x {
+                None => -zc / t,
+                Some(xl) => zc * (xl + zc * t) / (zc - xl * t),
+            });
+        }
+        x
+    };
+    let mut zeros = Vec::new();
+    let mut last = None;
+    let mut f = 50.0;
+    while f < 6000.0 {
+        let Some(x) = reactance(f) else { break };
+        // A reactance rises with frequency between its poles: a zero is a
+        // crossing upwards.
+        if last.is_some_and(|l: f64| l < 0.0 && x >= 0.0) {
+            zeros.push(f as f32);
+        }
+        last = Some(x);
+        f += 2.0;
+    }
+    zeros
+}
+
+/// A nasal held as it is spoken: the voice in the middle of `nasal` in
+/// `[v nasal v1]`, stopped there.
+#[must_use]
+pub fn spoken_nasal(settings: &VoiceSettings, nasal: Phoneme, v: Phoneme) -> Trombone {
+    let settings = settings.with_engine(Engine::Physical);
+    let mut voice = Trombone::new(SR);
+    settings.apply(&mut voice);
+    Speaker::prepare(&mut voice);
+    let utterance = Utterance::from_text(&format!("[{v} {nasal} {v}1]"), &settings.prosody());
+    let k = utterance
+        .segments()
+        .iter()
+        .position(|s| s.phoneme == nasal)
+        .expect("the nasal");
+    let half = 0.5 * utterance.segments()[k].duration * SR;
+    let mut speaker = Speaker::new();
+    speaker.speak(utterance);
+    let mut inside = 0.0;
+    while let Some((i, _)) = speaker.current() {
+        if i == k {
+            inside += 1.0;
+            if inside >= half {
+                break;
+            }
+        }
+        speaker.process(&mut voice);
+    }
+    voice
+}
+
+/// The notches of the transfer function of `voice` as it is now (see
+/// [`murmur`]), deepest first.
+#[must_use]
+pub fn notches(voice: &Trombone) -> Vec<Notch> {
     let step = 5.0;
-    let mag = spectrum::transfer(&t, 0.2, 5000.0, step);
+    let mag = spectrum::transfer(voice, 0.2, 5000.0, step);
     let db: Vec<f32> = mag.iter().map(|m| 20.0 * m.max(1e-20).log10()).collect();
     // Light smoothing over ±15 Hz.
     let smooth: Vec<f32> = (0..db.len())
