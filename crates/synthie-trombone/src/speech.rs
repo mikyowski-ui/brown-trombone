@@ -265,6 +265,9 @@ pub struct Speaker {
     /// voice is let go at this time on `clock` (see
     /// [`Tuning::voicing_tail`]).
     tail_until: Option<f32>,
+    /// The segment's closure has been held for its floor (see
+    /// [`Speaker::holding_closure`]).
+    closure_made: bool,
 }
 
 /// How long the voice must have been let go in a pause before the
@@ -329,6 +332,7 @@ impl Speaker {
         self.devoice_at = None;
         self.sealed_for = 0.0;
         self.tail_until = None;
+        self.closure_made = false;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -394,6 +398,7 @@ impl Speaker {
                     .all(|s| s.phoneme == Phoneme::Sil);
                 self.pause_pending = pause && !self.readied && !last;
                 self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
+                self.closure_made = false;
                 if !self.ahead && !pause {
                     voice.articulate(&entry_shape(&seg));
                 }
@@ -552,6 +557,7 @@ impl Speaker {
                 } else {
                     0.0
                 };
+                self.closure_made |= self.sealed_for >= self.utterance.closure_floor;
             }
             if self.elapsed >= seg.duration && !self.holding_closure(&seg) {
                 self.elapsed -= seg.duration;
@@ -581,8 +587,8 @@ impl Speaker {
 
     /// Whether a voiceless stop's closure is still to be held: the mouth
     /// has not yet been sealed (shut, with the velum shut) for
-    /// [`Tuning::closure_floor`], and the segment has not run over by more
-    /// than [`CLOSURE_OVERRUN`]. Its release waits, and so does the next
+    /// [`Tuning::closure_floor`] in this segment, and the segment has not
+    /// run over by more than [`CLOSURE_OVERRUN`]. Its release waits, and so does the next
     /// segment: in a fast voice the articulators sent on to the next sound
     /// as a closure barely formed let the mouth open again after a few
     /// milliseconds, and the stop was not heard at all.
@@ -594,6 +600,7 @@ impl Speaker {
                 .constriction
                 .is_some_and(|c| c.diameter <= 0.3);
         closure
+            && !self.closure_made
             && self.sealed_for < self.utterance.closure_floor
             && self.elapsed < seg.duration + CLOSURE_OVERRUN
     }
@@ -1319,6 +1326,15 @@ fn lean_on_vowels(drafts: &mut [Draft]) {
 /// fricative's (physical engine).
 const AFFRICATE_FRICATION: f32 = 0.8;
 
+/// How long after the release of a stop that follows /s/ (/sp st sk/) the
+/// voice comes back, seconds (physical engine), less the folds' own few
+/// milliseconds: a speaker's glottis opens once for the cluster, widest in
+/// the /s/, and is closing again by the release, so the voice onset time is
+/// short (10 to 20 ms). Waiting for the vowel to begin instead, the voice
+/// came a release lead late through a wide-open glottis, and the release
+/// was a loud breathy burst.
+const AFTER_S_ONSET: f32 = 0.004;
+
 /// The dental closure an /ð/ starts with after a pause, seconds (physical
 /// engine).
 const DENTAL_ONSET: f32 = 0.025;
@@ -1508,10 +1524,16 @@ fn expand(
             } else {
                 dur * timing.fortis_closure
             };
-            out.push(with(draft(p, a, closure, false), voiceless));
             let released_into = context
                 .next
                 .filter(|&(n, _, same)| same && (is_vowel(n) || n.manner() == Manner::Approximant));
+            let mut g = voiceless;
+            if after_s && released_into.is_some() {
+                // The glottis opened once, for the /s/, and is closing by
+                // the release: the voice follows it at once.
+                g.hold = AFTER_S_ONSET / rate;
+            }
+            out.push(with(draft(p, a, closure, false), g));
             if context.next.is_none() {
                 out.push(final_release(p, rate));
             } else if let Some((n, n_stressed, _)) = released_into

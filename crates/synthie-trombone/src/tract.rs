@@ -102,14 +102,17 @@ const SIBILANT_SHOULDER_FRONT: f32 = 4.0;
 /// Constriction index from which the tongue tip is at the teeth (/θ ð/):
 /// nothing in front of it but the lips.
 const DENTAL_PLACE: f32 = 38.5;
-/// Cells behind the teeth over which the blade of /θ ð/ rises to the tip:
-/// the broad, flat blade of a dental lies along the ridge and the front of
-/// the palate. With the alveolars' short shoulder (5 cells) the gap at the
-/// teeth was a pinch at the end of an open mouth, and the formants into
-/// and out of it a labial's (F2 near 900 Hz before /ə/, where a speaker's
-/// /ð/ has some 1400): with the low F1 of the narrow gap and next to no
-/// hiss, an /l/ or /w/.
-const DENTAL_SHOULDER_BACK: f32 = 9.0;
+/// The blade of /θ ð/: raised to this diameter just behind the tip, and
+/// less over [`DENTAL_BLADE_BACK`] cells behind it. A dental's broad, flat
+/// blade lies along the ridge and the front of the palate, so the mouth
+/// in front of the tongue body is shallow, but the narrow gap is the
+/// tip's alone (a long narrow channel chokes the air). With the
+/// alveolars' shoulder alone the gap at the teeth was a pinch at the end
+/// of an open mouth, and the formants into and out of it a labial's (F2
+/// near 900 Hz before /ə/, where a speaker's /ð/ has some 1400 to 1600):
+/// with the low F1 of the narrow gap and next to no hiss, an /l/ or /w/.
+const DENTAL_BLADE: f32 = 0.5;
+const DENTAL_BLADE_BACK: f32 = 9.0;
 /// Shoulder of a closure of the lips, cells either way: the lips are the
 /// last four cells of the tract, and closing them leaves the tongue alone.
 const LIP_SHOULDER: f32 = 2.5;
@@ -1270,8 +1273,6 @@ fn carve_consonant(target: &mut [f32; N], c: Constriction, floor: f32, hiss: boo
         (LIP_SHOULDER, LIP_SHOULDER)
     } else if index >= BLADE_PLACE && hiss && index < DENTAL_PLACE {
         (TIP_SHOULDER_BACK, SIBILANT_SHOULDER_FRONT)
-    } else if index >= DENTAL_PLACE {
-        (DENTAL_SHOULDER_BACK, TIP_SHOULDER_FRONT)
     } else if index >= BLADE_PLACE {
         (TIP_SHOULDER_BACK, TIP_SHOULDER_FRONT)
     } else if index >= TIP_START as f32 {
@@ -1279,6 +1280,29 @@ fn carve_consonant(target: &mut [f32; N], c: Constriction, floor: f32, hiss: boo
     } else {
         (reach(index), reach(index))
     };
+    shoulder(target, index, d, back, front);
+    if (DENTAL_PLACE..LIP_PLACE).contains(&index) {
+        // The broad blade of a dental, raised along the ridge behind the
+        // tip, but open: the narrow gap is the tip's alone.
+        shoulder(
+            target,
+            index - 1.0,
+            DENTAL_BLADE.max(d),
+            DENTAL_BLADE_BACK,
+            0.5,
+        );
+    }
+}
+
+/// Narrow `target` to `d` at `index`, with raised-cosine shoulders `back`
+/// cells towards the glottis and `front` cells towards the lips.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn shoulder(target: &mut [f32; N], index: f32, d: f32, back: f32, front: f32) {
     let centre = (index + 0.5) as i32;
     let span = back.max(front) as i32 + 2;
     for k in -span..=span {
