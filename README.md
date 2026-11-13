@@ -494,6 +494,7 @@ deterministic):
 | physical engine now | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
 | physical, lax vowels at the round 4 length (`profiles/long-lax.json`) | 28 % [23, 32] | 63 % [54, 71] | 34 % [29, 39] | 98 % [96, 100] | 89 % [85, 92] |
 | physical, round-5 pass a, rejected (`profiles/tuned-r5a-candidate.json`) | 30 % [25, 36] | 65 % [56, 74] | 33 % [29, 37] | 98 % [96, 100] | 87 % [83, 91] |
+| physical, round-5 pass b+c, rejected (`profiles/tuned-r5-candidate.json`) | 28 % [24, 33] | 65 % [57, 74] | 31 % [27, 35] | 99.5 % [98, 100] | 92 % [89, 94] |
 
 Round 5 changed the sounds, not the tuning: nasals keep a mouth cavity of
 their own, /ð/ has a dental blade, /p t k/ shut for at least 22 ms, the
@@ -537,6 +538,33 @@ it learned the tuning sentences, so it is kept as a rejected candidate.
 About half of all candidates were barred by a gate: the voice bar in
 closures, the onset pitch kick, the affricates, the pinch recovery and the
 regulator sit close to their bounds at the defaults.
+
+Pass b+c (timing, prosody and the lax nucleus; started again from the
+defaults, not from pass a) was made harder to over-fit: sentences only (the
+carrier syllables barely exercise timing, and in pass a they moved most on
+tune and got worse held out), a ten times stronger pull to the defaults and
+a smaller step. A first run had every candidate barred, so a gates-only
+scan moved each of its 24 numbers alone by one and two steps of 5 % of its
+range: `vowel_hold` fails a gate one step either side (the affricates, the
+onset pitch kick, clicks); ten more fail on one side (`lead`: affricates,
+voiced fricatives and the /eɪ/ glide when smaller; `closure_overshoot`:
+affricates and clicks when smaller; `body_rate`: the steady H1–H2 and the
+/eɪ/ glide when slower; `closure_floor`: the voiceless closures when
+shorter; `prelenis_stretch`, `voiced_sibilant_length`, `accent_size`:
+affricates when larger; `vot_alveolar`, `vot_velar`, `declination`: the
+pitch kick or clicks when smaller), and several pass two steps out but fail
+one, so the gates near their bounds are partly noise. The search was then
+held to the side of each default that passed (at most two steps). Its
+best, after 209 evaluations, improved the tuning sentences (phoneme error
+−2.3 [−4.9, 0.0], Whisper +8.1 [2.1, 15.2]) and passed every gate, but held
+out it is worse again (pooled phoneme error +1.6 [0.1, 3.0]; Whisper +3.0
+[−2.6, 8.9], within noise; the LibriSpeech texts −1.1 [−4.4, 2.0]), so it
+is kept as a rejected candidate too. Its moves are small (`release_lead`
+0.011 to 0.014 s, `accent_decay` 0.20 to 0.18, `phrase_onset` 0.15 to
+0.14, `velum_lead` 0.030 to 0.028, `dorsum_rate` 20 to 19.3). What the two passes show: with ten
+tuning sentences and twenty Harvard ones, the recognizer's gains on the
+tuning split are about the size of its noise, and the gates leave timing
+almost no room.
 
 Vowels are every vowel slot of the held-out sentences, carrier phrases and
 LibriSpeech texts (673 slots; the person's figure is on his own
@@ -596,8 +624,10 @@ average sentence).
 - **The gates leave the tuner little room**: the defaults sit close to
   many gate bounds, so moving one number by a few per cent often fails a
   gate (the voice bar, the onset pitch kick, the affricates, the pinch
-  recovery, the regulator); half of round 5's candidates were barred, and
-  the tuning sets are small enough to learn (pass a did).
+  recovery, the regulator, clicks at stop releases). In timing, a step of
+  5 % of its range fails a gate for `vowel_hold` either way and for ten
+  more numbers one way (above); about half of round 5's candidates were
+  barred, and the tuning sets are small enough to learn (both passes did).
 
 ## Making your game talk
 

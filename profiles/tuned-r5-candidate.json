@@ -1,0 +1,29 @@
+{
+  "tuning": {
+    "lax_length": 0.62,
+    "unstressed_lax_length": 0.62,
+    "lead": 0.0300083,
+    "release_lead": 0.0139585,
+    "vot_labial": 0.034985,
+    "vot_alveolar": 0.0450102,
+    "vot_velar": 0.0470559,
+    "devoicing_lead": 0.0107889,
+    "unstressed_vot": 0.527381,
+    "prefortis_clip": 0.86024,
+    "prelenis_stretch": 1.19946,
+    "release_speed": 0.392633,
+    "closure_overshoot": 0.3,
+    "body_rate": 11.4114,
+    "dorsum_rate": 19.3389,
+    "voiced_sibilant_length": 0.0949771,
+    "accent_size": 5.95566,
+    "accent_decay": 0.182277,
+    "declination": 6.0005,
+    "final_fall": 7.85315,
+    "phrase_onset": 0.139171,
+    "velum_lead": 0.0277607,
+    "closure_floor": 0.022,
+    "voicing_tail": 0.0124001,
+    "lax_nucleus": 0.677466
+  }
+}

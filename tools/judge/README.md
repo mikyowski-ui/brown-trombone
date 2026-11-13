@@ -359,6 +359,20 @@ error -3.5 points [-5.3, -1.7] over `sentence_heldout`, `harvard_heldout`
 and `carrier_heldout`; Whisper +7.0 points [2.2, 12.1] on the held-out
 sentences, +5.1 [-1.7, 12.2] on the tuning ones.
 
+**Round 5.** Pass a (21 parameters with the lax lengths locked at 0.62,
+the scan's pinned ones excluded, `--sigma 0.08 --word-weight 0.3`, 209
+evaluations, 53 s each with Whisper and the four gate binaries) fitted the
+tuning split (pooled phoneme error -3.8 [-5.4, -2.2], Whisper +8.1) and held
+out was worse (+2.9 [1.1, 4.8]): `profiles/tuned-r5a-candidate.json`. Pass
+b+c ran from the defaults on the sentences only (`--sets
+sentence_tune,harvard_tune --sigma 0.05 --prior-weight 1.0`), after a
+gates-only scan of each parameter at one and two steps of 5 % either side
+(`vowel_hold` pinned, ten free on one side only), with `--box` holding each
+to its free side; held out it was worse too (+1.6 [0.1, 3.0]):
+`profiles/tuned-r5-candidate.json`. Neither became the default. The
+improvement on the tuning split is about the size of the sets' noise, so a
+bigger tuning split would help more than a longer search.
+
 ## Files
 
 | file | what |
