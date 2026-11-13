@@ -985,10 +985,10 @@ impl App {
         // pharynx makes, the two columns of dots of a cell differ.
         let dots_x = f64::from(a.width) * 2.0 - 1.0;
         let dots_y = f64::from(a.height) * 4.0 - 1.0;
-        let dot_x = |d: u16| X_BOUNDS[0] + f64::from(d) * (X_BOUNDS[1] - X_BOUNDS[0]) / dots_x;
+        let column_x = |d: u16| X_BOUNDS[0] + f64::from(d) * (X_BOUNDS[1] - X_BOUNDS[0]) / dots_x;
         let first = 2 * (col - a.x);
         let drawn = [first, first + 1]
-            .map(|d| lerp_cell(&self.snap.diameters, dot_x(d).min(X_BOUNDS[1])) / 2.0)
+            .map(|d| lerp_cell(&self.snap.diameters, column_x(d).min(X_BOUNDS[1])) / 2.0)
             .into_iter()
             .fold(0.0f64, f64::max);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -2421,7 +2421,6 @@ mod tests {
     }
 
     // ----- Formant Lock -------------------------------------------------
-
 
     /// `laid_out()` with Formant Lock on and a vowel chart the size a
     /// 120×34 terminal draws it (26×9 cells), clear of the other areas.

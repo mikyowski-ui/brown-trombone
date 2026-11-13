@@ -10,7 +10,8 @@
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
 )]
 
 #[path = "../examples/support/spectrum.rs"]
@@ -71,9 +72,10 @@ fn lax_vowels_are_35_to_40_percent_shorter_than_tense_ones() {
         while k < segs.len() {
             let p = segs[k].phoneme;
             let mut d = segs[k].duration;
-            if segs.get(k + 1).is_some_and(|n| {
-                n.phoneme == p && n.articulation.vowel == Some(VowelKey::End(p))
-            }) {
+            if segs
+                .get(k + 1)
+                .is_some_and(|n| n.phoneme == p && n.articulation.vowel == Some(VowelKey::End(p)))
+            {
                 d += segs[k + 1].duration;
                 k += 1;
             }
@@ -200,10 +202,16 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
 fn ey_and_ow_glide_the_whole_way() {
     // /eɪ/ closes and fronts, /oʊ/ closes.
     let (a, b) = trajectory(Phoneme::Ey);
-    println!("EY: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}", a.0, b.0, a.1, b.1);
+    println!(
+        "EY: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}",
+        a.0, b.0, a.1, b.1
+    );
     assert!(a.0 - b.0 > 60.0 && b.1 - a.1 > 100.0, "EY: {a:?} -> {b:?}");
     let (a, b) = trajectory(Phoneme::Ow);
-    println!("OW: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}", a.0, b.0, a.1, b.1);
+    println!(
+        "OW: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}",
+        a.0, b.0, a.1, b.1
+    );
     assert!(a.0 - b.0 > 40.0, "OW: {a:?} -> {b:?}");
 }
 
