@@ -310,6 +310,28 @@ single scan point. The parameters that move it most and pass the gates are
 the breath noise (`glottal_efficiency`, less is better), the velar port
 (`nasal_port`, less is better) and the breath over a phrase (`final_drop`).
 
+**The round-4 pass** (pass a, the 19 parameters not pinned, the rest of
+pass a locked at the defaults, `--sigma 0.15`, seed 1): J 0.566 to 0.471
+in 301 evaluations, about 8 of every 12 candidates barred by a gate. Two
+lessons for the next one:
+
+- The best candidate (evaluation 274) failed a gate the loop skips by
+  default (`fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice`);
+  the best that passes the whole suite was evaluation 138
+  (`profiles/tuned-r4-candidate.json`). Check the whole suite on the top
+  few, not only the winner.
+- The guard clips each z at 4, so a measure already more than 4 spreads
+  from the person can get worse without cost: the candidate's level walls
+  went from 3.4 to 4.0 a second (the person: 1.1) and its level rises got
+  steeper in every sentence, while its distance improved. It was kept out
+  of the defaults for that. A guard that charges any measure for moving
+  further from the person, clipped or not, would have caught it.
+
+Held out (paired bootstrap over items, against the defaults): phoneme
+error -3.5 points [-5.3, -1.7] over `sentence_heldout`, `harvard_heldout`
+and `carrier_heldout`; Whisper +7.0 points [2.2, 12.1] on the held-out
+sentences, +5.1 [-1.7, 12.2] on the tuning ones.
+
 ## Files
 
 | file | what |
