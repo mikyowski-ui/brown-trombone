@@ -127,6 +127,12 @@ pub struct Gesture {
     /// instant the tract stops being shut, however early or late the
     /// articulators get there.
     pub hold: f32,
+    /// For the release of a stop into a liquid (/bl pr gl kr/): how long
+    /// after the mouth actually opens the next sound's shape is sent,
+    /// seconds; until then the tract holds this segment's shape (the
+    /// liquid's tongue body without its tip). `0` sends it as usual, a
+    /// head start before the segment ends.
+    pub transition: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -269,6 +275,8 @@ pub struct Speaker {
     /// The segment's closure has been held for its floor (see
     /// [`Speaker::holding_closure`]).
     closure_made: bool,
+    /// When the mouth last opened, on `clock` (physical engine).
+    opened_at: f32,
 }
 
 /// How long the voice must have been let go in a pause before the
@@ -334,6 +342,7 @@ impl Speaker {
         self.sealed_for = 0.0;
         self.tail_until = None;
         self.closure_made = false;
+        self.opened_at = 0.0;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -510,9 +519,15 @@ impl Speaker {
                 } else {
                     self.utterance.lead
                 };
-                if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration)
-                    && !self.holding_closure(&seg)
-                {
+                let send = if seg.gesture.transition > 0.0 {
+                    // A stop's release into a liquid: the liquid comes once
+                    // the release has been heard for its while.
+                    !voice.mouth_shut() && self.clock - self.opened_at >= seg.gesture.transition
+                } else {
+                    self.elapsed >= seg.duration - lead.min(0.5 * seg.duration)
+                        && !self.holding_closure(&seg)
+                };
+                if send {
                     voice.articulate(&entry_shape(&next));
                     self.ahead = true;
                 }
@@ -687,6 +702,9 @@ impl Speaker {
                 voice.set_tenseness(seg.tenseness);
             }
             voice.set_glottal_spread(stop.gesture.spread);
+        }
+        if !shut && self.was_shut {
+            self.opened_at = self.clock;
         }
         self.was_shut = shut;
         if let Some(t) = self.voice_at
@@ -1090,6 +1108,9 @@ struct Draft {
     /// The breath after a voiceless stop's release: takes the shape of
     /// the sound that follows (physical engine).
     aspiration: bool,
+    /// A /b p g k/ released into an /l r/ of its own word (physical
+    /// engine; see `release_into_liquids`).
+    into_liquid: bool,
 }
 
 /// Where a phone stands, for the physical engine's voicing rules.
@@ -1255,6 +1276,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         lean_on_vowels(&mut drafts);
         assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
+        release_into_liquids(&mut drafts, &timing, rate);
     }
 
     // Pitch: start each segment where the last ended.
@@ -1405,6 +1427,121 @@ fn voicing_gestures(drafts: &mut [Draft], pitch: f32, timing: &Tuning) {
     }
 }
 
+/// Whether stop `p` is released into an /l r/ of its own word: /bl pl gl
+/// kl br pr gr kr/ (physical engine). Not /tr dr/: the tip makes both.
+fn into_liquid(p: Phoneme, context: Context) -> bool {
+    matches!(p, Phoneme::B | Phoneme::P | Phoneme::G | Phoneme::K)
+        && context
+            .next
+            .is_some_and(|(n, _, same)| same && matches!(n, Phoneme::L | Phoneme::R))
+}
+
+/// How far the tongue tip of an /l r/ has got while it is held back for
+/// the release of the stop before it (touch diameter; see
+/// `release_into_liquids`): on its way, not yet the liquid's narrowing.
+/// Taken away altogether, the tract opened to an F1 of 650 Hz between the
+/// stop and the liquid, and "blew" was heard as "b-ah-lew".
+const HELD_TIP: f32 = 1.0;
+
+/// The physical engine's release of a stop into a liquid ("blue", "play",
+/// "glue", "cream"). A speaker's tongue is often in place for the liquid
+/// during the closure, but what a listener hears first is the stop: its
+/// burst and a stretch of its own formant transition, the lips or the back
+/// of the tongue letting go, before the liquid takes over (voiceless stops
+/// leave the start of the liquid voiceless). Sent with the release, the
+/// liquid's tip arrived within one articulator block (10 ms) of the lips
+/// parting, and of the stop's transition there was next to nothing left.
+/// (Most of the burst "blue" lacked against "background", some 25 dB above
+/// 2.5 kHz, was lips that parted at the tongue's speed; see
+/// `Tract::compute_shaped_targets`.)
+///
+/// So the stop is made on the liquid's tongue body (a labial leaves the
+/// tongue free), and its release goes into that body with the liquid's tip
+/// still on its way ([`HELD_TIP`]; /r/'s lips stay rounded). The Speaker sends the liquid itself
+/// [`Tuning::liquid_transition`] after the mouth actually opens
+/// ([`Gesture::transition`]): after a voiced stop in a release segment of
+/// its own, taken out of the liquid's time; after a voiceless one in its
+/// breath, the rest of which is the liquid made voiceless.
+fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
+    if timing.liquid_transition <= 0.0 {
+        return;
+    }
+    let mut k = 0;
+    while k + 1 < drafts.len() {
+        if !drafts[k].into_liquid {
+            k += 1;
+            continue;
+        }
+        let p = drafts[k].phoneme;
+        // The stop's last draft: its closure, or the breath after it.
+        let last = if drafts[k + 1].aspiration && drafts[k + 1].phoneme == p {
+            k + 1
+        } else {
+            k
+        };
+        let Some(liquid) = drafts
+            .get(last + 1)
+            .copied()
+            .filter(|d| matches!(d.phoneme, Phoneme::L | Phoneme::R))
+        else {
+            k += 1;
+            continue;
+        };
+        // The liquid's own body (/r/'s that of /ɚ/), not the vowel's after it.
+        let held = Articulation {
+            constriction: liquid
+                .articulation
+                .constriction
+                .map(|c| crate::Constriction::new(c.index, HELD_TIP.max(c.diameter))),
+            vowel: None,
+            ..liquid.articulation
+        };
+        if matches!(p, Phoneme::B | Phoneme::P) {
+            let closure = &mut drafts[k].articulation;
+            closure.tongue = held.tongue;
+            closure.vowel = None;
+        }
+        let window = timing.liquid_transition / rate;
+        if last > k {
+            let breath = &mut drafts[last];
+            breath.articulation = Articulation {
+                voiced: false,
+                tenseness: None,
+                ..held
+            };
+            breath.gesture.transition = window.min(breath.duration);
+        } else {
+            let d = window.min(0.5 * liquid.duration);
+            let share = d / liquid.duration;
+            let (from, to) = liquid.gesture.pressure_drop;
+            let between = from + (to - from) * share;
+            let before = drafts[k].accent;
+            let release = Draft {
+                phoneme: p,
+                articulation: held,
+                duration: d,
+                voiced: true,
+                accent: before * crate::math::powf(liquid.accent / before, share),
+                vowel: false,
+                part: Part::Head,
+                gesture: Gesture {
+                    pressure_drop: (from, between),
+                    transition: d,
+                    ..liquid.gesture
+                },
+                aspiration: false,
+                into_liquid: false,
+                ..liquid
+            };
+            let after = &mut drafts[last + 1];
+            after.duration -= d;
+            after.gesture.pressure_drop = (between, to);
+            drafts.insert(last + 1, release);
+        }
+        k = last + 1;
+    }
+}
+
 fn silence(duration: f32) -> Draft {
     Draft {
         phoneme: Phoneme::Sil,
@@ -1417,6 +1554,7 @@ fn silence(duration: f32) -> Draft {
         part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
+        into_liquid: false,
     }
 }
 
@@ -1445,6 +1583,7 @@ fn expand(
         part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
+        into_liquid: false,
     };
     let Some(context) = context else {
         // The classic engine.
@@ -1539,7 +1678,9 @@ fn expand(
             out.push(tail);
         }
         Manner::Stop if a.voiced => {
-            out.push(with(draft(p, a, dur, true), voiced_stop));
+            let mut closure = with(draft(p, a, dur, true), voiced_stop);
+            closure.into_liquid = into_liquid(p, context);
+            out.push(closure);
             if context.next.is_none() {
                 out.push(final_release(p, rate));
             }
@@ -1565,7 +1706,9 @@ fn expand(
                 // the release: the voice follows it at once.
                 g.hold = AFTER_S_ONSET / rate;
             }
-            out.push(with(draft(p, a, closure, false), g));
+            let mut shut = with(draft(p, a, closure, false), g);
+            shut.into_liquid = into_liquid(p, context);
+            out.push(shut);
             if context.next.is_none() {
                 out.push(final_release(p, rate));
             } else if let Some((n, n_stressed, _)) = released_into
@@ -1832,6 +1975,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         part: Part::Head,
         gesture: Gesture::default(),
         aspiration: false,
+        into_liquid: false,
     }
 }
 

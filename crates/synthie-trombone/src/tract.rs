@@ -168,6 +168,9 @@ enum Mover {
     Dorsum,
     /// The tongue tip and blade, or the lips, making a consonant.
     Tip,
+    /// The tongue dropping behind a nasal's closure (see
+    /// [`Tract::open_nasal_cavity`]).
+    Cavity,
 }
 
 /// The articulator that makes a consonant constriction at `index`.
@@ -771,9 +774,14 @@ impl Tract {
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
-            } else if opened[i] || self.quick_body {
-                // The back of the tongue: lowered behind a nasal's closure,
-                // or making a consonant of its own.
+            } else if opened[i] {
+                // Lowered behind a nasal's closure.
+                self.mover[i] = Mover::Cavity;
+            } else if self.quick_body && i < LIP_START {
+                // The back of the tongue making a consonant of its own. Not
+                // the lips: parting from a /b p/ into an /l r/, they moved
+                // at the tongue's speed, half their own, the burst came
+                // out of lips barely apart and was lost.
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
@@ -1076,6 +1084,7 @@ impl Tract {
         let tip = speed * self.motion.articulation_rate;
         let dorsum = speed * self.motion.dorsum_rate;
         let body = speed * self.motion.body_rate;
+        let cavity = speed * self.motion.nasal_cavity_rate;
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];
             // Consonants close twice as fast as they open, as in the
@@ -1089,6 +1098,7 @@ impl Tract {
                 Mover::Body => body,
                 Mover::Dorsum => dorsum * closing,
                 Mover::Tip => tip * closing,
+                Mover::Cavity => cavity * closing,
             };
             let mut v0 = self.velocity[i];
             if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {

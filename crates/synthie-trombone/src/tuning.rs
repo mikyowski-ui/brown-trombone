@@ -402,6 +402,23 @@ tuning! {
     /// The same as `lax_length` for an unstressed lax vowel ("it", "-ing"),
     /// which the stress already makes shorter.
     unstressed_lax_length = 0.62, 0.5..=1.0, C;
+
+    // ----- stops into liquids, and nasal murmurs (physical engine) -------
+
+    /// How long after a /b p g k/ in front of an /l r/ (as in "blue",
+    /// "play", "glue", "cream") opens the mouth the liquid's tongue tip is
+    /// held back, s: the release goes into the liquid's tongue body without
+    /// its narrowing, so a burst and a stretch of the stop's own formant
+    /// transition are heard before the liquid takes over. `0` sends the
+    /// liquid with the release, as before.
+    liquid_transition = 0.018, 0.0..=0.04, B;
+    /// How far the velum opens for /n/, against /m ŋ/: a speaker lowers it
+    /// less for the alveolar nasal.
+    alveolar_velum = 1.0, 0.5..=1.0, A;
+    /// Natural frequency of the tongue as it drops behind a nasal's
+    /// closure to [`nasal_cavity`](Self::nasal_cavity), rad/s, scaled with
+    /// the articulators' speed as `articulation_rate` is.
+    nasal_cavity_rate = 20.0, 10.0..=70.0, B;
 }
 
 impl Default for Tuning {
@@ -427,7 +444,7 @@ mod tests {
     fn two_passes_of_thirty_one_and_thirty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (31, 36));
+        assert_eq!((a, b), (32, 38));
     }
 
     #[test]
