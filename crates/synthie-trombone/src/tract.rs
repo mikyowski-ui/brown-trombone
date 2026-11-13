@@ -695,9 +695,9 @@ impl Tract {
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
-            } else if opened[i] {
-                self.mover[i] = Mover::Dorsum;
-            } else if self.quick_body {
+            } else if opened[i] || self.quick_body {
+                // The back of the tongue: lowered behind a nasal's closure,
+                // or making a consonant of its own.
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
