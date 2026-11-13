@@ -25,7 +25,7 @@
 use crate::math::{exp, lerp};
 use crate::phoneme::{Articulation, Manner, Phoneme};
 use crate::vowel_targets::VowelKey;
-use crate::{Engine, Trombone, Tuning};
+use crate::{Engine, SLOT_MAIN, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -147,6 +147,12 @@ pub struct Utterance {
     closure_floor: f32,
     /// How long the voice goes on into a voiceless stop's closure, seconds.
     voicing_tail: f32,
+    /// Out of a sibilant into /f v/: how long before the tongue lets go
+    /// the lower lip starts, and how long it takes to reach the teeth,
+    /// seconds (see [`Tuning::labial_lead`]).
+    labial_lead: f32,
+    labial_closing: f32,
+    sibilant_exit: f32,
 }
 
 /// A phoneme with its lexical context, the output of [`phonemize`].
@@ -197,6 +203,9 @@ impl Utterance {
             velum_lead: Tuning::DEFAULT.velum_lead,
             closure_floor: 0.0,
             voicing_tail: 0.0,
+            labial_lead: 0.0,
+            labial_closing: 0.0,
+            sibilant_exit: 0.0,
         }
     }
 
@@ -269,7 +278,30 @@ pub struct Speaker {
     /// The segment's closure has been held for its floor (see
     /// [`Speaker::holding_closure`]).
     closure_made: bool,
+    /// The lower lip on its way up to the teeth for an /f v/ after a
+    /// sibilant (see [`Speaker::move_lip`]).
+    labial: Option<LabialGesture>,
 }
+
+/// The way out of a sibilant into /f v/: the sibilant's gap as it was,
+/// the lip's gap the /f v/ wants, and the time on `clock` the two
+/// gestures set off.
+#[derive(Clone, Copy, Debug)]
+struct LabialGesture {
+    sibilant: crate::Constriction,
+    lip: crate::Constriction,
+    /// The lip's opening when it set off (touch diameter).
+    open: f32,
+    since: f32,
+}
+
+/// The constriction slot the lower lip moves in while the tongue still
+/// holds the sibilant before it.
+const LABIAL_SLOT: usize = 2;
+/// Opening (touch diameter) the tongue's gap widens to as it lets go of a
+/// sibilant into /f v/: the widest that still counts as a fricative.
+const SIBILANT_LET_GO: f32 = 0.8;
+
 
 /// How long the voice must have been let go in a pause before the
 /// articulators are set for the sound after it, seconds (physical engine).
@@ -334,6 +366,7 @@ impl Speaker {
         self.sealed_for = 0.0;
         self.tail_until = None;
         self.closure_made = false;
+        self.labial = None;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -345,6 +378,8 @@ impl Speaker {
         voice.set_fold_slack(0.0);
         voice.set_cavity_expansion(0.0);
         voice.articulate_phoneme(Phoneme::Sil);
+        voice.set_constriction(LABIAL_SLOT, None);
+        self.labial = None;
         self.index = usize::MAX;
         core::mem::take(&mut self.utterance)
     }
@@ -510,13 +545,43 @@ impl Speaker {
                 } else {
                     self.utterance.lead
                 };
+                // Out of a sibilant into /f v/ the lower lip sets off
+                // for the teeth before the tongue lets go (see
+                // `Speaker::move_lip`).
+                if self.labial.is_none()
+                    && self.utterance.sibilant_exit > 0.0
+                    && is_sibilant(seg.phoneme)
+                    && matches!(next.phoneme, Phoneme::F | Phoneme::V)
+                    && let Some(c) = next.articulation.constriction
+                    && self.elapsed
+                        >= seg.duration
+                            - (lead + self.utterance.labial_lead).min(0.6 * seg.duration)
+                    && let Some(sibilant) = voice.constriction(SLOT_MAIN)
+                {
+                    let lip = crate::Constriction::new(
+                        c.index,
+                        (c.diameter + voice.tuning().fricative_gap).max(0.32),
+                    );
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let cell = ((c.index + 0.5) as usize).min(crate::N - 1);
+                    self.labial = Some(LabialGesture {
+                        sibilant,
+                        lip,
+                        open: (voice.diameters()[cell] + 0.3).max(lip.diameter),
+                        since: self.clock,
+                    });
+                }
                 if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration)
                     && !self.holding_closure(&seg)
+                    && self.labial.is_none_or(|l| {
+                        self.clock - l.since >= self.utterance.sibilant_exit
+                    })
                 {
                     voice.articulate(&entry_shape(&next));
                     self.ahead = true;
                 }
             }
+            self.move_lip(voice, is_sibilant(seg.phoneme) && !self.ahead);
             // Out of a nasal into an obstruent the velum shuts ahead of the
             // mouth's opening (`Tuning::velum_lead`), so the obstruent
             // starts with the nose shut.
@@ -706,6 +771,39 @@ impl Speaker {
                 voice.set_glottal_spread(n.gesture.spread);
             }
         }
+    }
+
+    /// The lower lip coming up to the teeth for an /f v/ after a sibilant.
+    /// A speaker's lip rises while the tongue still holds the sibilant, and
+    /// the two gestures overlap: the lip narrows the way out in front of
+    /// the teeth, so the hiss of /s/ fades under it as its jet is choked
+    /// and the lip's own hiss grows, and when the tongue lets go the air
+    /// has the lip's gap to pass already. Sent at once (the tongue letting
+    /// go, the lip shutting in some 15 ms behind it), the sibilant stopped
+    /// within 4 ms, the air rushed out of the open mouth (lip flow from
+    /// about 120 to 950 cm³/s) and only then met the lip: a gap, a puff and
+    /// a faint hiss, the pattern of /p/ ("makes fine" as "makes pine").
+    /// The target is moved from the lip's opening to its gap over
+    /// `labial_closing`, starting `labial_lead` before the tongue lets go.
+    fn move_lip(&mut self, voice: &mut Trombone, under_sibilant: bool) {
+        let Some(l) = self.labial else {
+            return;
+        };
+        if !under_sibilant {
+            // The tongue has let go: the lip is the /f v/ now.
+            voice.set_constriction(LABIAL_SLOT, None);
+            self.labial = None;
+            return;
+        }
+        let since = self.clock - l.since;
+        let t = (since / self.utterance.labial_closing.max(1e-6)).min(1.0);
+        let eased = t * t * (3.0 - 2.0 * t);
+        let lip = l.open + (l.lip.diameter - l.open) * eased;
+        voice.set_constriction(LABIAL_SLOT, Some(crate::Constriction::new(l.lip.index, lip)));
+        let s = l.sibilant;
+        let t = (since / self.utterance.sibilant_exit.max(1e-6)).min(1.0);
+        let d = s.diameter + (SIBILANT_LET_GO - s.diameter).max(0.0) * t;
+        voice.set_constriction(SLOT_MAIN, Some(crate::Constriction::new(s.index, d)));
     }
 
     /// Render a block.
@@ -1136,6 +1234,11 @@ impl Context {
     }
 }
 
+/// /s z ʃ ʒ/.
+fn is_sibilant(p: Phoneme) -> bool {
+    matches!(p, Phoneme::S | Phoneme::Z | Phoneme::Sh | Phoneme::Zh)
+}
+
 fn is_obstruent(p: Phoneme) -> bool {
     matches!(
         p.manner(),
@@ -1291,6 +1394,9 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         velum_lead: timing.velum_lead,
         closure_floor: if physical { timing.closure_floor } else { 0.0 },
         voicing_tail: timing.voicing_tail,
+        labial_lead: if physical { timing.labial_lead } else { 0.0 },
+        labial_closing: if physical { timing.labial_closing } else { 0.0 },
+        sibilant_exit: if physical { timing.sibilant_exit } else { 0.0 },
     }
 }
 

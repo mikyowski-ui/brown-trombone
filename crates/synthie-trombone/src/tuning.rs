@@ -414,13 +414,25 @@ tuning! {
     /// /f/ words right in short sentences); at 7 the engine's /f/ is 16 dB
     /// under its vowel, flat from 2 to 7 kHz (centroid 4.8 kHz), and 16 to
     /// 18 of the 24 words are heard.
-    labial_edge = 7.0, 0.0..=40.0, A;
+    labial_edge = 3.0, 0.0..=40.0, A;
     /// The same for the jet of /θ ð/ out of the gap between the tongue tip
     /// and the edges of the upper incisors. Held low: the reader's /ð/ has
     /// some 9 dB more hiss above 2 kHz than the engine's without it, but
     /// at 5 to 7 the recognizer starts to hear /ð/ as /z/; at 3 it hears
     /// /ð/ as /l/ less often and nothing else changes beyond noise.
     dental_edge = 3.0, 0.0..=40.0, A;
+    /// Out of /s z ʃ ʒ/ into /f v/: how long before the tongue would let go
+    /// of the sibilant (`lead` before its end) the lower lip sets off for
+    /// the teeth and the tongue starts to let go, s (physical engine).
+    labial_lead = 0.04, 0.0..=0.08, B;
+    /// How long the lower lip then takes to come up to the teeth, s: its
+    /// target moves from the lip's opening to the gap of /f v/ over this
+    /// time, a slower gesture than a lip closing on its own.
+    labial_closing = 0.048, 0.01..=0.08, B;
+    /// How long the tongue takes to let go of the sibilant meanwhile, s:
+    /// its gap widens steadily to the widest that hisses, and only then is
+    /// let go altogether.
+    sibilant_exit = 0.06, 0.0..=0.1, B;
 }
 
 impl Default for Tuning {
