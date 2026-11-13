@@ -382,9 +382,10 @@ as the model goes:
   protrusion and a jaw; some of them were moved by a few per cent against
   the speech recognizer (`src/vowel_targets.rs` says which and by how
   much). They are held longer than the classic engine's, since the slow
-  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are a
-  little shorter than the tense ones (`lax_length` makes them as much
-  shorter as a speaker's, 0.62, at a cost the tuning sentences measure)
+  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are as
+  much shorter than the tense ones as a speaker's (`lax_length` and
+  `unstressed_lax_length`, 0.62; chosen by ear over the longer round 4
+  value, which the recognizer scores higher on sentences)
   and glide part of the way towards schwa over their last third, and /eɪ/
   glides the whole way. A
   vowel shape may also set the tongue root, which widens or narrows the
@@ -536,8 +537,9 @@ is now the closest to the person on the guard's distance (1.32, eSpeak
   /ʊ/ comes through about a quarter of the time (eSpeak's no better), /ɔ/
   is mostly heard as /ɑ/, /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as
   /u/ or /ɚ/. Lax vowels as short as a speaker's (`lax_length` and
-  `unstressed_lax_length` 0.62) are heard better (3 points), but the
-  sentences around them worse.
+  `unstressed_lax_length` 0.62, the default, chosen by ear) are heard
+  better (3 points), but the recognizer scores the sentences around them
+  worse than at 0.905 (`profiles/long-lax.json`).
 - **Isolated words** score about 54 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.

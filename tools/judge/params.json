@@ -67,7 +67,7 @@
   "closure_floor": {"lo": 0, "hi": 0.04, "default": 0.022, "pass": "b"},
   "voicing_tail": {"lo": 0, "hi": 0.03, "default": 0.012, "pass": "b"},
   "sibilant_teeth": {"lo": 0.3, "hi": 1.2, "default": 0.6, "pass": "a"},
-  "lax_length": {"lo": 0.5, "hi": 1, "default": 0.905, "pass": "c"},
+  "lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
   "lax_nucleus": {"lo": 0.4, "hi": 1, "default": 0.67, "pass": "c"},
-  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.905, "pass": "c"}
+  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"}
 }

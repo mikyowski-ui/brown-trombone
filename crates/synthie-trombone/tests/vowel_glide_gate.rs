@@ -28,7 +28,8 @@ fn physical() -> VoiceSettings {
 }
 
 /// The physical voice with its lax vowels as much shorter than its tense
-/// ones as a speaker's (the default is longer; see `Tuning::lax_length`).
+/// ones as a speaker's (the default; set here so the gate does not move with
+/// it; see `Tuning::lax_length`).
 fn short_lax() -> VoiceSettings {
     let mut v = physical();
     v.tuning.lax_length = 0.62;
@@ -221,7 +222,8 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
             glided.1,
             100.0 * s
         );
-        assert!((0.1..=0.6).contains(&s), "{p}: {s}");
+        // /ɛ/ moves least: 9 % at the default length, 21 % held longer.
+        assert!((0.07..=0.6).contains(&s), "{p}: {s}");
     }
     // The tense vowels have no glide of their own.
     for p in [Phoneme::Iy, Phoneme::Uw, Phoneme::Ae, Phoneme::Aa] {

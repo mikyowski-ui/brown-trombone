@@ -389,18 +389,19 @@ tuning! {
 
     /// Length of a stressed lax vowel /ɪ ɛ ʌ ʊ/ against a tense vowel's
     /// (/i u/) in the same place. A speaker reading LibriSpeech holds his
-    /// stressed lax vowels for some 60 % of his tense ones, and at 0.62 the
-    /// recognizer heard the vowels better (vowel lab held-out −2.7 points),
-    /// but the sentences of the tuning material lost 6 points of phoneme
-    /// accuracy and Whisper 8.5 of words; so it is left at the round 4
-    /// value, the most these sentences take.
-    lax_length = 0.905, 0.5..=1.0, C;
+    /// stressed lax vowels for some 60 % of his tense ones. At 0.62 the
+    /// recognizer heard the vowels better (vowel lab held-out −2.7 points)
+    /// but the sentences of the tuning material worse (6 points of phoneme
+    /// accuracy, Whisper 8.5 of words) than at the round 4 value, 0.905.
+    /// The owner, listening to both, chose 0.62 without hesitation, and
+    /// ears outrank the recognizer here.
+    lax_length = 0.62, 0.5..=1.0, C;
     /// Share of a lax vowel held on its own shape before it glides towards
     /// schwa (to its end shape in `vowel_targets`) for the rest.
     lax_nucleus = 0.67, 0.4..=1.0, C;
     /// The same as `lax_length` for an unstressed lax vowel ("it", "-ing"),
     /// which the stress already makes shorter.
-    unstressed_lax_length = 0.905, 0.5..=1.0, C;
+    unstressed_lax_length = 0.62, 0.5..=1.0, C;
 }
 
 impl Default for Tuning {
