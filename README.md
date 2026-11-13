@@ -387,7 +387,7 @@ as the model goes:
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
-Each of these has its numbers in `Tuning` (below) and its gate in
+Each of these has its numbers in `Tuning` (above) and its gate in
 `tests/physical_gates.rs` or `tests/natural_gate.rs`.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
