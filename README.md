@@ -425,8 +425,8 @@ cargo run --release -p synthie-trombone-cli -- --mimic --mic pipewire     # choo
 ```
 
 In the tests a second voice copies a first from its sound alone: six sung
-vowels within 4 % on F1 and F2, the copy's tract in place within 55 ms of
-a change. It has only ever heard the synthesizer; a real microphone in a
+vowels within 4 % on F1 and F2, the copy's tract in place within 95 ms of
+a change (its tongue body is as heavy and slow as the speaking voice's). It has only ever heard the synthesizer; a real microphone in a
 real room is untested. Formants are hard to read from high voices, where
 the harmonics are far apart: above about 200 Hz the first formant reads
 10 to 30 % off, and child-sized voices are worse. Pick a voice of about
@@ -458,26 +458,76 @@ real speech (five recordings of one reader gave tract lengths from 0.78 to
 0.97), and very pressed voices are out of the engine's reach.
 
 **A judge and a tuner** (`tools/judge`, see its README): a phoneme
-recognizer and Whisper score how much of the engine's speech a machine
-understands, and CMA-ES searches the `Tuning` numbers for a better score,
-rejecting any candidate that fails the physics gates. The honest
-scoreboard, on ten held-out sentences:
+recognizer (wav2vec2) and Whisper score how much of the engine's speech a
+machine understands, a naturalness measure compares its level, pitch,
+timing and hiss with a person reading the same text, and CMA-ES searches
+the `Tuning` numbers for a better score, rejecting any candidate that
+fails the gates or moves away from the person. The scoreboard at the end of
+round 4, on material never tuned on (95 % intervals in brackets, from
+resampling the sentences; one render each, since rendering is
+deterministic):
 
-| | Phoneme error | Words Whisper gets |
-|---|---|---|
-| a human reader (other sentences) | 6 % | 96 % |
-| eSpeak NG | 16 % | 83 % |
-| classic engine | 73 % | 16 % |
-| physical engine | 70 % | 25 % |
-| physical engine, tuned (`profiles/tuned-r3.json`) | 65 % | 28 % |
+| | Phoneme error, held-out sentences (30) | Words Whisper gets | Vowels heard wrong, in sentences | Voicing, forced choice, in sentences | Consonants right, in sentences |
+|---|---|---|---|---|---|
+| a person (LibriSpeech, his own 16 sentences) | 6 % [4, 8] | 96 % [92, 99] | 9 % [4, 13] | 99.5 % | 96 % [94, 98] |
+| eSpeak NG | 16 % [13, 19] | 87 % [78, 93] | 17 % [14, 21] | 93 % [87, 98] | 89 % [84, 93] |
+| classic engine | 77 % [72, 81] | 21 % [15, 28] | 88 % [85, 91] | 80 % [74, 86] | 46 % [40, 51] |
+| physical engine, start of round 4 | 70 % (ten sentences) | 25 % | – | 80 % | 50 % |
+| physical engine now | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
+| physical, round-3 profile (`profiles/old/`) | 49 % [44, 53] | 44 % [35, 53] | 46 % [40, 52] | 97 % [94, 100] | 77 % [73, 81] |
 
-So the engines are still far from intelligible to a machine, and tuning
-the numbers buys little: the aim was a 20 % cut in phoneme error and the
-tuner reached 7.5 %, while Whisper got worse on the sentences it was tuned
-on. The tuned profile is kept as a file to listen to, not made the
-default. The judge's confusions (vowels heard as "ah", lax vowels heard as
-tense, /t/ heard as /d/) point at the vowel targets and the voicing
-contrast, which is where the next work lies.
+TUNED_PARAGRAPH
+
+The held-out sentences are Harvard lists 2, 5 and 6; the first of them
+alone (the ten sentences of the start-of-round figure) now scores 28 %
+[21, 36] with 61 % of the words. Vowels are every vowel slot of the
+held-out sentences, carrier phrases and LibriSpeech texts (673 slots; the
+person's figure is on his own recordings); voicing and consonants are the
+slots of the 16 LibriSpeech texts. Isolated items are another matter: the
+judge is harsh on them even for a person (vowels in words cut out of the
+LibriSpeech recordings: 49 % wrong), and the engine's isolated words score
+54 % phoneme error [46, 63] (eSpeak 51 %). How natural it sounds is in
+`tools/judge/report/natural.md`: of all the systems, the physical engine
+is now the closest to the person on the guard's distance (1.32, eSpeak
+1.63, classic 1.43; 0 is the person's average sentence).
+
+**Known limits.** Plainly:
+
+- **Vowels in sentences** are heard wrong about 39 % of the time (eSpeak
+  17 %, the person 9 %). On isolated words the recognizer hears this
+  engine in about six vowel categories: the lax vowels of *hid, head, had,
+  hud, hood* are not produced distinctly (hid as hayed, head, had and hud
+  as hod, hood as hawed). In sentences /ʊ/ comes through 16 % of the time,
+  /ɔ/ is mostly heard as /ɑ/, /ɔɪ/ not at all, and schwa as /ɪ/ or /u/.
+- **Isolated words** score about 54 % phoneme error, against a 13-of-26
+  ceiling the judge gives a real person's isolated words; the isolated
+  figures are a relative measure only.
+- **Remaining confusions**: /ð/ heard as /l/ (the most common consonant
+  error in every set), /z/ as /ð/, /m/ and /n/ swapped, /d/ heard as /n/
+  in carrier phrases, /t/ dropped or heard as /d/.
+- **/s/ is darker and quieter** than a person's: its centroid is about
+  4 kHz in sentences against his 5.8 kHz, and it sits about 5 dB further
+  under the neighbouring vowel.
+- **Hard level walls at stop releases**: about 3.4 jumps of 20 dB in 10 ms
+  per second against the person's 1.1.
+- **The listener's F1 bias on close vowels**: the recognizer hears the
+  engine's /ɪ/ as /eɪ/ and its schwa as /ɪ/ or /u/, which is partly its own
+  F1 bias on close vowels and partly the engine.
+- **The whisper voice** has looser click bounds than the others (clicks up
+  to 6 vowel peaks against 2.5, steps between samples not bounded, bursts
+  up to 6 dB over its weak vowels).
+- **The pulse source sings notes above the folds' range** (the peaks of
+  the small voices' lively speech, the critter's 490 to 520 Hz), so those
+  stretches are a prescribed pulse, not the folds.
+- **Mimic's tract arrives slower** than before: the copy's tract is in
+  place within 95 ms of a change (the bound was 60 ms before the tongue
+  body was made heavy and slow).
+- **Voice matching** is less sure on real speech this round (four of six
+  recordings within its limits, above).
+- **The gates leave the tuner little room**: the defaults sit close to
+  many gate bounds, so moving one number by a few per cent often fails a
+  gate (the pinch recovery, the onset pitch kick, the regulator, the
+  voiced fricatives, clicks).
 
 ## Making your game talk
 
