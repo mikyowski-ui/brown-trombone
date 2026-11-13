@@ -547,7 +547,8 @@ def run(args) -> dict:
 
     if args.final_whisper:
         print("[final] scoring the best profile with phonemes + Whisper on the tuning sets")
-        J.score([SYSTEM], sets, profile=out, name=f"{SYSTEM}-{out.stem}", whisper=True, voice=args.voice)
+        with gpu_lock():
+            J.score([SYSTEM], sets, profile=out, name=f"{SYSTEM}-{out.stem}", whisper=True, voice=args.voice)
     return summary
 
 
