@@ -1,8 +1,9 @@
 # Intelligibility judge and tuner
 
-An offline judge that scores how intelligible synthesized speech is, and a
-CMA-ES tuner that searches the physical engine's 30 tuning parameters
-(`params.json`) to improve that score. Everything runs locally once the models
+An offline judge that scores how intelligible synthesized speech is, a
+measure of how natural it sounds against a person, and a CMA-ES tuner that
+searches the physical engine's tuning parameters (`params.json`, all 63
+fields of `Tuning`) to improve that score. Everything runs locally once the models
 are downloaded.
 
 ## Setup
@@ -80,7 +81,7 @@ Targeted measurements for the vowel, voicing and consonant-place stages
 (`probes.py`, run through `judge.py`):
 
 ```sh
-uv run python judge.py vowels physical --profile ../../profiles/tuned-r3.json   # -> physical-tuned-r3
+uv run python judge.py vowels physical --profile ../../profiles/old/tuned-r3.json   # -> physical-tuned-r3
 uv run python judge.py voicing espeak
 uv run python judge.py confusions classic --name classic-x
 uv run python judge.py vowels physical --set human          # the same slots inside the LibriSpeech sentences
@@ -220,28 +221,59 @@ measure on synthetic signals.
 
 ```sh
 uv run python tune.py --self-test                    # 7 evaluations on 12 items, then a resume check
-uv run python tune.py --pass a --sets vcv,pair --budget 300 --seed 1 --out out/profile-a.json
-uv run python tune.py --pass b --lock out/profile-a.json --sets word,sentence_tune \
+uv run python tune.py --pass a --scan 4 --gates bin --out out/scan-a.json        # sensitivity scan
+uv run python tune.py --pass a --gates bin --budget 300 --seed 1 --out out/profile-a.json
+uv run python tune.py --pass bc --lock out/profile-a.json --gates bin \
     --budget 300 --seed 1 --out out/profile-b.json
-uv run python judge.py score physical --sets sentence_heldout --profile out/profile-b.json --name physical-b-heldout
+uv run python judge.py score physical --sets sentence_heldout,harvard_heldout,carrier_heldout \
+    --profile out/profile-b.json --name physical-b-heldout
 ```
 
-- Searches the parameters of one pass (`a`: 14 source/frication parameters,
-  `b`: 16 timing parameters), minus those fixed by `--lock`. Each parameter
-  is mapped to 0..1 over its `lo..hi` range (hard bounds) and the search starts
-  at the defaults.
+`tune.py` is not run under the GPU lock: it takes the lock itself for each
+batch of judging and lets it go while it renders and runs the gates.
+
+- Searches the parameters of the chosen passes (`--pass`: `a` how sounds
+  are made, 29 parameters; `b` how they follow one another, 33; `c` the
+  vowel hold, 1; letters combine, `bc`), minus those fixed by `--lock` and
+  the twelve the classic engine reads too (`"classic": true` in
+  `params.json`: the classic engine is pinned bit for bit, so a tuned value
+  of those could never become a default; `--with-classic` tunes them
+  anyway). Each parameter is mapped to 0..1 over its `lo..hi` range (hard
+  bounds, inside the engine's own range) and the search starts at the
+  defaults. A test checks `params.json` against the engine
+  (`say --dump-parameters`).
+- Material: the tuning split, `sentence_tune`, `harvard_tune`,
+  `carrier_tune` (`--sets`); the held-out sets are refused.
 - Objective (lower is better), averaged over the sets:
-  `mean PER + 0.1 * mean(-log-likelihood) + 0.1 * mean(((x - default)/(hi - lo))^2)`
-  (`--ll-weight`, `--prior-weight`).
+  `mean PER + 0.1 * mean(-log-likelihood) + 0.1 * mean(((x - default)/(hi - lo))^2)
+  + 0.1 * max(0, D - D_default)` (`--ll-weight`, `--prior-weight`,
+  `--natural-weight`).
+- **The naturalness guard** `D`: each candidate also says the 16
+  LibriSpeech texts, and `natural.distance` takes the mean |z| (clipped at
+  4) of its loudness, pitch, timing and hiss measures against the person's,
+  plus the warped log-mel distance in dB, as one more term. A candidate pays
+  for every step away from the person beyond where the defaults are, so
+  the tuner cannot buy recognizer points with a voice a person does not
+  have. Only the naturalness measures of those texts are read, never their
+  phoneme or word scores; the decision below still leaves them out of the
+  held-out pool.
+- **Gates** (`--gates bin`: `bin/physical_gates` and `bin/natural_gate`,
+  copies of the compiled test binaries, which read the candidate from
+  `SYNTHIE_TROMBONE_PROFILE`): a candidate that fails any of them gets 1
+  plus 0.05 per failed gate added, so it can never win. The slow gates and
+  those no tuning value can affect are skipped in the loop; run the whole
+  suite on the final profile. They run on the CPU while the GPU judges.
 - Evaluation 0 is the starting point (defaults plus the lock), then CMA-ES
-  generations (`--popsize`, default `4 + 3 ln n`: 11 for pass a, 12 for pass
-  b; `--sigma` 0.25). The last generation may overrun `--budget` by less than
-  one population.
+  generations (`--popsize`, default `4 + 3 ln n`; `--sigma` 0.25). The last
+  generation may overrun `--budget` by less than one population.
 - All items of a generation render in parallel (`--jobs`, default all cores)
-  into `out/tmp/` (deleted afterwards); the phoneme model stays loaded on the GPU
-  and judges in batches (`--batch 8`).
+  into `out/tmp/` (deleted afterwards); the phoneme model stays loaded on the
+  GPU and judges in batches (`--batch 8`); the naturalness measures run in
+  worker processes (`--natural-jobs 4`), the gates `--gate-jobs` at a time
+  with `--gate-threads` each.
 - Every evaluation is appended to `out/tune-<out stem>.jsonl` (unit-box
-  point, parameter values, objective, per-set PER and log-likelihood, timings).
+  point, parameter values, objective, per-set PER and log-likelihood, the
+  naturalness distance and its terms, the gates failed, timings).
   `--resume` replays it: same seed, same candidates, and logged ones are not
   evaluated again. Without `--resume` an existing log is kept as `.bak`.
 - The best profile so far is rewritten to `--out` after every generation, as
@@ -251,12 +283,54 @@ uv run python judge.py score physical --sets sentence_heldout --profile out/prof
   `judge.py` (phonemes + Whisper) on the tuning sets, as
   `out/score-physical-<out stem>.json` (`--no-final-whisper` skips this).
 - `--subset N` uses N items per set for quick experiments.
+- `--scan N` runs a sensitivity scan instead: every parameter alone at N
+  points across its range (both ends included), the rest at their defaults,
+  with the gates; it logs to `out/scan-<out stem>.jsonl` and prints, per
+  point, the change in objective, PER, log-likelihood and naturalness
+  distance and the gates that failed.
 
-Measured on the RTX 3070 / 16 threads machine, with the default population
-size: pass a on `vcv,pair` (148 items) took **2.5 s per evaluation** (1.8 s rendering, 0.65 s judging);
-pass b on `word,sentence_tune` (52 items) took **1.8 s per evaluation**. A
-300-evaluation pass is about 9 to 13 minutes, plus about 15 s to start up and 30 s for the final
-Whisper check.
+Measured on the RTX 3070 / 16 threads machine (shared with other work):
+a pass over the tuning split (156 items, plus the 16 naturalness texts and
+both gate binaries per candidate, the slow gates the scan never saw fail
+skipped with `--gate-skip`) took **25 s per evaluation**, a 300-evaluation
+pass about two hours; the scan of 51 parameters at 4 points, 198
+evaluations, about 1.5 hours.
+
+**What the round-4 scan found.** The defaults sit close to many gate
+bounds: of the 51 parameters the tuner may move, 12 fail a gate at every
+scanned point away from the default (`lung_pressure`, `adduction_time`,
+`attack_hold`, `jet_efficiency`, `teeth_gain`, `abduction_time`,
+`postalveolar_lips`, `frication_ramp`, `fortis_closure`,
+`articulation_rate`, `closing_ratio`, `vowel_hold`), mostly on the pinch
+recovery (12 ms), the onset pitch kick, the regulator, voiced fricatives,
+clicks and the level of /s/ and /ʃ/. `frication_widening` does nothing
+while `frication_ramp` is 0. Points next to the default move the mean
+phoneme error by about a point either way, which is the noise floor of a
+single scan point. The parameters that move it most and pass the gates are
+the breath noise (`glottal_efficiency`, less is better), the velar port
+(`nasal_port`, less is better) and the breath over a phrase (`final_drop`).
+
+**The round-4 pass** (pass a, the 19 parameters not pinned, the rest of
+pass a locked at the defaults, `--sigma 0.15`, seed 1): J 0.566 to 0.471
+in 301 evaluations, about 8 of every 12 candidates barred by a gate. Two
+lessons for the next one:
+
+- The best candidate (evaluation 274) failed a gate the loop skips by
+  default (`fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice`);
+  the best that passes the whole suite was evaluation 138
+  (`profiles/tuned-r4-candidate.json`). Check the whole suite on the top
+  few, not only the winner.
+- The guard clips each z at 4, so a measure already more than 4 spreads
+  from the person can get worse without cost: the candidate's level walls
+  went from 3.4 to 4.0 a second (the person: 1.1) and its level rises got
+  steeper in every sentence, while its distance improved. It was kept out
+  of the defaults for that. A guard that charges any measure for moving
+  further from the person, clipped or not, would have caught it.
+
+Held out (paired bootstrap over items, against the defaults): phoneme
+error -3.5 points [-5.3, -1.7] over `sentence_heldout`, `harvard_heldout`
+and `carrier_heldout`; Whisper +7.0 points [2.2, 12.1] on the held-out
+sentences, +5.1 [-1.7, 12.2] on the tuning ones.
 
 ## Files
 
@@ -271,17 +345,17 @@ Whisper check.
 | `natural.py` | the naturalness measure against the human recordings (`judge.py natural`, `natural-report`). |
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
-| `tune.py` | the CMA-ES tuner. |
+| `tune.py` | the CMA-ES tuner and the sensitivity scan. |
 | `vowel_lab.py` | vowel error and margins per vowel under a profile, on the tuning or held-out split. |
 | `vowel_tune.py` | coordinate search over the vowel targets on the tuning split. |
-| `params.json` | the tuning parameters: `lo`, `hi`, `default`, `pass`; passes a and b for `tune.py`, pass c (vowel lengths and glides) for reference. |
+| `params.json` | the tuning parameters: `lo`, `hi`, `default`, `pass` (a, b, c, as in the engine), `classic` for the twelve the classic engine reads too. |
 | `data/w2v_vocab.json` | the phoneme model's tokenizer vocabulary (bundled; checked against the model at load). |
 | `data/fold_table.tsv` | every model token and the phonemes it folds to, for review (a test checks it is current). |
 | `tests/` | pytest: normalizer (every symbol maps, round trips, diphthongs and affricates as single model tokens, eSpeak agreement) and model-free parts of the judge and tuner. |
 | `report/judge.md` | generated comparison of every scored system. |
 | `out/` | scores, tuner logs, profiles, render cache (not committed). |
 | `.cache/` | models and anchor audio (not committed). |
-| `bin/say` | prebuilt renderer (not committed). |
+| `bin/say`, `bin/physical_gates`, `bin/natural_gate` | prebuilt renderer and gate test binaries (not committed; `cargo build --release --example say -p synthie-trombone`, `cargo test --release --no-run --test physical_gates --test natural_gate`, then copy them here). |
 
 ## Caveats
 
@@ -364,6 +438,17 @@ The engine speaking with the produced profile must re-analyse to within
 H1*-H2*. `tests/test_match_voice.py` checks this on eight hidden engine voices
 (pitch 90..300 Hz, tract length 0.7..1.25, tenseness 0.35..0.85) and prints
 the errors and the recovered settings.
+
+Recalibrated for round 4's engine (folds that close on every cycle, a
+brighter voice): on the eight hidden voices the re-analysis lands within
+1.0 % on pitch, 0.6 % on formant scale and 0.7 dB on H1*-H2* (with last
+round's calibration, which still passes on this engine: 1.1 %, 0.3 %,
+0.6 dB). The settings themselves are not always recovered: three of the
+eight come back with a tract length 16 to 38 % off the hidden one (two
+with the old calibration), measuring alike, and the hidden tenseness only
+below about 220 Hz. On six LibriSpeech recordings of one reader four pass
+the gate; one is matched 5.7 % low in pitch, and in one the formant scale
+reads 0.63 and the tract goes to the end of its range (1.5).
 
 ### Limits
 

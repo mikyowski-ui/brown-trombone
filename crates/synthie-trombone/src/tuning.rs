@@ -59,7 +59,10 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech (see the [module](self)).
+        /// How a voice turns sounds into speech: sixty-three numbers in three
+        /// passes (A: how sounds are made, B: how they follow one another,
+        /// C: vowels), each with a range a real speaker could plausibly
+        /// occupy ([`Tuning::FIELDS`]).
         #[derive(Clone, Copy, Debug, PartialEq)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[cfg_attr(feature = "serde", serde(default))]
