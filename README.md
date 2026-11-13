@@ -444,9 +444,15 @@ uv run python match_voice.py someone.wav --out someone.json
 cargo run --release -p synthie-trombone-cli -- --engine physical --profile tools/judge/someone.json
 ```
 
-On the engine's own voices it lands within 1 % on pitch and formant scale
-and 0.6 dB on H1-H2, and it meets the same limits on six recordings of a
-human reader. It copies those five things, not the person: accent,
+Recalibrated on this round's engine (the folds now close on every cycle and
+the voice is brighter), it re-measures eight hidden engine voices within
+1 % on pitch, 0.6 % on formant scale and 0.7 dB on H1-H2; for three of
+them it gets there with a tract length 17 to 38 % off the hidden one,
+because the formant-scale measure has near-equal answers about 25 % apart.
+On six recordings of a human reader it meets those limits on four (the
+last round's calibration met them on all six): one is matched 5.7 % low
+in pitch, and in another the formant scale is misread as the longest tract
+the engine allows. It copies those five things, not the person: accent,
 intonation and everything else stay the engine's. Body size is unsteady on
 real speech (five recordings of one reader gave tract lengths from 0.78 to
 0.97), and very pressed voices are out of the engine's reach.
