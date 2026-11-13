@@ -340,6 +340,43 @@ tuning! {
     /// a phrase, from nothing: the first sound swells in rather than
     /// switching on.
     phrase_onset = 0.15, 0.04..=0.3, B;
+
+    // ----- A: nasals, dentals and stops (physical engine) ---------------
+
+    /// Narrowest the mouth between the velum and a nasal's closure may be,
+    /// diameter units: the back of the tongue drops so that the closed
+    /// mouth is a side branch of the nose with its antiresonance where a
+    /// speaker's is (near 1 kHz for /m/, 1.5 to 2 kHz for /n/), whatever
+    /// the vowel's body around it. Below about 0.8 a central or back
+    /// vowel's hump pulls /n/ down to /m/'s.
+    nasal_cavity = 1.2, 0.6..=1.6, A;
+    /// Widest the mouth may be just behind an /n/'s closure, diameter
+    /// units: the blade raised towards the palate behind the tip. Narrowing
+    /// the closed end of the side branch raises its antiresonance above
+    /// /m/'s; wider than about 1.3, /n/ before an open or back vowel has it
+    /// near 1.2 kHz.
+    nasal_blade = 0.9, 0.6..=1.6, A;
+
+    // ----- B: nasals, dentals and stops (physical engine) ---------------
+
+    /// How long before the end of a nasal followed by an obstruent the
+    /// velum starts to shut, s. The velum is slow (some 50 ms to shut), and
+    /// a speaker raises it before the mouth opens: shut late, the first
+    /// half of the /d/ in "and" was still nasal, built no pressure and was
+    /// heard as /ŋ/ or not at all, and the /ð/ in "on the" was nasal.
+    velum_lead = 0.03, 0.0..=0.05, B;
+    /// Shortest complete closure of a voiceless stop (/p t k/), s: the
+    /// mouth and the nose shut, before the release is let go. In a fast
+    /// voice, or in a cluster where the articulators are sent on to the
+    /// next sound as the closure forms, a closure of a few milliseconds is
+    /// not heard as a stop.
+    closure_floor = 0.022, 0.0..=0.04, B;
+    /// How long the voice goes on once a voiceless stop has shut the
+    /// mouth, s, before the folds are let go: a speaker's voicing dies away
+    /// over the first 10 to 20 ms of a /p t k/ closure as the mouth fills.
+    /// Cut off as the mouth shut, the level fell by 25 to 30 dB in 10 ms at
+    /// every voiceless closure, where a speaker's falls by 13.
+    voicing_tail = 0.012, 0.0..=0.03, B;
 }
 
 impl Default for Tuning {
@@ -362,10 +399,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_nine_and_thirty_three() {
+    fn two_passes_of_thirty_one_and_thirty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (29, 33));
+        assert_eq!((a, b), (31, 36));
     }
 
     #[test]

@@ -14,10 +14,13 @@
 //!   it, in `[V C V1]` for five vowels, and the locus equation fitted over
 //!   them. Published F2 loci: bilabial about 700 to 1100 Hz, alveolar 1700
 //!   to 1800 Hz, velar following the vowel with F2 and F3 close together.
-//! * `murmur`: the deepest notches of the transfer function while a nasal
-//!   is held. The closed mouth behind the closure is a side branch, whose
-//!   resonance is an antiresonance: about 800 to 1000 Hz for /m/, 1500 to
-//!   2000 Hz for /n/, above 3 kHz for /ŋ/.
+//! * `murmur`: the antiresonance of the mouth behind each nasal's closure
+//!   in the middle of `[V C V1]` for ten vowels (from the tract's shape as
+//!   a closed side branch of the nose, and the depth of the notch the
+//!   transfer function has there), then the deepest notches of the
+//!   transfer function while a nasal is held. The closed mouth behind the
+//!   closure is a side branch, whose resonance is an antiresonance: about
+//!   800 to 1000 Hz for /m/, 1500 to 2000 Hz for /n/, above 3 kHz for /ŋ/.
 //! * `hiss`: level of each fricative above 2.5 kHz and between 70 and 300
 //!   Hz, against the vowel, and how much of it is voiced.
 //! * `final`: whether word-final stops are released: the loudest sample in
@@ -145,6 +148,42 @@ fn loci(settings: &VoiceSettings) {
 }
 
 fn murmur(settings: &VoiceSettings) {
+    println!(
+        "== murmur: the mouth's antiresonance as spoken in [V C V1], Hz (notch depth in the transfer function, dB)"
+    );
+    for nasal in [Phoneme::M, Phoneme::N, Phoneme::Ng] {
+        let mut line = format!("{nasal:>3}:");
+        for v in [
+            Phoneme::Iy,
+            Phoneme::Ih,
+            Phoneme::Eh,
+            Phoneme::Ae,
+            Phoneme::Aa,
+            Phoneme::Ah,
+            Phoneme::Ao,
+            Phoneme::Ow,
+            Phoneme::Uw,
+            Phoneme::Ax,
+        ] {
+            let t = place::spoken_nasal(settings, nasal, v);
+            let zero = place::branch_zeros(t.diameters(), t.tick_rate())
+                .first()
+                .copied();
+            let notches = place::notches(&t);
+            match zero {
+                Some(z) => {
+                    let depth = notches
+                        .iter()
+                        .filter(|n| (n.hz - z).abs() <= 0.1 * z)
+                        .map(|n| n.depth)
+                        .fold(0.0f32, f32::max);
+                    line += &format!(" {v} {z:5.0} ({depth:4.1})");
+                }
+                None => line += &format!(" {v}  none      "),
+            }
+        }
+        println!("{line}");
+    }
     println!("== murmur: deepest notches of the transfer function, Hz (depth dB)");
     for nasal in [Phoneme::M, Phoneme::N, Phoneme::Ng] {
         for v in [Phoneme::Iy, Phoneme::Aa, Phoneme::Uw] {

@@ -140,6 +140,12 @@ pub struct Utterance {
     kick_time: f32,
     /// Head start of the larynx into a voiceless consonant, seconds.
     devoicing_lead: f32,
+    /// Head start of the velum out of a nasal into an obstruent, seconds.
+    velum_lead: f32,
+    /// Shortest complete closure of a voiceless stop, seconds.
+    closure_floor: f32,
+    /// How long the voice goes on into a voiceless stop's closure, seconds.
+    voicing_tail: f32,
 }
 
 /// A phoneme with its lexical context, the output of [`phonemize`].
@@ -187,6 +193,9 @@ impl Utterance {
             release_lead: Tuning::DEFAULT.release_lead,
             kick_time: Tuning::DEFAULT.kick_time,
             devoicing_lead: Tuning::DEFAULT.devoicing_lead,
+            velum_lead: Tuning::DEFAULT.velum_lead,
+            closure_floor: 0.0,
+            voicing_tail: 0.0,
         }
     }
 
@@ -249,6 +258,13 @@ pub struct Speaker {
     /// A voiceless stop has begun but the mouth is not shut yet: the voice
     /// stops when it is, or at this time on `clock` at the latest.
     devoice_at: Option<f32>,
+    /// Seconds the mouth has been sealed (shut, the velum too) without a
+    /// break (physical engine).
+    sealed_for: f32,
+    /// A voiceless stop has shut the mouth with the voice still going: the
+    /// voice is let go at this time on `clock` (see
+    /// [`Tuning::voicing_tail`]).
+    tail_until: Option<f32>,
 }
 
 /// How long the voice must have been let go in a pause before the
@@ -271,6 +287,15 @@ const QUIET_PRESSURE: f32 = 0.3;
 /// Longest a voiceless stop waits for the mouth to shut before the voice
 /// is let go anyway, seconds.
 const DEVOICE_WAIT: f32 = 0.025;
+
+/// Longest a voiceless stop's closure segment is drawn out to give it its
+/// [`Tuning::closure_floor`], seconds: a closure that never forms is not
+/// waited for.
+const CLOSURE_OVERRUN: f32 = 0.03;
+
+/// Velum openness under which the nose counts as shut for a stop's
+/// closure.
+const SEALED_VELUM: f32 = 0.05;
 
 // On the physical engine the articulators get a head start on each sound
 // (`Tuning::lead`): their tissue has inertia there, and people begin moving
@@ -302,6 +327,8 @@ impl Speaker {
         self.voice_at = None;
         self.kick_from = 0.0;
         self.devoice_at = None;
+        self.sealed_for = 0.0;
+        self.tail_until = None;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -386,13 +413,18 @@ impl Speaker {
                     && voice.is_voiced()
                     && !voice.mouth_shut();
                 self.devoice_at = defer.then_some(self.clock + DEVOICE_WAIT);
-                if !defer {
+                // A voice dying away in a closure already made is let be.
+                let dying = physical && self.tail_until.is_some() && !seg.voiced;
+                if !dying {
+                    self.tail_until = None;
+                }
+                if !defer && !dying {
                     voice.set_voiced(seg.voiced && !held);
                     voice.set_tenseness(seg.tenseness);
                 }
                 if voice.engine() == Engine::Physical {
                     let g = &seg.gesture;
-                    if (!held || !seg.voiced) && !defer {
+                    if (!held || !seg.voiced) && !defer && !dying {
                         voice.set_glottal_spread(g.spread);
                     }
                     voice.set_fold_slack(g.slack);
@@ -460,10 +492,23 @@ impl Speaker {
                 } else {
                     self.utterance.lead
                 };
-                if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration) {
+                if self.elapsed >= seg.duration - lead.min(0.5 * seg.duration)
+                    && !self.holding_closure(&seg)
+                {
                     voice.articulate(&entry_shape(&next));
                     self.ahead = true;
                 }
+            }
+            // Out of a nasal into an obstruent the velum shuts ahead of the
+            // mouth's opening (`Tuning::velum_lead`), so the obstruent
+            // starts with the nose shut.
+            if physical
+                && seg.phoneme.manner() == Manner::Nasal
+                && let Some(next) = self.utterance.segments.get(self.index + 1)
+                && is_obstruent(next.phoneme)
+                && self.elapsed >= seg.duration - self.utterance.velum_lead.min(0.5 * seg.duration)
+            {
+                voice.set_velum(next.articulation.velum);
             }
             // A fricative's gap forming and opening again.
             let (into, out_of) = seg.gesture.gap_opening;
@@ -500,7 +545,15 @@ impl Speaker {
                 voice.set_glottal_spread(next.gesture.spread);
                 self.larynx_ahead = true;
             }
-            if self.elapsed >= seg.duration {
+            if physical {
+                let sealed = voice.mouth_shut() && voice.velum() < SEALED_VELUM;
+                self.sealed_for = if sealed {
+                    self.sealed_for + 1.0 / voice.sample_rate()
+                } else {
+                    0.0
+                };
+            }
+            if self.elapsed >= seg.duration && !self.holding_closure(&seg) {
                 self.elapsed -= seg.duration;
                 self.index += 1;
                 self.started = false;
@@ -526,6 +579,25 @@ impl Speaker {
         voice.process()
     }
 
+    /// Whether a voiceless stop's closure is still to be held: the mouth
+    /// has not yet been sealed (shut, with the velum shut) for
+    /// [`Tuning::closure_floor`], and the segment has not run over by more
+    /// than [`CLOSURE_OVERRUN`]. Its release waits, and so does the next
+    /// segment: in a fast voice the articulators sent on to the next sound
+    /// as a closure barely formed let the mouth open again after a few
+    /// milliseconds, and the stop was not heard at all.
+    fn holding_closure(&self, seg: &Segment) -> bool {
+        let closure = !seg.voiced
+            && matches!(seg.phoneme, Phoneme::P | Phoneme::T | Phoneme::K)
+            && seg
+                .articulation
+                .constriction
+                .is_some_and(|c| c.diameter <= 0.3);
+        closure
+            && self.sealed_for < self.utterance.closure_floor
+            && self.elapsed < seg.duration + CLOSURE_OVERRUN
+    }
+
     /// Time the larynx from what the mouth does (physical engine): the
     /// voice stops the moment a voiceless stop shuts the mouth, and after
     /// its release it comes back the segment's `hold` after the mouth
@@ -549,8 +621,10 @@ impl Speaker {
                 !n.voiced && matches!(n.phoneme.manner(), Manner::Stop | Manner::Affricate)
             })
         {
-            voice.set_voiced(false);
+            // The arytenoids part at once and the folds, still vibrating,
+            // die away as they go (see `Tuning::voicing_tail`).
             voice.set_glottal_spread(n.gesture.spread);
+            self.tail_until = Some(self.clock + self.utterance.voicing_tail);
             self.larynx_ahead = true;
         }
         if !shut && self.was_shut && self.voice_at.is_none() && !seg.voiced {
@@ -570,9 +644,29 @@ impl Speaker {
             && (shut || self.clock >= t)
         {
             self.devoice_at = None;
-            voice.set_voiced(false);
-            voice.set_tenseness(seg.tenseness);
+            // Shut in time: the voice dies away in the closure.
             voice.set_glottal_spread(seg.gesture.spread);
+            self.tail_until = Some(if shut {
+                self.clock + self.utterance.voicing_tail
+            } else {
+                self.clock
+            });
+        }
+        if let Some(t) = self.tail_until
+            && self.clock >= t
+        {
+            self.tail_until = None;
+            // Still in the sound before the stop, or in the stop itself.
+            let stop = if seg.voiced {
+                next.unwrap_or(*seg)
+            } else {
+                *seg
+            };
+            voice.set_voiced(false);
+            if !seg.voiced {
+                voice.set_tenseness(seg.tenseness);
+            }
+            voice.set_glottal_spread(stop.gesture.spread);
         }
         self.was_shut = shut;
         if let Some(t) = self.voice_at
@@ -1155,18 +1249,25 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         release_lead: timing.release_lead,
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
+        velum_lead: timing.velum_lead,
+        closure_floor: if physical { timing.closure_floor } else { 0.0 },
+        voicing_tail: timing.voicing_tail,
     }
 }
 
-/// The physical engine's place assimilation: /t d n/ right before /θ ð/
-/// are made where the dental is, with the tip against the teeth ("get the",
-/// "in the" are [t̪ ð], [n̪ ð]), so the tongue goes straight on into the
-/// fricative's gap instead of letting a closure behind the ridge burst
-/// into a gap at the teeth.
+/// The physical engine's place assimilation: /t d/ right before /θ ð/
+/// are made where the dental is, with the tip against the teeth ("get the"
+/// is [t̪ ð]), so the tongue goes straight on into the fricative's gap
+/// instead of letting a closure behind the ridge burst into a gap at the
+/// teeth. Not /n/: a speaker's [n̪] in "in the" touches from the ridge to
+/// the teeth, and the mouth behind it, which gives a nasal its
+/// antiresonance, is an /n/'s. Closed at the teeth alone, this tract's
+/// mouth behind the closure grew by a centimetre, its antiresonance fell
+/// to /m/'s (840 Hz), and "on the" was heard as "om the".
 fn assimilate_place(drafts: &mut [Draft]) {
     for k in 0..drafts.len().saturating_sub(1) {
         let next = drafts[k + 1];
-        if !matches!(drafts[k].phoneme, Phoneme::T | Phoneme::D | Phoneme::N)
+        if !matches!(drafts[k].phoneme, Phoneme::T | Phoneme::D)
             || !matches!(next.phoneme, Phoneme::Th | Phoneme::Dh)
         {
             continue;

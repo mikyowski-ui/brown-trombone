@@ -1475,6 +1475,117 @@ fn the_folds_carry_running_speech() {
     });
 }
 
+/// The four sentences of the owner's listening test.
+const LISTENING: [&str; 4] = [
+    "The birch canoe slid on the smooth planks.",
+    "Glue the sheet to the dark blue background.",
+    "She sells sea shells by the sea shore.",
+    "The juice of lemons makes fine punch.",
+];
+
+#[test]
+fn voiceless_stops_shut_the_mouth_for_their_closure() {
+    // A /p t k/ is a closure: the mouth and the nose shut for some 50 to
+    // 100 ms in a speaker's running speech, and still some tens of
+    // milliseconds in a fast one. Too short a closure is not heard as a
+    // stop at all. Every voiceless stop of the judge's twenty sentences
+    // and the four listening sentences, at three speaking rates, is held
+    // shut (no lumen in front of the pharynx, the velum shut) for at least
+    // `Tuning::closure_floor`, 22 ms, without a break. Before the floor the
+    // shortest closures were 32 ms at rate 1 ([ŋk] in "planks", [mp], [nt]),
+    // but at rate 1.5 eleven of 272 were shorter than 22 ms and at rate 2
+    // forty-eight, six of them never shut at all.
+    use synthie_trombone::speech::{Speaker, Utterance};
+    let mut texts: Vec<String> = judge_sentences().into_iter().map(|(_, t)| t).collect();
+    texts.extend(LISTENING.iter().map(|s| (*s).to_string()));
+    let floor = synthie_trombone::Tuning::DEFAULT.closure_floor;
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = [1.0f32, 1.5, 2.0]
+            .into_iter()
+            .map(|rate| {
+                let texts = &texts;
+                scope.spawn(move || {
+                    let mut settings = tuned(Preset::Deep.settings()).with_engine(Engine::Physical);
+                    settings.rate = rate;
+                    let (mut count, mut shortest, mut short) = (0, f32::INFINITY, Vec::new());
+                    for text in texts {
+                        let mut t = fresh();
+                        settings.apply(&mut t);
+                        Speaker::prepare(&mut t);
+                        let utterance = Utterance::from_text(text, &settings.prosody());
+                        let phonemes: Vec<Phoneme> =
+                            utterance.segments().iter().map(|s| s.phoneme).collect();
+                        let closures: Vec<bool> = utterance
+                            .segments()
+                            .iter()
+                            .map(|s| {
+                                !s.voiced
+                                    && matches!(s.phoneme, Phoneme::P | Phoneme::T | Phoneme::K)
+                                    && s.articulation
+                                        .constriction
+                                        .is_some_and(|c| c.diameter <= 0.3)
+                            })
+                            .collect();
+                        let mut speaker = Speaker::new();
+                        speaker.speak(utterance);
+                        // Per closure segment: the longest sealed stretch
+                        // that reaches into it.
+                        let mut longest = vec![0usize; phonemes.len()];
+                        let (mut run, mut touched) = (0usize, Vec::<usize>::new());
+                        while let Some((i, _)) = speaker.current() {
+                            speaker.process(&mut t);
+                            if t.mouth_shut() && t.velum() < 0.05 {
+                                run += 1;
+                                if closures[i] && !touched.contains(&i) {
+                                    touched.push(i);
+                                }
+                                for &k in &touched {
+                                    longest[k] = longest[k].max(run);
+                                }
+                            } else {
+                                run = 0;
+                                touched.clear();
+                            }
+                        }
+                        for (k, &c) in closures.iter().enumerate() {
+                            if !c {
+                                continue;
+                            }
+                            count += 1;
+                            let ms = longest[k] as f32 / SR;
+                            shortest = shortest.min(ms);
+                            if ms < floor - 1.0 / SR {
+                                let prev = k.checked_sub(1).map_or(Phoneme::Sil, |j| phonemes[j]);
+                                let next = phonemes.get(k + 1).copied().unwrap_or(Phoneme::Sil);
+                                short.push(format!(
+                                    "{prev} [{}] {next} {:.1} ms in {text:?}",
+                                    phonemes[k],
+                                    1e3 * ms
+                                ));
+                            }
+                        }
+                    }
+                    (rate, count, shortest, short)
+                })
+            })
+            .collect();
+        for job in jobs {
+            let (rate, count, shortest, short) = job.join().expect("speech");
+            println!(
+                "rate {rate}: {count} voiceless stops, shortest closure {:.1} ms",
+                1e3 * shortest
+            );
+            assert!(
+                short.is_empty(),
+                "rate {rate}: {} closures under {:.0} ms, first {}",
+                short.len(),
+                1e3 * floor,
+                short[0]
+            );
+        }
+    });
+}
+
 #[test]
 fn affricates_release_into_full_frication() {
     // An affricate's closure opens into the fricative of its place: its
@@ -1737,36 +1848,59 @@ fn notch_in(notches: &[place::Notch], lo: f32, hi: f32, depth: f32) -> Option<pl
 #[test]
 fn nasal_murmurs_have_the_antiresonance_of_their_place() {
     // The mouth closed behind a nasal's closure is a side branch of the
-    // nose; its own resonance is an antiresonance of the murmur: 800 to
-    // 1000 Hz for /m/ (the whole mouth), higher for /n/ (1500 to 2000 Hz in
-    // men; here 1000 to 1200, above /m/'s), and above 3 kHz for /ŋ/, whose
-    // closure leaves almost nothing behind it. Measured on the settled
-    // shapes after /a/ and /i/: /m/ 825 and 910 Hz, /n/ 1190 and 1000 Hz,
-    // /ŋ/ nothing deeper than 11 dB below 1.3 kHz and 3670 Hz.
+    // nose; its own resonance is an antiresonance of the murmur: 750 to
+    // 1250 Hz for /m/ (the whole mouth), 1450 to 2200 Hz for /n/, above 3
+    // kHz for /ŋ/, whose closure leaves almost nothing behind it (Fujimura
+    // 1962). Measured as spoken, in the middle of the nasal in [V C V1]
+    // for ten vowels: the frequency at which the mouth behind the closure,
+    // as a tube of the tract's cells, has no impedance, and the notch the
+    // transfer function has there.
+    //
+    // Left in the vowel's shape, the mouth followed the vowel: before
+    // /ʌ ə ɔ oʊ/ the hump of the tongue body near the velum, a narrow neck
+    // at the open end of the branch, pulled /n/ down to 700 to 1000 Hz and
+    // /m/ to 420 to 530 Hz, and the recognizer heard /n/ as /m/ (and /m/ as
+    // /n/ or /ŋ/) in a third of the nasals in the LibriSpeech sentences.
+    // With the back of the tongue lowered behind the closure and the blade
+    // raised behind an /n/'s tip: /m/ 670 to 1020 Hz (lowest before /ʌ/,
+    // where the back of the tongue has not quite reached its floor in the
+    // middle of a 65 ms murmur), /n/ 1310 to 1870 Hz, and in every vowel
+    // /n/ at least 470 Hz above /m/.
     let settings = stops::judge_voice();
-    for v in [Phoneme::Aa, Phoneme::Iy] {
-        let m = place::murmur(&settings, Phoneme::M, v);
-        let n = place::murmur(&settings, Phoneme::N, v);
-        let ng = place::murmur(&settings, Phoneme::Ng, v);
-        let m0 = notch_in(&m, 600.0, 1300.0, 12.0).expect("an /m/ antiresonance");
-        let n0 = notch_in(&n, 600.0, 1300.0, 12.0).expect("an /n/ antiresonance");
-        println!(
-            "after {v}: /m/ {:.0} Hz ({:.0} dB), /n/ {:.0} Hz ({:.0} dB), /ŋ/ {:?}",
-            m0.hz,
-            m0.depth,
-            n0.hz,
-            n0.depth,
-            notch_in(&ng, 3000.0, 4000.0, 12.0).map(|x| x.hz)
-        );
-        assert!((750.0..=1000.0).contains(&m0.hz), "after {v}: /m/ {m0:?}");
-        assert!(n0.hz > m0.hz + 50.0, "after {v}: /n/ {n0:?}, /m/ {m0:?}");
+    for v in [
+        Phoneme::Iy,
+        Phoneme::Ih,
+        Phoneme::Eh,
+        Phoneme::Ae,
+        Phoneme::Aa,
+        Phoneme::Ah,
+        Phoneme::Ao,
+        Phoneme::Ow,
+        Phoneme::Uw,
+        Phoneme::Ax,
+    ] {
+        let zero = |nasal: Phoneme| {
+            let t = place::spoken_nasal(&settings, nasal, v);
+            let zeros = place::branch_zeros(t.diameters(), t.tick_rate());
+            (zeros.first().copied(), place::notches(&t))
+        };
+        let (m, m_notches) = zero(Phoneme::M);
+        let (n, _) = zero(Phoneme::N);
+        let (ng, ng_notches) = zero(Phoneme::Ng);
+        let m = m.unwrap_or_else(|| panic!("in {v}: /m/ has no antiresonance"));
+        let n = n.unwrap_or_else(|| panic!("in {v}: /n/ has no antiresonance"));
+        let m_notch = notch_in(&m_notches, 0.9 * m, 1.1 * m, 0.0).map_or(0.0, |x| x.depth);
+        println!("in {v}: /m/ {m:.0} Hz (notch {m_notch:.0} dB), /n/ {n:.0} Hz, /ŋ/ {ng:?}");
+        assert!((650.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
+        assert!(m_notch >= 20.0, "in {v}: /m/ notch {m_notch:.1} dB");
+        assert!((1300.0..=2200.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
+        assert!(n >= m + 400.0, "in {v}: /n/ {n:.0} Hz, /m/ {m:.0} Hz");
+        assert!(ng.is_none_or(|z| z > 3000.0), "in {v}: /ŋ/ at {ng:?}");
+        // The nose has a shallow notch of its own near 1 kHz (11 to 13 dB,
+        // the two nasal passages out of step), in every nasal.
         assert!(
-            notch_in(&ng, 600.0, 1300.0, 12.0).is_none(),
-            "after {v}: /ŋ/ {ng:?}"
-        );
-        assert!(
-            notch_in(&ng, 3000.0, 4000.0, 12.0).is_some(),
-            "after {v}: /ŋ/ {ng:?}"
+            notch_in(&ng_notches, 600.0, 1300.0, 15.0).is_none(),
+            "in {v}: /ŋ/ {ng_notches:?}"
         );
     }
 }
