@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-seven numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-eight numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
