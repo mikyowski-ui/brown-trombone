@@ -378,6 +378,8 @@ pub(crate) struct Tract {
     /// (physical engine), and which articulator moves each cell.
     body: [f32; N],
     mover: [Mover; N],
+    /// Lip cells let go of a closure and still on their way out of it.
+    parting: [bool; N],
     /// The tongue body is being held by a consonant of its own (/k g ŋ l
     /// r/): it moves at the back of the tongue's speed, until it is back
     /// with the vowels.
@@ -443,6 +445,7 @@ impl Tract {
             velocity: [0.0; N],
             body: [0.0; N],
             mover: [Mover::Body; N],
+            parting: [false; N],
             quick_body: false,
             nasal: false,
             narrowing: None,
@@ -769,6 +772,9 @@ impl Tract {
                 }
             }
         }
+        for i in LIP_START..N {
+            self.parting[i] |= self.diameter[i] <= 0.0;
+        }
         for i in 0..N {
             if self.target[i] < self.body[i] - CARVED
                 && let Some(m) = by[i]
@@ -777,9 +783,9 @@ impl Tract {
             } else if opened[i] {
                 // Lowered behind a nasal's closure.
                 self.mover[i] = cavity;
-            } else if self.quick_body && !(i >= LIP_START && self.mover[i] == Mover::Tip) {
+            } else if self.quick_body && !(self.parting[i] && self.mover[i] == Mover::Tip) {
                 // The back of the tongue making a consonant of its own. Not
-                // lips letting go of a consonant of theirs: parting from a
+                // lips parting from a closure of theirs: opening from a
                 // /b p/ into an /l r/ they moved at the tongue's speed, half
                 // their own, and the burst came out of lips barely apart.
                 self.mover[i] = Mover::Dorsum;
@@ -787,6 +793,7 @@ impl Tract {
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
             {
                 self.mover[i] = Mover::Body;
+                self.parting[i] = false;
             }
         }
         if self.relief > 0.0 {
