@@ -30,6 +30,9 @@ pub const MAX_CONSTRICTIONS: usize = 4;
 pub const TONGUE_INDEX: core::ops::RangeInclusive<f32> = 12.0..=29.0;
 /// Valid tongue body heights (diameter under the tongue; small is high).
 pub const TONGUE_DIAMETER: core::ops::RangeInclusive<f32> = 2.05..=3.5;
+/// Valid tongue root settings (`ln` of the widening of the middle of the
+/// pharynx; see [`Shape::pharynx`](crate::inverse::Shape::pharynx)).
+pub const PHARYNX: core::ops::RangeInclusive<f32> = -1.2..=0.8;
 
 const GLOTTAL_REFLECTION: f32 = 0.75;
 const LIP_REFLECTION: f32 = -0.85;
@@ -72,6 +75,33 @@ const JAW_TIME: f32 = 0.02;
 /// Lip cells over which the jaw's opening grows to its full width, from
 /// [`LIP_START`] on: the corners of the mouth open less than its middle.
 const JAW_RAMP: f32 = 3.0;
+
+// ----- the tongue root (physical engine) ---------------------------------
+//
+// The root of the tongue faces the pharynx. Drawn forward it widens the
+// pharynx (an advanced tongue root, as in the tense vowels /i e u o/),
+// pulled back it narrows it (/a/). The single cosine of the tongue body
+// ties the pharynx to where the tongue is high; the root moves it on its
+// own, with the body and as slowly, and consonants made on a vowel's body
+// keep that vowel's root (see `Tract::pharynx`).
+
+/// First and last cell the tongue root reshapes: from just above the
+/// larynx tube to behind the tongue body's back...
+const PHARYNX_FROM: f32 = 6.0;
+const PHARYNX_TO: f32 = 22.0;
+
+/// How much of the root's widening cell `i` takes: a raised cosine over
+/// [`PHARYNX_FROM`]..[`PHARYNX_TO`], fullest half-way, in the lower and
+/// middle pharynx.
+#[allow(clippy::cast_precision_loss)]
+fn pharynx_weight(i: usize) -> f32 {
+    let x = (i as f32 - PHARYNX_FROM) / (PHARYNX_TO - PHARYNX_FROM);
+    if (0.0..=1.0).contains(&x) {
+        0.5 * (1.0 - cos(2.0 * PI * x))
+    } else {
+        0.0
+    }
+}
 
 // ----- articulators of two speeds (physical engine) ----------------------
 //
@@ -312,6 +342,11 @@ pub(crate) struct Tract {
 
     pub(crate) tongue_index: f32,
     pub(crate) tongue_diameter: f32,
+    /// The tongue root (physical engine): `ln` of how much wider it makes
+    /// the middle of the pharynx, positive drawn forward, negative pulled
+    /// back, `0` at rest (see [`pharynx_weight`]). Part of the vowel shape,
+    /// moved with the tongue body. The classic engine leaves it at rest.
+    pub(crate) pharynx: f32,
     pub(crate) velum_target: f32,
     pub(crate) movement_speed: f32,
     pub(crate) dynamics: Dynamics,
@@ -379,6 +414,7 @@ impl Tract {
             new_reflection_nose: 0.0,
             tongue_index: 12.9,
             tongue_diameter: 2.43,
+            pharynx: 0.0,
             velum_target: VELUM_CLOSED,
             movement_speed: MOVEMENT_SPEED,
             dynamics: Dynamics::Linear,
@@ -457,6 +493,16 @@ impl Tract {
     pub(crate) fn set_tongue(&mut self, index: f32, diameter: f32) {
         self.tongue_index = index.clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end());
         self.tongue_diameter = diameter.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end());
+    }
+
+    /// Set the tongue root (see [`Tract::pharynx`]), within
+    /// [`PHARYNX`]; anything not finite leaves it at rest.
+    pub(crate) fn set_pharynx(&mut self, pharynx: f32) {
+        self.pharynx = if pharynx.is_finite() {
+            pharynx.clamp(*PHARYNX.start(), *PHARYNX.end())
+        } else {
+            0.0
+        };
     }
 
     pub(crate) fn set_velum(&mut self, openness: f32) {
@@ -545,6 +591,17 @@ impl Tract {
         1.5 - curve
     }
 
+    /// [`rest_diameter`](Self::rest_diameter) with the tongue root's own
+    /// shaping of the pharynx (see [`Tract::pharynx`]); the root at rest
+    /// changes nothing.
+    fn body_diameter(&self, i: usize) -> f32 {
+        let d = self.rest_diameter(i);
+        if self.pharynx.abs() <= f32::EPSILON || !self.jaw {
+            return d;
+        }
+        d * exp(self.pharynx * pharynx_weight(i))
+    }
+
     /// How far the jaw parts the lips beyond rest, diameter units: by
     /// [`JAW_OPENING`] times how open the tongue is (0 high, 1 low), less as
     /// the lips round, and not at all while a consonant narrows the tract:
@@ -586,7 +643,7 @@ impl Tract {
     )]
     fn compute_targets(&mut self) {
         for i in 0..N {
-            self.target[i] = self.rest_diameter(i);
+            self.target[i] = self.body_diameter(i);
         }
         let floor = match self.dynamics {
             Dynamics::Linear => 0.0,

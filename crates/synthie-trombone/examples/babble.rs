@@ -384,6 +384,7 @@ fn main() {
         tongue_diameter: 3.0,
         lips: Some(1.8),
         narrowing: None,
+        pharynx: 0.0,
     }
     .coordinates()[2]
         * (DIMS[2] - 1) as f32;

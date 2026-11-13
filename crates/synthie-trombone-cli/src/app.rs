@@ -1395,6 +1395,7 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
         tongue_diameter: height,
         lips,
         narrowing: Some(narrowing),
+        pharynx: 0.0,
     }
 }
 
@@ -1595,6 +1596,7 @@ impl App {
                 tongue_diameter: self.tongue.1,
                 lips: None,
                 narrowing: None,
+                pharynx: 0.0,
             },
         };
         if self.shape_formants(&start).is_some() {

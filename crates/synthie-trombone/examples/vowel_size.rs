@@ -67,6 +67,9 @@ const ROWS: usize = 12;
 const NATIVE_ROW: usize = 5;
 /// Weight of F3 against F1 and F2 (on squared `ln` errors).
 const F3_WEIGHT: f32 = 0.3;
+/// Shape coordinates: tongue index and diameter, lips, narrowing place and
+/// opening, tongue root.
+const D: usize = 6;
 /// Pull towards the neighbouring row's shape, per squared coordinate:
 /// small next to a formant error (moving a coordinate by 0.1 costs as much
 /// as a 0.3 % error), so it only chooses among shapes that reach the
@@ -78,7 +81,22 @@ const BEND: f32 = 3.0e-3;
 /// How hard the native shape is pulled towards the articulators' natural
 /// place for it (see [`prior`]), per coordinate, relative to [`STAY`] and
 /// [`BEND`].
-const NATURAL_PULL: [f32; 5] = [1.0, 1.0, 1.0, 0.1, 0.1];
+const NATURAL_PULL: [f32; D] = [1.0, 1.0, 1.0, 0.1, NARROWING_PULL, ROOT_PULL];
+/// How hard the tongue root is pulled towards its natural setting: about
+/// half as hard as the tongue, so that it moves where the formants need it
+/// (F3 above all, which the tongue and lips alone leave several per cent
+/// off for /i ɪ/), and otherwise stays where the vowel's class puts it.
+const ROOT_PULL: f32 = 0.5;
+/// How hard the narrowing is pulled towards none (or the sound's natural
+/// one): the narrowing belongs to the vowel alone, and a vowel between two
+/// consonants is often over before it has formed, so the shapes lean on
+/// the tongue, its root and the lips first.
+const NARROWING_PULL: f32 = 1.0;
+/// The tongue roots the engine allows (`synthie_trombone::PHARYNX`).
+const PHARYNX: (f32, f32) = (-1.2, 0.8);
+/// Natural tongue root of the tense vowels /i e u o/ (and their glides):
+/// drawn forward, widening the pharynx; the others' is at rest.
+const TENSE_ROOT: f32 = 0.25;
 /// Finite-difference step, in shape coordinates.
 const H: f32 = 0.008;
 /// Tongue body positions and heights the engine allows.
@@ -93,9 +111,12 @@ const START_LIPS: f32 = 1.2;
 /// map, up to the teeth (/i/ in a long tract wants a little more than the
 /// map's 34).
 const NARROWING_AT: (f32, f32) = (10.0, 38.0);
-/// Lowest narrowing place for all but the open vowels: the upper pharynx,
-/// behind the tongue body...
-const ORAL: f32 = 14.0;
+/// Lowest narrowing place for all but the open vowels: the oral cavity,
+/// above the tongue root. Below it, the pharynx is shaped by the root,
+/// which belongs to the tongue body and so stays in place through the
+/// consonants on either side of a vowel; a narrowing there belonged to the
+/// vowel alone, came only with it and was never made in a short vowel...
+const ORAL: f32 = 20.0;
 /// ...and the F1 (adult man, Hz) from which a vowel counts as open.
 const THROAT_F1: f32 = 640.0;
 /// Narrowing openings searched.
@@ -132,9 +153,9 @@ fn articulation(key: VowelKey) -> Articulation {
     key.articulation().expect("a vowel shape")
 }
 
-/// The five raw numbers of a shape: tongue index, tongue diameter, lips
-/// (`0` when spread), narrowing cell and narrowing diameter.
-fn raw(s: &Shape) -> [f32; 5] {
+/// The six raw numbers of a shape: tongue index, tongue diameter, lips
+/// (`0` when spread), narrowing cell, narrowing diameter and tongue root.
+fn raw(s: &Shape) -> [f32; D] {
     let n = s.narrowing.expect("physical vowels narrow the tongue");
     [
         s.tongue_index,
@@ -142,14 +163,15 @@ fn raw(s: &Shape) -> [f32; 5] {
         s.lips.unwrap_or(0.0),
         n.0,
         n.1,
+        s.pharynx,
     ]
 }
 
-/// A shape as five coordinates, each `0‥1` over the ranges searched:
+/// A shape as six coordinates, each `0‥1` over the ranges searched:
 /// tongue index, tongue diameter, lips, narrowing place, narrowing
-/// opening; the openings on a logarithmic scale. Spread lips are `1`, no
-/// narrowing the widest one.
-fn to_x(s: &Shape) -> [f32; 5] {
+/// opening, tongue root; the openings on a logarithmic scale. Spread lips
+/// are `1`, no narrowing the widest one.
+fn to_x(s: &Shape) -> [f32; D] {
     let lin = |v: f32, r: (f32, f32)| (v - r.0) / (r.1 - r.0);
     let log = |v: f32, r: (f32, f32)| {
         ((v - TOUCH).ln() - (r.0 - TOUCH).ln()) / ((r.1 - TOUCH).ln() - (r.0 - TOUCH).ln())
@@ -161,12 +183,13 @@ fn to_x(s: &Shape) -> [f32; 5] {
         s.lips.map_or(1.0, |l| log(l, LIPS)),
         lin(at, NARROWING_AT),
         log(narrow, NARROWING),
+        lin(s.pharynx, PHARYNX),
     ]
     .map(|v| v.clamp(0.0, 1.0))
 }
 
 /// The shape at coordinates `x` (see [`to_x`]); lips only if `rounded`.
-fn from_x(x: &[f32; 5], rounded: bool) -> Shape {
+fn from_x(x: &[f32; D], rounded: bool) -> Shape {
     let lin = |v: f32, r: (f32, f32)| r.0 + (r.1 - r.0) * v.clamp(0.0, 1.0);
     let log = |v: f32, r: (f32, f32)| {
         let (lo, hi) = ((r.0 - TOUCH).ln(), (r.1 - TOUCH).ln());
@@ -177,12 +200,13 @@ fn from_x(x: &[f32; 5], rounded: bool) -> Shape {
         tongue_diameter: lin(x[1], TONGUE_DIAMETER),
         lips: rounded.then(|| log(x[2], LIPS)),
         narrowing: Some((lin(x[3], NARROWING_AT), log(x[4], NARROWING))),
+        pharynx: lin(x[5], PHARYNX),
     }
 }
 
 /// A start for target `t` from shape `s`: lips made to agree with the
 /// target's.
-fn start_from(s: &Shape, t: &Target) -> [f32; 5] {
+fn start_from(s: &Shape, t: &Target) -> [f32; D] {
     let mut x = to_x(s);
     match t.lips {
         Lips::Spread => x[2] = 1.0,
@@ -202,15 +226,15 @@ struct Goal {
     /// `ln` of the target formants.
     t: [f32; 3],
     /// Coordinates of the neighbouring row, to stay near...
-    near: [f32; 5],
+    near: [f32; D],
     /// ...and where the rows before point, not to bend away from.
-    ahead: [f32; 5],
+    ahead: [f32; D],
     /// Which coordinates may move.
-    free: [bool; 5],
+    free: [bool; D],
     /// How hard each coordinate is pulled towards `near` and `ahead`.
-    pull: [f32; 5],
+    pull: [f32; D],
     /// Lowest value of each coordinate (the highest is 1).
-    lo: [f32; 5],
+    lo: [f32; D],
     rounded: bool,
     length: f32,
 }
@@ -224,9 +248,9 @@ impl Goal {
         ]
     }
 
-    fn cost(&self, x: &[f32; 5], r: &[f32; 3]) -> f32 {
+    fn cost(&self, x: &[f32; D], r: &[f32; 3]) -> f32 {
         let mut c: f32 = r.iter().map(|v| v * v).sum();
-        for d in 0..5 {
+        for d in 0..D {
             c += self.pull[d]
                 * (STAY * (x[d] - self.near[d]) * (x[d] - self.near[d])
                     + BEND * (x[d] - self.ahead[d]) * (x[d] - self.ahead[d]));
@@ -234,7 +258,7 @@ impl Goal {
         c
     }
 
-    fn eval(&self, m: &mut Meter, x: &[f32; 5]) -> Option<([f32; 3], f32)> {
+    fn eval(&self, m: &mut Meter, x: &[f32; D]) -> Option<([f32; 3], f32)> {
         let f = m.measure(&from_x(x, self.rounded), self.length)?;
         let r = self.residuals(f);
         Some((r, self.cost(x, &r)))
@@ -242,8 +266,8 @@ impl Goal {
 
     /// Damped Gauss-Newton from `x`, on measured formants. Returns the
     /// coordinates reached, their residuals and cost.
-    fn refine(&self, m: &mut Meter, mut x: [f32; 5]) -> Option<([f32; 5], [f32; 3], f32)> {
-        for d in 0..5 {
+    fn refine(&self, m: &mut Meter, mut x: [f32; D]) -> Option<([f32; D], [f32; 3], f32)> {
+        for d in 0..D {
             x[d] = x[d].clamp(self.lo[d], 1.0);
         }
         let (mut r, mut cost) = self.eval(m, &x)?;
@@ -253,8 +277,8 @@ impl Goal {
                 break;
             }
             // Derivatives, stepping into the allowed box.
-            let mut j = [[0.0f32; 5]; 3];
-            for d in 0..5 {
+            let mut j = [[0.0f32; D]; 3];
+            for d in 0..D {
                 if !self.free[d] {
                     continue;
                 }
@@ -268,12 +292,12 @@ impl Goal {
                     j[k][d] = (ry[k] - r[k]) / h;
                 }
             }
-            let mut a = [[0.0f32; 5]; 5];
-            let mut b = [0.0f32; 5];
-            for d in 0..5 {
+            let mut a = [[0.0f32; D]; D];
+            let mut b = [0.0f32; D];
+            for d in 0..D {
                 for k in 0..3 {
                     b[d] += j[k][d] * r[k];
-                    for c in 0..5 {
+                    for c in 0..D {
                         a[d][c] += j[k][d] * j[k][c];
                     }
                 }
@@ -285,13 +309,13 @@ impl Goal {
             while damping < 1.0e3 {
                 let mut lhs = a;
                 let mut rhs = b.map(|v| -v);
-                for d in 0..5 {
+                for d in 0..D {
                     lhs[d][d] += damping * (a[d][d] + 1.0e-4);
                     let stuck = !self.free[d]
                         || (x[d] <= self.lo[d] && b[d] > 0.0)
                         || (x[d] >= 1.0 && b[d] < 0.0);
                     if stuck {
-                        for c in 0..5 {
+                        for c in 0..D {
                             lhs[d][c] = 0.0;
                             lhs[c][d] = 0.0;
                         }
@@ -299,15 +323,15 @@ impl Goal {
                         rhs[d] = 0.0;
                     }
                 }
-                let Some(step) = solve5(lhs, rhs) else { break };
+                let Some(step) = solve_d(lhs, rhs) else { break };
                 let mut y = x;
-                for d in 0..5 {
+                for d in 0..D {
                     y[d] = (x[d] + step[d]).clamp(self.lo[d], 1.0);
                 }
                 if let Some((ry, cy)) = self.eval(m, &y)
                     && cy < cost
                 {
-                    let size = (0..5).fold(0.0f32, |s, d| s.max((y[d] - x[d]).abs()));
+                    let size = (0..D).fold(0.0f32, |s, d| s.max((y[d] - x[d]).abs()));
                     x = y;
                     r = ry;
                     cost = cy;
@@ -325,25 +349,25 @@ impl Goal {
     }
 }
 
-/// Solve the 5×5 system `a · x = b` by Gaussian elimination.
-fn solve5(mut a: [[f32; 5]; 5], mut b: [f32; 5]) -> Option<[f32; 5]> {
-    for p in 0..5 {
+/// Solve the D×D system `a · x = b` by Gaussian elimination.
+fn solve_d(mut a: [[f32; D]; D], mut b: [f32; D]) -> Option<[f32; D]> {
+    for p in 0..D {
         let pivot = a[p][p];
         if pivot.abs() < 1.0e-12 || !pivot.is_finite() {
             return None;
         }
-        for r in p + 1..5 {
+        for r in p + 1..D {
             let m = a[r][p] / pivot;
-            for c in p..5 {
+            for c in p..D {
                 a[r][c] -= m * a[p][c];
             }
             b[r] -= m * b[p];
         }
     }
-    let mut x = [0.0f32; 5];
-    for p in (0..5).rev() {
+    let mut x = [0.0f32; D];
+    for p in (0..D).rev() {
         let mut s = b[p];
-        for c in p + 1..5 {
+        for c in p + 1..D {
             s -= a[p][c] * x[c];
         }
         x[p] = s / a[p][p];
@@ -354,7 +378,7 @@ fn solve5(mut a: [[f32; 5]; 5], mut b: [f32; 5]) -> Option<[f32; 5]> {
 /// One solved row.
 #[derive(Clone, Copy)]
 struct Solved {
-    x: [f32; 5],
+    x: [f32; D],
     /// Relative errors of F1, F2, F3 against the target.
     err: [f32; 3],
     /// Whether the babble map's start won.
@@ -378,7 +402,7 @@ fn rel(r: &[f32; 3]) -> [f32; 3] {
 /// and does not make its formants with a pharynx pinched near the folds
 /// (which a real voice's folds would feel: such shapes sound different
 /// from their closed-glottis formants).
-fn prior(t: &Target) -> [f32; 5] {
+fn prior(t: &Target) -> [f32; D] {
     let a = articulation(t.key);
     let (index, diameter) = a.tongue.expect("a vowel tongue");
     let lips = match t.lips {
@@ -391,6 +415,7 @@ fn prior(t: &Target) -> [f32; 5] {
         tongue_diameter: diameter,
         lips,
         narrowing,
+        pharynx: natural_root(t.key),
     });
     if narrowing.is_none() {
         x[3] = 0.5;
@@ -399,14 +424,26 @@ fn prior(t: &Target) -> [f32; 5] {
     x
 }
 
+/// The tongue root a vowel shape has by phonetics: drawn forward for the
+/// tense vowels /i e u o/ and their glides, at rest for the others.
+fn natural_root(key: VowelKey) -> f32 {
+    use Phoneme as P;
+    match key {
+        VowelKey::Vowel(P::Iy | P::Uw | P::Y | P::W)
+        | VowelKey::Start(P::Ey | P::Ow)
+        | VowelKey::End(P::Ey | P::Ow | P::Ay | P::Aw | P::Oy) => TENSE_ROOT,
+        _ => 0.0,
+    }
+}
+
 /// Lowest coordinates target `t` may take: only open vowels (F1 of
 /// [`THROAT_F1`] or more) narrow the pharynx below [`ORAL`]. A narrowing
 /// that low, close to the folds, loads them: the sound's F1 then rises
 /// above the tract's own, by 5 % for /e/ and /æ/ (as the listener hears
 /// them), where a narrowing along the tongue leaves it alone. Open vowels
 /// need it all the same, to reach their F1.
-fn lowest(t: &Target) -> [f32; 5] {
-    let mut lo = [0.0; 5];
+fn lowest(t: &Target) -> [f32; D] {
+    let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
         lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
     }
@@ -421,7 +458,7 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
     let f = vowel_targets::formants(t.key, 1.0).expect("a target");
     let rounded = t.lips == Lips::Rounded;
     let home = prior(t);
-    let mut starts: Vec<([f32; 5], bool)> = vec![(home, false)];
+    let mut starts: Vec<([f32; D], bool)> = vec![(home, false)];
     for f3 in [Some(f[2]), None] {
         let near = from_x(&home, rounded);
         starts.push((
@@ -431,10 +468,10 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
         starts.push((start_from(&inverse::solve(f[0], f[1], f3, None), t), true));
     }
     let lo = lowest(t);
-    let starts: Vec<([f32; 5], bool)> = starts
+    let starts: Vec<([f32; D], bool)> = starts
         .into_iter()
         .map(|(mut x, m)| {
-            for d in 0..5 {
+            for d in 0..D {
                 x[d] = x[d].max(lo[d]);
             }
             (x, m)
@@ -444,7 +481,7 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
         t: f.map(f32::ln),
         near: home,
         ahead: home,
-        free: [true, true, rounded, true, true],
+        free: [true, true, rounded, true, true, true],
         // Tongue and lips have a natural place; the narrowing is there to
         // place F3 and is let go wherever that needs it.
         pull: NATURAL_PULL,
@@ -452,7 +489,7 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
         rounded,
         length: 1.0,
     };
-    let mut best: Option<([f32; 5], f32, bool)> = None;
+    let mut best: Option<([f32; D], f32, bool)> = None;
     for (x, from_map) in starts {
         let Some((x, _, cost)) = goal.refine(m, x) else {
             continue;
@@ -467,7 +504,7 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
     let polish = Goal {
         near: x,
         ahead: x,
-        pull: [1.0; 5],
+        pull: [1.0; D],
         ..goal
     };
     let (x, r, _) = polish.refine(m, x).expect("a measurable shape");
@@ -480,7 +517,7 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
 
 /// Solve the rows of target `t` outwards from the native one `x0`, `up`
 /// towards longer tracts or down towards shorter ones.
-fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solved)> {
+fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solved)> {
     let rounded = t.lips == Lips::Rounded;
     // /a/ in a small body keeps its throat: the narrowing that would lift
     // F1 the last 2 % sits deep in the pharynx, and tightening it there
@@ -488,7 +525,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solve
     // which upsets the balance of /s/ against /a/ that the physical gates
     // hold). Its tongue still moves.
     let throat = t.key == VowelKey::Vowel(Phoneme::Aa) && !up;
-    let free = [true, true, rounded, !throat, !throat];
+    let free = [true, true, rounded, !throat, !throat, true];
     let rows: Vec<usize> = if up {
         (NATIVE_ROW + 1..ROWS).collect()
     } else {
@@ -500,8 +537,8 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solve
         let length = row_length(k);
         let target = vowel_targets::formants(t.key, length).expect("a target");
         // Carry on the way the shape has been moving.
-        let mut ahead = [0.0f32; 5];
-        for d in 0..5 {
+        let mut ahead = [0.0f32; D];
+        for d in 0..D {
             ahead[d] = if free[d] {
                 (2.0 * last[d] - before[d]).clamp(0.0, 1.0)
             } else {
@@ -513,7 +550,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solve
             near: last,
             ahead,
             free,
-            pull: [1.0; 5],
+            pull: [1.0; D],
             lo: lowest(t),
             rounded,
             length,
@@ -525,7 +562,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; 5], up: bool) -> Vec<(usize, Solve
             let guess =
                 inverse::solve_for(target[0], target[1], Some(target[2]), Some(&near), length);
             let mut g = start_from(&guess, t);
-            for d in 0..5 {
+            for d in 0..D {
                 if !free[d] {
                     g[d] = last[d];
                 }
@@ -578,7 +615,7 @@ fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&mut Meter, &T) -> R + Sync
 
 /// The shape the library makes of the table at `length`, with the same
 /// arithmetic as `vowel_size::shape`.
-fn interpolate(rows: &[[u16; 5]; ROWS], length: f32) -> Shape {
+fn interpolate(rows: &[[i32; D]; ROWS], length: f32) -> Shape {
     let (a, s) = if length.to_bits() == 1.0f32.to_bits() {
         (NATIVE_ROW, 0.0)
     } else {
@@ -587,8 +624,8 @@ fn interpolate(rows: &[[u16; 5]; ROWS], length: f32) -> Shape {
         (a, t - a as f32)
     };
     let v = |k: usize| {
-        let lo = f32::from(rows[a][k]);
-        let hi = rows.get(a + 1).map_or(lo, |r| f32::from(r[k]));
+        let lo = rows[a][k] as f32;
+        let hi = rows.get(a + 1).map_or(lo, |r| r[k] as f32);
         (lo + (hi - lo) * s) / 1000.0
     };
     Shape {
@@ -596,6 +633,7 @@ fn interpolate(rows: &[[u16; 5]; ROWS], length: f32) -> Shape {
         tongue_diameter: v(1).clamp(TONGUE_DIAMETER.0, TONGUE_DIAMETER.1),
         lips: (rows[a][2] > 0).then(|| v(2).max(MIN_LIPS)),
         narrowing: Some((v(3), v(4).max(MIN_NARROWING))),
+        pharynx: v(5).clamp(PHARYNX.0, PHARYNX.1),
     }
 }
 
@@ -656,13 +694,13 @@ fn main() {
     println!("solved in {:.1} s", started.elapsed().as_secs_f32());
 
     // Quantise to thousandths of the raw shape numbers.
-    let mut table = vec![[[0u16; 5]; ROWS]; targets.len()];
+    let mut table = vec![[[0i32; D]; ROWS]; targets.len()];
     for (v, t) in targets.iter().enumerate() {
         for k in 0..ROWS {
             let s = solved[v][k].expect("every row solved");
             let r = raw(&from_x(&s.x, t.lips == Lips::Rounded));
-            for d in 0..5 {
-                table[v][k][d] = (r[d] * 1000.0).round() as u16;
+            for d in 0..D {
+                table[v][k][d] = (r[d] * 1000.0).round() as i32;
             }
         }
     }
@@ -844,10 +882,10 @@ fn main() {
          /// The row at the native length.\n\
          pub(super) const NATIVE: usize = {NATIVE_ROW};\n\
          /// Per vowel shape and row: tongue index, tongue diameter, lips (`0`\n\
-         /// when spread), narrowing cell and narrowing diameter, in\n\
-         /// thousandths.\n\
+         /// when spread), narrowing cell, narrowing diameter and tongue\n\
+         /// root, in thousandths.\n\
          #[rustfmt::skip]\n\
-         pub(super) static SHAPES: &[(VowelKey, [[u16; 5]; {ROWS}])] = &["
+         pub(super) static SHAPES: &[(VowelKey, [[i32; {D}]; {ROWS}])] = &["
     );
     for (v, t) in targets.iter().enumerate() {
         let _ = writeln!(src, "    ({}, [", key_src(t.key));
@@ -855,7 +893,7 @@ fn main() {
             let rows: Vec<String> = rows
                 .iter()
                 .map(|row| {
-                    let cells: Vec<String> = row.iter().map(u16::to_string).collect();
+                    let cells: Vec<String> = row.iter().map(i32::to_string).collect();
                     format!("[{}]", cells.join(","))
                 })
                 .collect();

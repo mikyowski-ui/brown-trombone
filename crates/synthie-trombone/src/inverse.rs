@@ -87,6 +87,13 @@ pub struct Shape {
     pub lips: Option<f32>,
     /// Narrowing along the tongue, `(cell, touch diameter)`, or `None`.
     pub narrowing: Option<(f32, f32)>,
+    /// The tongue root: `ln` of how much it widens the middle of the
+    /// pharynx (positive drawn forward, as in the tense vowels; negative
+    /// pulled back, as in /ɑ/), `0.0` at rest. It belongs to the tongue
+    /// body: consonants made on a vowel keep its root. The babble map
+    /// covers the root at rest only; [`predict`] and [`solve`] leave it
+    /// there.
+    pub pharynx: f32,
 }
 
 /// Position of `v` in `range`, `0‥1`.
@@ -165,6 +172,7 @@ impl Shape {
                     from_unit_log(x[4], NARROWING),
                 )
             }),
+            pharynx: 0.0,
         }
     }
 }

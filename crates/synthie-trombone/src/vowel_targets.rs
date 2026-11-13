@@ -179,6 +179,15 @@ pub const TARGETS: &[Target] = &[
     end(Phoneme::Ow, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Aw, BACK_OFFGLIDE, Lips::Rounded),
     end(Phoneme::Oy, FRONT_OFFGLIDE, Lips::Spread),
+    // Where the lax vowels glide to over their last third: 40 % of the
+    // way from the vowel to schwa (AX above). The heavy tongue body gets
+    // a little under half of the way there before the next sound takes
+    // it, so the vowel ends some 15 to 20 % of the way to schwa, as
+    // English lax vowels do (they centralise; the tense ones do not).
+    end(Phoneme::Ih, [ 460.0, 1832.0, 2630.0], Lips::Spread),
+    end(Phoneme::Eh, [ 569.0, 1691.0, 2583.0], Lips::Spread),
+    end(Phoneme::Ah, [ 560.0, 1368.0, 2550.0], Lips::Spread),
+    end(Phoneme::Uh, [ 485.0, 1285.0, 2480.0], Lips::Rounded),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

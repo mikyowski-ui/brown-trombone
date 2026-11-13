@@ -510,6 +510,7 @@ pub fn shape_json(s: &Shape) -> Value {
         "tongue_diameter": s.tongue_diameter,
         "lips": s.lips,
         "narrowing": s.narrowing.map(|(at, d)| [at, d]),
+        "pharynx": s.pharynx,
     })
 }
 
@@ -528,6 +529,12 @@ fn shape_from(v: &Value) -> Result<Shape, String> {
             None
         } else {
             Some(pair(narrowing, "narrowing")?)
+        },
+        // Takes from before the tongue root had a setting have it at rest.
+        pharynx: if v.get("pharynx").is_some() {
+            num(v, "pharynx")?
+        } else {
+            0.0
         },
     })
 }
