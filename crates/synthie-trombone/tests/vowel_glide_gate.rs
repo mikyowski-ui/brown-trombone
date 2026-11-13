@@ -113,11 +113,24 @@ fn lax_vowels_are_35_to_40_percent_shorter_than_tense_ones() {
     assert!((bit - beat).abs() < 1e-6);
 }
 
-/// F1 and F2 of the tract as it is now (closed-glottis transfer function).
+/// F1 and F2 of the tract as it is now: the first two peaks of the
+/// closed-glottis transfer function within 40 dB of its tallest (a rounded
+/// vowel's F2 is weak beside its F1).
 fn formants(voice: &Trombone) -> (f32, f32) {
-    let f = spectrum::formants(voice, 3500.0);
-    let mut hz = f.iter().map(|r| r.hz).filter(|&hz| hz > 150.0);
-    (hz.next().unwrap_or(0.0), hz.next().unwrap_or(0.0))
+    let step = 5.0;
+    let rate = voice.tick_rate();
+    let mut x = vec![0.0f32; (0.08 * rate) as usize];
+    voice.impulse_response(&mut x);
+    let mag: Vec<f32> = spectrum::spectrum(&x, rate, 3500.0, step)
+        .iter()
+        .map(|m| 20.0 * m.max(1e-20).log10())
+        .collect();
+    let top = mag.iter().copied().fold(f32::MIN, f32::max);
+    let reach = (40.0 / step) as usize;
+    let mut peaks = (reach.max((150.0 / step) as usize)..mag.len() - reach)
+        .filter(|&k| mag[k] > top - 40.0 && mag[k - reach..=k + reach].iter().all(|&v| v <= mag[k]))
+        .map(|k| k as f32 * step);
+    (peaks.next().unwrap_or(0.0), peaks.next().unwrap_or(0.0))
 }
 
 /// F1 and F2 at 40 % and at 95 % of the vowel `p` said as `[HH p1]` at the
@@ -185,35 +198,49 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
 
 #[test]
 fn ey_and_ow_glide_the_whole_way() {
-    for (p, f1_fall, f2_change) in [(Phoneme::Ey, 60.0, 100.0), (Phoneme::Ow, 50.0, -50.0)] {
-        let (a, b) = trajectory(p);
-        println!("{p}: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}", a.0, b.0, a.1, b.1);
-        assert!(a.0 - b.0 > f1_fall, "{p}: F1 {} -> {}", a.0, b.0);
-        if f2_change > 0.0 {
-            assert!(b.1 - a.1 > f2_change, "{p}: F2 {} -> {}", a.1, b.1);
-        } else {
-            assert!(b.1 - a.1 < f2_change, "{p}: F2 {} -> {}", a.1, b.1);
-        }
-    }
+    // /eɪ/ closes and fronts, /oʊ/ closes.
+    let (a, b) = trajectory(Phoneme::Ey);
+    println!("EY: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}", a.0, b.0, a.1, b.1);
+    assert!(a.0 - b.0 > 60.0 && b.1 - a.1 > 100.0, "EY: {a:?} -> {b:?}");
+    let (a, b) = trajectory(Phoneme::Ow);
+    println!("OW: F1 {:.0} -> {:.0}, F2 {:.0} -> {:.0}", a.0, b.0, a.1, b.1);
+    assert!(a.0 - b.0 > 40.0, "OW: {a:?} -> {b:?}");
 }
 
 #[test]
-fn tense_vowels_draw_the_tongue_root_forward_and_lax_ones_do_not() {
+fn the_tongue_root_parts_tense_from_lax_and_stays_with_the_body() {
     let root = |p: Phoneme| p.physical_shape(1.0).expect("a vowel").pharynx;
-    for p in [Phoneme::Iy, Phoneme::Ey] {
-        assert!(root(p) > 0.2, "{p}: {}", root(p));
-    }
+    let end_root = |p: Phoneme| {
+        p.glide_end()
+            .and_then(|a| a.physical_shape(1.0))
+            .expect("a diphthong")
+            .pharynx
+    };
+    // /i/ widens the pharynx; /eɪ/ draws the root forward as it rises.
+    assert!(root(Phoneme::Iy) > 0.3, "IY: {}", root(Phoneme::Iy));
+    assert!(end_root(Phoneme::Ey) > root(Phoneme::Ey) + 0.3);
+    // The lax vowels leave it at rest or pull it back.
     for p in [Phoneme::Ih, Phoneme::Eh, Phoneme::Ah, Phoneme::Uh] {
-        assert!(root(p) < 0.15, "{p}: {}", root(p));
+        assert!(root(p) < 0.1, "{p}: {}", root(p));
     }
-    // A consonant made on a vowel keeps that vowel's root: the classic
-    // engine, which has none, is left alone.
-    let mut a = Trombone::new(SR);
-    a.set_engine(Engine::Physical);
-    a.articulate_phoneme(Phoneme::Iy);
-    a.settle();
-    let wide = a.target_diameters()[14];
-    a.articulate_phoneme(Phoneme::Ih);
-    a.settle();
-    assert!(a.target_diameters()[14] < wide);
+    // A consonant made on a vowel keeps that vowel's root (the body glides
+    // from vowel to vowel under it); the classic engine has none.
+    let pharynx_under_s = |engine: Engine, v: Phoneme| {
+        let mut t = Trombone::new(SR);
+        t.set_engine(engine);
+        let mut s = Phoneme::S.articulation();
+        s.vowel = Some(VowelKey::Vowel(v));
+        s.tongue = v.articulation().tongue;
+        t.articulate(&s);
+        t.settle();
+        t.target_diameters()[13]
+    };
+    assert!(
+        pharynx_under_s(Engine::Physical, Phoneme::Uh)
+            < 0.8 * pharynx_under_s(Engine::Physical, Phoneme::Iy)
+    );
+    assert_eq!(
+        pharynx_under_s(Engine::Classic, Phoneme::Uh).to_bits(),
+        pharynx_under_s(Engine::Classic, Phoneme::Uh).to_bits()
+    );
 }

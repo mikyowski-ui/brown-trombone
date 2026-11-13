@@ -537,7 +537,19 @@ impl Articulation {
             a.lips = lips.map(|d| Constriction::new(LIPS, d));
             return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        (self.leaning_on(tongue, tract_length), None)
+        let mut a = self.leaning_on(tongue, tract_length);
+        // The lips round ahead of a rounded vowel ("hook", "to"), through
+        // whatever consonant comes before it that does not use the lips
+        // itself or hiss: rounding is the vowel's, as its tongue is, and
+        // formed only with the vowel it came too late for a short /ʊ/.
+        let hisses = self
+            .constriction
+            .is_some_and(|c| c.diameter > SHUT + 0.3 && c.diameter <= HISS + 0.3);
+        let labial = self.constriction.is_some_and(|c| c.index >= TEETH);
+        if self.lips.is_none() && !hisses && !labial {
+            a.lips = lips.map(|d| Constriction::new(LIPS, d));
+        }
+        (a, None)
     }
 
     /// A consonant made on top of a vowel's tongue body `body` (physical
