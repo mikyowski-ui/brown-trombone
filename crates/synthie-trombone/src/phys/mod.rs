@@ -117,6 +117,11 @@ const SKIN_RADIATION: f32 = 0.4;
 
 /// Joint in front of which the upper teeth stand in the air stream.
 pub(crate) const TEETH_AT: usize = 40;
+/// Cell between the edges of the incisors, which the jaw closes to a
+/// narrow gap for /s z/ (see [`Phys::set_teeth`]). A jet driven through it
+/// strikes them at its entrance, one cell further on than a jet that
+/// crosses an open mouth to the back of the upper teeth.
+pub(crate) const TEETH_GAP: usize = TEETH_AT + 1;
 
 /// How far rounded lips are pushed forward, at the most, in cells of tube:
 /// about 0.7 cm at the native size. Rounding is not only a narrowing: the
@@ -157,6 +162,17 @@ pub(crate) fn protrusion(diameter: f32) -> f32 {
 }
 /// How far behind the teeth (cells) a jet can form and still strike them.
 const JET_REACH: usize = 9;
+/// Length of a jet's core, in diameters of the gap it leaves: so far it
+/// keeps the speed it left with, and beyond it slows as it spreads, in
+/// proportion to the distance (a free round jet's core is 5 to 7
+/// diameters; one confined between the tongue and the palate carries a
+/// little further). The jet of /s z/ reaches the teeth inside its core;
+/// that of /ʃ ʒ/, made twice as far back, has slowed by a tenth when it
+/// gets there and strikes them some 2 dB more weakly.
+const JET_CORE: f32 = 8.0;
+/// Seconds over which the jaw raises the lower incisors to the upper ones,
+/// or lowers them again (see [`Phys::set_teeth`]).
+const TEETH_TIME: f32 = 0.02;
 
 /// When a closure opens while the voice is wanted, the air the walls took
 /// up behind it is let go for this long, seconds, with this time constant,
@@ -373,8 +389,10 @@ pub(crate) struct Phys {
     /// the noise rule sees).
     flow: [f32; N + 1],
     flow_smooth: f32,
-    /// Narrowest cell behind the teeth this block.
+    /// Narrowest cell behind the teeth this block, and how far its jet
+    /// travels to strike them, cm (see [`JET_CORE`]).
     jet_cell: usize,
+    jet_travel: f32,
     turbulence: Turbulence,
     noisy: bool,
     /// Fastest jet the present lung pressure can drive, cm/s.
@@ -386,6 +404,18 @@ pub(crate) struct Phys {
     summed: f32,
     flow_mean: [f32; N + 1],
     jet_mean: [f32; N + 1],
+    /// How far the jaw has brought the incisors together, `0` (as the
+    /// lips and tongue leave them) to `1` (to the gap `teeth_gap`), at the
+    /// start and end of the block, and where it is going.
+    teeth0: f32,
+    teeth1: f32,
+    teeth_target: f32,
+    /// Gap between the incisors when they are together, articulation
+    /// diameter units (see `Tuning::sibilant_teeth`).
+    teeth_gap: f32,
+    /// A measuring pressure source, dyn/cm², in series at joint `probe.0`
+    /// (between cells `probe.0 − 1` and `probe.0`) for the next tick only.
+    probe: (usize, f32),
 
     pub(crate) gauge: Gauge,
 }
@@ -444,6 +474,7 @@ impl Phys {
             flow: [0.0; N + 1],
             flow_smooth: 1.0,
             jet_cell: TEETH_AT - 1,
+            jet_travel: 0.0,
             turbulence: Turbulence::new(0x7B0E_5EED),
             noisy: true,
             v_max: V_MAX,
@@ -452,6 +483,11 @@ impl Phys {
             summed: 0.0,
             flow_mean: [0.0; N + 1],
             jet_mean: [0.0; N + 1],
+            teeth0: 0.0,
+            teeth1: 0.0,
+            teeth_target: 0.0,
+            teeth_gap: crate::Tuning::DEFAULT.sibilant_teeth,
+            probe: (0, 0.0),
             gauge: Gauge::default(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
@@ -503,6 +539,7 @@ impl Phys {
     /// Take the noise and nasal settings of a voice.
     pub(crate) fn set_tuning(&mut self, tuning: &crate::Tuning) {
         self.nasal_port = tuning.nasal_port;
+        self.teeth_gap = tuning.sibilant_teeth;
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
     }
@@ -682,6 +719,19 @@ impl Phys {
         }
     }
 
+    /// Whether the jaw is bringing the incisors together, `0..1`: it does
+    /// for /s z/, whose jet must strike the teeth through a narrow gap.
+    /// The teeth are bone, not part of the tongue and lip shape the
+    /// articulation model makes; they narrow the cell between them
+    /// ([`TEETH_GAP`]) to `Tuning::sibilant_teeth`, following the jaw over
+    /// [`TEETH_TIME`]. The small cavity this closes off between the tongue
+    /// tip and the teeth is what gives /s/ its peak at 5 to 8 kHz: open to
+    /// the lips, the mouth in front of the tongue is a horn with no
+    /// resonance below 12 kHz. Call before [`begin_block`](Self::begin_block).
+    pub(crate) fn set_teeth(&mut self, share: f32) {
+        self.teeth_target = share.clamp(0.0, 1.0);
+    }
+
     /// How fast each cell's diameter will be changing at the end of the
     /// coming block, diameter units per second (the articulators' own
     /// speeds). Call before [`begin_block`](Self::begin_block).
@@ -702,6 +752,8 @@ impl Phys {
         self.a0 = self.a1;
         self.d0 = self.d1;
         self.m0 = self.m1;
+        self.teeth0 = self.teeth1;
+        self.teeth1 += (self.teeth_target - self.teeth1) * (block_dt / TEETH_TIME).min(1.0);
         for (i, &d) in diameter.iter().enumerate() {
             self.a1[i] = self.area_of(d);
             self.d1[i] = d;
@@ -720,6 +772,8 @@ impl Phys {
         if first {
             self.a0 = self.a1;
             self.d0 = self.d1;
+            self.teeth1 = self.teeth_target;
+            self.teeth0 = self.teeth1;
             self.m0 = [0.0; N];
             self.m1 = [0.0; N];
             for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
@@ -754,6 +808,7 @@ impl Phys {
         self.adot = [0.0; N];
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn refresh(&mut self, block_dt: f32) {
         self.wall_s0 = self.wall_s1;
         self.att0 = self.att;
@@ -786,6 +841,20 @@ impl Phys {
             }
         }
         self.jet_cell = narrowest;
+        // The jet leaves at the joint after its cell.
+        let strike = TEETH_AT as f32 + self.teeth1;
+        self.jet_travel = (strike - (narrowest + 1) as f32) * self.dx;
+    }
+
+    /// Switch the noise sources off or on (for measuring around a flow).
+    pub(crate) fn set_noisy(&mut self, on: bool) {
+        self.noisy = on;
+    }
+
+    /// Put a pressure pulse of `p`, dyn/cm², in series at joint `joint`
+    /// for the next tick (for measuring how a noise source there is heard).
+    pub(crate) fn kick(&mut self, joint: usize, p: f32) {
+        self.probe = (joint, p);
     }
 
     /// Pressure in cell `i`, dyn/cm².
@@ -865,10 +934,23 @@ impl Phys {
             l3 - l2,
         );
         let mut sealed = false;
+        let teeth = self.teeth0 + (self.teeth1 - self.teeth0) * lambda;
+        // The lip opening, as the lips alone make it (the teeth are not
+        // the lips rounding).
+        let mut lip_opening = f32::INFINITY;
         for i in 0..N {
             self.wall_y[i] *= keep;
             let d = h00 * self.d0[i] + h10 * self.m0[i] + h01 * self.d1[i] + h11 * self.m1[i];
-            let a = self.area_of(d);
+            let mut a = self.area_of(d);
+            if i >= LIP_OPENING {
+                lip_opening = lip_opening.min(a);
+            }
+            if i == TEETH_GAP && teeth > 0.0 {
+                let gap = self.area_of(self.teeth_gap);
+                if gap < a {
+                    a += (gap - a) * teeth;
+                }
+            }
             sealed |= i >= SEAL_FROM && a < A_MIN;
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);
@@ -901,6 +983,15 @@ impl Phys {
             (0.0, 0.0)
         };
         let mut jet = (0.0f32, 0usize);
+        // The share of its noise the jet behind the teeth still makes when
+        // it reaches them: the cube of the speed it has left, which follows
+        // the gap it leaves tick by tick (a closing gap's jet dies away
+        // before the teeth as the gap shuts).
+        let reach = {
+            let width = 2.0 * sqrt(1.0 / (PI * inv[self.jet_cell]));
+            let speed = (JET_CORE * width / self.jet_travel.max(1e-6)).min(1.0);
+            speed * speed * speed
+        };
         for j in 1..N {
             let i = j - 1;
             let mut shunt = self.wall_shunt(i, y[i] * RHO_C);
@@ -938,7 +1029,14 @@ impl Phys {
                 if free > jet.0 {
                     jet = (free, i);
                 }
-                if j == TEETH_AT && self.jet_cell + 1 < TEETH_AT {
+                // A jet from behind the teeth strikes the upper ones, or,
+                // as the jaw closes the incisors, the gap between them.
+                let at = match j {
+                    TEETH_AT => 1.0 - teeth,
+                    TEETH_GAP => teeth,
+                    _ => 0.0,
+                };
+                if at > 0.0 && self.jet_cell + 1 < TEETH_AT {
                     let c = self.jet_cell;
                     let struck = jet_noise(
                         self.flow[c + 1],
@@ -946,12 +1044,16 @@ impl Phys {
                         inv[j],
                         self.turbulence.teeth_eff,
                         self.v_max,
-                    );
+                    ) * reach
+                        * at;
                     pn += hiss_teeth * struck;
                     if struck > jet.0 {
                         jet = (struck, c);
                     }
                 }
+            }
+            if j == self.probe.0 {
+                pn += self.probe.1;
             }
             let s = solve(
                 &Joint {
@@ -988,11 +1090,7 @@ impl Phys {
         let i = N - 1;
         let shunt = self.wall_shunt(i, y[i] * RHO_C);
         let lip_area = y[i] * RHO_C;
-        let narrowest = y[LIP_OPENING..]
-            .iter()
-            .fold(f32::INFINITY, |m, &v| m.min(v))
-            * RHO_C;
-        let series = self.lip_tube(narrowest);
+        let series = self.lip_tube(lip_opening);
         let mut u_lips = 0.0;
         let mut joint = Joint {
             y1: y[i],
@@ -1032,6 +1130,7 @@ impl Phys {
             nl[i] = s.out_left;
             u_skin += self.wall_commit(i, s.p1);
         }
+        self.probe.1 = 0.0;
         self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
         self.flow_sum[N] += u_lips;
         self.summed += 1.0;
