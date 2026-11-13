@@ -240,7 +240,7 @@ reads the rest as well:
 | gaps | `fricative_gap`, `approximant_gap`, `nasal_port` |
 | larynx in consonants | `abduction_time`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `voiced_stop_slack`, `cavity_expansion`, `onset_kick`, `kick_time` |
 | lengths | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `voiced_sibilant_length`, `approximant_length`, `aspirate_length`, `aspiration`, `stress_stretch`, `vowel_hold` |
-| lax vowels | `lax_length`, `reduced_length`, `lax_nucleus` |
+| lax vowels | `lax_length`, `unstressed_lax_length`, `lax_nucleus` |
 | voicing timing | `vot_labial`, `vot_alveolar`, `vot_velar`, `devoicing_lead`, `unstressed_vot`, `fortis_closure`, `prefortis_clip`, `prelenis_stretch` |
 | articulators | `lead`, `release_lead`, `articulation_rate`, `body_rate`, `dorsum_rate`, `closing_ratio`, `release_speed`, `closure_overshoot` |
 | breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
@@ -382,9 +382,11 @@ as the model goes:
   protrusion and a jaw; some of them were moved by a few per cent against
   the speech recognizer (`src/vowel_targets.rs` says which and by how
   much). They are held longer than the classic engine's, since the slow
-  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are
-  35 to 40 % shorter than the tense ones and glide part of the way
-  towards schwa over their last third, and /eɪ/ glides the whole way. A
+  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are a
+  little shorter than the tense ones (`lax_length` makes them as much
+  shorter as a speaker's, 0.62, at a cost the tuning sentences measure)
+  and glide part of the way towards schwa over their last third, and /eɪ/
+  glides the whole way. A
   vowel shape may also set the tongue root, which widens or narrows the
   pharynx on its own and stays with the tongue body under the consonants
   around the vowel (`Shape::pharynx`); the built-in vowels leave it at

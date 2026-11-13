@@ -981,8 +981,8 @@ fn number_words(digits: &str) -> String {
 // their mean and the long tense /æ ɑ ɔ ɝ/ about 1.17 (/i u/ about 1). In
 // running speech the lax vowels are shorter still against the tense ones
 // (a speaker reading LibriSpeech holds his stressed /ɪ ɛ ʌ/ for about 60 %
-// of his /i eɪ æ ɔ/): the lax vowels take `Tuning::lax_length` of a tense
-// vowel's length.
+// of his /i eɪ æ ɔ/): stressed lax vowels take `Tuning::lax_length` of a
+// tense vowel's length, unstressed ones `Tuning::unstressed_lax_length`.
 
 /// Length of the long tense vowels /æ ɑ ɔ ɝ/ against the others (physical
 /// engine).
@@ -1006,10 +1006,11 @@ fn is_lax(p: Phoneme) -> bool {
 /// than on the classic engine (`Tuning::vowel_hold`), lax vowels are
 /// shorter than tense ones, long tense ones longer, /aɪ aʊ ɔɪ/ longer than
 /// /eɪ oʊ/.
-fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
+fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
-        _ if is_lax(p) => timing.lax_length * timing.vowel_hold,
+        _ if is_lax(p) && stressed => timing.lax_length * timing.vowel_hold,
+        _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
         P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
         P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
         _ => timing.vowel_hold,
@@ -1021,7 +1022,7 @@ fn own_length(p: Phoneme, timing: &Tuning) -> f32 {
 fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) -> f32 {
     let own = |d: f32| {
         if physical {
-            d * own_length(p, timing)
+            d * own_length(p, stressed, timing)
         } else {
             d
         }

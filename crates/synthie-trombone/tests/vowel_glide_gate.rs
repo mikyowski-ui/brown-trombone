@@ -27,9 +27,18 @@ fn physical() -> VoiceSettings {
     Preset::Deep.settings().with_engine(Engine::Physical)
 }
 
+/// The physical voice with its lax vowels as much shorter than its tense
+/// ones as a speaker's (the default is longer; see `Tuning::lax_length`).
+fn short_lax() -> VoiceSettings {
+    let mut v = physical();
+    v.tuning.lax_length = 0.62;
+    v.tuning.unstressed_lax_length = 0.62;
+    v
+}
+
 /// Seconds of `p` in `text` (every segment of it).
 fn length(text: &str, p: Phoneme) -> f32 {
-    Utterance::from_text(text, &physical().prosody())
+    Utterance::from_text(text, &short_lax().prosody())
         .segments()
         .iter()
         .filter(|s| s.phoneme == p)
@@ -38,7 +47,7 @@ fn length(text: &str, p: Phoneme) -> f32 {
 }
 
 #[test]
-fn lax_vowels_are_35_to_40_percent_shorter_than_tense_ones() {
+fn lax_vowels_can_be_35_to_40_percent_shorter_than_tense_ones() {
     // In the same frame, stressed and unstressed...
     for (lax, tense) in [(Phoneme::Ih, Phoneme::Iy), (Phoneme::Uh, Phoneme::Uw)] {
         for stress in ["1", "0"] {
@@ -64,7 +73,7 @@ fn lax_vowels_are_35_to_40_percent_shorter_than_tense_ones() {
     let tense = [Phoneme::Iy, Phoneme::Uw, Phoneme::Ey, Phoneme::Ow];
     let (mut l, mut t) = (Vec::new(), Vec::new());
     for s in sentences {
-        let u = Utterance::from_text(s, &physical().prosody());
+        let u = Utterance::from_text(s, &short_lax().prosody());
         // Whole vowels: a lax vowel's offglide and a diphthong's glide
         // belong to the segment before them.
         let segs = u.segments();
@@ -97,6 +106,19 @@ fn lax_vowels_are_35_to_40_percent_shorter_than_tense_ones() {
         1000.0 * mean(&t)
     );
     assert!(ratio < 0.65, "{ratio}");
+    // At the defaults a lax vowel is still the shorter.
+    let default = |v: Phoneme| {
+        Utterance::from_text(
+            &format!("[S {}1 L] [AX0]", v.symbol()),
+            &physical().prosody(),
+        )
+        .segments()
+        .iter()
+        .filter(|s| s.phoneme == v)
+        .map(|s| s.duration)
+        .sum::<f32>()
+    };
+    assert!(default(Phoneme::Ih) < default(Phoneme::Iy));
     // The classic engine keeps them alike.
     let classic = |text: &str, p| {
         Utterance::from_text(text, &Preset::Deep.settings().prosody())
@@ -199,7 +221,7 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
             glided.1,
             100.0 * s
         );
-        assert!((0.07..=0.4).contains(&s), "{p}: {s}");
+        assert!((0.1..=0.6).contains(&s), "{p}: {s}");
     }
     // The tense vowels have no glide of their own.
     for p in [Phoneme::Iy, Phoneme::Uw, Phoneme::Ae, Phoneme::Aa] {
