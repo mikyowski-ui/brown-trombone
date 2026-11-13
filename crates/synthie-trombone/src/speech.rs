@@ -142,8 +142,6 @@ pub struct Utterance {
     devoicing_lead: f32,
     /// Head start of the velum out of a nasal into an obstruent, seconds.
     velum_lead: f32,
-    /// Head start of the velum into a nasal from a vowel, seconds.
-    velum_anticipation: f32,
     /// Shortest complete closure of a voiceless stop, seconds.
     closure_floor: f32,
     /// How long the voice goes on into a voiceless stop's closure, seconds.
@@ -196,7 +194,6 @@ impl Utterance {
             kick_time: Tuning::DEFAULT.kick_time,
             devoicing_lead: Tuning::DEFAULT.devoicing_lead,
             velum_lead: Tuning::DEFAULT.velum_lead,
-            velum_anticipation: Tuning::DEFAULT.velum_anticipation,
             closure_floor: 0.0,
             voicing_tail: 0.0,
         }
@@ -527,19 +524,6 @@ impl Speaker {
                 && let Some(next) = self.utterance.segments.get(self.index + 1)
                 && is_obstruent(next.phoneme)
                 && self.elapsed >= seg.duration - self.utterance.velum_lead.min(0.5 * seg.duration)
-            {
-                voice.set_velum(next.articulation.velum);
-            }
-            // Into a nasal from a vowel the velum lowers during the vowel
-            // (`Tuning::velum_anticipation`), as a speaker's does: English
-            // vowels before a nasal are nasalised, and the port is wide
-            // open for the nasal's murmur.
-            if physical
-                && is_vowel(seg.phoneme)
-                && let Some(next) = self.utterance.segments.get(self.index + 1)
-                && next.phoneme.manner() == Manner::Nasal
-                && self.elapsed
-                    >= seg.duration - self.utterance.velum_anticipation.min(0.5 * seg.duration)
             {
                 voice.set_velum(next.articulation.velum);
             }
@@ -1285,7 +1269,6 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
         velum_lead: timing.velum_lead,
-        velum_anticipation: timing.velum_anticipation,
         closure_floor: if physical { timing.closure_floor } else { 0.0 },
         voicing_tail: timing.voicing_tail,
     }

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the sixty-nine numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the sixty-eight numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -372,12 +372,6 @@ tuning! {
     /// Cut off as the mouth shut, the level fell by 25 to 30 dB in 10 ms at
     /// every voiceless closure, where a speaker's falls by 13.
     voicing_tail = 0.012, 0.0..=0.03, B;
-    /// How long before the end of a vowel followed by a nasal the velum
-    /// starts to lower, s: a speaker nasalises the vowel before a nasal.
-    /// Lowered only with the nasal's closure, the velum (some 50 ms to
-    /// open) was wide open for barely 30 ms of a nasal that it also had to
-    /// close for an obstruent after it, and such an /n/ was heard as /ŋ/.
-    velum_anticipation = 0.04, 0.0..=0.08, B;
 
     // ----- A: sibilants (physical engine) -------------------------------
     /// Gap left between the incisors while /s z/ are made, as the jaw
@@ -409,10 +403,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_one_and_thirty_seven() {
+    fn two_passes_of_thirty_one_and_thirty_six() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (31, 37));
+        assert_eq!((a, b), (31, 36));
     }
 
     #[test]
