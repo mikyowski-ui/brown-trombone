@@ -2,7 +2,7 @@
 
 An offline judge that scores how intelligible synthesized speech is, a
 measure of how natural it sounds against a person, and a CMA-ES tuner that
-searches the physical engine's tuning parameters (`params.json`, all 63
+searches the physical engine's tuning parameters (`params.json`, all 71
 fields of `Tuning`) to improve that score. Everything runs locally once the models
 are downloaded.
 
@@ -225,6 +225,10 @@ uv run python tune.py --pass a --scan 4 --gates bin --out out/scan-a.json       
 uv run python tune.py --pass a --gates bin --budget 300 --seed 1 --out out/profile-a.json
 uv run python tune.py --pass bc --lock out/profile-a.json --gates bin \
     --budget 300 --seed 1 --out out/profile-b.json
+uv run python tune.py --pass a --lock out/lock-lax.json --gates bin --budget 200 --sigma 0.08 \
+    --word-weight 0.3 --final-check 6 --gate-jobs 7 --gate-threads 2 --out out/profile-r5a.json \
+    --exclude lung_pressure,adduction_time,attack_hold,jet_efficiency,teeth_gain,abduction_time,postalveolar_lips,frication_widening
+                                                     # round 5's pass a (below); out/lock-lax.json holds lax_length 0.62
 uv run python judge.py score physical --sets sentence_heldout,harvard_heldout,carrier_heldout \
     --profile out/profile-b.json --name physical-b-heldout
 ```
@@ -233,9 +237,10 @@ uv run python judge.py score physical --sets sentence_heldout,harvard_heldout,ca
 batch of judging and lets it go while it renders and runs the gates.
 
 - Searches the parameters of the chosen passes (`--pass`: `a` how sounds
-  are made, 29 parameters; `b` how they follow one another, 33; `c` the
-  vowel hold, 1; letters combine, `bc`), minus those fixed by `--lock` and
-  the twelve the classic engine reads too (`"classic": true` in
+  are made, 31 parameters; `b` how they follow one another, 36; `c` the
+  vowel lengths, 4; letters combine, `bc`), minus those fixed by `--lock`,
+  those named by `--exclude` (left at their defaults, e.g. the ones the
+  scan found pinned by gates) and the twelve the classic engine reads too (`"classic": true` in
   `params.json`: the classic engine is pinned bit for bit, so a tuned value
   of those could never become a default; `--with-classic` tunes them
   anyway). Each parameter is mapped to 0..1 over its `lo..hi` range (hard
@@ -245,24 +250,46 @@ batch of judging and lets it go while it renders and runs the gates.
 - Material: the tuning split, `sentence_tune`, `harvard_tune`,
   `carrier_tune` (`--sets`); the held-out sets are refused.
 - Objective (lower is better), averaged over the sets:
-  `mean PER + 0.1 * mean(-log-likelihood) + 0.1 * mean(((x - default)/(hi - lo))^2)
-  + 0.1 * max(0, D - D_default)` (`--ll-weight`, `--prior-weight`,
+  `mean PER + 0.1 * mean(-log-likelihood) + w * (1 - Whisper word accuracy)
+  + 0.1 * mean(((x - default)/(hi - lo))^2) + 0.1 * mean_k max(0, |z_k| - |z_k default|)`
+  (`--ll-weight`, `--word-weight`, default 0, `--prior-weight`,
   `--natural-weight`).
-- **The naturalness guard** `D`: each candidate also says the 16
-  LibriSpeech texts, and `natural.distance` takes the mean |z| (clipped at
-  4) of its loudness, pitch, timing and hiss measures against the person's,
-  plus the warped log-mel distance in dB, as one more term. A candidate pays
-  for every step away from the person beyond where the defaults are, so
-  the tuner cannot buy recognizer points with a voice a person does not
-  have. Only the naturalness measures of those texts are read, never their
-  phoneme or word scores; the decision below still leaves them out of the
-  held-out pool.
-- **Gates** (`--gates bin`: `bin/physical_gates` and `bin/natural_gate`,
-  copies of the compiled test binaries, which read the candidate from
-  `SYNTHIE_TROMBONE_PROFILE`): a candidate that fails any of them gets 1
-  plus 0.05 per failed gate added, so it can never win. The slow gates and
-  those no tuning value can affect are skipped in the loop; run the whole
-  suite on the final profile. They run on the CPU while the GPU judges.
+- **Whisper in the loop** (`--word-weight` above 0): Whisper `small.en` is
+  loaded on the GPU next to the phoneme model and transcribes every
+  candidate's tuning sentences (`sentence_tune`, `harvard_tune`; the carrier
+  phrases have no written form); the word accuracy is pooled over them.
+  It adds about 5 s a candidate.
+- **The naturalness guard**: each candidate also says the 16 LibriSpeech
+  texts, and every one of its loudness, pitch, timing and hiss measures
+  gets a z against the person's (`natural.distance` with `clip=None`; the
+  warped log-mel distance in dB is one more term). A candidate pays for
+  each measure it moves further from the person than the defaults are,
+  unclipped and term by term, so a measure already far off cannot get worse
+  for free and a gain on one measure does not pay for a loss on another.
+  On top of that, a candidate is **barred** like a gate failure
+  (`natural:<measure>` in the log) when its level walls per second, its
+  level rises (`steps.p95_up`) or its unclipped naturalness distance are
+  worse than the defaults' beyond noise: the lower end of the 95 % paired
+  bootstrap interval over the 16 texts above 0 (`NATURAL_HOLD`,
+  `--no-natural-hold` turns it off). Round 4's guard clipped each z at 4,
+  and its winner made the walls 3.4 to 4.0 a second and the rises steeper
+  in 16 of 16 sentences unseen; the hold bars exactly that. Only the
+  naturalness measures of those texts are read, never their phoneme or
+  word scores; the decision below still leaves them out of the held-out
+  pool.
+- **Gates** (`--gates bin`: `bin/physical_gates`, `bin/natural_gate`,
+  `bin/sibilant_gate` and `bin/vowel_glide_gate`, copies of the compiled
+  test binaries, which read the candidate from `SYNTHIE_TROMBONE_PROFILE`):
+  a candidate that fails any of them gets 1 plus 0.05 per failed gate
+  added, so it can never win. Only the slowest gate (`no_held_note`, about
+  70 s) and determinism (`same_seed`) are skipped in the loop (round 4
+  skipped more, and its best candidate failed one of those). They run on
+  the CPU while the GPU judges. `--final-check K` runs the K best
+  candidates that passed, best first, through every gate binary with
+  nothing skipped and writes the first that passes to `--out`; the other
+  test binaries (`listen_gate`, `mimic_gate`, `inverse_gate`,
+  `vowel_size_gate`, ...) only test the built-in tuning, so a result is
+  made the default and `cargo test --workspace --release` run on that.
 - Evaluation 0 is the starting point (defaults plus the lock), then CMA-ES
   generations (`--popsize`, default `4 + 3 ln n`; `--sigma` 0.25). The last
   generation may overrun `--budget` by less than one population.
@@ -279,7 +306,7 @@ batch of judging and lets it go while it renders and runs the gates.
 - The best profile so far is rewritten to `--out` after every generation, as
   `{"tuning": {...}}` with the tuned and locked parameters, the only shape
   `bin/say --profile` accepts.
-- Whisper is not used in the loop. At the end the best profile is scored by
+- At the end the best profile is scored by
   `judge.py` (phonemes + Whisper) on the tuning sets, as
   `out/score-physical-<out stem>.json` (`--no-final-whisper` skips this).
 - `--subset N` uses N items per set for quick experiments.
@@ -355,7 +382,7 @@ sentences, +5.1 [-1.7, 12.2] on the tuning ones.
 | `report/judge.md` | generated comparison of every scored system. |
 | `out/` | scores, tuner logs, profiles, render cache (not committed). |
 | `.cache/` | models and anchor audio (not committed). |
-| `bin/say`, `bin/physical_gates`, `bin/natural_gate` | prebuilt renderer and gate test binaries (not committed; `cargo build --release --example say -p synthie-trombone`, `cargo test --release --no-run --test physical_gates --test natural_gate`, then copy them here). |
+| `bin/say`, `bin/physical_gates`, `bin/natural_gate`, `bin/sibilant_gate`, `bin/vowel_glide_gate` | prebuilt renderer and gate test binaries (not committed; `cargo build --release --example say -p synthie-trombone`, `cargo test --release --no-run -p synthie-trombone --test physical_gates --test natural_gate --test sibilant_gate --test vowel_glide_gate`, then copy them here, without the hash in the name). |
 
 ## Caveats
 

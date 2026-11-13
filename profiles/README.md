@@ -1,0 +1,11 @@
+# Profiles
+
+Tuning profiles for the physical engine (`say --profile`, `SYNTHIE_TROMBONE_PROFILE` for the gates), each
+`{"tuning": {...}}` over the defaults of `Tuning`.
+
+| profile | what |
+|---|---|
+| `long-lax.json` | lax vowels at the round 4 length (`lax_length`, `unstressed_lax_length` 0.905); the default is 0.62, chosen by ear. |
+| `tuned-r5a-candidate.json` | round 5, pass a (21 sound parameters, CMA-ES on the tuning split). **Rejected**: it fits the tuning split (pooled phoneme error -3.8 points, Whisper words +8.1) but held out it is worse beyond noise (pooled phoneme error +2.9 [1.1, 4.8], harvard_heldout +5.2, carrier_heldout +2.3), with consonants in sentences 91.0 to 87.3. |
+| `tuned-r4-candidate.json` | round 4, pass a; kept out of the defaults for steeper level rises and more level walls. Stale: pins the old `teeth_gain`. |
+| `old/` | round 3 profiles, which now score worse than the defaults. |
