@@ -20,9 +20,12 @@ release. This crate keeps that model and adds:
 - **Measured vowels:** ARPAbet phonemes. The vowels were grid-searched
   against Peterson & Barney formant data, and every vowel lands within
   about 2 % on F1/F2 (`examples/tune_vowels.rs`, `examples/formants.rs`).
-- **Text to speech** (`alloc`): English spelling rules plus an exceptions
-  dictionary, ARPAbet in `[brackets]`, numbers, stress, coarticulation,
-  declining intonation, falls at `.` and rises at `?`.
+- **Text to speech** (`alloc`): a pronouncing dictionary (2,000 words
+  built in, 1,200 more with the default `dictionary` feature), known stems
+  with regular endings, English spelling rules for the rest, ARPAbet in
+  `[brackets]`, numbers, stress, coarticulation, declining intonation,
+  falls at `.` and rises at `?`. `speech::phonemize_with` takes your own
+  lexicon in place of the built-in one.
 - **`no_std`:** `default-features = false, features = ["libm"]` (add
   `alloc` for speech).
 
@@ -89,9 +92,21 @@ vocal folds under lung pressure, frequency-dependent losses, yielding
 walls, side cavities and airflow-driven noise. Notes outside the folds'
 range (`Trombone::fold_range`) are sung by a prescribed pulse unless
 `set_fallback(Fallback::Never)`; `Gauges::sounding` says which source is
-singing. Choose it per voice with
-`VoiceSettings::with_engine`, or on a `Trombone` with `set_engine`. The
-repository README has the details and the measurements it is held to.
+singing. Its speech has a voiced/voiceless contrast made by the larynx
+(the glottis spread for /p t k s/, a voice onset time after a release,
+a voice that lasts through /b d g/), timed from the moment the mouth
+actually shuts (`Trombone::mouth_shut`, `Gauges::mouth_shut`); a slow
+tongue body and jaw under quick tip and lips; vowels from published
+formants; and breath and intonation shaped per phrase. Choose it per
+voice with `VoiceSettings::with_engine`, or on a `Trombone` with
+`set_engine`.
+
+Both engines read their numbers from `Tuning` (63 fields with defaults
+and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
+of them), which a JSON profile can set (`profile` feature,
+`VoiceSettings::with_profile`). The repository README has the details,
+the measurements the physical engine is held to and how a speech
+recognizer scores it.
 
 ## Examples
 

@@ -72,8 +72,9 @@ fn object(value: Value, what: &str) -> Result<Map<String, Value>, ProfileError> 
 }
 
 impl VoiceSettings {
-    /// This voice with a JSON profile laid over it (see the
-    /// [module](self)).
+    /// This voice with a JSON profile laid over it: the `persona` first,
+    /// then the voice's own fields, then the [`Tuning`] fields. Every key
+    /// is optional; an unknown one is an error.
     ///
     /// # Errors
     ///

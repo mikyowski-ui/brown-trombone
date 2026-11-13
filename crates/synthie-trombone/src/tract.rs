@@ -738,6 +738,7 @@ impl Tract {
             carve(&mut self.target, c, floor);
         }
         self.body = self.target;
+        let opened = self.open_nasal_cavity();
         let mut by = [None; N];
         for (k, s) in self.slots.iter().enumerate() {
             let Some(s) = s.filter(|s| s.alive) else {
@@ -765,7 +766,6 @@ impl Tract {
                 }
             }
         }
-        let opened = self.open_nasal_cavity();
         for i in 0..N {
             if self.target[i] < self.body[i] - CARVED
                 && let Some(m) = by[i]
@@ -795,10 +795,14 @@ impl Tract {
     /// hump of a central or back vowel's body near the velum, a narrow neck
     /// at the cavity's open end, pulled /n/'s antiresonance down to 700 to
     /// 1000 Hz before /ʌ ə ɔ oʊ/ and /m/'s to 450 Hz, where /m/ and nothing
-    /// are heard. So the back of the tongue drops behind a nasal closure,
-    /// to at least [`Tuning::nasal_cavity`] from the velum to the tip's or
-    /// the lips' shoulder. Returns the cells it moved (the back of the
-    /// tongue moves them, at its speed).
+    /// are heard. So the tongue drops behind a nasal closure, to at least
+    /// [`Tuning::nasal_cavity`] all the way from the velum to the closure,
+    /// before the tip's or the lips' shoulder is carved into it: lowered
+    /// only as far as the shoulder, the high front of /i ɪ æ/ stayed under
+    /// the closed end of the branch, /n/'s antiresonance rose to 1.75 to
+    /// 1.9 kHz, and the recognizer heard such an /n/ as /ŋ/ (8 of the 38
+    /// above 1.7 kHz in the sentences, 2 of the 37 below 1.4 kHz). Returns
+    /// the cells it moved (the back of the tongue moves them, at its speed).
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
@@ -829,12 +833,9 @@ impl Tract {
             // A velar closure: nothing of the mouth is left behind it.
             return moved;
         }
-        let shoulder = if index >= LIP_PLACE {
-            LIP_SHOULDER
-        } else {
-            TIP_SHOULDER_BACK
-        };
-        let cavity_end = ((index - shoulder - 1.0).max(0.0) as usize).min(N);
+        // Up to the closure: the tip's or the lips' shoulder is carved into
+        // the lowered tongue afterwards.
+        let cavity_end = (index.max(0.0) as usize).min(LIP_START).min(N);
         let floor = self.motion.nasal_cavity;
         for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
             .iter_mut()

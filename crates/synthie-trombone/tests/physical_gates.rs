@@ -1877,12 +1877,14 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
     // at the open end of the branch, pulled /n/ down to 700 to 1000 Hz and
     // /m/ to 420 to 530 Hz, and the recognizer heard /n/ as /m/ (and /m/ as
     // /n/ or /ŋ/) in a third of the nasals in the LibriSpeech sentences.
-    // With the back of the tongue lowered behind the closure
-    // (`Tuning::nasal_cavity`): /m/ 780 to 1060 Hz with a notch 23 to 40 dB
-    // deep, /n/ 1150 to 1850 Hz (lowest before /ɔ ʌ ɑ/, still under a
-    // speaker's there), and in every vowel /n/ at least 340 Hz above /m/.
-    // (The notch /n/ leaves is shallower, 2 to 26 dB: a resonance of the
-    // murmur lies close to it.)
+    // With the tongue lowered behind the closure (`Tuning::nasal_cavity`):
+    // /m/ 780 to 1040 Hz with a notch 23 to 40 dB deep, /n/ 1150 to 1600 Hz
+    // (lowest before /ɔ ʌ/), and in every vowel /n/ at least 340 Hz above
+    // /m/. (The notch /n/ leaves is shallower, 2 to 30 dB: a resonance of
+    // the murmur lies close to it.) Lowered only up to the tip's shoulder,
+    // /n/ after /i ɪ æ ʊ/ stood at 1.75 to 1.9 kHz, and the recognizer
+    // heard /n/ as /ŋ/ in a fifth of those over 1.7 kHz: so /n/ is also
+    // held under 1.7 kHz here.
     let settings = stops::judge_voice();
     for v in [
         Phoneme::Iy,
@@ -1910,7 +1912,7 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
         println!("in {v}: /m/ {m:.0} Hz (notch {m_notch:.0} dB), /n/ {n:.0} Hz, /ŋ/ {ng:?}");
         assert!((700.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
         assert!(m_notch >= 20.0, "in {v}: /m/ notch {m_notch:.1} dB");
-        assert!((1100.0..=2200.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
+        assert!((1100.0..=1700.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
         assert!(n >= m + 300.0, "in {v}: /n/ {n:.0} Hz, /m/ {m:.0} Hz");
         assert!(ng.is_none_or(|z| z > 3000.0), "in {v}: /ŋ/ at {ng:?}");
         // The nose has a shallow notch of its own near 1 kHz (11 to 13 dB,
