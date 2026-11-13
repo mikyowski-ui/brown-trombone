@@ -408,12 +408,16 @@ tuning! {
     /// Strength of the sound the jet of /f v/ makes where it strikes the
     /// edges of the upper incisors and the upper lip (physical engine): the
     /// face its eddies load, in areas of the lip gap (see `Phys::set_edge`).
-    /// At 0 the hiss of /f/ was the free jet's alone, 27 dB under the
+    /// At 0 the hiss of /f/ was the free jet's alone, 27 to 36 dB under the
     /// vowel beside it in sentences, where the LibriSpeech reader's is 16
     /// dB under, and Whisper heard "makes fine" as "makes pine" (7 of 24
-    /// /f/ words right in short sentences); at 7 the engine's /f/ is 16 dB
-    /// under its vowel, flat from 2 to 7 kHz (centroid 4.8 kHz), and 16 to
-    /// 18 of the 24 words are heard.
+    /// /f/ words right in short sentences). At 3 a steady /f/ is 10 dB
+    /// under a steady /s/ (the reader's /f/ is 10.5 dB under his /s/), 11
+    /// dB louder than the free jet alone; in sentences it is some 22 dB
+    /// under its vowel, its pressure still building, and flat from 2 to 7
+    /// kHz. At 7 it matched the reader against the vowel, but a steady /f/
+    /// was only 3 dB under /s/ and, once the hand-over out of /s/ kept the
+    /// pressure up, as loud as the /s/ before it.
     labial_edge = 3.0, 0.0..=40.0, A;
     /// The same for the jet of /θ ð/ out of the gap between the tongue tip
     /// and the edges of the upper incisors. Held low: the reader's /ð/ has
@@ -430,8 +434,9 @@ tuning! {
     /// time, a slower gesture than a lip closing on its own.
     labial_closing = 0.048, 0.01..=0.08, B;
     /// How long the tongue takes to let go of the sibilant meanwhile, s:
-    /// its gap widens steadily to the widest that hisses, and only then is
-    /// let go altogether.
+    /// its gap widens steadily to just past the widest that hisses, and
+    /// only then is let go altogether. 0 switches the hand-over off: the
+    /// tongue lets go at once and the lip shuts behind it.
     sibilant_exit = 0.06, 0.0..=0.1, B;
 }
 

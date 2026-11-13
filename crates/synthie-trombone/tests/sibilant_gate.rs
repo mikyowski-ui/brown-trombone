@@ -321,8 +321,11 @@ fn z_hisses_in_the_band_of_s_under_its_voice() {
     assert!(cz > 5000.0, "z centroid {cz:.0} Hz");
 }
 
+/// Each segment's phoneme with its start and end, seconds.
+type Segments = Vec<(Phoneme, f32, f32)>;
+
 /// [`say`] with the flow out of the lips, cm³/s, at every sample.
-fn say_with_lips(text: &str) -> (Vec<f32>, Vec<(Phoneme, f32, f32)>, Vec<f32>) {
+fn say_with_lips(text: &str) -> (Vec<f32>, Segments, Vec<f32>) {
     let settings = tuned(Preset::Deep.settings().with_engine(Engine::Physical));
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
