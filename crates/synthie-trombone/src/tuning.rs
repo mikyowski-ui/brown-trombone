@@ -133,7 +133,7 @@ tuning! {
     /// Share of a free jet's dynamic pressure that returns as sound.
     jet_efficiency = 0.057, 0.015..=0.2, A;
     /// The same for a jet that strikes the teeth, relative to a free jet.
-    teeth_gain = 0.28, 0.07..=1.0, A;
+    teeth_gain = 0.38, 0.07..=1.0, A;
     /// Efficiency of the jet between the folds (breath noise).
     glottal_efficiency = 0.043, 0.01..=0.15, A;
     /// Frequency above which turbulence has less and less energy, Hz (that
@@ -340,6 +340,14 @@ tuning! {
     /// a phrase, from nothing: the first sound swells in rather than
     /// switching on.
     phrase_onset = 0.15, 0.04..=0.3, B;
+    // ----- A: sibilants (physical engine) -------------------------------
+    /// Gap left between the incisors while /s z/ are made, as the jaw
+    /// raises the lower ones to the upper (articulation diameter units:
+    /// 0.6 is about 0.45 cm² at the native size). The jet from the tongue
+    /// tip strikes the teeth through it, and the small cavity it closes off
+    /// behind them is what gives /s/ its peak at 5 to 8 kHz. Narrower is
+    /// brighter and quieter.
+    sibilant_teeth = 0.6, 0.3..=1.2, A;
 }
 
 impl Default for Tuning {
@@ -362,10 +370,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_twenty_nine_and_thirty_three() {
+    fn two_passes_of_thirty_and_thirty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (29, 33));
+        assert_eq!((a, b), (30, 33));
     }
 
     #[test]

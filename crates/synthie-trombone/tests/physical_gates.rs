@@ -840,8 +840,12 @@ fn fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice() {
 fn a_gap_near_a_fricative_still_hisses() {
     // Playing by hand, nobody lands on a fricative exactly. Within two
     // cells and 0.15 in diameter of each fricative's own position a held
-    // gap still hisses: no more than 20 dB under the fricative itself,
-    // where without the regulator the narrow ones are shut or choked.
+    // gap still hisses: no more than 20 dB under the fricative itself, or
+    // under the one whose place it has moved to if that is quieter, where
+    // without the regulator the narrow ones are shut or choked. (A gap
+    // moved from /s/ onto the teeth is a /θ/: its jet no longer strikes
+    // them, and with /s/ as loud as a speaker's it is 23 dB under /s/,
+    // where /θ/ is 20 dB under.)
     let level = |index: f32, diameter: f32, regulated: bool| {
         let mut t = fresh();
         t.set_engine(Engine::Physical);
@@ -854,12 +858,24 @@ fn a_gap_near_a_fricative_still_hisses() {
     };
     std::thread::scope(|scope| {
         let mut jobs = Vec::new();
-        for p in [Phoneme::S, Phoneme::Sh, Phoneme::F, Phoneme::Th] {
+        let places = [Phoneme::S, Phoneme::Sh, Phoneme::F, Phoneme::Th].map(|p| {
             let c = p.articulation().constriction.unwrap();
-            let own = level(c.index, c.diameter, true);
+            (p, c, level(c.index, c.diameter, true))
+        });
+        for &(p, c, own) in &places {
             for by in [-0.15, 0.0, 0.15] {
                 for along in [-2.0, 0.0, 2.0] {
                     let (index, diameter) = (c.index + along, c.diameter + by);
+                    // The fricative whose place the gap is nearest now.
+                    let near = places
+                        .iter()
+                        .min_by(|a, b| {
+                            (a.1.index - index)
+                                .abs()
+                                .total_cmp(&(b.1.index - index).abs())
+                        })
+                        .map_or(own, |q| q.2);
+                    let own = own.min(near);
                     jobs.push((
                         p,
                         along,
