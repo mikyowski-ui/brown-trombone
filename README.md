@@ -584,16 +584,24 @@ average sentence).
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong 27 % of the time in the
-  LibriSpeech texts and 30 % over the vowel lab's held-out material
-  (eSpeak 15 and 17 %, the person 9 %; the round's target was 22 %). /ʊ/
-  comes through about a quarter of the time, /ɔ/ is mostly heard as /ɑ/,
-  /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as /u/ or /ɚ/. The tongue
-  root (`Shape::pharynx`) is there but the built-in vowels leave it at
-  rest.
-- **Lax vowels are longer than a speaker's** at the round 4 length and
-  as short as one's at the default (0.62, chosen by ear); the recognizer
-  scores the tuning sentences better at the longer length.
+- **Vowels in sentences** are heard wrong 24 % of the time in the
+  LibriSpeech texts (27 % before round 6's tongue root) and 30 % over the
+  vowel lab's held-out material (eSpeak 15 and 17 %, the person 9 %; the
+  target is 22 %). A third of the misses in the LibriSpeech texts are
+  words the engine's front end says otherwise than eSpeak's reference
+  (a full "and" for a reduced one): over the slots where they agree the
+  error is 19 %. /ʊ/ comes through about a quarter of the time, /ɔ/ is
+  mostly heard as /ɑ/, /ɑ/ often as /æ/ (its target is Hillenbrand's
+  Michigan /ɑ/, F2 1333 Hz; at 1100 to 1180 Hz the recognizer hears it
+  better, but that shape at the back of the tongue's reach moves the
+  gates measured in "a pa"), /ɔɪ/ not at all, and schwa as /u/ or /ɚ/.
+  The tongue root of /ɪ ʌ ʊ/ costs the carrier phrases 1.7 to 3.5 points
+  of phoneme error.
+- **Lax vowels in the engine's sentences sit nearer the tense ones than a
+  speaker's**: measured the same way in the LibriSpeech texts, the
+  person's /ɪ/ has an F2 at his schwa's and 20 % under his /i/, the
+  engine's 14 % over its schwa; but moved there, its /ɪ/ is heard as a
+  high central vowel, and made longer (0.82 of a tense vowel) as /eɪ/.
 - **Whisper gets 62 to 67 % of the held-out words** (target 75 %). In the
   four listening sentences it hears "makes fine" as "makes pine": the /s/
   of "makes" cuts off in about 10 ms where a reader's fades over 20 to
