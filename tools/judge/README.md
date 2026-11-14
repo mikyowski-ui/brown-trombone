@@ -674,15 +674,20 @@ voice's formant scale, median over the vowels measured in both):
 
 | | timing only | hybrid | without the voice | without tenseness | without vowels |
 |---|---:|---:|---:|---:|---:|
-| formant scale against his, |%| | 4.8 | 1.9 | 4.8 | 1.4 | 1.4 |
-| H1*-H2* against his, |dB| | 1.4 | 0.6 | 1.6 | 0.7 | 0.6 |
-| HNR against his, |dB| (the engine is noisier) | 2.7 | 3.0 | 2.9 | 2.9 | 3.0 |
-| H1*-H2* contour, r with his (RMS) | 0.22 (3.1 dB) | 0.49 (2.7 dB) | 0.53 | 0.22 (3.1 dB) | 0.51 |
-| vowel F1 / F2 error, median | 27 / 22 % | 17 / 16 % | 27 / 21 % | 17 / 16 % | 19 / 19 % |
-| level against his, RMS over sonorants | 3.0 dB | 2.6 dB | 2.8 dB | 2.6 dB | 2.7 dB |
+| formant scale against his, |%| | 5.1 | 1.8 | 5.1 | 0.7 | 1.7 |
+| H1*-H2* against his, |dB| | 1.5 | 0.5 | 1.6 | 0.6 | 0.5 |
+| HNR against his, |dB| (the engine is noisier) | 2.8 | 2.9 | 2.9 | 2.9 | 2.9 |
+| H1*-H2* contour, r with his (RMS) | 0.22 (3.1 dB) | 0.60 (2.5 dB) | 0.54 (2.7 dB) | 0.23 (3.1 dB) | 0.58 (2.6 dB) |
+| vowel F1 / F2 error, median | 27 / 22 % | 23 / 20 % | 27 / 22 % | 21 / 20 % | 23 / 22 % |
+| level against his, RMS over sonorants | 2.9 dB | 2.6 dB | 2.8 dB | 2.6 dB | 2.7 dB |
 
-The level loop: 4.7 dB before it, 2.5 dB after (93 of 455 sonorants at
-the limit); with the round 8 range 3.0 dB (218 at the limit).
+The level loop: 4.7 dB before it, 2.6 dB after (95 of 455 sonorants at
+the limit); with the round 8 range 3.1 dB (221 at the limit). Sample 2
+(a woman at 204 Hz) was matched with a tract of 0.93 and the tenseness at
+its floor; her vowels' median F1 / F2 error went from 21 / 11 % (the
+deep voice following her timing) to 10 / 6 %, but her H1*-H2* contour was
+not followed (r -0.09; 0.45 without the tenseness loop): at her pitch the
+per-phone H1*-H2* moves by more than the engine's tenseness range can.
 
 **Checks** (`check`; `transfer` prints them): the rendering aligned again
 against the schedule, interior phones, mean absolute duration error; how

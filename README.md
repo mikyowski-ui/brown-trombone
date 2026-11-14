@@ -508,28 +508,35 @@ and `artificalsample2.mp3`, whose text Whisper heard):
 
 | anchors | rules | timing only | hybrid (everything) | without the voice | without tenseness | without vowels | without speed-up |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| phoneme error | 18.3 % | 21.7 % | 21.3 % | 21.4 % | 21.4 % | 19.6 % | 25.2 % |
-| vowels heard wrong | 24.1 % | 24.5 % | 26.2 % | 26.6 % | 25.5 % | 22.7 % | 30.1 % |
-| Whisper words | 81.3 % | 78.0 % | 80.9 % | 80.4 % | 80.4 % | 82.8 % | 77.5 % |
-| naturalness distance | 1.10 | 0.89 | 0.93 | 0.89 | 0.91 | 0.91 | 0.93 |
+| phoneme error | 18.3 % | 21.3 % | 21.1 % | 21.4 % | 21.4 % | 20.2 % | 23.7 % |
+| vowels heard wrong | 24.1 % | 25.9 % | 25.2 % | 26.9 % | 25.5 % | 24.8 % | 29.0 % |
+| Whisper words | 81.3 % | 82.8 % | 76.6 % | 83.3 % | 75.6 % | 82.3 % | 78.9 % |
+| naturalness distance | 1.10 | 0.89 | 0.91 | 0.88 | 0.90 | 0.91 | 0.92 |
+| of it, warped spectral distance | 15.6 dB | 14.9 dB | 15.0 dB | 14.9 dB | 15.0 dB | 15.1 dB | 15.1 dB |
 
 "Timing only" has round 9's level range and 70 % floor on phone length;
 with round 8's transfer the phoneme error was 26.9 % and Whisper 74.6 %.
 
+Single runs; Whisper over these 16 sentences moves by 4 to 6 points
+between runs that differ only in the level loop's breath.
+
 - Phones no shorter than 70 % of their rule length, with the tongue body
   sped up through those still shorter (up to 1.6 times), took the reader's
-  own timing from 26.9 % phoneme error to 21.7 %; the speed-up alone is
-  worth about 4 points of it. A faster tongue body in general did not help
+  own timing from 26.9 % phoneme error to 21.7 %; the speed-up is worth
+  about 2.6 points of it. A faster tongue body in general did not help
   (the rules with it: 21.6 %); the /d/ he runs into the next sound ("and
   the") was the phone most often lost.
-- The baseline voice puts the engine's formant scale within 1.9 % of his
-  (4.8 % without) and H1*-H2* within 0.6 dB (1.6), but it did not bring
-  the naturalness distance down; the vowel formants cut the median F2
-  error against him from 19 to 16 % and cost 3.5 points of vowels heard
-  wrong; the tenseness took the correlation of the H1*-H2* contour with
-  his from 0.22 to 0.49. On the two reference recordings the whole
-  transfer did best: phoneme error against the engine's own phones 9 %
-  and 4 % (by the rules 11 % and 19 %), Whisper 14 of 16 words each.
+- The baseline voice puts the engine's formant scale within 1.8 % of his
+  (5.1 % without) and H1*-H2* within 0.5 dB (1.6), but it did not bring
+  the naturalness distance down (0.91 with it, 0.88 without); the vowel
+  formants cut the median F2 error against him from 21.9 to 20.2 %
+  (F1 unchanged) at 0.4 points of vowels heard wrong; the tenseness took
+  the correlation of the H1*-H2* contour with his from 0.23 to 0.60.
+- On the two reference recordings (one utterance each, so a few phones
+  either way): phoneme error against the engine's own phones 18 % for the
+  Polly sample and 15 % for sample 2 with everything (by the rules 11 %
+  and 19 %, with the timing only 6 % and 17 %); Whisper 14 and 13 of 16
+  words.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
 two-mass folds; Story & Titze (1995) and Titze & Story (2002) for the
