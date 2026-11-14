@@ -685,6 +685,19 @@ deterministic):
 | physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
 | physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
 
+Round 9, all of it together (single scoring runs, the paragraphs below
+measure each part by itself against the end of round 8): phoneme error
+over the 30 held-out sentences 25.1 % (round 8: 22.9 %), Whisper's words
+68.3 % (68.3 %), the ten `sentence_heldout` sentences 20.0 % and 73.8 %
+(18.4 and 68.8 %), vowels in the LibriSpeech texts heard wrong 23.8 %
+(23.1 %); the four-sentence clip 25 of 31 words (25), "The birch can also
+count the smooth planks". The tap's gain on that clip ("canoes feed on",
+27 words) does not survive the source's changes: switched off one at a
+time, only the accent's place matters (`accent_peak` 1, as until round 9:
+"The birch canoes sit on the smooth planks", 26 words; 0.7: 24; 0.85:
+26, "can use three on"). It stays at 0.55, where the pitch across accented
+vowels moves as the reader's does.
+
 Round 9 (single scoring runs): the voice's source. The phoneme-switched
 softening is off; the voice takes a source tilt and a voice's breath
 noise is pitched higher (so its accented vowels are as dark as the
