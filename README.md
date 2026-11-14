@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the eighty-five numbers of `Tuning`, each with a default and
+Underneath sit the eighty-nine numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -247,6 +247,7 @@ reads the rest as well:
 | hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
 | intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
 | stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
+| a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (and `sonorant_slack`, `final_slack`, now 0) |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -372,7 +373,14 @@ as the model goes:
 - **The voice.** In modal speech the folds close on every cycle, so the
   voice keeps a steady H1–H2 instead of drifting breathy, and the folds
   carry every sentence of the default voices; the pulse only takes notes
-  out of their range (above).
+  out of their range (above). It is brightest on the accented vowels: in
+  nasals and liquids, and half as much in unaccented vowels, it passes a
+  one-pole low-pass at 3 kHz (`Trombone::set_fold_softness`), so that
+  their level in 2 to 4 kHz against 0 to 1 kHz falls under the accented
+  vowels' as the LibriSpeech reader's does (nasals 6.1 dB, his 5.6;
+  liquids 4.0, his 5.1; unaccented vowels 0.1, his 0.6). The folds
+  themselves are left as the tenseness holds them, so nothing about where
+  they can sing or how they start changes.
 - **Voiced and voiceless.** For /p t k f s/ the arytenoids spread the
   glottis behind the folds, slower than the folds themselves move, and the
   voice stops at the moment the mouth actually shuts (the larynx is timed
@@ -689,10 +697,32 @@ average sentence).
   slide down" (the /u/ after /n/ starts with a front glide, and no flap
   joins "slid" to "on"), and "background" is on the edge: heard right or as
   "back drawing" as the stop release speed moves by a tenth.
-- **The folds can be relaxed by 12 % and no more**: at 15 % the child
-  voice's folds fall out of the range they can sing at 290 Hz and the
-  hand-over to the pulse source clicks; at 20 % the voice gives out in the
-  closure of a /g/ after an unaccented vowel.
+- **The softer voice is a filter, not the folds.** Held more loosely
+  (round 7), the folds open: past 12 % the child voice fell out of its
+  folds' range with a click and a /g/ lost its voice bar, and at 12 % the
+  nasals and liquids came out brighter, not darker. Closing them more
+  softly does not work in this model either: a softer contact lowered
+  H1–H2 (by 3.4 dB at a third of the stiffness), edges meeting along
+  their length closed faster, and a low-pass on the glottal area or on the
+  flow the tract takes up was undone by the tract's pressure on the folds,
+  because the high frequencies of this voice come from the flow's ripple
+  under that pressure, not from the instant of closure. So the low-pass
+  is on the voice as it leaves (for the voice the same as on the glottal
+  flow's derivative); in the /ɪ/ of "of art" it also dulls the start of
+  the /v/, which the recognizer then hears as /l/.
+- **H1–H2 of the nasals and glides** stays under the reader's: his
+  nasals have 4.1 dB more H1–H2 than his accented vowels, the engine's 1.5
+  dB less. The engine's nasal murmur resonance stands near 290 Hz with a
+  58 Hz bandwidth, which lifts H2 of the deep voice by 5 dB against /a/; a
+  source that keeps the folds' adduction does not change H1–H2 (the
+  low-pass leaves it within 0.1 dB). The glides are already darker than
+  his (11.6 dB under the accented vowels in 2 to 4 kHz, his 4.4) and are
+  not softened.
+- **The voice is brighter than the reader's overall**: his accented
+  vowels have their 2 to 4 kHz band 29 dB under 0 to 1 kHz, the engine's
+  16 dB, and its pitch is steadier (cycle-to-cycle jitter, RAP, 0.11 %
+  against his 0.25 %; wobble about the pitch line within a vowel 0.11
+  against 0.21 semitones; shimmer alike).
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.

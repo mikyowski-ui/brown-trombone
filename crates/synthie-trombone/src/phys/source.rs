@@ -83,6 +83,8 @@ const STALL_SWING: f32 = 0.03;
 /// that step left the mouth as a click several times the vowel's peak:
 /// the critter's high notes cross its folds' range within a vowel.
 const HANDOVER_TIME: f32 = 0.006;
+/// Seconds over which the softness of the folds follows its setting.
+const SOFT_TIME: f32 = 0.01;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
 /// size.
 const VIBRATION_AREA: f32 = 0.14;
@@ -253,6 +255,10 @@ pub(crate) struct Source {
     /// Share by which the fold cover is slackened, wanted and present.
     pub(crate) slack_target: f32,
     slack: f32,
+    /// How softly the folds close, `0‥1`, wanted and present (see
+    /// `Trombone::set_fold_softness`).
+    pub(crate) soft_target: f32,
+    soft: f32,
     /// Share of the glottal flow that passes between the vibrating edges.
     fold_share: f32,
     f0: f32,
@@ -328,6 +334,8 @@ impl Source {
             breath: 1.0,
             slack_target: 0.0,
             slack: 0.0,
+            soft_target: 0.0,
+            soft: 0.0,
             fold_share: 1.0,
             f0: 140.0,
             f1: 140.0,
@@ -370,8 +378,10 @@ impl Source {
         let muscles = self.muscle_override;
         let (lung_base, tuning) = (self.lung_base, self.tuning);
         let (spread, slack, breath) = (self.spread_target, self.slack_target, self.breath);
+        let soft = self.soft_target;
         *self = Self::new();
         (self.spread_target, self.slack_target, self.breath) = (spread, slack, breath);
+        self.soft_target = soft;
         self.kind = kind;
         self.probe = probe;
         self.fallback = fallback;
@@ -614,6 +624,7 @@ impl Source {
         let spread = self.spread_target * self.size * self.size;
         self.spread += (spread - self.spread) * (dt / arytenoids);
         self.slack += (self.slack_target - self.slack) * (dt / arytenoids);
+        self.soft += (self.soft_target - self.soft) * (dt / SOFT_TIME);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
 
         let to = if self.active() == SourceKind::Folds {
@@ -670,6 +681,18 @@ impl Source {
         let w = self.blend;
         self.edge_area = w * self.folds.area() + (1.0 - w) * edge;
         (w * folds + (1.0 - w) * kinematic, self.lung)
+    }
+
+    /// Coefficient of the one-pole low-pass on the voice of soft folds,
+    /// for steps of `dt`: its corner is `soft_corner / s` at softness `s`,
+    /// so firm folds pass untouched (`1`).
+    #[inline]
+    pub(crate) fn soft_pass(&self, dt: f32) -> f32 {
+        if self.soft <= 1e-4 {
+            return 1.0;
+        }
+        let corner = self.tuning.soft_corner / self.soft;
+        1.0 - exp(-2.0 * PI * corner * dt)
     }
 
     /// Which model is making the voice right now, or `None` while no voice

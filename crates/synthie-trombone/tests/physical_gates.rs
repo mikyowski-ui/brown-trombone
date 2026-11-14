@@ -2268,3 +2268,234 @@ fn final_stops_are_released() {
         assert!(level > -36.0, "final {p}: {level} dB");
     }
 }
+
+/// Level in 2-4 kHz against 0-1 kHz, and H1-H2 at pitch `f0`, of one
+/// frame, dB (Hann window; 40 Hz steps for the bands).
+fn tilt_and_h1h2(frame: &[f32], f0: f32) -> (f32, f32) {
+    let n = frame.len();
+    let w: Vec<f32> = (0..n)
+        .map(|k| frame[k] * (0.5 - 0.5 * (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()))
+        .collect();
+    let power = |lo: f32, hi: f32| {
+        let mut sum = 0.0f32;
+        let mut hz = lo;
+        while hz < hi {
+            sum += tone(&w, hz).powi(2);
+            hz += 40.0;
+        }
+        sum
+    };
+    let peak = |k: f32| {
+        (-4..=4)
+            .map(|c| tone(&w, k * f0 * (1.0 + 0.02 * c as f32)))
+            .fold(0.0f32, f32::max)
+    };
+    (
+        10.0 * (power(2000.0, 4000.0) / power(40.0, 1000.0).max(1e-20)).log10(),
+        db(peak(1.0)) - db(peak(2.0)),
+    )
+}
+
+/// Per class (accented vowel, unaccented vowel, nasal, liquid) of one
+/// spoken sentence: mean tilt and H1-H2 (see `tilt_and_h1h2`) of 32 ms
+/// frames every 10 ms over the middle half of each segment of that class
+/// sung by the folds, and how many frames. The vowels are told apart as
+/// `labels` says them: those it leaves firm are the accented ones.
+#[allow(clippy::many_single_char_names)]
+fn class_quality(
+    settings: &VoiceSettings,
+    labels: &VoiceSettings,
+    text: &str,
+) -> [(f32, f32, usize); 4] {
+    use synthie_trombone::Manner;
+    use synthie_trombone::speech::{Segment, Speaker, Utterance};
+    let mut t = fresh();
+    settings.apply(&mut t);
+    t.set_tuning(&settings.tuning);
+    Speaker::prepare(&mut t);
+    let mut speaker = Speaker::new();
+    speaker.speak(Utterance::from_text(text, &settings.prosody()));
+    let marks = Utterance::from_text(text, &labels.prosody());
+    let (mut out, mut at, mut pitch, mut folds) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    while speaker.is_speaking() {
+        let seg = speaker.current().map(|(i, s)| (i, *s));
+        out.push(speaker.process(&mut t));
+        at.push(seg);
+        pitch.push(t.frequency());
+        folds.push(t.gauges().sounding == Some(GlottalSource::Folds));
+    }
+    let class = |index: usize, s: &Segment| {
+        let firm = marks
+            .segments()
+            .get(index)
+            .is_none_or(|m| m.gesture.softness == 0.0);
+        let vowel = matches!(s.phoneme.manner(), Manner::Vowel | Manner::Diphthong);
+        if !s.voiced {
+            None
+        } else if vowel && firm {
+            Some(0)
+        } else if vowel {
+            Some(1)
+        } else if s.phoneme.manner() == Manner::Nasal {
+            Some(2)
+        } else if matches!(s.phoneme, Phoneme::L | Phoneme::R) {
+            Some(3)
+        } else {
+            None
+        }
+    };
+    let mut sums = [(0.0f32, 0.0f32, 0usize); 4];
+    let (win, hop) = ((0.032 * SR) as usize, (0.01 * SR) as usize);
+    let mut k = 0;
+    while k < at.len() {
+        let Some((index, seg)) = at[k] else {
+            k += 1;
+            continue;
+        };
+        let end = k + at[k..]
+            .iter()
+            .take_while(|s| s.is_some_and(|s| s.0 == index))
+            .count();
+        if let Some(c) = class(index, &seg) {
+            let (a, b) = (k + (end - k) / 4, end - (end - k) / 4);
+            let mut m = a;
+            while m < b {
+                if m >= win / 2 && m + win / 2 < out.len() && folds[m] {
+                    let (tilt, h12) = tilt_and_h1h2(&out[m - win / 2..m + win / 2], pitch[m]);
+                    sums[c].0 += tilt;
+                    sums[c].1 += h12;
+                    sums[c].2 += 1;
+                }
+                m += hop;
+            }
+        }
+        k = end;
+    }
+    sums.map(|(t, h, n)| {
+        let d = n.max(1) as f32;
+        (t / d, h / d, n)
+    })
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // the measure, its bounds and the threshold
+fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
+    // The LibriSpeech reader's voice is darker in his nasals and liquids
+    // than in his accented vowels, and a little in his unaccented ones:
+    // level in 2-4 kHz against 0-1 kHz, against the accented vowels of the
+    // same sentence, averaged over his 16 sentences (the judge's alignment,
+    // 32 ms frames over the middle half of each segment): nasals -5.6 dB,
+    // liquids -5.1, unaccented vowels -0.6. The engine says the same texts;
+    // measured the same way, the softening (`set_fold_softness`) must bring
+    // it within 2 dB of him, and it must be the softening that does it:
+    // with the voice firm throughout its nasals and liquids are brighter.
+    // The folds are left alone: H1-H2 moves by under 0.7 dB (in the nasals
+    // it is some 5 dB under the reader's, and that is the nasal tract's:
+    // its murmur resonance near 290 Hz lifts H2 by 5 dB against /a/), and
+    // the phonation threshold pressure by under 2 %.
+    const PERSON: [f32; 3] = [-0.6, -5.6, -5.1];
+    let path = "../../tools/judge/material/human.tsv";
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let sentences: Vec<String> = text
+        .lines()
+        .skip(1)
+        .filter_map(|row| row.split('\t').nth(2).map(str::to_string))
+        .collect();
+    assert_eq!(sentences.len(), 16);
+    let soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    let mut firm = soft;
+    firm.tuning.sonorant_softness = 0.0;
+    firm.tuning.unstressed_softness = 0.0;
+    firm.tuning.final_softness = 0.0;
+    let measure = |settings: &VoiceSettings| {
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = sentences
+                .iter()
+                .map(|s| scope.spawn(move || class_quality(settings, &soft, s)))
+                .collect();
+            // Mean over sentences of (class - accented vowels).
+            let mut diff = [[0.0f32; 2]; 3];
+            let mut count = [0usize; 3];
+            for job in jobs {
+                let q = job.join().expect("a sentence");
+                if q[0].2 == 0 {
+                    continue;
+                }
+                for c in 0..3 {
+                    if q[c + 1].2 > 0 {
+                        diff[c][0] += q[c + 1].0 - q[0].0;
+                        diff[c][1] += q[c + 1].1 - q[0].1;
+                        count[c] += 1;
+                    }
+                }
+            }
+            for c in 0..3 {
+                diff[c][0] /= count[c].max(1) as f32;
+                diff[c][1] /= count[c].max(1) as f32;
+            }
+            diff
+        })
+    };
+    let (s, f) = (measure(&soft), measure(&firm));
+    let names = ["unaccented vowels", "nasals", "liquids"];
+    for c in 0..3 {
+        println!(
+            "{:18} tilt {:+5.1} dB (firm {:+5.1}, the reader {:+5.1}); H1-H2 {:+5.1} dB (firm {:+5.1})",
+            names[c], s[c][0], f[c][0], PERSON[c], s[c][1], f[c][1]
+        );
+    }
+    for c in 0..3 {
+        assert!(
+            (s[c][0] - PERSON[c]).abs() < 2.0,
+            "{}: tilt {:+.1} dB against the accented vowels, the reader's {:+.1}",
+            names[c],
+            s[c][0],
+            PERSON[c]
+        );
+        assert!(
+            (s[c][1] - f[c][1]).abs() < 0.7,
+            "{}: H1-H2 moved by {:+.1} dB",
+            names[c],
+            s[c][1] - f[c][1]
+        );
+    }
+    for c in 1..3 {
+        assert!(
+            f[c][0] - s[c][0] > 1.5,
+            "{}: the softening darkened them by only {:.1} dB",
+            names[c],
+            f[c][0] - s[c][0]
+        );
+    }
+
+    // The threshold, found as `folds_stop_below_a_threshold_pressure`
+    // finds it, firm and at the softest setting.
+    let threshold = |softness: f32| {
+        let vibrating = |pressure: f32| {
+            let mut t = voice(110.0, 0.65, 1.0);
+            t.set_fold_softness(softness);
+            t.set_lung_pressure(pressure);
+            render(&mut t, 0.8);
+            let f = flows(&mut t, 0.3);
+            let peak = f.iter().fold(0.0f32, |m, &v| m.max(v));
+            let floor = f.iter().fold(f32::INFINITY, |m, &v| m.min(v));
+            peak - floor > 0.5 * peak
+        };
+        let (mut lo, mut hi) = (1.0f32, 8.0f32);
+        for _ in 0..9 {
+            let mid = f32::midpoint(lo, hi);
+            if vibrating(mid) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        hi
+    };
+    let (firm, softest) = (threshold(0.0), threshold(1.0));
+    println!("phonation threshold {firm:.2} cmH2O firm, {softest:.2} at softness 1");
+    assert!(
+        (softest / firm - 1.0).abs() < 0.02,
+        "threshold {firm} cmH2O firm, {softest} soft"
+    );
+}

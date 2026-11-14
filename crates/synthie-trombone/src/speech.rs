@@ -103,6 +103,9 @@ pub struct Gesture {
     /// Share by which the fold cover slackens (see
     /// [`Trombone::set_fold_slack`]).
     pub slack: f32,
+    /// How soft the voice is, `0‥1` (see
+    /// [`Trombone::set_fold_softness`]).
+    pub softness: f32,
     /// Active widening of the pharynx, cm³/s (see
     /// [`Trombone::set_cavity_expansion`]).
     pub expansion: f32,
@@ -384,6 +387,7 @@ impl Speaker {
         voice.set_breath(1.0);
         voice.set_glottal_spread(0.0);
         voice.set_fold_slack(0.0);
+        voice.set_fold_softness(0.0);
         voice.set_cavity_expansion(0.0);
         voice.articulate_phoneme(Phoneme::Sil);
         voice.set_constriction(LABIAL_SLOT, None);
@@ -489,6 +493,7 @@ impl Speaker {
                         voice.set_glottal_spread(g.spread);
                     }
                     voice.set_fold_slack(g.slack);
+                    voice.set_fold_softness(g.softness);
                     voice.set_cavity_expansion(g.expansion);
                 }
             }
@@ -659,6 +664,7 @@ impl Speaker {
                     voice.set_voiced(false);
                     voice.set_glottal_spread(0.0);
                     voice.set_fold_slack(0.0);
+                    voice.set_fold_softness(0.0);
                     voice.set_cavity_expansion(0.0);
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
@@ -1552,21 +1558,44 @@ fn assimilate_place(drafts: &mut [Draft]) {
     }
 }
 
-/// How firmly the folds are held together through a phrase (physical
-/// engine). A speaker presses them fully only on the accented vowels:
-/// through nasals, liquids and glides, and through unaccented vowels, they
-/// are held more loosely (a longer open phase, a steeper spectrum, the
-/// first harmonic a few dB stronger against the second), and they slacken
-/// over the last 150 ms before a pause. Held at the accented vowel's
-/// firmness throughout, every voiced sound had the same bright buzz.
+/// How firmly the folds are held, and how soft the voice is, through a
+/// phrase (physical engine). A speaker's voice is brightest on the accented
+/// vowels: through nasals and liquids, and through unaccented vowels, its
+/// spectrum falls faster above 2 kHz, and it softens again over the last
+/// 150 ms before a pause. Held at the accented vowel's brightness
+/// throughout, every voiced sound had the same bright buzz.
+///
+/// Measured in the LibriSpeech reader's 16 sentences against his stressed
+/// vowels (`tools/judge` alignment; level in 2-4 kHz against 0-1 kHz):
+/// nasals 5.6 dB darker, liquids 5.1, unaccented vowels 0.6, glides 4.4;
+/// the engine's, with the folds alike throughout, 3.8, 2.1, -0.5 and 11.6.
+/// So nasals, liquids and unaccented vowels are softened
+/// (`sonorant_softness`, `unstressed_softness`, `final_softness`, through
+/// `Trombone::set_fold_softness`, which leaves the folds alone), and the
+/// glides, already darker than his under their narrow lips, are not.
+///
+/// Until round 8 the folds were held more loosely instead
+/// (`sonorant_slack`, `final_slack`: a share of the tenseness off), which
+/// opens them: past 12 % the child voice fell out of its folds' range and
+/// a /g/ lost its voice bar, and at 12 % it made the nasals and liquids
+/// brighter, not darker (their breath noise grew).
 fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
-    /// The stretch before a pause over which the folds slacken, seconds.
+    /// The stretch before a pause over which the voice softens, seconds.
     const FINAL: f32 = 0.15;
     for d in phrase.iter_mut() {
         let sonorant = matches!(d.phoneme.manner(), Manner::Nasal | Manner::Approximant);
+        let liquid = matches!(d.phoneme, Phoneme::L | Phoneme::R);
         let unaccented = d.vowel && d.accent <= 0.0;
-        if d.voiced && d.tenseness.is_none() && (sonorant || unaccented) {
+        if !d.voiced {
+            continue;
+        }
+        if d.tenseness.is_none() && (sonorant || unaccented) && timing.sonorant_slack > 0.0 {
             d.tenseness = Some(tense * (1.0 - timing.sonorant_slack));
+        }
+        if d.phoneme.manner() == Manner::Nasal || liquid {
+            d.gesture.softness = d.gesture.softness.max(timing.sonorant_softness);
+        } else if unaccented {
+            d.gesture.softness = d.gesture.softness.max(timing.unstressed_softness);
         }
     }
     let mut left = FINAL;
@@ -1578,10 +1607,14 @@ fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
             break;
         }
         if d.voiced {
-            // Slackest at the very end, firm again 150 ms before it.
+            // Slackest and softest at the very end, as before 150 ms
+            // before it.
             let share = (left - 0.5 * d.duration.min(left)).max(0.0) / FINAL;
-            let now = d.tenseness.unwrap_or(tense);
-            d.tenseness = Some(now * (1.0 - timing.final_slack * share));
+            if timing.final_slack > 0.0 {
+                let now = d.tenseness.unwrap_or(tense);
+                d.tenseness = Some(now * (1.0 - timing.final_slack * share));
+            }
+            d.gesture.softness = d.gesture.softness.max(timing.final_softness * share);
         }
         left -= d.duration;
     }

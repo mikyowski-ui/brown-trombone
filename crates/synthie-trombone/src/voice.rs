@@ -156,6 +156,8 @@ pub struct Trombone {
     source: Source,
     /// Radiated flow at the previous internal sample (physical engine).
     phys_flow: f32,
+    /// The physical engine's output after the low-pass of soft folds.
+    soft_out: f32,
     glottal_area: f32,
     regulated: bool,
     tuning: Tuning,
@@ -223,6 +225,7 @@ impl Trombone {
                 source
             },
             phys_flow: 0.0,
+            soft_out: 0.0,
             glottal_area: 0.0,
             regulated: true,
             tuning: Tuning::DEFAULT,
@@ -260,6 +263,7 @@ impl Trombone {
         self.phys.reset();
         self.source.reset();
         self.phys_flow = 0.0;
+        self.soft_out = 0.0;
         self.frication.reset();
         self.block_pos = 0;
         self.since_regulated = BLOCK;
@@ -517,6 +521,32 @@ impl Trombone {
         }
     }
 
+    /// Soften the voice, `0` (firm, the default) to `1`, as a speaker's
+    /// voice is softer on nasals, liquids and unaccented syllables than on
+    /// an accented vowel: the voice passes a one-pole low-pass whose corner
+    /// is [`Tuning::soft_corner`] at `1` and moves up out of hearing
+    /// towards `0`, so the spectrum above 2 kHz falls faster. The folds
+    /// themselves are left alone: how far apart they are held, the
+    /// pressure they need to start and every note they can sing stay as
+    /// the tenseness sets them. The change is spread over some 10 ms.
+    /// Physical engine only.
+    ///
+    /// Why not in the folds: a softer contact made them close for longer
+    /// and lowered H1-H2 (by 3.4 dB at a third of the stiffness), edges
+    /// that meet progressively along their length closed faster under the
+    /// suction of the narrowing slit and at 0.012 cm sent the 210 Hz voice
+    /// into a regime where its edges never met, a low-pass on the glottal
+    /// area put the flow behind the folds' motion and pumped them louder
+    /// and brighter, and one on the flow the tract takes up was given back
+    /// by the tract's pressure on the folds (−0.3 to −2 dB at 2 to 4 kHz).
+    /// The high frequencies of this voice come from the flow's ripple under
+    /// the tract's own pressure, not from the instant of closure.
+    pub fn set_fold_softness(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.soft_target = share.clamp(0.0, 1.0);
+        }
+    }
+
     /// Widen the pharynx actively at `cm3_per_s` (cm³/s at native size,
     /// `0‥500`), as a speaker does to keep the voice going through a voiced
     /// closure: the air the folds send into the shut tract is taken up
@@ -633,6 +663,7 @@ impl Trombone {
         self.source.set_size(length);
         self.source.reset();
         self.phys_flow = 0.0;
+        self.soft_out = 0.0;
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 
@@ -1153,12 +1184,22 @@ impl Trombone {
         self.glottal_area = area;
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;
+        // Soft folds: the voice through a one-pole low-pass. The tract is
+        // linear, so for the voice this is the low-pass on the derivative
+        // of the glottal flow, but outside the loop of folds and tract: put
+        // on the flow the tract takes up, the tract's pressure fed back on
+        // the folds gave most of the high frequencies back (see
+        // `Trombone::set_fold_softness`).
+        let pass = self.source.soft_pass(2.0 * dt);
+        self.soft_out += (out - self.soft_out) * pass;
+        let out = self.soft_out;
         if out.is_finite() {
             out
         } else {
             self.phys.reset();
             self.source.reset();
             self.phys_flow = 0.0;
+            self.soft_out = 0.0;
             0.0
         }
     }
