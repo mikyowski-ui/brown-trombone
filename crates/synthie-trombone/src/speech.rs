@@ -283,7 +283,11 @@ impl Utterance {
     }
 
     /// The pitch track at `t` seconds (see [`Utterance::set_pitch_track`]).
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     fn track_at(&self, t: f32) -> Option<f32> {
         let track = &self.pitch_track;
         let last = track.len().checked_sub(1)?;

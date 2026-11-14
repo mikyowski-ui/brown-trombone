@@ -52,9 +52,9 @@
 mod wav;
 
 use std::time::Instant;
+use synthie_trombone::speech::{self, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
 use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
-use synthie_trombone::speech::{self, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::{Trombone, normalize};
 
 /// A prosody schedule (`tools/judge/prosody.py`) from its JSON.

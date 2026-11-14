@@ -221,8 +221,18 @@ fn share_out(rule: &[f32], floor: &[f32], target: f32) -> Vec<f32> {
         return out;
     }
     for _ in 0..rule.len() {
-        let held: f32 = floor.iter().zip(&fixed).filter(|(_, f)| **f).map(|(m, _)| m).sum();
-        let free: f32 = rule.iter().zip(&fixed).filter(|(_, f)| !**f).map(|(r, _)| r).sum();
+        let held: f32 = floor
+            .iter()
+            .zip(&fixed)
+            .filter(|(_, f)| **f)
+            .map(|(m, _)| m)
+            .sum();
+        let free: f32 = rule
+            .iter()
+            .zip(&fixed)
+            .filter(|(_, f)| !**f)
+            .map(|(r, _)| r)
+            .sum();
         let scale = if free > 0.0 {
             (target - held) / free
         } else {
@@ -268,7 +278,11 @@ impl Utterance {
     ///
     /// When the schedule's phones are not the utterance's, or it has no
     /// pitch track.
-    #[allow(clippy::too_many_lines)]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::many_single_char_names,
+        clippy::cast_precision_loss
+    )]
     pub fn follow(
         &mut self,
         schedule: &Schedule,
@@ -305,11 +319,9 @@ impl Utterance {
                 });
             }
         }
-        let mut report = FollowReport::default();
-
         // The voice's own pitch: the median of its rule contour over its
         // voiced sounds, time-weighted.
-        report.shift = match mode {
+        let shift = match mode {
             PitchMode::Speaker => 0.0,
             PitchMode::Voice => {
                 let mut voiced: Vec<(f32, f32)> = self
@@ -317,7 +329,12 @@ impl Utterance {
                     .iter()
                     .zip(&self.phones)
                     .filter(|(s, p)| s.voiced && **p != NO_PHONE)
-                    .map(|(s, _)| (ln(s.pitch.0.max(1.0) * s.pitch.1.max(1.0)) * 0.5, s.duration))
+                    .map(|(s, _)| {
+                        (
+                            ln(s.pitch.0.max(1.0) * s.pitch.1.max(1.0)) * 0.5,
+                            s.duration,
+                        )
+                    })
                     .collect();
                 voiced.sort_by(|a, b| a.0.total_cmp(&b.0));
                 let half = 0.5 * voiced.iter().map(|v| v.1).sum::<f32>();
@@ -336,6 +353,10 @@ impl Utterance {
                     _ => 0.0,
                 }
             }
+        };
+        let mut report = FollowReport {
+            shift,
+            ..FollowReport::default()
         };
 
         // Each phone's duration: the speaker's, and half of any pause of
@@ -425,7 +446,11 @@ impl Utterance {
             i = j;
         }
         for (s, &d) in self.segments.iter_mut().zip(&new) {
-            let f = if s.duration > 0.0 { d / s.duration } else { 1.0 };
+            let f = if s.duration > 0.0 {
+                d / s.duration
+            } else {
+                1.0
+            };
             let g = &mut s.gesture;
             g.gap_opening = (g.gap_opening.0 * f, g.gap_opening.1 * f);
             if g.hold >= 0.5 * s.duration {
@@ -515,12 +540,16 @@ impl Utterance {
             .iter()
             .zip(&schedule.phones)
             .map(|(&(a, b), ph)| {
-                let share = if ph.breath.is_finite() { ph.breath } else { 1.0 };
+                let share = if ph.breath.is_finite() {
+                    ph.breath
+                } else {
+                    1.0
+                };
                 let limited = share.clamp(BREATH_RANGE.0, BREATH_RANGE.1);
                 if (limited - share).abs() > 1e-6 {
                     report.breath_limited += 1;
                 }
-                (0.5 * (a + b), limited)
+                (f32::midpoint(a, b), limited)
             })
             .collect();
         let breath_at = |tau: f32| -> f32 {
@@ -630,7 +659,7 @@ mod tests {
         }
         // The pitch follows the speaker's, phone onto phone.
         let spans = u.phone_spans();
-        let mid = 0.5 * (spans[10].0 + spans[10].1);
+        let mid = f32::midpoint(spans[10].0, spans[10].1);
         let want = s.pitch_at(0.5 + 10.5 * 0.09);
         let got = u.track_at(mid).unwrap();
         assert!((got - want).abs() < 0.5, "{got} {want}");
@@ -706,9 +735,15 @@ mod tests {
     #[test]
     fn share_out_keeps_proportions_and_floors() {
         let d = share_out(&[0.05, 0.05], &[0.03, 0.006], 0.04);
-        assert!((d[0] - 0.03).abs() < 1e-6 && (d[1] - 0.01).abs() < 1e-6, "{d:?}");
+        assert!(
+            (d[0] - 0.03).abs() < 1e-6 && (d[1] - 0.01).abs() < 1e-6,
+            "{d:?}"
+        );
         let d = share_out(&[0.02, 0.06], &[0.006, 0.006], 0.16);
-        assert!((d[0] - 0.04).abs() < 1e-6 && (d[1] - 0.12).abs() < 1e-6, "{d:?}");
+        assert!(
+            (d[0] - 0.04).abs() < 1e-6 && (d[1] - 0.12).abs() < 1e-6,
+            "{d:?}"
+        );
         let d = share_out(&[0.02, 0.06], &[0.03, 0.006], 0.01);
         assert_eq!(d, [0.03, 0.006]);
     }
