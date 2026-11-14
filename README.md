@@ -384,14 +384,14 @@ as the model goes:
   much). They are held longer than the classic engine's, since the slow
   tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are
   as much shorter than the tense ones as a speaker's, by 38 %
-  (`lax_length` and `unstressed_lax_length`, 0.62, chosen by ear), a
-  stressed one's held part never under 60 ms however fast the speech
-  (`lax_floor`). A milder stressed length, 0.82 ("sells", "punch"), is in
-  `profiles/stressed-lax.json`: there the recognizer hears the stressed
-  /ɪ/ as /eɪ/ in a quarter of the LibriSpeech texts' slots. They glide part of the
-  way towards schwa over their last third, a stressed /æ/ about a fifth of
-  the way over its last 45 % (`ae_nucleus`), and /eɪ/ glides the whole
-  way. A vowel shape also sets the tongue root, which widens or narrows
+  (`lax_length` and `unstressed_lax_length`, 0.62, chosen by ear), and
+  glide part of the way towards schwa over their last third; /eɪ/ glides
+  the whole way. `profiles/stressed-lax.json` holds round 6's milder
+  stressed length (0.82, "sells", "punch") with a 60 ms floor on the held
+  part (`lax_floor`) and a stressed /æ/ that glides a fifth of the way to
+  schwa (`ae_nucleus`); there the recognizer hears the stressed /ɪ/ as
+  /eɪ/ in a quarter of the LibriSpeech texts' slots, so it is not the
+  default. A vowel shape also sets the tongue root, which widens or narrows
   the pharynx on its own and stays with the tongue body under the
   consonants around the vowel (`Shape::pharynx`): /ɪ ʌ ʊ/ pull it back
   (by 0.20, 0.12 and 0.29), every other vowel leaves it at rest, so the

@@ -412,17 +412,22 @@ tuning! {
 
     /// Shortest the held part of a stressed lax vowel may be, seconds (its
     /// nucleus: `lax_nucleus` of its length, before its glide towards
-    /// schwa), however fast the speech; `0` for none. Of the 136 stressed
-    /// lax vowels of the judge's sentences it lengthens 39 at the default
-    /// rate (the shortest held 53 ms), 93 at 1.2 times the rate; with
-    /// `lax_length` at 0.82 none at the default rate, 39 at 1.2 times.
-    lax_floor = 0.06, 0.0..=0.09, C;
+    /// schwa), however fast the speech; `0` for none. The owner asked for
+    /// 60 ms with the milder stressed length (`profiles/stressed-lax.json`),
+    /// where of the 136 stressed lax vowels of the judge's sentences it
+    /// lengthens none at the default rate and 39 at 1.2 times the rate (at
+    /// `lax_length` 0.62: 39 already at the default rate). Off by default:
+    /// with it and `ae_nucleus` on, the held-out sentences' phoneme error
+    /// rose 1.9 points [-0.1, 4.2] and the vowel lab's held-out vowel error
+    /// 1.3 [-0.3, 3.0].
+    lax_floor = 0.0, 0.0..=0.09, C;
     /// Share of a stressed /æ/ held on its own shape before it glides
-    /// towards schwa for the rest ("planks", "background"); `1.0` holds it
-    /// to the end, as before round 6. At 0.55 it ends about a fifth of the
-    /// way to schwa (`tests/vowel_glide_gate.rs`); at 0.67, the lax vowels'
-    /// share, only 13 %.
-    ae_nucleus = 0.55, 0.4..=1.0, C;
+    /// towards schwa for the rest ("planks", "background"); `1.0` (the
+    /// default) holds it to the end. At 0.55 it ends about a fifth of the
+    /// way to schwa (`tests/vowel_glide_gate.rs`; at 0.67, the lax vowels'
+    /// share, 13 %), and the recognizer heard more /æ/ as /ɛ/. In
+    /// `profiles/stressed-lax.json`.
+    ae_nucleus = 1.0, 0.4..=1.0, C;
 }
 
 impl Default for Tuning {

@@ -267,16 +267,26 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
         let n = u.segments().iter().filter(|s| s.phoneme == p).count();
         assert_eq!(n, 1, "{p}");
     }
-    // ...but a stressed /æ/ glides about a fifth of the way to schwa
-    // (`Tuning::ae_nucleus`), an unstressed one not at all.
-    let (mid, glided) = trajectory(Phoneme::Ae);
-    let mut held = physical();
-    held.tuning.ae_nucleus = 1.0;
+    // ...nor does /æ/ by default; with `Tuning::ae_nucleus` at 0.55
+    // (`profiles/stressed-lax.json`) a stressed one glides about a fifth
+    // of the way to schwa, an unstressed one not at all.
+    let held = physical();
+    let u = Utterance::from_text("[HH AE1]", &held.prosody());
+    assert_eq!(
+        u.segments()
+            .iter()
+            .filter(|s| s.phoneme == Phoneme::Ae)
+            .count(),
+        1
+    );
+    let mut gliding = physical();
+    gliding.tuning.ae_nucleus = 0.55;
+    let (mid, glided) = trajectory_in(Phoneme::Ae, &gliding);
     let (_, still) = trajectory_in(Phoneme::Ae, &held);
     let s = share(mid, still, glided, schwa);
     println!("AE: {:.0} % of the way to schwa", 100.0 * s);
     assert!((0.15..=0.3).contains(&s), "AE: {s}");
-    let u = Utterance::from_text("[HH AE0 D]", &physical().prosody());
+    let u = Utterance::from_text("[HH AE0 D]", &gliding.prosody());
     assert_eq!(
         u.segments()
             .iter()
@@ -291,8 +301,8 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
     // With the owner's milder stressed length (`profiles/stressed-lax.json`)
     // a stressed lax vowel is 18 % shorter than a tense one, an unstressed
     // one still 38 % ("sells" against "of"); at the defaults both are 38 %.
-    // The held part of a stressed one never falls under
-    // `Tuning::lax_floor`, however fast the speech.
+    // With `Tuning::lax_floor` set the held part of a stressed one never
+    // falls under it, however fast the speech.
     let ratio = |stress: &str, settings: &VoiceSettings| {
         let len = |v: Phoneme| {
             Utterance::from_text(
@@ -319,6 +329,8 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
     for rate in [1.0f32, 1.4, 2.0] {
         let mut fast = physical();
         fast.rate *= rate;
+        fast.tuning.lax_length = 0.82;
+        fast.tuning.lax_floor = 0.06;
         let u = Utterance::from_text("[P AH1 N CH] [S EH1 L Z] [K IH1 T]", &fast.prosody());
         let segs = u.segments();
         let heads: Vec<f32> = segs
