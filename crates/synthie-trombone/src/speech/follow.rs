@@ -22,8 +22,10 @@
 //! the lungs push through each phone.
 
 use super::{Break, NO_PHONE, Token, Utterance};
-use crate::Phoneme;
+use crate::inverse::{self, Shape};
 use crate::math::{lerp, ln, powf};
+use crate::vowel_targets::VowelKey;
+use crate::{Manner, Phoneme, Tuning};
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -39,8 +41,9 @@ const MIN_PAUSE: f32 = 0.03;
 /// A gap between two phones of the schedule at least this long is a
 /// pause, seconds.
 pub const PAUSE_GAP: f32 = 0.02;
-/// The range of a phone's breath, a share of the voice's lung pressure.
-const BREATH_RANGE: (f32, f32) = (0.5, 1.5);
+/// A phone this much shorter than the rules make it, or more, has its
+/// articulators sped up (a ratio of durations).
+const SPED_UP: f32 = 1.01;
 /// Step of the pitch track the utterance is given, seconds.
 const TRACK_HOP: f32 = 0.005;
 
@@ -54,8 +57,117 @@ pub struct PhoneSpan {
     /// End on the recording, seconds.
     pub end: f32,
     /// How hard the lungs push through it, a share of what the rules give
-    /// (`1`), limited to 0.5 to 1.5.
+    /// (`1`), limited to [`FollowOptions::breath_range`].
     pub breath: f32,
+    /// How firmly the folds are held through it, a share of the rules'
+    /// tenseness (`1`), limited to [`FollowOptions::tenseness_range`]: the
+    /// speaker's voice quality from phone to phone.
+    pub tenseness: f32,
+    /// For a vowel: its first two formants as the speaker has them, each a
+    /// share of the formant of the voice's own vowel shape (`(1, 1)` is the
+    /// voice's vowel), limited to ±[`FollowOptions::formant_range`]. The
+    /// vowel, and the consonants made on its body, get a shape solved for
+    /// them (see [`Utterance::follow_with`]).
+    pub formants: Option<(f32, f32)>,
+}
+
+impl PhoneSpan {
+    /// A phone from `start` to `end` seconds, everything else as the rules
+    /// have it.
+    #[must_use]
+    pub const fn new(phoneme: Option<Phoneme>, start: f32, end: f32) -> Self {
+        Self {
+            phoneme,
+            start,
+            end,
+            breath: 1.0,
+            tenseness: 1.0,
+            formants: None,
+        }
+    }
+}
+
+/// What [`Utterance::follow_with`] takes from a [`Schedule`] besides the
+/// durations, and within which limits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FollowOptions {
+    /// Which pitch.
+    pub pitch: PitchMode,
+    /// The range of a phone's breath share ([`PhoneSpan::breath`]).
+    pub breath_range: (f32, f32),
+    /// The range of a phone's tenseness share ([`PhoneSpan::tenseness`]);
+    /// `(1, 1)` leaves the rules' tenseness.
+    pub tenseness_range: (f32, f32),
+    /// How far a vowel's formants may be moved, a share either way
+    /// ([`PhoneSpan::formants`]); `0` leaves the voice's vowels.
+    pub formant_range: f32,
+    /// The voice's tract length (see
+    /// [`Trombone::set_tract_length`](crate::Trombone::set_tract_length)),
+    /// which the vowel shapes are solved for.
+    pub tract_length: f32,
+    /// Fastest the articulators may be driven, a multiple of their rule
+    /// speed: a phone the schedule makes shorter than the rules do has
+    /// them moved faster in proportion, up to this (`1` never).
+    pub max_speed: f32,
+    /// Shortest a phone may be made, a share of its rule duration; `0`
+    /// gives every phone the schedule's duration.
+    pub shortest: f32,
+}
+
+impl FollowOptions {
+    /// Everything followed, within the limits of `tuning`, for a voice of
+    /// `tract_length`.
+    #[must_use]
+    pub fn new(pitch: PitchMode, tuning: &Tuning, tract_length: f32) -> Self {
+        let t = tuning.clamped();
+        Self {
+            pitch,
+            breath_range: (t.follow_breath_low, t.follow_breath_high),
+            tenseness_range: (t.follow_tenseness_low, t.follow_tenseness_high),
+            formant_range: t.follow_formant_range,
+            tract_length,
+            max_speed: t.follow_speed_max,
+            shortest: t.follow_shortest,
+        }
+    }
+
+    /// Only the durations, pauses, pitch and breath, as until round 9.
+    #[must_use]
+    pub fn timing_only(pitch: PitchMode) -> Self {
+        Self {
+            tenseness_range: (1.0, 1.0),
+            formant_range: 0.0,
+            max_speed: 1.0,
+            shortest: 0.0,
+            ..Self::new(pitch, &Tuning::DEFAULT, 1.0)
+        }
+    }
+}
+
+/// What a followed utterance asks of the [`Speaker`](super::Speaker) beyond
+/// its segments: per segment, how fast the articulators move to its shape
+/// and the vowel shape it is made with. Empty for an utterance that
+/// follows nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Followed {
+    /// Articulation speed per segment, a multiple of the voice's.
+    pub(crate) speed: Vec<f32>,
+    /// Per segment, the vowel shape it is made with in place of the
+    /// voice's own for that key: the vowel's, and that of the vowel a
+    /// consonant leans on.
+    pub(crate) shape: Vec<Option<(VowelKey, Shape)>>,
+}
+
+impl Followed {
+    /// Articulation speed for segment `k`.
+    pub(crate) fn speed_of(&self, k: usize) -> f32 {
+        self.speed.get(k).copied().unwrap_or(1.0)
+    }
+
+    /// The vowel shape segment `k` is made with, if it has one of its own.
+    pub(crate) fn shape_of(&self, k: usize) -> Option<(VowelKey, Shape)> {
+        self.shape.get(k).copied().flatten()
+    }
 }
 
 /// A person's timing and pitch for a text: one [`PhoneSpan`] per phone of
@@ -97,8 +209,22 @@ pub struct FollowReport {
     pub added: f32,
     /// Semitones the speaker's contour was moved by.
     pub shift: f32,
-    /// Breath shares that had to be limited to 0.5 to 1.5.
+    /// Breath shares that had to be limited to
+    /// [`FollowOptions::breath_range`].
     pub breath_limited: usize,
+    /// Tenseness shares that had to be limited to
+    /// [`FollowOptions::tenseness_range`].
+    pub tenseness_limited: usize,
+    /// Vowels given a shape of their own for the speaker's formants.
+    pub shaped: usize,
+    /// Of those, the formants that had to be limited to
+    /// ±[`FollowOptions::formant_range`].
+    pub formants_limited: usize,
+    /// Phones whose articulators were sped up (shorter than the rules
+    /// make them), and the fastest speed given.
+    pub sped: usize,
+    /// The fastest articulation speed given, a multiple of the voice's.
+    pub fastest: f32,
     /// Each phone's start and end on the utterance's clock, seconds.
     pub spans: Vec<(f32, f32)>,
 }
@@ -274,6 +400,38 @@ impl Utterance {
     /// speaker's the utterance has no pause for (inside a word) is shared
     /// between the phones on either side.
     ///
+    /// This follows the timing, pitch and breath only, as
+    /// [`FollowOptions::timing_only`]; [`follow_with`](Self::follow_with)
+    /// takes the speaker's voice quality and vowels too.
+    ///
+    /// # Errors
+    ///
+    /// When the schedule's phones are not the utterance's, or it has no
+    /// pitch track.
+    pub fn follow(
+        &mut self,
+        schedule: &Schedule,
+        mode: PitchMode,
+    ) -> Result<FollowReport, ScheduleError> {
+        self.follow_with(schedule, &FollowOptions::timing_only(mode))
+    }
+
+    /// [`follow`](Self::follow), and within the limits of `options`:
+    ///
+    /// * **tenseness:** each voiced sonorant's tenseness is scaled by its
+    ///   phone's [`PhoneSpan::tenseness`] (the obstruents keep the rules');
+    /// * **vowels:** a vowel with [`PhoneSpan::formants`] is given a shape
+    ///   solved through the babble map ([`inverse::solve_for`], starting
+    ///   from the voice's own shape for it, for the voice's tract length)
+    ///   for the voice's formants there scaled by those shares, rounding
+    ///   and all; the consonants made on its body (see `lean_on_vowels`)
+    ///   lean on that shape too;
+    /// * **speed:** a phone the schedule makes shorter than the rules do
+    ///   has its articulators moved faster by the rules' duration over the
+    ///   schedule's, up to [`FollowOptions::max_speed`], so the tongue gets
+    ///   to its shapes in the time there is. A phone given more time than
+    ///   the rules keeps the voice's speed.
+    ///
     /// # Errors
     ///
     /// When the schedule's phones are not the utterance's, or it has no
@@ -283,11 +441,12 @@ impl Utterance {
         clippy::many_single_char_names,
         clippy::cast_precision_loss
     )]
-    pub fn follow(
+    pub fn follow_with(
         &mut self,
         schedule: &Schedule,
-        mode: PitchMode,
+        options: &FollowOptions,
     ) -> Result<FollowReport, ScheduleError> {
+        let mode = options.pitch;
         if schedule.pitch.is_empty() || schedule.pitch_hop <= 0.0 || !schedule.pitch_hop.is_finite()
         {
             return Err(ScheduleError::NoPitch);
@@ -395,6 +554,8 @@ impl Utterance {
         };
         let mut i = 0;
         let mut new = Vec::with_capacity(self.segments.len());
+        let mut speed = alloc::vec![1.0; self.segments.len()];
+        report.fastest = 1.0;
         while i < self.segments.len() {
             let p = self.phones[i];
             let mut j = i + 1;
@@ -435,16 +596,27 @@ impl Utterance {
                 }
             } else {
                 let floor: Vec<f32> = self.segments[i..j].iter().map(floor_of).collect();
-                let want = target[p as usize];
+                let had: f32 = rule.iter().sum();
+                let want = target[p as usize].max(options.shortest * had);
                 let least: f32 = floor.iter().sum();
                 if want < least {
                     report.too_short += 1;
                     report.added += least - want;
                 }
-                new.extend(share_out(&rule, &floor, want));
+                let got = share_out(&rule, &floor, want);
+                // Shorter than the rules: the articulators get there faster.
+                let has: f32 = got.iter().sum();
+                if options.max_speed > 1.0 && has > 0.0 && had > SPED_UP * has {
+                    let f = (had / has).min(options.max_speed);
+                    speed[i..j].fill(f);
+                    report.sped += 1;
+                    report.fastest = report.fastest.max(f);
+                }
+                new.extend(got);
             }
             i = j;
         }
+        self.followed.speed = if report.sped > 0 { speed } else { Vec::new() };
         for (s, &d) in self.segments.iter_mut().zip(&new) {
             let f = if s.duration > 0.0 {
                 d / s.duration
@@ -545,7 +717,8 @@ impl Utterance {
                 } else {
                     1.0
                 };
-                let limited = share.clamp(BREATH_RANGE.0, BREATH_RANGE.1);
+                let (lo, hi) = options.breath_range;
+                let limited = share.clamp(lo, hi.max(lo));
                 if (limited - share).abs() > 1e-6 {
                     report.breath_limited += 1;
                 }
@@ -570,8 +743,127 @@ impl Utterance {
                 1.0 - (1.0 - to) * breath_at(b),
             );
         }
+
+        // The voice quality: each voiced sonorant's tenseness by its phone's
+        // share. Not the obstruents': a voiced closure needs folds held
+        // firmly enough to go on vibrating against the pressure building
+        // in the mouth (with a loose baseline and its breath at the bottom
+        // of its range, a /b/ or /g/ between vowels lost most of its voice
+        // bar), and the speaker's voice quality is measured on the
+        // sonorants anyway.
+        let (lo, hi) = options.tenseness_range;
+        let mut limited = alloc::vec![false; n];
+        for (s, &p) in self.segments.iter_mut().zip(&self.phones) {
+            let sonorant = matches!(
+                s.phoneme.manner(),
+                Manner::Vowel | Manner::Diphthong | Manner::Nasal | Manner::Approximant
+            );
+            if p == NO_PHONE || !s.voiced || !sonorant {
+                continue;
+            }
+            let share = schedule.phones[p as usize].tenseness;
+            let share = if share.is_finite() { share } else { 1.0 };
+            let f = share.clamp(lo, hi.max(lo));
+            limited[p as usize] |= (f - share).abs() > 1e-6;
+            s.tenseness = (s.tenseness * f).clamp(0.0, 1.0);
+        }
+        report.tenseness_limited = limited.iter().filter(|&&l| l).count();
+
+        self.shape_vowels(schedule, options, &mut report);
         report.spans = spans;
         Ok(report)
+    }
+
+    /// The speaker's vowels (see [`follow_with`](Self::follow_with)): a
+    /// shape solved for each vowel with [`PhoneSpan::formants`], held by
+    /// the vowel's segments and by the consonants made on its body.
+    fn shape_vowels(
+        &mut self,
+        schedule: &Schedule,
+        options: &FollowOptions,
+        report: &mut FollowReport,
+    ) {
+        self.followed.shape = Vec::new();
+        let range = options.formant_range.clamp(0.0, 0.5);
+        if range <= 0.0 {
+            return;
+        }
+        let length = options.tract_length;
+        let mut shapes: Vec<Option<(VowelKey, Shape)>> = alloc::vec![None; self.segments.len()];
+        let mut solved: Vec<Option<(VowelKey, Shape)>> = alloc::vec![None; schedule.phones.len()];
+        let mut limited = 0;
+        for (i, s) in self.segments.iter().enumerate() {
+            let p = self.phones[i];
+            if p == NO_PHONE || s.phoneme.manner() != Manner::Vowel {
+                continue;
+            }
+            // The vowel's own shape (or the fronted /u/'s after /t d s z/),
+            // not its glide towards schwa or back.
+            let Some(key) = s
+                .articulation
+                .vowel
+                .filter(|&k| k == VowelKey::Vowel(s.phoneme) || k == VowelKey::Fronted(s.phoneme))
+            else {
+                continue;
+            };
+            let Some((r1, r2)) = schedule.phones[p as usize].formants else {
+                continue;
+            };
+            // (A phone held on two shapes, the fronted /u/'s and the plain
+            // one it glides back to, is solved for each.)
+            if solved[p as usize].is_none_or(|(k, _)| k != key) {
+                let first = solved[p as usize].is_none();
+                let Some(own) = key.articulation().and_then(|a| a.physical_shape(length)) else {
+                    continue;
+                };
+                let Some(native) = inverse::predict(&own) else {
+                    continue;
+                };
+                let at = inverse::formants_at_length(native, length);
+                let clip = |r: f32| {
+                    let r = if r.is_finite() && r > 0.0 { r } else { 1.0 };
+                    let c = r.clamp(1.0 - range, 1.0 + range);
+                    ((c - r).abs() > 1e-6, c)
+                };
+                let ((l1, r1), (l2, r2)) = (clip(r1), clip(r2));
+                limited += usize::from(l1 || l2);
+                let shape =
+                    inverse::solve_for(at[0] * r1, at[1] * r2, Some(at[2]), Some(&own), length);
+                solved[p as usize] = Some((key, shape));
+                report.shaped += usize::from(first);
+            }
+            shapes[i] = solved[p as usize];
+        }
+        report.formants_limited = limited;
+        if report.shaped == 0 {
+            return;
+        }
+        // The consonants made on a vowel's body lean on its shape: the
+        // vowel they lead into, or the one before.
+        let is_vowel =
+            |s: &super::Segment| matches!(s.phoneme.manner(), Manner::Vowel | Manner::Diphthong);
+        for i in 0..self.segments.len() {
+            let s = &self.segments[i];
+            let Some(key) = s.articulation.vowel else {
+                continue;
+            };
+            if is_vowel(s) || s.phoneme == Phoneme::Sil {
+                continue;
+            }
+            let next = self.segments[i + 1..]
+                .iter()
+                .position(is_vowel)
+                .map(|j| i + 1 + j);
+            let prev = self.segments[..i].iter().rposition(is_vowel);
+            let on = [next, prev]
+                .into_iter()
+                .flatten()
+                .find(|&j| self.segments[j].articulation.vowel == Some(key));
+            if let Some(j) = on {
+                shapes[i] = shapes[j];
+            }
+        }
+        self.followed.shape = shapes;
     }
 
     /// Where each phone of the text starts and ends on the utterance's
@@ -627,12 +919,7 @@ mod tests {
         let mut t = 0.5;
         let phones = (0..n)
             .map(|k| {
-                let s = PhoneSpan {
-                    phoneme: None,
-                    start: t,
-                    end: t + d,
-                    breath: 1.0,
-                };
+                let s = PhoneSpan::new(None, t, t + d);
                 t += d + if k == at { pause } else { 0.0 };
                 s
             })
@@ -746,5 +1033,183 @@ mod tests {
         );
         let d = share_out(&[0.02, 0.06], &[0.03, 0.006], 0.01);
         assert_eq!(d, [0.03, 0.006]);
+    }
+
+    fn everything(tract_length: f32) -> FollowOptions {
+        FollowOptions::new(PitchMode::Speaker, &Tuning::DEFAULT, tract_length)
+    }
+
+    #[test]
+    fn a_fronted_u_takes_the_speakers_formants_too() {
+        let text = "two dogs";
+        let mut s = schedule(text, 0.12, 99, 0.0);
+        s.phones[1].formants = Some((1.05, 0.9)); // the /u/ after /t/
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let r = u.follow_with(&s, &everything(1.0)).unwrap();
+        assert!(r.shaped >= 1, "{r:?}");
+        let keys: Vec<VowelKey> = (0..u.segments.len())
+            .filter(|&i| u.phone_of(i) == Some(1))
+            .filter_map(|i| u.followed.shape_of(i).map(|(k, _)| k))
+            .collect();
+        assert!(keys.contains(&VowelKey::Fronted(Phoneme::Uw)), "{keys:?}");
+    }
+
+    #[test]
+    fn tenseness_follows_the_schedule_within_its_limits() {
+        let text = "she sells sea shells";
+        let mut s = schedule(text, 0.09, 99, 0.0);
+        s.phones[1].tenseness = 1.3; // the /i/ of "she"
+        s.phones[3].tenseness = 0.95; // the /e/ of "sells"
+        s.phones[4].tenseness = 0.5; // its /l/
+        let mut plain = Utterance::from_tokens(&phonemize(text), &physical());
+        plain.follow(&s, PitchMode::Speaker).unwrap();
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let r = u.follow_with(&s, &everything(1.0)).unwrap();
+        assert_eq!(r.tenseness_limited, 2);
+        let t = Tuning::DEFAULT;
+        for (k, want) in [
+            (1, t.follow_tenseness_high),
+            (3, 0.95),
+            (4, t.follow_tenseness_low),
+            (5, 1.0),
+        ] {
+            for (i, (a, b)) in plain.segments.iter().zip(&u.segments).enumerate() {
+                if plain.phone_of(i) == Some(k) && a.voiced {
+                    assert!((b.tenseness - a.tenseness * want).abs() < 1e-5, "phone {k}");
+                }
+            }
+        }
+        // the voiceless /s/ keeps its tenseness
+        let s0 = plain.segments.iter().position(|x| x.phoneme == Phoneme::S);
+        assert!(
+            s0.is_some_and(
+                |i| (plain.segments[i].tenseness - u.segments[i].tenseness).abs() < 1e-9
+            )
+        );
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names)]
+    fn phones_shorter_than_the_rules_move_the_tongue_faster() {
+        let text = "the juice of lemons";
+        let rule = Utterance::from_tokens(&phonemize(text), &physical()).phone_spans();
+        let mut s = schedule(text, 0.1, 99, 0.0);
+        // phone 3 at 80 % of its rule length, phone 4 at a third, phone 5 at
+        // twice: sped up by 1.25, by the most allowed, and not at all
+        let mut t = 0.5;
+        for (k, p) in s.phones.iter_mut().enumerate() {
+            let d = rule[k].1 - rule[k].0;
+            let d = match k {
+                3 => 0.8 * d,
+                4 => d / 3.0,
+                5 => 2.0 * d,
+                _ => d,
+            };
+            (p.start, p.end) = (t, t + d);
+            t += d;
+        }
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let mut options = everything(1.0);
+        options.shortest = 0.0;
+        let r = u.follow_with(&s, &options).unwrap();
+        let max = Tuning::DEFAULT.follow_speed_max;
+        for i in 0..u.segments.len() {
+            let want = match u.phone_of(i) {
+                Some(3) => 1.25,
+                Some(4) => max,
+                _ => 1.0,
+            };
+            let got = u.followed.speed_of(i);
+            assert!((got - want).abs() < 0.02, "segment {i}: {got} {want}");
+        }
+        assert!(r.sped == 2 && (r.fastest - max).abs() < 1e-6);
+        // With a floor at 70 % of the rules the third-length phone gets 70 %
+        // of its rule duration, and the speed that goes with it.
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let mut options = everything(1.0);
+        options.shortest = 0.7;
+        u.follow_with(&s, &options).unwrap();
+        let spans = u.phone_spans();
+        let d = spans[4].1 - spans[4].0;
+        assert!((d / (rule[4].1 - rule[4].0) - 0.7).abs() < 0.01, "{d}");
+        let i = (0..u.segments.len())
+            .find(|&i| u.phone_of(i) == Some(4))
+            .unwrap();
+        assert!((u.followed.speed_of(i) - 1.0 / 0.7).abs() < 0.02);
+        // and never with the speed left alone
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        u.follow(&s, PitchMode::Speaker).unwrap();
+        assert!(u.followed.speed.iter().all(|&f| (f - 1.0).abs() < 1e-9));
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names)]
+    fn a_vowel_takes_the_speakers_formants_and_its_consonants_lean_on_them() {
+        let text = "a big dog";
+        let length = 0.9;
+        let mut s = schedule(text, 0.1, 99, 0.0);
+        let ih = 2; // AX B IH G D AO G
+        s.phones[ih].formants = Some((1.1, 0.92));
+        s.phones[5].formants = Some((1.4, 1.0)); // the /ɔ/: F1 limited to +15 %
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let r = u.follow_with(&s, &everything(length)).unwrap();
+        assert_eq!((r.shaped, r.formants_limited), (2, 1));
+        let key = VowelKey::Vowel(Phoneme::Ih);
+        let vowel = (0..u.segments.len())
+            .find(|&i| u.phone_of(i) == Some(ih) && u.segments[i].articulation.vowel == Some(key))
+            .unwrap();
+        let (k, shape) = u.followed.shape_of(vowel).unwrap();
+        assert_eq!(k, key);
+        let own = key.articulation().unwrap().physical_shape(length).unwrap();
+        let f = |sh: &Shape| inverse::formants_at_length(inverse::predict(sh).unwrap(), length);
+        let (a, b) = (f(&own), f(&shape));
+        assert!((b[0] / a[0] / 1.1 - 1.0).abs() < 0.04, "{a:?} {b:?}");
+        assert!((b[1] / a[1] / 0.92 - 1.0).abs() < 0.04, "{a:?} {b:?}");
+        // the /b/ and /g/ around it are made on that shape
+        for i in 0..u.segments.len() {
+            if matches!(u.phone_of(i), Some(1 | 3)) && u.segments[i].articulation.vowel == Some(key)
+            {
+                assert_eq!(u.followed.shape_of(i), Some((key, shape)), "segment {i}");
+            }
+        }
+        let ao = (0..u.segments.len())
+            .find(|&i| u.phone_of(i) == Some(5))
+            .unwrap();
+        let (_, shape) = u.followed.shape_of(ao).unwrap();
+        let own = VowelKey::Vowel(Phoneme::Ao)
+            .articulation()
+            .unwrap()
+            .physical_shape(length)
+            .unwrap();
+        let (a, b) = (f(&own), f(&shape));
+        assert!(b[0] / a[0] < 1.15 * 1.04, "{a:?} {b:?}");
+
+        // The speaker holds the shape while the vowel is spoken.
+        let mut voice = crate::Trombone::new(48_000.0);
+        voice.set_engine(Engine::Physical);
+        voice.set_tract_length(length);
+        super::super::Speaker::prepare(&mut voice);
+        let mut speaker = super::super::Speaker::new();
+        let want = u.followed.shape_of(vowel).unwrap().1;
+        speaker.speak(u);
+        let mut seen = false;
+        for _ in 0..48_000 * 3 {
+            speaker.process(&mut voice);
+            // Early in the vowel: by its end the /g/ after it is on its way.
+            if !seen && speaker.current().is_some_and(|(i, _)| i == vowel) {
+                let (ti, td) = voice.tongue();
+                assert!(
+                    (ti - want.tongue_index).abs() < 1e-3
+                        && (td - want.tongue_diameter).abs() < 1e-3,
+                    "{:?} {want:?}",
+                    voice.tongue()
+                );
+                seen = true;
+            }
+            if !speaker.is_speaking() {
+                break;
+            }
+        }
+        assert!(seen);
     }
 }

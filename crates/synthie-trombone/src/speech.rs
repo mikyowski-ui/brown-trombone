@@ -182,6 +182,9 @@ pub struct Utterance {
     /// [`Utterance::set_pitch_track`]). Empty: the segments' pitch.
     pitch_track: Vec<f32>,
     pitch_hop: f32,
+    /// What following a speaker's schedule asks of the [`Speaker`] beyond
+    /// the segments (see [`Utterance::follow_with`]).
+    followed: follow::Followed,
 }
 
 /// The phone of a pause, in [`Utterance`]'s record of which phone each
@@ -242,6 +245,7 @@ impl Utterance {
             phones: Vec::new(),
             pitch_track: Vec::new(),
             pitch_hop: 0.0,
+            followed: follow::Followed::default(),
         }
     }
 
@@ -532,7 +536,12 @@ impl Speaker {
                 self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
                 self.closure_made = false;
                 if !self.ahead && !pause {
-                    voice.articulate(&entry_shape(&seg));
+                    articulate_segment(
+                        voice,
+                        &self.utterance.followed,
+                        self.index,
+                        &entry_shape(&seg),
+                    );
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -625,8 +634,14 @@ impl Speaker {
                 && voice.gauges().subglottal_pressure < QUIET_PRESSURE
             {
                 let segments = &self.utterance.segments[self.index..];
-                if let Some(next) = segments.iter().find(|s| s.phoneme != Phoneme::Sil) {
-                    voice.articulate(&entry_shape(next));
+                if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
+                    let next = &segments[k];
+                    articulate_segment(
+                        voice,
+                        &self.utterance.followed,
+                        self.index + k,
+                        &entry_shape(next),
+                    );
                     voice.settle();
                     // What little still rings in the tract belongs to the
                     // old shape; let it go with it.
@@ -693,7 +708,12 @@ impl Speaker {
                             .is_none_or(|l| self.clock - l.since >= self.utterance.sibilant_exit)
                 };
                 if send {
-                    voice.articulate(&entry_shape(&next));
+                    articulate_segment(
+                        voice,
+                        &self.utterance.followed,
+                        self.index + 1,
+                        &entry_shape(&next),
+                    );
                     self.ahead = true;
                 }
             }
@@ -713,7 +733,12 @@ impl Speaker {
             let (into, out_of) = seg.gesture.gap_opening;
             let lead = self.utterance.lead;
             if physical && self.gap_stage == 0 && self.elapsed >= into - lead.min(0.5 * into) {
-                voice.articulate(&seg.articulation);
+                articulate_segment(
+                    voice,
+                    &self.utterance.followed,
+                    self.index,
+                    &seg.articulation,
+                );
                 self.gap_stage = 1;
             }
             if physical
@@ -722,7 +747,8 @@ impl Speaker {
                 && !self.ahead
                 && self.elapsed >= seg.duration - out_of - lead.min(0.5 * out_of)
             {
-                voice.articulate(&widened(&seg.articulation, 2.0 * seg.gesture.gap_widening));
+                let a = widened(&seg.articulation, 2.0 * seg.gesture.gap_widening);
+                articulate_segment(voice, &self.utterance.followed, self.index, &a);
                 self.gap_stage = 2;
             }
             // Into a voiceless fricative the larynx moves a little ahead
@@ -938,6 +964,24 @@ impl Speaker {
     }
 }
 
+/// Send segment `k`'s articulation `a` to the voice, with the speed and
+/// the vowel shape a followed utterance gives it (see
+/// [`Utterance::follow_with`]); an utterance that follows nothing has the
+/// voice's own.
+fn articulate_segment(
+    voice: &mut Trombone,
+    followed: &follow::Followed,
+    k: usize,
+    a: &Articulation,
+) {
+    voice.set_articulation_boost(followed.speed_of(k));
+    match followed.shape_of(k) {
+        Some((key, shape)) => voice.hold_speech_vowel(Some((key, &shape))),
+        None => voice.hold_speech_vowel(None),
+    }
+    voice.articulate(a);
+}
+
 /// The shape a segment begins with: a fricative's gap still forming (see
 /// [`Gesture::gap_opening`]), anything else its own.
 fn entry_shape(seg: &Segment) -> Articulation {
@@ -964,7 +1008,7 @@ mod follow;
 mod lexicon;
 mod rules;
 
-pub use follow::{FollowReport, PhoneSpan, PitchMode, Schedule, ScheduleError};
+pub use follow::{FollowOptions, FollowReport, PhoneSpan, PitchMode, Schedule, ScheduleError};
 
 /// Convert English text (with optional `[ARPAbet]` spans) to tokens.
 ///
@@ -1744,6 +1788,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         phones,
         pitch_track: Vec::new(),
         pitch_hop: 0.0,
+        followed: follow::Followed::default(),
     }
 }
 

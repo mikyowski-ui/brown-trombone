@@ -59,10 +59,16 @@ pub struct Recording {
 #[must_use]
 pub fn record(settings: &VoiceSettings, text: &str) -> Recording {
     let settings = settings.with_engine(Engine::Physical);
+    record_utterance(&settings, Utterance::from_text(text, &settings.prosody()))
+}
+
+/// Speak `utterance` with `settings` on the physical engine and record it.
+#[must_use]
+pub fn record_utterance(settings: &VoiceSettings, utterance: Utterance) -> Recording {
+    let settings = settings.with_engine(Engine::Physical);
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
     Speaker::prepare(&mut voice);
-    let utterance = Utterance::from_text(text, &settings.prosody());
     let phonemes = utterance.segments().iter().map(|s| s.phoneme).collect();
     let durations = utterance.segments().iter().map(|s| s.duration).collect();
     let taps = utterance
@@ -247,12 +253,19 @@ fn cycle_pitch(r: &Recording, from: usize, to: usize, vowel: (usize, usize)) -> 
 /// Measure the stop `p` (the first segment that says it) in `text`.
 #[must_use]
 pub fn stop(settings: &VoiceSettings, text: &str, p: Phoneme) -> StopMeasure {
-    let r = record(settings, text);
-    let Some(k) = r.phonemes.iter().position(|&q| q == p) else {
+    stop_in(&record(settings, text), p, 0)
+}
+
+/// Measure the `nth` (from 0) stop `p` of a recording.
+#[must_use]
+pub fn stop_in(r: &Recording, p: Phoneme, nth: usize) -> StopMeasure {
+    let firsts =
+        (0..r.phonemes.len()).filter(|&k| r.phonemes[k] == p && (k == 0 || r.phonemes[k - 1] != p));
+    let Some(k) = firsts.into_iter().nth(nth) else {
         return StopMeasure::default();
     };
-    let (seg_start, seg_end) = span(&r, k);
-    let vibr = vibrating(&r);
+    let (seg_start, seg_end) = span(r, k);
+    let vibr = vibrating(r);
     // The closure: the run of shut samples that overlaps the segment.
     let probe = (seg_start + seg_end) / 2;
     let mut lo = probe;
@@ -276,8 +289,8 @@ pub fn stop(settings: &VoiceSettings, text: &str, p: Phoneme) -> StopMeasure {
         hi = lo;
     }
     let release = hi;
-    let vowel_k = main_vowel(&r, k + 1);
-    let (vs, ve) = span(&r, vowel_k);
+    let vowel_k = main_vowel(r, k + 1);
+    let (vs, ve) = span(r, vowel_k);
     let mid = (vs + (ve - vs) / 4, ve - (ve - vs) / 4);
     let vowel_rms = rms(&r.out[mid.0..mid.1]);
     let low = filter(
@@ -307,13 +320,13 @@ pub fn stop(settings: &VoiceSettings, text: &str, p: Phoneme) -> StopMeasure {
     } else {
         f32::NAN
     };
-    let steady = cycle_pitch(&r, mid.0, mid.1, (vs, ve));
+    let steady = cycle_pitch(r, mid.0, mid.1, (vs, ve));
     let (f0_onset, f0_next) = match onset {
         Some(s) if vs >= release => {
             let s = s.max(release);
             (
-                cycle_pitch(&r, s, s + 1200, (vs, ve)) - steady,
-                cycle_pitch(&r, s + 1200, s + 2400, (vs, ve)) - steady,
+                cycle_pitch(r, s, s + 1200, (vs, ve)) - steady,
+                cycle_pitch(r, s + 1200, s + 2400, (vs, ve)) - steady,
             )
         }
         _ => (f32::NAN, f32::NAN),

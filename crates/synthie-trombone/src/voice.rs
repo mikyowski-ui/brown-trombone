@@ -163,6 +163,9 @@ pub struct Trombone {
     tuning: Tuning,
     /// Vowel shapes held in place of the built-in ones (physical engine).
     own_vowels: crate::vowel_size::OwnShapes,
+    /// One vowel shape held over those for the sound being spoken (see
+    /// [`Trombone::hold_speech_vowel`]).
+    speech_vowel: Option<(crate::vowel_targets::VowelKey, crate::inverse::Shape)>,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -230,6 +233,7 @@ impl Trombone {
             regulated: true,
             tuning: Tuning::DEFAULT,
             own_vowels: crate::vowel_size::OwnShapes::NONE,
+            speech_vowel: None,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -748,6 +752,31 @@ impl Trombone {
         }
     }
 
+    /// Move the tongue body and the back of the tongue `factor` times as
+    /// fast as the [articulation speed](Self::set_articulation_speed) sets
+    /// them (physical engine; clamped to `1‥3`, `1` by default): a speaker
+    /// in a hurry gets the tongue to its shapes in the time a fast phone
+    /// leaves. The tip, the lips and the velum keep their speed.
+    pub fn set_articulation_boost(&mut self, factor: f32) {
+        if factor.is_finite() {
+            self.tract.boost = factor.clamp(1.0, 3.0);
+        }
+    }
+
+    /// Hold `shape` for the vowel `key` in the articulations sent from now
+    /// on, over the voice's own and those of
+    /// [`set_vowel_shape`](Self::set_vowel_shape), until it is set again;
+    /// `None` lets go of it (physical engine). The speech of a followed
+    /// schedule gives each vowel, and the consonants made on its body, a
+    /// shape of its own this way (see
+    /// [`Utterance::follow_with`](crate::speech::Utterance::follow_with)).
+    pub fn hold_speech_vowel(
+        &mut self,
+        shape: Option<(crate::vowel_targets::VowelKey, &crate::inverse::Shape)>,
+    ) {
+        self.speech_vowel = shape.map(|(k, s)| (k, *s));
+    }
+
     /// Move to an articulation. Uses [`SLOT_MAIN`] and [`SLOT_LIPS`]; leaves
     /// voicing and pitch alone (see [`Articulation::voiced`]). On the
     /// physical engine a vowel takes the shape that suits the current
@@ -765,10 +794,14 @@ impl Trombone {
             // Physical vowel shapes also follow the speaker's size, and the
             // tongue root goes with the tongue body.
             Engine::Physical => {
-                if let Some(root) = a.physical_root(self.tract_length, &self.own_vowels) {
+                let mut held = self.own_vowels;
+                if let Some((key, shape)) = &self.speech_vowel {
+                    held.set(*key, Some(shape));
+                }
+                if let Some(root) = a.physical_root(self.tract_length, &held) {
                     self.tract.set_pharynx(root);
                 }
-                a.physical_in(self.tract_length, &self.own_vowels)
+                a.physical_in(self.tract_length, &held)
             }
         };
         self.tract.set_narrowing(narrowing);

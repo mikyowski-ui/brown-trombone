@@ -175,3 +175,79 @@ def test_the_engine_follows_a_schedule():
     assert abs((spans[6, 0] - spans[5, 1]) - 0.25) < 2e-4
     assert "0 below the engine's floor" in r["followed"]
     json.dumps(sched)
+
+
+# --------------------------------------------------------------------------
+# A recording without a transcript
+
+
+def test_a_long_recording_is_cut_in_its_longest_silences():
+    hop = Pr.HOP
+    db = np.full(3000, -10.0)  # 30 s of speech
+    db[400:420] = -60.0  # a 0.2 s silence at 4 s
+    db[1000:1040] = -60.0  # a 0.4 s silence at 10 s
+    db[1300:1310] = -60.0  # 0.1 s: too short to cut at
+    db[2100:2130] = -60.0  # a 0.3 s silence at 21 s
+    pieces = Pr.split_pieces(db, 30.0, max_piece=14.0)
+    assert pieces[0] == (0.0, pytest.approx(10.2)) and pieces[-1][1] == 30.0
+    assert all(b - a <= 14.0 + 1e-9 for a, b in pieces)
+    assert all(abs(pieces[k][1] - pieces[k + 1][0]) < 1e-12 for k in range(len(pieces) - 1))
+    assert pytest.approx(pieces[1][1]) == 21.15
+    # a short one stays whole, and one with no silence is cut where it is quietest
+    assert Pr.split_pieces(db[:500], 5.0) == [(0.0, 5.0)]
+    db = np.full(2000, -10.0)
+    db[1200] = -15.0
+    assert Pr.split_pieces(db, 20.0, max_piece=14.0)[0][1] == pytest.approx(1200 * hop)
+
+
+def test_given_words_are_shared_out_by_what_was_heard_in_each_piece():
+    given = "Mr. Smith paid 5 dollars, then he left the shop.".split()
+    heard = [["mister", "smith", "paid", "five", "dollars"], ["then", "he", "left", "the", "shop"]]
+    norm = {"Mr.": ["mister"], "5": ["five"]}
+
+    def words(w):
+        return norm.get(w, [w.strip(".,").lower()])
+
+    out = Pr.distribute_words(given, heard, words)
+    assert [" ".join(p) for p in out] == ["Mr. Smith paid 5 dollars,", "then he left the shop."]
+    # words heard wrongly still go with their neighbours
+    heard = [["mister", "smith", "played", "five", "dollars"], ["than", "he", "left", "the", "shop"]]
+    assert [len(p) for p in Pr.distribute_words(given, heard, words)] == [5, 5]
+
+
+def test_the_text_beside_a_recording_is_used_and_a_heard_one_is_said_to_be(tmp_path, monkeypatch):
+    audio = np.zeros(16000 * 2)
+    wav = tmp_path / "rec.wav"
+    (tmp_path / "rec.txt").write_text("hello there\n")
+    t = Pr.resolve_text(wav, None, audio)
+    assert (t.text, t.source) == ("hello there", "file")
+    assert Pr.resolve_text(wav, "given words", audio).source == "given"
+    (tmp_path / "rec.txt").unlink()
+    monkeypatch.setattr(Pr, "transcribe_pieces", lambda a, pieces: ["Hello there."] * len(pieces))
+    t = Pr.resolve_text(wav, None, audio)
+    assert (t.text, t.source, t.heard) == ("Hello there.", "heard", ["Hello there."])
+    sched = {"text": t.text, "text_source": t.source, "phones": []}
+    (tmp_path / "out").mkdir()
+    Pr.write_heard_text(sched, tmp_path / "out" / "s.json")
+    assert (tmp_path / "out" / "s.txt").read_text().strip() == "Hello there."
+    assert not (tmp_path / "rec.txt").exists()
+    assert "heard by Whisper, not given" in Pr.describe_text(sched)[0]
+    # a long recording: one heard text per piece, joined
+    long_audio = np.random.default_rng(1).normal(0, 0.1, 16000 * 30)
+    long_audio[16000 * 10 : 16000 * 10 + 6400] = 0.0
+    long_audio[16000 * 20 : 16000 * 20 + 6400] = 0.0
+    t = Pr.resolve_text(wav, None, long_audio)
+    assert len(t.pieces) == 3 and t.text == " ".join(["Hello there."] * 3)
+
+
+def test_phones_the_path_had_to_force_are_reported():
+    # three units; the model hears the first two (log p near 0) but not the third
+    small = np.full((30, 4), -20.0)
+    small[:, 0] = -0.01
+    small[5, 1], small[15, 2], small[25, 3] = -0.05, -0.2, -9.0
+    sc = Pr.unit_scores(small, [1, 2, 3], [(5, 5), (14, 16), (25, 25)], [[0], [1, 2], [3]], 4)
+    assert np.allclose(sc, [-0.05, -0.2, -0.2, -9.0])
+    sched = {"phones": [{"phone": p, "start": 0.1 * k, "end": 0.1 * k + 0.1, "align_lp": float(s), "word": "w"}
+                        for k, (p, s) in enumerate(zip(["D", "AA", "R", "K"], sc))]}  # fmt: skip
+    low = Pr.poorly_placed(sched)
+    assert [p["phone"] for p in low] == ["K"] and low[0]["index"] == 3
