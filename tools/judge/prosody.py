@@ -110,6 +110,15 @@ LEVEL_RANGE = 4.0
 #: Level of the engine's voice per doubling of its breath share, dB
 #: (measured: ``python prosody.py slope``).
 LEVEL_PER_DOUBLING = 9.0
+#: A phone whose unit the model gives at best this log-probability (nats)
+#: on the frames the forced path put it on is reported as poorly placed
+#: (``poorly_placed``).
+LOW_SCORE = -4.5
+#: Longest piece of a recording aligned at once, s: the aligner's memory
+#: grows with the length (the engine speaks any length). Longer recordings
+#: are cut in their longest silences (at least ``CUT_MIN`` s) into pieces
+#: of at least ``MIN_PIECE`` s.
+MAX_PIECE, MIN_PIECE, CUT_MIN = 14.0, 2.0, 0.12
 
 FOUR_SENTENCES = (
     "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background. "
@@ -149,8 +158,11 @@ def engine_rule(text: str, voice: str = "deep") -> tuple[list[str], np.ndarray]:
              "--phone-times", str(times), text],
             capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL,
         )  # fmt: skip
-        spans = np.array(json.loads(times.read_text())["spans"], float)
-    phones = A.parse_engine_line(res.stdout.splitlines()[0])
+        rec = json.loads(times.read_text())
+        spans = np.array(rec["spans"], float)
+    # ``say`` names each phone in its phone times; older builds only print
+    # one symbol per segment, which ``parse_engine_line`` folds back.
+    phones = rec.get("phones") or A.parse_engine_line(res.stdout.splitlines()[0])
     if len(phones) != len(spans):
         raise RuntimeError(f"say's phonemes ({len(phones)}) and phone times ({len(spans)}) disagree for {text!r}")
     return phones, spans[:, 1] - spans[:, 0]
@@ -319,6 +331,10 @@ class Aligned:
     start: np.ndarray  # s
     end: np.ndarray  # s
     spike: np.ndarray  # s, middle of the frames the model emitted the phone's unit on
+    #: per phone, the best log-probability (nats) the model gives its unit
+    #: on the frames the forced path emits it on: near 0 where the model
+    #: hears the phone, far below where the path had to put it anyway
+    score: np.ndarray | None = None
 
 
 def bounds_from_units(
@@ -447,6 +463,34 @@ def ctc_score(lp, units: list[tuple[str, ...]], pj) -> float:
     return -float(loss)
 
 
+def unit_scores(small: np.ndarray, labels: list[int], spans: list[tuple[int, int]], owners: list[list[int]],
+                n: int) -> np.ndarray:  # fmt: skip
+    """Per phone, the best log-probability of its unit over the frames the
+    forced path emits it on (see ``Aligned.score``)."""
+    out = np.zeros(n)
+    for lab, (a, b), own in zip(labels, spans, owners):
+        s = float(np.max(small[a : b + 1, lab])) if 0 <= a <= b else -math.inf
+        for i in own:
+            out[i] = s
+    return out
+
+
+def poorly_placed(sched: dict, below: float | None = None) -> list[dict]:
+    """The phones of a schedule the aligner could not place well: the model
+    gives the unit it was forced onto under ``LOW_SCORE`` nats (a phone the
+    speaker did not say, or said otherwise than the engine will: a number,
+    an abbreviation or a name read differently), with their place in the
+    text's words."""
+    below = LOW_SCORE if below is None else below
+    out = []
+    for k, p in enumerate(sched["phones"]):
+        s = p.get("align_lp")
+        if s is not None and s < below:
+            out.append({"index": k, "phone": p["phone"], "start": p["start"], "end": p["end"],
+                        "align_lp": s, "word": p.get("word", "")})  # fmt: skip
+    return out
+
+
 def align(pj, audio: np.ndarray, phones: list[str], lp=None, db: np.ndarray | None = None,
           rule_durations: np.ndarray | None = None,
           voiced: np.ndarray | None = None) -> tuple[Aligned, list[int]]:  # fmt: skip
@@ -477,6 +521,7 @@ def align(pj, audio: np.ndarray, phones: list[str], lp=None, db: np.ndarray | No
     bounds = place_bounds(spans, change_curve(audio), units, prior)
     length = len(audio) / SR
     al = bounds_from_units(phones, owners, spans, bounds, length)
+    al.score = unit_scores(small, labels, spans, owners, len(phones))
     if db is None:
         db = N.level_db(np.asarray(audio, np.float64))
     quiet = quiet_runs(db, voiced) if voiced is not None else []
@@ -553,10 +598,184 @@ def phone_levels(db: np.ndarray, start: np.ndarray, end: np.ndarray, phones: lis
     return lv - ref
 
 
+# --------------------------------------------------------------------------
+# The text: given, beside the recording, or heard
+# --------------------------------------------------------------------------
+
+
+def split_pieces(db: np.ndarray, length: float, max_piece: float = MAX_PIECE, min_piece: float = MIN_PIECE,
+                 hop: float = HOP) -> list[tuple[float, float]]:  # fmt: skip
+    """Cut a recording of ``length`` seconds (frame levels ``db``) into
+    pieces no longer than ``max_piece``, each cut in the middle of the
+    longest silence (``silent_runs``, at least ``CUT_MIN``) that leaves both
+    sides ``min_piece`` or more; where there is no such silence, at the
+    quietest 10 ms in the stretch. One piece if the recording is short."""
+    if length <= max_piece:
+        return [(0.0, length)]
+    sil = [(a, b) for a, b in silent_runs(db, hop) if b - a >= CUT_MIN and a > 0.0 and b < length]
+    out, start = [], 0.0
+    while length - start > max_piece:
+        lo, hi = start + min_piece, min(start + max_piece, length - min_piece)
+        inside = [(b - a, 0.5 * (a + b)) for a, b in sil if lo <= 0.5 * (a + b) <= hi]
+        if inside:
+            cut = max(inside)[1]
+        else:
+            i0, i1 = int(lo / hop), max(int(lo / hop) + 1, int(hi / hop))
+            cut = (i0 + int(np.argmin(db[i0:i1]))) * hop
+        out.append((start, cut))
+        start = cut
+    out.append((start, length))
+    return out
+
+
+def distribute_words(given: list[str], heard: list[list[str]], norm=lambda w: [w.lower()]) -> list[list[str]]:
+    """Share the words of a given text (``given``, as written) out over
+    pieces of the recording, from what was heard in each (``heard``, per
+    piece, normalised words): the given words are lined up with the heard
+    ones (Levenshtein, on ``norm`` of each given word), and each piece takes
+    the given words up to the last one lined up with a word heard in it."""
+    toks, owner = [], []
+    for k, w in enumerate(given):
+        for t in norm(w) or [w.lower()]:
+            toks.append(t)
+            owner.append(k)
+    hyp, piece = [], []
+    for p, ws in enumerate(heard):
+        hyp += ws
+        piece += [p] * len(ws)
+    n, m = len(toks), len(hyp)
+    d = np.zeros((n + 1, m + 1), int)
+    d[:, 0], d[0, :] = np.arange(n + 1), np.arange(m + 1)
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            d[i, j] = min(d[i - 1, j - 1] + (toks[i - 1] != hyp[j - 1]), d[i - 1, j] + 1, d[i, j - 1] + 1)
+    # the piece each given token falls in, from the path (deletions take the
+    # piece of the heard word before them)
+    where = [0] * n
+    i, j = n, m
+    while i > 0:
+        if j > 0 and d[i, j] == d[i - 1, j - 1] + (toks[i - 1] != hyp[j - 1]):
+            where[i - 1] = piece[j - 1]
+            i, j = i - 1, j - 1
+        elif j > 0 and d[i, j] == d[i, j - 1] + 1:
+            j -= 1
+        else:
+            where[i - 1] = piece[j - 1] if j > 0 else 0
+            i -= 1
+    out: list[list[str]] = [[] for _ in heard]
+    last = 0
+    for k, w in enumerate(given):
+        ps = [where[t] for t in range(n) if owner[t] == k]
+        p = max(last, max(ps) if ps else last)
+        out[p].append(w)
+        last = p
+    return out
+
+
+def transcribe_pieces(audio: np.ndarray, pieces: list[tuple[float, float]]) -> list[str]:
+    """Whisper's text of each piece (the judge's cached model)."""
+    import judge as J
+
+    wj = J.WordJudge()
+    try:
+        return wj.transcribe([np.asarray(audio[int(a * SR) : int(b * SR)], np.float32) for a, b in pieces],
+                             batch_size=1)  # fmt: skip
+    finally:
+        wj.close()
+
+
+@dataclass
+class Text:
+    """What a recording says, and where that came from."""
+
+    text: str  #: the whole text, as the engine will be given it
+    pieces: list[tuple[float, float]]  #: the stretches aligned one at a time, s
+    texts: list[str]  #: the text of each piece
+    source: str  #: "given", "file" (a .txt beside the recording) or "heard" (Whisper)
+    heard: list[str] | None = None  #: Whisper's text of each piece, when it was asked
+
+
+def resolve_text(wav: Path | str, text: str | None, audio: np.ndarray) -> Text:
+    """The text of a recording: ``text`` when given, else the ``.txt``
+    beside it, else what Whisper hears. A recording longer than
+    ``MAX_PIECE`` is cut at pauses (``split_pieces``) and each piece gets
+    its share of the text (Whisper's of that piece, or the given text's
+    words lined up with it, ``distribute_words``)."""
+    import natural as N
+
+    x = np.asarray(audio, np.float64)
+    pieces = split_pieces(N.level_db(x), len(x) / SR)
+    source = "given"
+    if text is None:
+        beside = Path(wav).with_suffix(".txt")
+        if beside.exists():
+            text, source = beside.read_text(encoding="utf-8").strip(), "file"
+    if text is not None and len(pieces) == 1:
+        return Text(text, pieces, [text], source)
+    heard = transcribe_pieces(x, pieces)
+    if text is None:
+        return Text(" ".join(heard), pieces, heard, "heard", heard)
+    from whisper.normalizers import EnglishTextNormalizer
+
+    norm = EnglishTextNormalizer()
+    shared = distribute_words(text.split(), [norm(h).split() for h in heard], lambda w: norm(w).split())
+    keep = [k for k, ws in enumerate(shared) if ws]
+    return Text(text, [pieces[k] for k in keep], [" ".join(shared[k]) for k in keep], source, heard)
+
+
+def word_phones(text: str, voice: str = "deep") -> list[tuple[str, int]] | None:
+    """Each word of ``text`` with how many of the engine's phones it has,
+    if the words said one at a time add up to the text's phones (function
+    words keep their weak forms only in context, so they may not)."""
+    words = text.split()
+    counts = []
+    for w in words:
+        try:
+            counts.append(len(engine_phones(w, voice)))
+        except (RuntimeError, subprocess.CalledProcessError, IndexError):
+            return None
+    if sum(counts) != len(engine_phones(text, voice)):
+        return None
+    return list(zip(words, counts))
+
+
+# --------------------------------------------------------------------------
+# The schedule
+# --------------------------------------------------------------------------
+
+
+def align_pieces(pj, x: np.ndarray, phones: list[str], pieces: list[tuple[float, float]], counts: list[int],
+                 db: np.ndarray, rule: np.ndarray | None, voiced: np.ndarray) -> tuple[Aligned, list[int]]:  # fmt: skip
+    """``align`` piece by piece (``counts`` phones in each), joined: the
+    times moved onto the whole recording's clock, a pause between every two
+    pieces."""
+    starts, ends, spikes, scores, paused = [], [], [], [], []
+    k0 = 0
+    for (a, b), n in zip(pieces, counts):
+        i0, i1 = int(round(a * SR)), int(round(b * SR))
+        f0, f1 = int(round(a / HOP)), int(round(b / HOP))
+        sub_rule = None if rule is None else rule[k0 : k0 + n]
+        al, ps = align(pj, x[i0:i1], phones[k0 : k0 + n], None, db[f0:f1], sub_rule, voiced[f0:f1])
+        starts.append(al.start + a)
+        ends.append(al.end + a)
+        spikes.append(al.spike + a)
+        scores.append(al.score)
+        paused += [k0 + p for p in ps]
+        if k0 > 0:
+            paused.append(k0 - 1)
+        k0 += n
+    al = Aligned(list(phones), np.concatenate(starts), np.concatenate(ends), np.concatenate(spikes),
+                 np.concatenate(scores))  # fmt: skip
+    return al, sorted(set(paused))
+
+
 def analyse_audio(pj, audio: np.ndarray, text: str, phones: list[str], lp=None, source: str = "",
-                  rule: np.ndarray | None = None) -> dict:  # fmt: skip
+                  rule: np.ndarray | None = None, pieces: list[tuple[float, float]] | None = None,
+                  counts: list[int] | None = None) -> dict:  # fmt: skip
     """The schedule for ``audio`` saying ``text`` (``phones``: the engine's;
-    ``rule``: its rule durations, for the aligner's prior)."""
+    ``rule``: its rule durations, for the aligner's prior); with ``pieces``
+    (stretches of the recording, s) and ``counts`` (the phones in each),
+    aligned piece by piece."""
     import match_voice as M
     import natural as N
 
@@ -565,7 +784,10 @@ def analyse_audio(pj, audio: np.ndarray, text: str, phones: list[str], lp=None, 
     raw = M.track_pitch(x, SR, 55.0, 450.0).f0
     f0 = clean_pitch(raw)
     v = f0 > 0
-    al, paused = align(pj, x, phones, lp, db, rule, v)
+    if pieces is not None and len(pieces) > 1:
+        al, paused = align_pieces(pj, x, phones, pieces, counts, db, rule, v)
+    else:
+        al, paused = align(pj, x, phones, lp, db, rule, v)
     median = float(np.median(f0[v])) if v.any() else 100.0
     track = fill_pitch(f0, median)
     lv = phone_levels(db, al.start, al.end, al.phones)
@@ -579,18 +801,62 @@ def analyse_audio(pj, audio: np.ndarray, text: str, phones: list[str], lp=None, 
             "phone": p, "start": round(a, 4), "end": round(b, 4), "level_db": round(float(lv[k]), 2),
             "breath": 1.0, "pitch": [round(h, 1) for h in pts],
             "voiced": round(float(v[m].mean()), 2) if m.any() else 0.0,
+            "align_lp": round(float(al.score[k]), 2) if al.score is not None else None,
         })  # fmt: skip
     pauses = [{"after": k, "start": phones_out[k]["end"], "end": phones_out[k + 1]["start"]} for k in paused]
     return {
         "format": "synthie-prosody-1",
         "text": text,
         "source": source,
+        "pieces": [[round(a, 3), round(b, 3)] for a, b in (pieces or [(0.0, len(x) / SR)])],
         "phones": phones_out,
         "pauses": pauses,
         "median_hz": round(median, 2),
         "pitch": {"start": 0.0, "hop": HOP, "hz": [round(float(h), 2) for h in track],
                   "voiced": [int(x) for x in v]},  # fmt: skip
     }
+
+
+def schedule_of(pj, wav: Path | str, audio: np.ndarray, text: Text, voice: str = "deep") -> dict:
+    """The schedule of a recording whose text has been resolved
+    (``resolve_text``): the engine's phones for the text aligned piece by
+    piece, where the text came from, and the phones the aligner could not
+    place well (``poorly_placed``)."""
+    phones, rule = engine_rule(text.text, voice)
+    counts = None
+    if len(text.pieces) > 1:
+        counts = [len(engine_phones(t, voice)) for t in text.texts]
+        if sum(counts) != len(phones):
+            raise RuntimeError(f"the pieces' phones ({sum(counts)}) are not the whole text's ({len(phones)}): "
+                               f"{text.texts}")  # fmt: skip
+    sched = analyse_audio(pj, audio, text.text, phones, source=Path(wav).name, rule=rule, pieces=text.pieces,
+                          counts=counts)  # fmt: skip
+    sched["text_source"] = text.source
+    if text.heard is not None:
+        sched["heard"] = text.heard
+    words = word_phones(text.text, voice)
+    if words is not None:
+        k = 0
+        for w, n in words:
+            for p in sched["phones"][k : k + n]:
+                p["word"] = w
+            k += n
+    sched["poorly_placed"] = poorly_placed(sched)
+    return sched
+
+
+def describe_text(sched: dict) -> list[str]:
+    """Lines saying where the text came from and which phones the aligner
+    could not place well."""
+    out = []
+    if sched.get("text_source") == "heard":
+        out.append(f"text heard by Whisper, not given: {sched['text']!r}")
+    elif sched.get("text_source") == "file":
+        out.append(f"text from the .txt beside the recording: {sched['text']!r}")
+    for p in sched.get("poorly_placed", []):
+        out.append(f"poorly placed: phone {p['index']} {p['phone']} in {p['word']!r} at {p['start']:.2f}-{p['end']:.2f} s "
+                   f"(the model gives it {p['align_lp']:.1f} nats at best)")  # fmt: skip
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -615,7 +881,8 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
     if follow:
         cmd += ["--match-prosody", str(path), "--prosody-pitch", pitch, "--prosody-kick", "on" if kick else "off"]
     res = subprocess.run(cmd + [sched["text"]], capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
-    spans = np.array(json.loads(times.read_text())["spans"], float)
+    rec = json.loads(times.read_text())
+    spans = np.array(rec["spans"], float)
     times.unlink()
     if isinstance(schedule, dict):
         path.unlink()
@@ -623,7 +890,8 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
     shift = 0.0
     if "contour moved" in followed:
         shift = float(followed.split("contour moved")[1].split("st")[0])
-    return {"spans": spans, "phones": A.parse_engine_line(res.stdout.splitlines()[0]), "followed": followed,
+    return {"spans": spans, "phones": rec.get("phones") or A.parse_engine_line(res.stdout.splitlines()[0]),
+            "followed": followed,
             "shift": shift}  # fmt: skip
 
 
@@ -767,16 +1035,27 @@ def _pj():
     return J.PhonemeJudge()
 
 
+def write_heard_text(sched: dict, schedule_path: Path) -> None:
+    """A text Whisper heard goes beside the schedule (never beside the
+    recording, which may be someone else's folder)."""
+    if sched.get("text_source") == "heard":
+        Path(schedule_path).with_suffix(".txt").write_text(sched["text"] + "\n", encoding="utf-8")
+
+
 def cmd_analyse(args) -> int:
     import render as R
 
+    audio = R.load_audio(args.wav)
+    text = resolve_text(args.wav, args.text, audio)
     pj = _pj()
     try:
-        phones, rule = engine_rule(args.text, args.voice)
-        sched = analyse_audio(pj, R.load_audio(args.wav), args.text, phones, source=Path(args.wav).name, rule=rule)
+        sched = schedule_of(pj, args.wav, audio, text, args.voice)
     finally:
         pj.close()
     Path(args.out).write_text(json.dumps(sched, indent=1), encoding="utf-8")
+    write_heard_text(sched, Path(args.out))
+    for line in describe_text(sched):
+        print(line)
     print(f"{args.out}: {len(sched['phones'])} phones, {len(sched['pauses'])} pauses, median {sched['median_hz']:.0f} Hz")
     return 0
 
@@ -846,35 +1125,49 @@ def roundtrip(pj, text: str, out_dir: Path, voice: str = "deep") -> dict:
     return res
 
 
-def transfer_file(pj, wav: Path | str, text: str, out_dir: Path, name: str, pitch: str = "speaker",
+def transfer_file(pj, wav: Path | str, text: str | Text, out_dir: Path, name: str, pitch: str = "speaker",
                   voice: str = "deep", level: bool = True, audio: np.ndarray | None = None) -> dict:  # fmt: skip
-    """Any recording and its text: the schedule (``<name>.json``), the engine
-    speaking it (``<name>-transfer.wav``) and by its rules
-    (``<name>-rule.wav``), and the checks of the transfer."""
+    """Any recording and its text (a string, or resolved by
+    ``resolve_text``): the schedule (``<name>.json``, with ``<name>.txt``
+    beside it when the text was heard), the engine speaking it
+    (``<name>-transfer.wav``) and by its rules (``<name>-rule.wav``), and
+    the checks of the transfer."""
     import render as R
 
     out_dir.mkdir(parents=True, exist_ok=True)
     if audio is None:
         audio = R.load_audio(wav)
-    phones, rule = engine_rule(text, voice)
-    sched = analyse_audio(pj, audio, text, phones, source=Path(wav).name, rule=rule)
+    if isinstance(text, str):
+        text = Text(text, [(0.0, len(audio) / SR)], [text], "given")
+    sched = schedule_of(pj, wav, audio, text, voice)
+    rule = engine_rule(text.text, voice)[1]
     tr = transfer(pj, sched, out_dir / f"{name}-transfer.wav", pitch, level, voice)
     (out_dir / f"{name}.json").write_text(json.dumps(tr["schedule"], indent=1), encoding="utf-8")
-    render({"text": text}, out_dir / f"{name}-rule.wav", follow=False, voice=voice)
+    write_heard_text(sched, out_dir / f"{name}.json")
+    render({"text": text.text}, out_dir / f"{name}-rule.wav", follow=False, voice=voice)
     res = check(pj, tr["schedule"], R.load_audio(out_dir / f"{name}-transfer.wav"), tr["spans"], tr["shift"], rule)
     res.update(levels=tr["levels"], followed=tr["followed"], shift=tr["shift"], pauses=len(sched["pauses"]),
-               median_hz=sched["median_hz"])  # fmt: skip
+               median_hz=sched["median_hz"], text=text.text, text_source=text.source,
+               poorly_placed=sched["poorly_placed"])  # fmt: skip
     return res
 
 
 def cmd_transfer(args) -> int:
+    import render as R
+
+    audio = R.load_audio(args.wav)
+    text = resolve_text(args.wav, args.text, audio)
     pj = _pj()
     try:
         name = args.name or Path(args.wav).stem
-        res = transfer_file(pj, args.wav, args.text, Path(args.out_dir), name, args.pitch, args.voice, not args.no_level)
+        res = transfer_file(pj, args.wav, text, Path(args.out_dir), name, args.pitch, args.voice, not args.no_level,
+                            audio=audio)  # fmt: skip
     finally:
         pj.close()
     print(json.dumps(res, indent=1, default=float))
+    for line in describe_text({"text": res["text"], "text_source": res["text_source"],
+                               "poorly_placed": res["poorly_placed"]}):  # fmt: skip
+        print(line)
     return 0
 
 
@@ -925,7 +1218,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyse", help="a recording and its text -> schedule JSON")
     a.add_argument("wav")
-    a.add_argument("--text", required=True)
+    a.add_argument("--text", help="what the recording says (default: the .txt beside it, else Whisper's hearing)")
     a.add_argument("--out", required=True)
     a.add_argument("--voice", default="deep")
     r = sub.add_parser("render", help="speak a schedule")
@@ -945,7 +1238,7 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--voice", default="deep")
     tf = sub.add_parser("transfer", help="a recording and its text -> schedule, the engine saying it both ways, checks")
     tf.add_argument("wav")
-    tf.add_argument("--text", required=True)
+    tf.add_argument("--text", help="what the recording says (default: the .txt beside it, else Whisper's hearing)")
     tf.add_argument("--out-dir", default=str(HERE / "out" / "prosody"))
     tf.add_argument("--name")
     tf.add_argument("--pitch", choices=["speaker", "voice"], default="speaker")

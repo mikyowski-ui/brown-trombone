@@ -282,6 +282,15 @@ fn main() -> std::io::Result<()> {
         talker.compile(&text)
     };
     let spans = utterance.phone_spans();
+    // Each phone of the text, by the segment that starts it.
+    let mut phones = vec![String::new(); spans.len()];
+    for (i, s) in utterance.segments().iter().enumerate() {
+        if let Some(p) = utterance.phone_of(i)
+            && phones[p].is_empty()
+        {
+            phones[p] = s.phoneme.to_string();
+        }
+    }
     // One symbol per segment, as the judge reads it; a lax vowel's glide
     // towards schwa is part of the vowel, not a segment of its own.
     let mut last = None;
@@ -318,7 +327,10 @@ fn main() -> std::io::Result<()> {
     }
     if let Some(file) = phone_times {
         let spans: Vec<[f32; 2]> = spans.iter().map(|&(a, b)| [a, b]).collect();
-        std::fs::write(&file, serde_json::json!({ "spans": spans }).to_string())?;
+        std::fs::write(
+            &file,
+            serde_json::json!({ "spans": spans, "phones": phones }).to_string(),
+        )?;
     }
     Ok(())
 }
