@@ -85,8 +85,8 @@
   "sonorant_slack": {"lo": 0, "hi": 0.4, "default": 0, "pass": "a"},
   "final_slack": {"lo": 0, "hi": 0.4, "default": 0, "pass": "a"},
   "soft_corner": {"lo": 1000, "hi": 8000, "default": 3000, "pass": "a"},
-  "sonorant_softness": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
-  "unstressed_softness": {"lo": 0, "hi": 1, "default": 0.5, "pass": "a"},
+  "sonorant_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+  "unstressed_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
   "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
   "lateral_release": {"lo": 0, "hi": 0.04, "default": 0.01, "pass": "b"}
 }

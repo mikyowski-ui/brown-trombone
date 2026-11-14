@@ -543,10 +543,12 @@ tuning! {
     /// How soft the voice is in nasals and liquids, `0` (as on an accented
     /// vowel) to `1` (physical engine). The glides are left firm: under
     /// their narrow lips they are already darker than the reader's (11.6
-    /// dB under the accented vowels in 2-4 kHz, his 4.4).
-    sonorant_softness = 1.0, 0.0..=1.0, A;
-    /// The same in unaccented vowels.
-    unstressed_softness = 0.5, 0.0..=1.0, A;
+    /// dB under the accented vowels in 2-4 kHz, his 4.4). Round 8 had 1;
+    /// `0` since round 9: the owner heard the accented vowels jump out
+    /// sharp where the filter let go of them.
+    sonorant_softness = 0.0, 0.0..=1.0, A;
+    /// The same in unaccented vowels (round 8: 0.5).
+    unstressed_softness = 0.0, 0.0..=1.0, A;
     /// The same at the very end of a phrase, reached over its last 150
     /// ms; `0`, since the engine's last vowels are already darker than the
     /// reader's (see `final_slack`).

@@ -2402,7 +2402,12 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
         .filter_map(|row| row.split('\t').nth(2).map(str::to_string))
         .collect();
     assert_eq!(sentences.len(), 16);
-    let soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    // The softening is off by default since round 9 (the owner heard the
+    // accented vowels jump out where it let go); the mechanism is tested
+    // at round 8's setting.
+    let mut soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    soft.tuning.sonorant_softness = 1.0;
+    soft.tuning.unstressed_softness = 0.5;
     let mut firm = soft;
     firm.tuning.sonorant_softness = 0.0;
     firm.tuning.unstressed_softness = 0.0;
