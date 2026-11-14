@@ -1,4 +1,4 @@
-//! [`Tuning`]: the eighty-nine numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the ninety numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: eighty-nine numbers in three
+        /// How a voice turns sounds into speech: ninety numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -551,6 +551,24 @@ tuning! {
     /// ms; `0`, since the engine's last vowels are already darker than the
     /// reader's (see `final_slack`).
     final_softness = 0.0, 0.0..=1.0, A;
+
+    // ----- B: from one shape to the next (round 8) -----------------------
+
+    /// How long before an /l/'s tip lets go of it into a vowel the tongue
+    /// body sets off from the /l/'s own body for the vowel's, s (physical
+    /// engine): the end of the /l/ is made on the vowel's body. `0`
+    /// releases tip and body together, as until round 8: the tip lets go
+    /// while the body is still the /l/'s, low and back (with the tip let
+    /// go it is an /ɑ/, F1 710 Hz), and the first formant rose some 130 Hz
+    /// above both the /l/'s and the vowel's between them ("slid": 470,
+    /// 585, 455 Hz), heard as /aɪ/: "slid" as "slide", and 7 of 15 /l ɪ/
+    /// in short phrases as "l-ay". At 0.01 it runs flat from the /l/ into
+    /// the vowel (470, 455, 480 Hz) and no /l ɪ/ is heard so; at 0.02 the
+    /// recognizer heard more /l/ before /ɪ/ as /r/ and the /ɪ/ as /i/.
+    /// Raising the /l/'s own body instead (to (20, 2.2..2.4)) took the rise
+    /// down to 55 Hz, but the /l/ was heard as /w/ or /r/ in sentences and
+    /// a /z/ after it at the end of a phrase no longer hissed.
+    lateral_release = 0.01, 0.0..=0.04, B;
 }
 
 impl Default for Tuning {
@@ -573,10 +591,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_forty_one_each() {
+    fn two_passes_of_forty_one_and_forty_two() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (41, 41));
+        assert_eq!((a, b), (41, 42));
     }
 
     #[test]

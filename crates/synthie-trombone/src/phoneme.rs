@@ -118,6 +118,8 @@ const POSTALVEOLAR: f32 = 33.0;
 const VELAR: f32 = 21.0;
 /// Closed.
 const SHUT: f32 = 0.0;
+/// Widest touch diameter that still closes the tract.
+const SHUT_WIDEST: f32 = 0.3;
 /// Tongue body of /k g ŋ/ (classic engine).
 const VELAR_TONGUE: (f32, f32) = (VELAR, 2.1);
 /// Tongue body of /k g ŋ/ on the physical engine: forward of the closure,
@@ -507,6 +509,25 @@ impl Articulation {
 
     /// [`physical_in`](Self::physical_in) before the approximants are
     /// narrowed.
+    ///
+    /// A consonant made on a vowel's body (see [`leaning_on`](Self::leaning_on))
+    /// holds that vowel's lips too, unless it shapes the lips itself (/ʃ ʒ
+    /// tʃ dʒ r w/), holds a gap meant to hiss, or is made by the back of the
+    /// tongue: a speaker rounds the lips for /u/ through the stops, nasals
+    /// and liquids before it ("canoe", "blue", "moon", "to") and keeps them
+    /// rounded after it ("food").
+    /// Without them the lips of /u/ set off only as the vowel began, over a
+    /// tongue body already in place for it: the second formant fell from
+    /// about 1800 Hz to 1000 over the first 150 ms of the vowel after an
+    /// /n/, which is /ju/, and "canoe" was heard as "can you". Under /s z/
+    /// the rounded lips darkened the hiss ("rose" was heard as "rode"), and
+    /// at /f v θ ð/ they would shape the gap itself. Under /k g ŋ/ they
+    /// took the velar pinch out of the release (the second formant 10 ms
+    /// into the /u/ of "[u g u]" fell to 820 Hz, under the vowel's own,
+    /// where a velar's stands above it). The vowel's narrowing
+    /// along the tongue stays the vowel's: held under the consonants as
+    /// well, it cost 3 to 4 points of phoneme error in the held-out Harvard
+    /// sentences (schwa after a consonant heard as /ɚ/).
     fn physical_shape_of(
         self,
         tract_length: f32,
@@ -537,7 +558,15 @@ impl Articulation {
             a.lips = lips.map(|d| Constriction::new(LIPS, d));
             return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        (self.leaning_on(tongue, tract_length), None)
+        let mut a = self.leaning_on(tongue, tract_length);
+        let hisses = a
+            .constriction
+            .is_some_and(|c| c.diameter > SHUT_WIDEST && c.diameter <= crate::tract::HISS_WIDEST);
+        let velar = self.tongue == Some(VELAR_TONGUE);
+        if a.lips.is_none() && !hisses && !velar {
+            a.lips = lips.map(|d| Constriction::new(LIPS, d));
+        }
+        (a, None)
     }
 
     /// A consonant made on top of a vowel's tongue body `body` (physical
