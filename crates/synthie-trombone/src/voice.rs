@@ -12,8 +12,13 @@ use crate::tract::{Constriction, Dynamics, HISS_WIDEST, MOVEMENT_SPEED, N, NOSE_
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
-/// Internal samples per parameter block.
+/// Internal samples per parameter block (classic engine): 10.7 ms.
 const BLOCK: u32 = 512;
+/// Internal samples per parameter block in the physical engine: 2.7 ms.
+/// What the articulators are told takes effect at the start of a block,
+/// so at 512 samples a gesture of 20 to 30 ms was made in two or three
+/// steps, and where they fell depended on what had been said before it.
+const PHYSICAL_BLOCK: u32 = 128;
 /// Constriction slot used by [`Trombone::articulate`] for the main closure.
 pub const SLOT_MAIN: usize = 0;
 /// Constriction slot used by [`Trombone::articulate`] for lip rounding.
@@ -159,7 +164,13 @@ pub struct Trombone {
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
+    /// Internal samples per parameter block (see [`Trombone::set_block`]).
+    block: u32,
     block_pos: u32,
+    /// Internal samples since the hiss regulator last looked (physical
+    /// engine): it reads the streams' averages over a long block (10.7 ms,
+    /// a pitch period or more) whatever the control block's length.
+    since_regulated: u32,
 
     sample_rate: f32,
     internal_rate: f32,
@@ -219,7 +230,9 @@ impl Trombone {
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
+            block: BLOCK,
             block_pos: 0,
+            since_regulated: BLOCK,
             sample_rate,
             internal_rate: INTERNAL_RATE,
             tract_length: 1.0,
@@ -249,6 +262,7 @@ impl Trombone {
         self.phys_flow = 0.0;
         self.frication.reset();
         self.block_pos = 0;
+        self.since_regulated = BLOCK;
         self.frac = 1.0;
         self.prev = 0.0;
         self.cur = 0.0;
@@ -270,7 +284,26 @@ impl Trombone {
             Engine::Physical => Dynamics::Damped,
         };
         self.tract.jaw = engine == Engine::Physical;
+        self.set_block(match engine {
+            Engine::Classic => BLOCK,
+            Engine::Physical => PHYSICAL_BLOCK,
+        });
         self.reset();
+    }
+
+    /// How often the articulators, the folds' controls and the tract's
+    /// areas are brought up to date, in internal samples (48 kHz at tract
+    /// length 1): 512 is 10.7 ms. For measuring how far the sound depends
+    /// on it; the classic engine is only itself at 512.
+    #[doc(hidden)]
+    pub fn set_block(&mut self, samples: u32) {
+        self.block = samples.clamp(16, 4096);
+        self.block_pos = 0;
+        self.since_regulated = BLOCK;
+        #[allow(clippy::cast_precision_loss)]
+        let share = self.block as f32 / BLOCK as f32;
+        self.tract.block_share = share;
+        self.phys.block_share = share;
     }
 
     /// The sound model in use.
@@ -1035,17 +1068,30 @@ impl Trombone {
 
     #[allow(clippy::cast_precision_loss)]
     fn internal_sample(&mut self) -> f32 {
+        // Two clocks in the physical engine. The folds' controls (pitch,
+        // tenseness, voicing) and the hiss regulator are brought up to date
+        // once a long block, 10.7 ms: they are interpolated across it or
+        // read averages over it, and a pitch period is that long. The
+        // articulators and the tract's areas go by the control block, which
+        // may be shorter.
+        let block = self.block;
+        let slow = self.since_regulated >= BLOCK;
         if self.block_pos == 0 {
-            let dt = BLOCK as f32 / self.internal_rate;
-            self.glottis.update_block(dt, &self.simplex);
-            if self.engine == Engine::Physical {
-                self.phys.end_block();
-                if self.regulated {
-                    let breath = self.source.breath_is_up();
-                    let voiced = (self.glottis.voiced || self.glottis.always_voice)
-                        && self.glottis.block_tenseness().1 >= WHISPER_TENSENESS;
-                    let phys = &self.phys;
-                    self.tract.regulate(dt, breath, voiced, |i| phys.stream(i));
+            let dt = block as f32 / self.internal_rate;
+            let long = self.since_regulated as f32 / self.internal_rate;
+            if slow {
+                self.since_regulated = 0;
+                self.glottis.update_block(long, &self.simplex);
+                if self.engine == Engine::Physical {
+                    self.phys.end_block();
+                    if self.regulated {
+                        let breath = self.source.breath_is_up();
+                        let voiced = (self.glottis.voiced || self.glottis.always_voice)
+                            && self.glottis.block_tenseness().1 >= WHISPER_TENSENESS;
+                        let phys = &self.phys;
+                        self.tract
+                            .regulate(long, breath, voiced, |i| phys.stream(i));
+                    }
                 }
             }
             self.tract.update_block(dt);
@@ -1059,16 +1105,21 @@ impl Trombone {
                     dt,
                     self.glottis.voiced || self.glottis.always_voice,
                 );
-                self.source
-                    .begin_block(&self.glottis, self.tract.any_constriction());
+                if slow {
+                    self.source
+                        .begin_block(&self.glottis, self.tract.any_constriction());
+                }
             }
         }
-        let lambda1 = self.block_pos as f32 / BLOCK as f32;
-        let lambda2 = (self.block_pos as f32 + 0.5) / BLOCK as f32;
-        self.block_pos = (self.block_pos + 1) % BLOCK;
+        let lambda1 = self.block_pos as f32 / block as f32;
+        let lambda2 = (self.block_pos as f32 + 0.5) / block as f32;
+        let slow1 = self.since_regulated as f32 / BLOCK as f32;
+        let slow2 = (self.since_regulated as f32 + 0.5) / BLOCK as f32;
+        self.block_pos = (self.block_pos + 1) % block;
+        self.since_regulated = self.since_regulated.saturating_add(1);
 
         if self.engine == Engine::Physical {
-            return self.physical_sample(lambda1, lambda2);
+            return self.physical_sample([lambda1, lambda2], [slow1, slow2]);
         }
 
         let glottal = self
@@ -1091,14 +1142,14 @@ impl Trombone {
     /// One internal sample of the physical engine: two tract ticks. The
     /// sound that reaches a listener is the rate of change of the flow
     /// leaving the mouth and nose.
-    fn physical_sample(&mut self, lambda1: f32, lambda2: f32) -> f32 {
+    fn physical_sample(&mut self, tract: [f32; 2], folds: [f32; 2]) -> f32 {
         let dt = 0.5 / self.internal_rate;
-        let (area, lung) = self.source.tick(lambda1, dt);
-        self.phys.tick(lambda1, Drive::Glottis { area, lung });
-        self.source.react(&self.phys.gauge, lambda1, dt);
-        let (area, lung) = self.source.tick(lambda2, dt);
-        let flow = self.phys.tick(lambda2, Drive::Glottis { area, lung });
-        self.source.react(&self.phys.gauge, lambda2, dt);
+        let (area, lung) = self.source.tick(folds[0], dt);
+        self.phys.tick(tract[0], Drive::Glottis { area, lung });
+        self.source.react(&self.phys.gauge, folds[0], dt);
+        let (area, lung) = self.source.tick(folds[1], dt);
+        let flow = self.phys.tick(tract[1], Drive::Glottis { area, lung });
+        self.source.react(&self.phys.gauge, folds[1], dt);
         self.glottal_area = area;
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;

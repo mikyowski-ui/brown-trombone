@@ -158,6 +158,8 @@ const CONSONANT_WIDEST: f32 = 1.3;
 /// A cell a consonant has let go is back with the tongue body once it is
 /// this close to where the body wants it, diameter units.
 const RETURNED: f32 = 0.08;
+/// ...and how slowly it must be moving there, diameter units per second.
+const RETURNED_SPEED: f32 = 1.0;
 
 /// Which articulator moves a cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,6 +373,9 @@ pub(crate) struct Tract {
     /// How far the jaw parts the lips now (see [`Tract::jaw_opening`]): it
     /// follows where it is going with [`JAW_TIME`].
     jaw_open: f32,
+    /// Length of a control block as a share of the long one (512 internal
+    /// samples); see [`crate::math::approach`].
+    pub(crate) block_share: f32,
     /// How the damped articulators move (the speeds of the voice's tuning).
     pub(crate) motion: Tuning,
     velocity: [f32; N],
@@ -441,6 +446,7 @@ impl Tract {
             dynamics: Dynamics::Linear,
             jaw: false,
             jaw_open: 0.0,
+            block_share: 1.0,
             motion: Tuning::DEFAULT,
             velocity: [0.0; N],
             body: [0.0; N],
@@ -816,7 +822,14 @@ impl Tract {
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
+                && self.velocity[i].abs() <= RETURNED_SPEED
             {
+                // Back where the vowel wants it and at rest there: the
+                // body has it again. Handed over on the way past, still
+                // moving at the quick articulator's speed, the slow body
+                // carried it on beyond its place and brought it back over
+                // the next 100 ms, by more or less as the control blocks
+                // happened to fall.
                 self.mover[i] = Mover::Body;
                 self.parting[i] = false;
             }
@@ -1066,14 +1079,21 @@ impl Tract {
             }
         }
 
+        // The cells are sent where the jaw will be half-way through the
+        // block: sent where it ends the block, they ran ahead of it by half
+        // a block, 5 ms at the long block and 1 ms at a short one.
         let jaw = if self.jaw { self.jaw_opening() } else { 0.0 };
-        self.jaw_open += (jaw - self.jaw_open) * (dt / JAW_TIME).min(1.0);
+        let whole = crate::math::approach(dt, JAW_TIME, self.block_share);
+        let half = 1.0 - crate::math::sqrt(1.0 - whole);
+        self.jaw_open += (jaw - self.jaw_open) * half;
         self.compute_targets();
 
         if self.dynamics == Dynamics::Damped {
             self.move_damped(dt);
+            self.jaw_open += (jaw - self.jaw_open) * half;
             return;
         }
+        self.jaw_open += (jaw - self.jaw_open) * half;
 
         let amount = dt * self.movement_speed;
         let mut obstruction = None;

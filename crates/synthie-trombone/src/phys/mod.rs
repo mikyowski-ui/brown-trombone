@@ -428,6 +428,9 @@ pub(crate) struct Phys {
     /// `Tuning::labial_edge`).
     edge0: f32,
     edge1: f32,
+    /// Length of a control block as a share of the long one (512 internal
+    /// samples); see [`crate::math::approach`].
+    pub(crate) block_share: f32,
     edge_target: f32,
     dental_edge: f32,
     labial_edge: f32,
@@ -507,6 +510,7 @@ impl Phys {
             teeth_gap: crate::Tuning::DEFAULT.sibilant_teeth,
             edge0: 0.0,
             edge1: 0.0,
+            block_share: 1.0,
             edge_target: 0.0,
             dental_edge: crate::Tuning::DEFAULT.dental_edge,
             labial_edge: crate::Tuning::DEFAULT.labial_edge,
@@ -800,9 +804,11 @@ impl Phys {
         self.d0 = self.d1;
         self.m0 = self.m1;
         self.teeth0 = self.teeth1;
-        self.teeth1 += (self.teeth_target - self.teeth1) * (block_dt / TEETH_TIME).min(1.0);
+        self.teeth1 += (self.teeth_target - self.teeth1)
+            * crate::math::approach(block_dt, TEETH_TIME, self.block_share);
         self.edge0 = self.edge1;
-        self.edge1 += (self.edge_target - self.edge1) * (block_dt / EDGE_TIME).min(1.0);
+        self.edge1 += (self.edge_target - self.edge1)
+            * crate::math::approach(block_dt, EDGE_TIME, self.block_share);
         for (i, &d) in diameter.iter().enumerate() {
             self.a1[i] = self.area_of(d);
             self.d1[i] = d;

@@ -42,7 +42,7 @@
   "prelenis_stretch": {"lo": 1.05, "hi": 1.4, "default": 1.2, "pass": "b"},
   "articulation_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
   "closing_ratio": {"lo": 1, "hi": 3, "default": 2, "pass": "b"},
-  "release_speed": {"lo": 0.1, "hi": 0.8, "default": 0.37, "pass": "b"},
+  "release_speed": {"lo": 0.1, "hi": 0.8, "default": 0.6, "pass": "b"},
   "closure_overshoot": {"lo": 0.1, "hi": 0.5, "default": 0.3, "pass": "b"},
   "body_rate": {"lo": 8, "hi": 18, "default": 11.4, "pass": "b"},
   "dorsum_rate": {"lo": 13, "hi": 30, "default": 20, "pass": "b"},
@@ -77,7 +77,7 @@
   "dental_edge": {"lo": 0, "hi": 6, "default": 3, "pass": "a"},
   "labial_lead": {"lo": 0.02, "hi": 0.06, "default": 0.04, "pass": "b"},
   "labial_closing": {"lo": 0.03, "hi": 0.07, "default": 0.048, "pass": "b"},
-  "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.06, "pass": "b"},
+  "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.07, "pass": "b"},
   "lax_floor": {"lo": 0, "hi": 0.09, "default": 0.06, "pass": "c"},
   "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"}
 }

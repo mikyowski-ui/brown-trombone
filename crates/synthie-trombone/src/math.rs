@@ -92,3 +92,18 @@ pub(crate) fn floor_i64(x: f64) -> i64 {
 pub fn midi_to_hz(note: f32) -> f32 {
     440.0 * powf(2.0, (note - 69.0) / 12.0)
 }
+
+/// Share of the way to its target that a first-order lag of time constant
+/// `time` covers in a block of `dt` seconds, when a block is `share` of the
+/// long block these lags were set at (512 internal samples). At `share` 1
+/// it is the plain `dt / time` they have always used; a shorter block
+/// covers the same ground over the same time, in more and smaller steps.
+pub(crate) fn approach(dt: f32, time: f32, share: f32) -> f32 {
+    let long = (dt / share / time).min(1.0);
+    #[allow(clippy::float_cmp)]
+    if share == 1.0 {
+        long
+    } else {
+        1.0 - powf(1.0 - long, share)
+    }
+}
