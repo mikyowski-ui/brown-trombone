@@ -301,7 +301,8 @@ def parse_engine_line(line: str) -> list[str]:
     extra aspiration segment, a stop before a pause (physical engine) an
     extra release segment, a /B G/ released into an /L R/ of its own word
     (physical engine) a release segment, a /DH/ after a pause (physical
-    engine) a dental closure first, and pauses are ``SIL``.  This undoes that, so
+    engine) a dental closure first, an /L/ before a vowel (physical engine)
+    a last part made on the vowel's tongue body, and pauses are ``SIL``.  This undoes that, so
     ``AA P P AA B AY AY T`` reads ``AA P AA B AY T`` and
     ``SIL DH DH AX K AE T T SIL`` reads ``DH AX K AE T``.  A line that
     already has one symbol per phoneme passes through unchanged.
@@ -330,6 +331,8 @@ def parse_engine_line(line: str) -> list[str]:
             i += 2  # a stop and its release before a pause
         elif nxt == s and s == "DH" and before is None:
             i += 2  # a dental closure and the /DH/ after a pause
+        elif nxt == s and s == "L" and after in VOCALIC:
+            i += 2  # an /L/ and its release onto the vowel's body
         else:
             i += 1
     return out

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the ninety numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the ninety-three numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: ninety numbers in three
+        /// How a voice turns sounds into speech: ninety-three numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -569,6 +569,25 @@ tuning! {
     /// down to 55 Hz, but the /l/ was heard as /w/ or /r/ in sentences and
     /// a /z/ after it at the end of a phrase no longer hissed.
     lateral_release = 0.01, 0.0..=0.04, B;
+
+    // ----- B and C: the front of the tongue (round 9) -------------------
+
+    /// Share of an /u/ after /t d n s z ʃ ʒ tʃ dʒ j/ held on its fronted
+    /// shape before it glides back towards the plain /u/ for the rest
+    /// (physical engine; `1.0` holds it to the end, `0` makes it the plain
+    /// back /u/ as before). See `speech::fronts_u`.
+    fronted_nucleus = 0.5, 0.0..=1.0, C;
+    /// Length of an alveolar tap, s (physical engine): a /t d/ between a
+    /// vowel and an unstressed one ("slid on", "get it", "water", "city")
+    /// is a touch of the tongue tip, voiced throughout, with no burst and
+    /// no breath after it. `0` makes them stops again. See `speech::taps`.
+    tap_length = 0.02, 0.0..=0.05, B;
+    /// How long before an alveolar tap begins its tip sets off, s
+    /// (physical engine), in place of `lead`: the tap is a quick throw of
+    /// the tip, which reaches the ridge from a vowel in some 10 to 18 ms.
+    /// Sent with the usual head start, it shut the mouth 10 to 15 ms before
+    /// the tap was due and held it for twice the tap's length.
+    tap_lead = 0.015, 0.0..=0.04, B;
 }
 
 impl Default for Tuning {
@@ -591,10 +610,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_forty_one_and_forty_two() {
+    fn two_passes_of_forty_one_and_forty_four() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (41, 42));
+        assert_eq!((a, b), (41, 44));
     }
 
     #[test]
@@ -602,7 +621,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 7);
+        assert_eq!(c, 8);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

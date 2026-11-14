@@ -111,7 +111,7 @@ floor) and the utterance a pitch track (`Utterance::set_pitch_track`) that
 follows the person's contour phone by phone, in place of the rules'
 declination, accents and final fall.
 
-Both engines read their numbers from `Tuning` (90 fields with defaults
+Both engines read their numbers from `Tuning` (93 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
 `VoiceSettings::with_profile`). The repository README has the details,

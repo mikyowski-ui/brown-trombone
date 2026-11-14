@@ -58,8 +58,16 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         let s = place::speak(&voice(), text, true);
         let (_, v) = after(&s, c);
         assert_eq!(s.phonemes[v], Phoneme::Uw, "{text}: {:?}", s.phonemes);
+        // A fronted /u/ holds its shape over its first part and glides
+        // back towards the plain one over the rest (see
+        // `Tuning::fronted_nucleus`); the first part is what is held.
+        let glides_back = s.phonemes.get(v + 1) == Some(&Phoneme::Uw);
         let (v0, v1) = s.ranges[v];
-        let mid = usize::midpoint(v0, v1);
+        let mid = if glides_back {
+            v1
+        } else {
+            usize::midpoint(v0, v1)
+        };
         // The stop's own transition, its first 20 ms, falls from the
         // alveolar locus as a speaker's does; what follows is the vowel.
         let settled = v0 + (0.02 * place::SR) as usize;
@@ -110,6 +118,140 @@ fn the_first_formant_runs_flat_from_l_into_ih() {
             "{text}: F2 {:.0} to {:.0}",
             lateral[1],
             vowel[1]
+        );
+    }
+}
+
+/// What the larynx and the tract do through one /t d/ between vowels:
+/// how long the mouth is shut, the least the folds open and close over any
+/// 10 ms of it against their swing in the vowel before, and how far the
+/// pressure above the folds (its mean over 10 ms, a voice period) rises
+/// over the vowel's, against the lungs'.
+struct Touch {
+    shut_ms: f32,
+    swing: f32,
+    pressure: f32,
+}
+
+/// Speak `text` and measure its first `p` from 30 ms before it to 30 ms
+/// after it; also how many segments it has.
+fn touch(text: &str, p: Phoneme) -> (Touch, usize) {
+    use synthie_trombone::speech::{Speaker, Utterance};
+    use synthie_trombone::{Engine, Trombone};
+    let settings = voice().with_engine(Engine::Physical);
+    let mut t = Trombone::new(place::SR);
+    settings.apply(&mut t);
+    Speaker::prepare(&mut t);
+    let u = Utterance::from_text(text, &settings.prosody());
+    let segments = u.segments().to_vec();
+    let k = segments
+        .iter()
+        .position(|s| s.phoneme == p)
+        .unwrap_or_else(|| panic!("{text}: no {p}"));
+    let span = segments
+        .iter()
+        .skip(k)
+        .take_while(|s| s.phoneme == p)
+        .count();
+    let mut sp = Speaker::new();
+    sp.speak(u);
+    let margin = (0.03 * place::SR) as usize;
+    let window = (0.01 * place::SR) as usize;
+    let (mut log, mut at) = (Vec::new(), None::<(usize, usize)>);
+    while let Some((i, _)) = sp.current() {
+        let n = log.len();
+        if i >= k && i < k + span {
+            at = Some(at.map_or((n, n), |(a, _)| (a, n)));
+        }
+        let g = t.gauges();
+        log.push((g.mouth_shut, g.glottal_area, g.supraglottal_pressure));
+        sp.process(&mut t);
+    }
+    let (a, b) = at.expect("the consonant was spoken");
+    let (from, to) = (a.saturating_sub(margin), (b + margin).min(log.len()));
+    let swing = |r: &[(bool, f32, f32)]| {
+        let (lo, hi) = r
+            .iter()
+            .fold((f32::INFINITY, 0.0f32), |(lo, hi), x| {
+                (lo.min(x.1), hi.max(x.1))
+            });
+        hi - lo
+    };
+    let vowel = swing(&log[from.saturating_sub(4 * window)..from]);
+    let least = (from..to.saturating_sub(window))
+        .step_by(window / 4)
+        .map(|s| swing(&log[s..s + window]))
+        .fold(f32::INFINITY, f32::min);
+    let shut = log[from..to].iter().filter(|x| x.0).count();
+    let mean = |r: &[(bool, f32, f32)]| r.iter().map(|x| x.2).sum::<f32>() / r.len() as f32;
+    let before = mean(&log[from.saturating_sub(4 * window)..from]);
+    let pressure = (from..to.saturating_sub(window))
+        .step_by(window / 8)
+        .map(|s| mean(&log[s..s + window]) - before)
+        .fold(0.0f32, f32::max);
+    (
+        Touch {
+            shut_ms: 1000.0 * shut as f32 / place::SR,
+            swing: least / vowel,
+            pressure: pressure / t.lung_pressure(),
+        },
+        span,
+    )
+}
+
+#[test]
+fn a_t_or_d_between_vowels_is_a_tap() {
+    // A tap: a touch of the tip with the voice going on through it, no
+    // pressure built behind it and nothing after it (one segment: no
+    // burst, no breath). The LibriSpeech reader's last 37 to 66 ms as
+    // aligned, dip 5 to 13 dB under the vowel beside them and are voiced
+    // throughout ("that it", "fled in", "British", "middle").
+    let taps = [
+        ("slid on", Phoneme::D),
+        ("get it", Phoneme::T),
+        ("water", Phoneme::T),
+        ("a lot of", Phoneme::T),
+    ];
+    let stops = [
+        ("a toe", Phoneme::T),
+        ("winter", Phoneme::T),
+        ("get", Phoneme::T),
+        ("a dog", Phoneme::D),
+    ];
+    for &(text, p) in taps.iter().chain(&stops) {
+        let (m, span) = touch(text, p);
+        println!(
+            "{text}: {span} segments, shut {:.1} ms, swing {:.2}, pressure {:.2}",
+            m.shut_ms, m.swing, m.pressure
+        );
+    }
+    for (text, p) in taps {
+        let (tap, span) = touch(text, p);
+        assert_eq!(span, 1, "{text}: the tap is one segment");
+        assert!(
+            (2.0..=20.0).contains(&tap.shut_ms),
+            "{text}: shut for {:.1} ms",
+            tap.shut_ms
+        );
+        assert!(
+            tap.swing > 0.3,
+            "{text}: the folds' swing falls to {:.2} of the vowel's",
+            tap.swing
+        );
+        assert!(
+            tap.pressure < 0.5,
+            "{text}: mouth pressure {:.2} of the lungs'",
+            tap.pressure
+        );
+    }
+    // Not before a stressed vowel, nor after a consonant, nor at the end
+    // of a phrase: a stop, held shut.
+    for (text, p) in stops {
+        let (stop, _) = touch(text, p);
+        assert!(
+            stop.shut_ms > 25.0,
+            "{text}: shut for {:.1} ms",
+            stop.shut_ms
         );
     }
 }

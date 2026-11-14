@@ -716,6 +716,7 @@ fn key_src(key: VowelKey) -> String {
         VowelKey::Vowel(p) => format!("Vowel(Phoneme::{p:?})"),
         VowelKey::Start(p) => format!("Start(Phoneme::{p:?})"),
         VowelKey::End(p) => format!("End(Phoneme::{p:?})"),
+        VowelKey::Fronted(p) => format!("Fronted(Phoneme::{p:?})"),
     }
 }
 
@@ -941,7 +942,7 @@ fn main() {
         src,
         "//! ```\n\n\
          use crate::phoneme::Phoneme;\n\
-         use crate::vowel_targets::VowelKey::{{self, End, Start, Vowel}};\n\n\
+         use crate::vowel_targets::VowelKey::{{self, End, Fronted, Start, Vowel}};\n\n\
          /// Tract length of the first row.\n\
          pub(super) const FIRST: f32 = {FIRST:?};\n\
          /// Tract length between rows.\n\
