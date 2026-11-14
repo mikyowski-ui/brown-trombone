@@ -366,6 +366,10 @@ pub(crate) struct Tract {
     pub(crate) pharynx: f32,
     pub(crate) velum_target: f32,
     pub(crate) movement_speed: f32,
+    /// How much faster than `movement_speed` the tongue body and its back
+    /// move (physical engine; see
+    /// [`Trombone::set_articulation_boost`](crate::Trombone::set_articulation_boost)).
+    pub(crate) boost: f32,
     pub(crate) dynamics: Dynamics,
     /// Whether the lips part with the tongue's opening, as a jaw lowered
     /// with the tongue body parts them (physical engine; see
@@ -448,6 +452,7 @@ impl Tract {
             pharynx: 0.0,
             velum_target: VELUM_CLOSED,
             movement_speed: MOVEMENT_SPEED,
+            boost: 1.0,
             dynamics: Dynamics::Linear,
             jaw: false,
             jaw_open: 0.0,
@@ -1161,8 +1166,8 @@ impl Tract {
         // Natural frequencies of the three articulators at this speed.
         let speed = self.movement_speed / MOVEMENT_SPEED;
         let tip = speed * self.motion.articulation_rate;
-        let dorsum = speed * self.motion.dorsum_rate;
-        let body = speed * self.motion.body_rate;
+        let dorsum = speed * self.boost * self.motion.dorsum_rate;
+        let body = speed * self.boost * self.motion.body_rate;
         let cavity = speed * self.motion.nasal_cavity_rate;
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];

@@ -52,7 +52,7 @@
 mod wav;
 
 use std::time::Instant;
-use synthie_trombone::speech::{self, PhoneSpan, PitchMode, Schedule, Utterance};
+use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
 use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
 use synthie_trombone::{Trombone, normalize};
@@ -69,11 +69,19 @@ fn read_schedule(json: &str) -> Schedule {
         .as_array()
         .expect("schedule: no \"phones\"")
         .iter()
-        .map(|p| PhoneSpan {
-            phoneme: p["phone"].as_str().and_then(Phoneme::from_symbol),
-            start: num(&p["start"], "start"),
-            end: num(&p["end"], "end"),
-            breath: p["breath"].as_f64().map_or(1.0, |b| b as f32),
+        .map(|p| {
+            let mut span = PhoneSpan::new(
+                p["phone"].as_str().and_then(Phoneme::from_symbol),
+                num(&p["start"], "start"),
+                num(&p["end"], "end"),
+            );
+            span.breath = p["breath"].as_f64().map_or(1.0, |b| b as f32);
+            span.tenseness = p["tenseness"].as_f64().map_or(1.0, |t| t as f32);
+            span.formants = p["formants"]
+                .as_array()
+                .filter(|f| f.len() == 2)
+                .and_then(|f| Some((f[0].as_f64()? as f32, f[1].as_f64()? as f32)));
+            span
         })
         .collect();
     let pitch = &v["pitch"];
@@ -89,6 +97,15 @@ fn read_schedule(json: &str) -> Schedule {
             .collect(),
         median_hz: num(&v["median_hz"], "median_hz"),
     }
+}
+
+/// A schedule's `"voice"` object (a profile: the speaker's tract length,
+/// tenseness, breathiness and pitch), as profile JSON.
+fn schedule_voice(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v.get("voice")
+        .filter(|v| v.is_object())
+        .map(ToString::to_string)
 }
 
 /// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`.
@@ -168,6 +185,10 @@ fn main() -> std::io::Result<()> {
     let mut pitch_mode = PitchMode::Speaker;
     let mut phone_times: Option<String> = None;
     let mut kick = true;
+    let mut follow_voice = true;
+    let mut follow_tenseness = true;
+    let mut follow_formants = true;
+    let mut follow_speed = true;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -224,6 +245,10 @@ fn main() -> std::io::Result<()> {
             }
             "--phone-times" => phone_times = Some(value("--phone-times")),
             "--prosody-kick" => kick = value("--prosody-kick") != "off",
+            "--prosody-voice" => follow_voice = value("--prosody-voice") != "off",
+            "--prosody-tenseness" => follow_tenseness = value("--prosody-tenseness") != "off",
+            "--prosody-formants" => follow_formants = value("--prosody-formants") != "off",
+            "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--dump-profile" => dump = true,
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
@@ -244,6 +269,20 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut settings = settings.with_engine(engine).with_persona(&persona);
+    // A schedule's own voice: the speaker's tract length, voice quality and
+    // pitch, as a profile laid over the preset (a --profile goes on top).
+    let schedule_json = match &schedule {
+        Some(file) => Some(std::fs::read_to_string(file)?),
+        None => None,
+    };
+    if let Some(json) = &schedule_json
+        && follow_voice
+        && let Some(voice) = schedule_voice(json)
+    {
+        settings = settings
+            .with_profile(&voice)
+            .unwrap_or_else(|e| panic!("the schedule's voice: {e}"));
+    }
     let mut vowels = Vec::new();
     if let Some(file) = profile {
         let json = std::fs::read_to_string(&file)?;
@@ -262,12 +301,26 @@ fn main() -> std::io::Result<()> {
     talker.voice_mut().set_glottal_source(source);
     hold_vowels(talker.voice_mut(), &vowels);
     let mut followed = None;
-    let utterance = if let Some(file) = &schedule {
-        let schedule = read_schedule(&std::fs::read_to_string(file)?);
+    let utterance = if let (Some(file), Some(json)) = (&schedule, &schedule_json) {
+        let schedule = read_schedule(json);
         let tokens = schedule.phrase(&speech::phonemize(&text));
         let mut u = Utterance::from_tokens(&tokens, &talker.settings().prosody());
+        let mut options = FollowOptions::new(
+            pitch_mode,
+            &talker.settings().tuning,
+            talker.settings().tract_length,
+        );
+        if !follow_tenseness {
+            options.tenseness_range = (1.0, 1.0);
+        }
+        if !follow_formants {
+            options.formant_range = 0.0;
+        }
+        if !follow_speed {
+            options.max_speed = 1.0;
+        }
         let report = u
-            .follow(&schedule, pitch_mode)
+            .follow_with(&schedule, &options)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
         followed = Some(report);
         if !kick {
@@ -317,12 +370,17 @@ fn main() -> std::io::Result<()> {
     );
     if let Some(r) = followed {
         println!(
-            "followed: {} phones, {} below the engine's floor (+{:.0} ms), contour moved {:+.1} st, {} breath shares limited",
+            "followed: {} phones, {} below the engine's floor (+{:.0} ms), contour moved {:+.1} st, {} breath shares limited, {} tenseness shares limited, {} vowels shaped ({} limited), {} phones sped up (up to {:.2}x)",
             r.spans.len(),
             r.too_short,
             1000.0 * r.added,
             r.shift,
-            r.breath_limited
+            r.breath_limited,
+            r.tenseness_limited,
+            r.shaped,
+            r.formants_limited,
+            r.sped,
+            r.fastest
         );
     }
     if let Some(file) = phone_times {

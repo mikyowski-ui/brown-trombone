@@ -1,4 +1,4 @@
-//! [`Tuning`]: the ninety numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the ninety-six numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: ninety numbers in three
+        /// How a voice turns sounds into speech: ninety-six numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -569,6 +569,33 @@ tuning! {
     /// down to 55 Hz, but the /l/ was heard as /w/ or /r/ in sentences and
     /// a /z/ after it at the end of a phrase no longer hissed.
     lateral_release = 0.01, 0.0..=0.04, B;
+
+    // ----- following a speaker's schedule (round 9) ----------------------
+
+    /// Least breath a phone of a followed schedule may be given, a share of
+    /// what the rules give it (physical engine; see
+    /// `speech::FollowOptions::breath_range`).
+    follow_breath_low = 0.5, 0.2..=1.0, A;
+    /// Most breath a phone of a followed schedule may be given, a share of
+    /// what the rules give it (the lungs push with at most 1.5 times the
+    /// voice's pressure).
+    follow_breath_high = 1.5, 1.0..=1.5, A;
+    /// Least tenseness a voiced phone of a followed schedule may be given,
+    /// a share of the rules' (physical engine; see
+    /// `speech::FollowOptions::tenseness_range`). Round 8 measured that
+    /// 12 % less hands the child voice's folds to the pulse source with a
+    /// click and 20 % less loses the voice bar of a /g/.
+    follow_tenseness_low = 0.9, 0.7..=1.0, A;
+    /// Most tenseness a voiced phone of a followed schedule may be given,
+    /// a share of the rules'.
+    follow_tenseness_high = 1.15, 1.0..=1.4, A;
+    /// Fastest the tongue body and its back may be driven through a phone
+    /// a followed schedule makes shorter than the rules do, a multiple of
+    /// their speed (see `Trombone::set_articulation_boost`).
+    follow_speed_max = 1.6, 1.0..=2.5, B;
+    /// How far a followed schedule may move a vowel's F1 and F2 from the
+    /// voice's own, a share either way (see `speech::PhoneSpan::formants`).
+    follow_formant_range = 0.15, 0.0..=0.3, C;
 }
 
 impl Default for Tuning {
@@ -591,10 +618,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_forty_one_and_forty_two() {
+    fn two_passes_of_forty_five_and_forty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (41, 42));
+        assert_eq!((a, b), (45, 43));
     }
 
     #[test]
@@ -602,7 +629,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 7);
+        assert_eq!(c, 8);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

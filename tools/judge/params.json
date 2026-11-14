@@ -88,5 +88,11 @@
   "sonorant_softness": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
   "unstressed_softness": {"lo": 0, "hi": 1, "default": 0.5, "pass": "a"},
   "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
-  "lateral_release": {"lo": 0, "hi": 0.04, "default": 0.01, "pass": "b"}
+  "lateral_release": {"lo": 0, "hi": 0.04, "default": 0.01, "pass": "b"},
+  "follow_breath_low": {"lo": 0.2, "hi": 1, "default": 0.5, "pass": "a"},
+  "follow_breath_high": {"lo": 1, "hi": 1.5, "default": 1.5, "pass": "a"},
+  "follow_tenseness_low": {"lo": 0.7, "hi": 1, "default": 0.9, "pass": "a"},
+  "follow_tenseness_high": {"lo": 1, "hi": 1.4, "default": 1.15, "pass": "a"},
+  "follow_speed_max": {"lo": 1, "hi": 2.5, "default": 1.6, "pass": "b"},
+  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"}
 }
