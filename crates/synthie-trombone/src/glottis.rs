@@ -15,6 +15,7 @@ pub(crate) const DEFAULT_RELEASE: f32 = 0.05 * INTERNAL_RATE / 512.0;
 
 /// The vocal folds.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)] // independent switches
 pub(crate) struct Glottis {
     /// Voicing gate: the folds are pushed together and vibrate.
     pub voiced: bool,
@@ -30,6 +31,15 @@ pub(crate) struct Glottis {
     pub glide: f32,
     /// Scale of the small random pitch jitter (`1.0` natural, `0.0` robotic).
     pub jitter: f32,
+    /// Depth of a quicker random movement of the pitch (6 to 10 Hz, a
+    /// share of the pitch at jitter 1), on top of that slow wander: `0` in
+    /// the classic engine; the physical engine sets `Tuning::pitch_flutter`.
+    pub flutter: f32,
+    /// The physical engine never calls [`step`](Self::step), whose clock
+    /// moves the vibrato and the wander: it keeps this one instead
+    /// ([`advance`](Self::advance)). Until round 9 its pitch held still.
+    pub own_clock: bool,
+    pitch_clock: f64,
     /// Voicing onset rate, intensity per second.
     pub attack: f32,
     /// Voicing offset rate, intensity per second.
@@ -74,6 +84,9 @@ impl Glottis {
             vibrato_frequency: 6.0,
             glide: 0.1,
             jitter: 1.0,
+            flutter: 0.0,
+            own_clock: false,
+            pitch_clock: 0.0,
             attack: DEFAULT_ATTACK,
             release: DEFAULT_RELEASE,
             intensity: 0.0,
@@ -114,6 +127,8 @@ impl Glottis {
             self.attack,
             self.release,
             self.jitter,
+            self.flutter,
+            self.own_clock,
         );
         let rate = self.rate;
         *self = Self::new();
@@ -130,6 +145,8 @@ impl Glottis {
             self.attack,
             self.release,
             self.jitter,
+            self.flutter,
+            self.own_clock,
         ) = keep;
         self.aspiration.reset();
     }
@@ -209,7 +226,9 @@ impl Glottis {
             self.smooth_frequency = self.target_frequency.max(self.smooth_frequency / rate);
         }
         self.old_frequency = self.new_frequency;
-        self.new_frequency = (self.smooth_frequency * (1.0 + self.vibrato(t, simplex))).max(10.0);
+        let clock = if self.own_clock { self.pitch_clock } else { t };
+        self.new_frequency =
+            (self.smooth_frequency * (1.0 + self.vibrato(clock, simplex))).max(10.0);
 
         // Tenseness with a little drift.
         self.old_tenseness = self.new_tenseness;
@@ -231,11 +250,19 @@ impl Glottis {
         let mut v = self.vibrato_amount * sin(2.0 * PI * phase);
         v += self.jitter * 0.02 * simplex.sample(t * 4.07);
         v += self.jitter * 0.04 * simplex.sample(t * 2.15);
+        if self.flutter > 0.0 {
+            v += self.jitter * self.flutter * simplex.sample(t * 7.9 + 31.0);
+        }
         if self.wobble {
             v += 0.2 * simplex.sample(t * 0.98);
             v += 0.4 * simplex.sample(t * 0.5);
         }
         v
+    }
+
+    /// Move the pitch's own clock on by `dt` seconds (see `own_clock`).
+    pub(crate) fn advance(&mut self, dt: f32) {
+        self.pitch_clock += f64::from(dt);
     }
 
     /// Precompute the LF model for one pulse (normalised to `T = 1`, `Ee = 1`).

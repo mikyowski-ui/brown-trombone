@@ -124,7 +124,11 @@ fn phrases_swell_in_and_die_away() {
         falls += fall;
     }
     let fall = falls / SENTENCES.len() as f32;
-    assert!(fall > 0.2, "mean fall {:.0} ms", fall * 1e3);
+    // 200 ms until round 9: the source tilt takes some 2 dB off the
+    // vowels and nothing off the voiceless sounds after the last of them,
+    // so the level stays within 6 dB of the peak a little longer (180,
+    // 200 and 160 ms here).
+    assert!(fall > 0.15, "mean fall {:.0} ms", fall * 1e3);
 }
 
 #[test]

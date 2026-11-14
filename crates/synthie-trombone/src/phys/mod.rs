@@ -29,6 +29,7 @@ pub(crate) mod junction;
 pub(crate) mod noise;
 pub(crate) mod radiation;
 pub(crate) mod source;
+pub(crate) mod tilt;
 
 use crate::math::sqrt;
 use crate::tract::{N, NOSE_LEN, NOSE_START};
@@ -37,6 +38,10 @@ use core::f32::consts::PI;
 use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
 use noise::{JET_HEADROOM, Turbulence, V_MAX, full_jet, glottal_noise, jet_noise, reynolds};
 use radiation::Radiation;
+
+/// Seconds over which the share of the glottal jet's breath noise follows
+/// the voicing (see `Phys::voiced_target`).
+const BREATH_SHARE_TIME: f32 = 0.005;
 
 /// Density of warm, moist air, g/cm³.
 pub(crate) const RHO: f32 = 1.14e-3;
@@ -437,6 +442,17 @@ pub(crate) struct Phys {
     /// A measuring pressure source, dyn/cm², in series at joint `probe.0`
     /// (between cells `probe.0 − 1` and `probe.0`) for the next tick only.
     probe: (usize, f32),
+    /// The source tilt the voice takes as it leaves (see [`tilt`]), and its
+    /// state.
+    tilt: tilt::Shelf,
+    radiated: tilt::Tilt,
+    /// Whether the folds are asked to sing, `0‥1`, wanted and present (it
+    /// moves over `BREATH_SHARE_TIME`): the voice's tilt is on as far as
+    /// this says, and the breath noise of the narrow glottal slit of a
+    /// voice is pitched higher than that of an open glottis
+    /// (`Tuning::voiced_breath_corner`).
+    pub(crate) voiced_target: f32,
+    voiced: f32,
 
     pub(crate) gauge: Gauge,
 }
@@ -515,6 +531,10 @@ impl Phys {
             dental_edge: crate::Tuning::DEFAULT.dental_edge,
             labial_edge: crate::Tuning::DEFAULT.labial_edge,
             probe: (0, 0.0),
+            tilt: tilt::Shelf::FLAT,
+            radiated: tilt::Tilt::default(),
+            voiced_target: 0.0,
+            voiced: 0.0,
             gauge: Gauge::default(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
@@ -558,6 +578,7 @@ impl Phys {
 
         self.configure_branches();
         self.turbulence.set_rate(dt, len);
+        self.tilt = self.turbulence.tilt(dt, len);
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
@@ -571,6 +592,17 @@ impl Phys {
         self.labial_edge = tuning.labial_edge;
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
+        self.tilt = self.turbulence.tilt(self.dt, self.len);
+    }
+
+    /// The flow a tick returned, as it is heard: while the folds are asked
+    /// to sing, with the source tilt (`Tuning::voice_tilt`) on it. The
+    /// noise sources took its inverse on the way in, so they leave as they
+    /// would without it; while the voice is off (a voiceless consonant, the
+    /// breath before a phrase, a burst's flow) nothing is tilted.
+    #[inline]
+    pub(crate) fn radiate(&mut self, flow: f32) -> f32 {
+        self.radiated.blend(&self.tilt, flow, self.voiced)
     }
 
     /// Seed the turbulence. Equal seeds give equal sound.
@@ -583,6 +615,9 @@ impl Phys {
         self.turbulence.corner = old.corner;
         self.turbulence.teeth_floor = old.teeth_floor;
         self.turbulence.teeth_corner = old.teeth_corner;
+        self.turbulence.tilt_depth = old.tilt_depth;
+        self.turbulence.tilt_corner = old.tilt_corner;
+        self.turbulence.slit_corner = old.slit_corner;
         self.turbulence.set_rate(self.dt, self.len);
     }
 
@@ -701,6 +736,7 @@ impl Phys {
         self.flow_mean = [0.0; N + 1];
         self.jet_mean = [0.0; N + 1];
         self.turbulence.reset();
+        self.radiated = tilt::Tilt::default();
         self.gauge = Gauge::default();
     }
 
@@ -1036,7 +1072,7 @@ impl Phys {
         let mut u_nose = 0.0;
         let mut u_skin = 0.0;
         let (hiss, hiss_teeth) = if self.noisy {
-            self.turbulence.tick()
+            self.turbulence.tick(self.voiced)
         } else {
             (0.0, 0.0)
         };
@@ -1208,7 +1244,7 @@ impl Phys {
                 self.v_max,
             );
             if p > 0.0 {
-                u_edge = self.turbulence.edge_hiss() * edge * p * INV_RHO_C / inv[c];
+                u_edge = self.turbulence.edge_hiss(self.voiced) * edge * p * INV_RHO_C / inv[c];
             }
         }
         self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
@@ -1291,8 +1327,9 @@ impl Phys {
         let sealed = area < A_MIN;
         let inv_g = 1.0 / area.max(A_MIN);
         let k = 0.5 * RHO * GLOTTAL_KT * inv_g * inv_g;
+        self.voiced += (self.voiced_target - self.voiced) * (self.dt / BREATH_SHARE_TIME).min(1.0);
         let pn = if self.noisy && !sealed {
-            self.turbulence.breath()
+            self.turbulence.breath(self.voiced)
                 * glottal_noise(
                     self.flow[0],
                     inv_g,

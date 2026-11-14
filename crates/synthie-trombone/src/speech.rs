@@ -112,6 +112,11 @@ pub struct Gesture {
     /// Pitch added at the start of the segment, Hz, decaying over the
     /// voice's [`Tuning::kick_time`].
     pub kick: f32,
+    /// Semitones the pitch stands off the straight line from the start of
+    /// the segment to its end at its middle, falling away as a parabola
+    /// to either end (the physical engine's intonation: an accent peaking
+    /// inside its vowel).
+    pub pitch_arc: f32,
     /// Share of the voice's lung pressure held back at the start and at
     /// the end of the segment, in between in proportion (see
     /// [`Trombone::set_breath`]): `0` pushes with all of it, `1` not at
@@ -586,7 +591,15 @@ impl Speaker {
             let mut hz = self
                 .utterance
                 .track_at(self.nominal + self.elapsed.min(seg.duration))
-                .unwrap_or_else(|| lerp(seg.pitch.0, seg.pitch.1, t));
+                .unwrap_or_else(|| {
+                    let hz = lerp(seg.pitch.0, seg.pitch.1, t);
+                    if seg.gesture.pitch_arc == 0.0 {
+                        hz
+                    } else {
+                        let arc = seg.gesture.pitch_arc * 4.0 * t * (1.0 - t);
+                        hz * crate::math::powf(2.0, arc / 12.0)
+                    }
+                });
             if seg.gesture.kick.abs() > 0.0 && self.clock >= self.kick_from {
                 hz += seg.gesture.kick
                     * exp(-(self.clock - self.kick_from) / self.utterance.kick_time);
@@ -1378,6 +1391,10 @@ struct Draft {
     tenseness: Option<f32>,
     /// Relative pitch target at the end of the segment (1.0 = baseline).
     accent: f32,
+    /// The same at its middle, for a vowel the physical engine's
+    /// intonation has passed (`0`: none, the pitch goes straight from the
+    /// last segment's to this one's).
+    mid_accent: f32,
     vowel: bool,
     part: Part,
     /// Laryngeal and wall gesture (physical engine).
@@ -1583,6 +1600,14 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             d.articulation.velum = d.articulation.velum.max(nasality);
         }
         let target = prosody.pitch * d.accent;
+        let mut gesture = d.gesture;
+        if d.vowel && d.mid_accent > 0.0 {
+            // How far the intonation's curve stands off the straight line
+            // from the last segment's pitch to this one's at the middle.
+            let mid = prosody.pitch * d.mid_accent;
+            gesture.pitch_arc =
+                12.0 * crate::math::ln(2.0 * mid / (last + target)) / core::f32::consts::LN_2;
+        }
         segments.push(Segment {
             phoneme: d.phoneme,
             articulation: d.articulation,
@@ -1590,7 +1615,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             pitch: (last, target),
             tenseness: d.tenseness.unwrap_or(tense),
             voiced: d.voiced,
-            gesture: d.gesture,
+            gesture,
         });
         last = target;
     }
@@ -1903,6 +1928,7 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
                 duration: d,
                 voiced: true,
                 accent: before * crate::math::powf(liquid.accent / before, share),
+                mid_accent: 0.0,
                 vowel: false,
                 part: Part::Head,
                 gesture: Gesture {
@@ -2002,6 +2028,7 @@ fn silence(duration: f32) -> Draft {
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,
+        mid_accent: 0.0,
     }
 }
 
@@ -2040,6 +2067,7 @@ fn expand(
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,
+        mid_accent: 0.0,
     };
     let Some(context) = context else {
         // The classic engine.
@@ -2386,6 +2414,7 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
             t += d.duration;
             d.gesture.pressure_drop = (start, held(t));
         }
+        decline_through_vowels(&mut drafts[a..b], timing);
         // After the last phrase the breath dies away over the closing pause,
         // so its last sound is not cut off.
         if b + 1 == drafts.len()
@@ -2408,6 +2437,48 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
         } else {
             drafts[k] = lead_in;
         }
+    }
+}
+
+/// Level of the physical voice against lung pressure: it rises as the
+/// pressure to this power (`examples/tiltprobe.rs --level`: /a/ at 115 Hz,
+/// 3.2 dB from 6.4 to 8 cmH2O).
+const LEVEL_EXPONENT: f32 = 1.64;
+
+/// The breath sinks through each vowel (physical engine): a speaker's
+/// vowel is loudest soon after it starts and falls by some 2 dB to its end
+/// (the LibriSpeech reader's stressed vowels: 2.1 dB from their peak to
+/// their end, median), where the engine's held its level or grew. So the
+/// lungs let go of [`Tuning::vowel_decline`] dB of level across each
+/// vowel (its glide or offglide included) and take it back in the sounds
+/// that follow; they follow within some 30 ms.
+fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
+    if timing.vowel_decline <= 0.0 {
+        return;
+    }
+    let end = crate::math::powf(10.0, -timing.vowel_decline / (20.0 * LEVEL_EXPONENT));
+    let mut k = 0;
+    while k < phrase.len() {
+        if !phrase[k].vowel {
+            k += 1;
+            continue;
+        }
+        let last = k + phrase[k + 1..]
+            .iter()
+            .take_while(|d| d.vowel && d.part != Part::Head)
+            .count();
+        let total: f32 = phrase[k..=last].iter().map(|d| d.duration).sum();
+        if total > 0.0 {
+            let share = |t: f32| 1.0 + (end - 1.0) * (t / total);
+            let mut t = 0.0;
+            for d in &mut phrase[k..=last] {
+                let (a, b) = d.gesture.pressure_drop;
+                let s0 = share(t);
+                t += d.duration;
+                d.gesture.pressure_drop = (1.0 - (1.0 - a) * s0, 1.0 - (1.0 - b) * share(t));
+            }
+        }
+        k = last + 1;
     }
 }
 
@@ -2441,6 +2512,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,
+        mid_accent: 0.0,
     }
 }
 
@@ -2483,16 +2555,20 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
                 _ => b,
             };
             // The nucleus of a statement peaks as its vowel begins, its rise
-            // carried by the sounds before it, and falls from there.
+            // carried by the sounds before it, and falls from there; any
+            // other accent rises from the start of its syllable and peaks
+            // `accent_peak` of the way through its vowel.
+            let onset = spans[..k]
+                .iter()
+                .rev()
+                .zip(drafts[..k].iter().rev())
+                .take_while(|(_, d)| !d.vowel)
+                .last()
+                .map_or(a - 0.05, |(&(s, _), _)| s);
             if falling && Some(k) == last_vowel {
-                let onset = spans[..k]
-                    .iter()
-                    .rev()
-                    .zip(drafts[..k].iter().rev())
-                    .take_while(|(_, d)| !d.vowel)
-                    .last()
-                    .map_or(a - 0.05, |(&(s, _), _)| s);
                 (onset, a)
+            } else if timing.accent_peak < 1.0 {
+                (onset.min(a), a + timing.accent_peak * (b - a))
             } else {
                 (a, b)
             }
@@ -2528,8 +2604,11 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
     };
     let declination = timing.declination * expr;
     let semitones = |t: f32| declination * (0.5 - t / total) + accent(t) + boundary(t);
-    for (d, &(_, end)) in drafts.iter_mut().zip(&spans) {
+    for (d, &(start, end)) in drafts.iter_mut().zip(&spans) {
         d.accent = crate::math::powf(2.0, semitones(end) / 12.0);
+        if d.vowel {
+            d.mid_accent = crate::math::powf(2.0, semitones(f32::midpoint(start, end)) / 12.0);
+        }
     }
     // After a question's rise the consonants stay up.
     if let (Some(v), Break::Question) = (last_draft, brk) {
