@@ -24,6 +24,16 @@ From a recording and its text:
 * **level** -- RMS in dB every 10 ms (``natural.level_db``); each phone's
   mean against the mean of the utterance's vowels.
 
+* **text** -- given, from a ``.txt`` beside the recording, or heard by the
+  judge's Whisper (``resolve_text``; written beside the schedule); a long
+  recording is cut at pauses into pieces aligned one at a time
+  (``split_pieces``); phones the aligner had to force are reported
+  (``poorly_placed``).
+* **the speaker's voice** (``transfer``, ``speaker_voice.py``) -- a baseline
+  profile the schedule carries as ``"voice"``, and in the loop each
+  sonorant's tenseness and each vowel's formants moved towards the
+  speaker's.
+
 All of it goes into one JSON schedule (``analyse``). ``render`` speaks it
 with ``bin/say --match-prosody`` and, with ``--level``, maps the level onto
 the lungs: the engine's rendering is measured phone by phone and the breath
@@ -105,8 +115,21 @@ SHARE_WEIGHT = {"vowel": 1.5, "other": 1.0}
 #: The speaker's pitch counts as moving fast from this many semitones a
 #: second (``pitch_error`` reports those frames apart).
 FAST_PITCH = 40.0
-#: How far the level may be moved from the rules', dB either way.
-LEVEL_RANGE = 4.0
+#: How far the level may be moved from the rules', dB down and up: as far
+#: as the engine follows its breath with the folds still going. Measured
+#: (``python prosody.py slope`` and a sweep of the breath share over the
+#: four sentences at the rules' timing, the deep, bright and child
+#: voices): the vowels' level follows the breath from a share of 0.5
+#: (-11 dB, 96 to 99 % of the vowel frames voiced; at 0.45 93 to 98 %, at
+#: 0.4 84 to 91 %: the folds drop out) to 1.5 (+5.4 dB, as much as the
+#: lungs give, H1-H2 within 0.7 dB of the rules': the voice does not
+#: press). Until round 9 ±4 dB, where nearly half of the anchors'
+#: sonorants stood at the limit.
+LEVEL_RANGE = (-10.5, 5.2)
+#: The level of the engine's vowels against their breath share (deep
+#: voice, from the sweep): share, dB against a share of 1.
+BREATH_DB = ((0.5, -11.2), (0.55, -9.5), (0.6, -7.8), (0.7, -5.2), (0.85, -2.4), (1.0, 0.0), (1.15, 1.9),
+             (1.3, 3.5), (1.5, 5.4))  # fmt: skip
 #: Level of the engine's voice per doubling of its breath share, dB
 #: (measured: ``python prosody.py slope``).
 LEVEL_PER_DOUBLING = 9.0
@@ -870,11 +893,13 @@ FOLLOWED = ("voice", "tenseness", "formants", "speed")
 
 
 def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str = "deep",
-           follow: bool = True, kick: bool = True, off: tuple[str, ...] = ()) -> dict:  # fmt: skip
+           follow: bool = True, kick: bool = True, off: tuple[str, ...] = (),
+           profile: Path | None = None) -> dict:  # fmt: skip
     """Speak a schedule (or, with ``follow=False``, its text by the rules)
     with ``bin/say``; ``kick=False`` leaves out the engine's pitch kick
-    after voiceless consonants, and ``off`` the parts of ``FOLLOWED`` named.
-    Returns the phone spans of the output and what ``say`` printed."""
+    after voiceless consonants, ``off`` the parts of ``FOLLOWED`` named, and
+    ``profile`` is a voice profile laid over the voice (and the schedule's
+    own). Returns the phone spans of the output and what ``say`` printed."""
     if isinstance(schedule, dict):
         path = Path(out).with_suffix(".schedule.json")
         path.write_text(json.dumps(schedule), encoding="utf-8")
@@ -883,6 +908,8 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
         path, sched = Path(schedule), json.loads(Path(schedule).read_text(encoding="utf-8"))
     times = Path(out).with_suffix(".times.json")
     cmd = [str(say_bin()), "--engine", "physical", "--voice", voice, "--out", str(out), "--phone-times", str(times)]
+    if profile is not None:
+        cmd += ["--profile", str(profile)]
     if follow:
         cmd += ["--match-prosody", str(path), "--prosody-pitch", pitch, "--prosody-kick", "on" if kick else "off"]
         for part in off:
@@ -964,6 +991,25 @@ def boundary_error(a_start: np.ndarray, b_start: np.ndarray) -> dict:
     return {"mean_ms": float(1000 * d.mean()), "mae_ms": float(1000 * np.abs(d - d.mean()).mean())}
 
 
+def breath_db(share) -> np.ndarray:
+    """The level a breath share gives (``BREATH_DB``), dB against a share
+    of 1; past the table's ends at ``LEVEL_PER_DOUBLING``."""
+    b, d = np.array(BREATH_DB).T
+    s = np.asarray(share, float)
+    out = np.interp(s, b, d)
+    out = np.where(s < b[0], d[0] + LEVEL_PER_DOUBLING * np.log2(np.maximum(s, 1e-3) / b[0]), out)
+    return np.where(s > b[-1], d[-1] + LEVEL_PER_DOUBLING * np.log2(s / b[-1]), out)
+
+
+def db_breath(db) -> np.ndarray:
+    """The breath share that gives ``db`` (``breath_db`` turned round)."""
+    b, d = np.array(BREATH_DB).T
+    x = np.asarray(db, float)
+    out = np.interp(x, d, b)
+    out = np.where(x < d[0], b[0] * 2 ** ((x - d[0]) / LEVEL_PER_DOUBLING), out)
+    return np.where(x > d[-1], b[-1] * 2 ** ((x - d[-1]) / LEVEL_PER_DOUBLING), out)
+
+
 def level_step(sched: dict, audio: np.ndarray, spans: np.ndarray) -> tuple[dict, dict]:
     """One step of moving each sonorant's breath towards the person's level
     (relative to the utterance's vowels), within ``LEVEL_RANGE`` dB of the
@@ -979,43 +1025,89 @@ def level_step(sched: dict, audio: np.ndarray, spans: np.ndarray) -> tuple[dict,
     err = hum - eng
     new = json.loads(json.dumps(sched))
     breath = np.array([p.get("breath", 1.0) for p in sched["phones"]])
-    db_now = LEVEL_PER_DOUBLING * np.log2(breath)
-    db_new = np.clip(db_now + err, -LEVEL_RANGE, LEVEL_RANGE)
+    db_now = breath_db(breath)
+    db_new = np.clip(db_now + err, *LEVEL_RANGE)
     # obstruents: the mean of the sonorants beside them
     for k in np.flatnonzero(~son):
         near = [db_new[j] for j in (k - 1, k + 1) if 0 <= j < len(phones) and son[j]]
         db_new[k] = float(np.mean(near)) if near else 0.0
     for k, p in enumerate(new["phones"]):
-        p["breath"] = round(float(2 ** (db_new[k] / LEVEL_PER_DOUBLING)), 4)
+        p["breath"] = round(float(db_breath(db_new[k])), 4)
     stats = {"rms_db": float(np.sqrt(np.mean(err[son] ** 2))), "mean_abs_db": float(np.mean(np.abs(err[son]))),
-             "at_limit": int(np.sum(np.abs(db_new[son]) >= LEVEL_RANGE - 1e-6))}  # fmt: skip
+             "at_limit": int(np.sum((db_new[son] <= LEVEL_RANGE[0] + 1e-6) | (db_new[son] >= LEVEL_RANGE[1] - 1e-6)))}  # fmt: skip
     return new, stats
 
 
-def transfer(pj, sched: dict, out: Path, pitch: str = "speaker", level: bool = True, voice: str = "deep") -> dict:
-    """Render a schedule, with the level loop when ``level`` (two steps; the
-    rendering whose level is closest to the person's is kept); returns the
-    schedule rendered, the level errors (one per rendering) and the
-    render's spans."""
-    import render as R
+@dataclass
+class Speaker:
+    """What the transfer loop moves the engine towards besides the level
+    (``speaker_voice``): the recording's per-phone voice quality and vowel
+    formants, its formant scale, the LPC order both are measured with and
+    the reference the engine's formant scale is measured against."""
 
-    levels = []
-    r = render(sched, out, pitch, voice)
+    phones: dict  #: ``speaker_voice.phone_voice`` of the recording
+    scale: float
+    order: int
+    ref: dict
+
+
+def transfer_score(st: dict) -> float:
+    """How far a rendering is from the person, for keeping the best of the
+    loop: level (dB RMS over sonorants) and, where measured, H1*-H2* (dB
+    RMS of the deviations) and vowel formants (mean |error| %, over 5)."""
+    s = st["level"]["rms_db"] / 2
+    if st.get("h12") and st["h12"].get("rms_db") is not None:
+        s += st["h12"]["rms_db"]
+    f = st.get("formants") or {}
+    if f.get("f1_pct") is not None:
+        s += 0.5 * (f["f1_pct"] + f["f2_pct"]) / 5
+    return s
+
+
+def transfer(pj, sched: dict, out: Path, pitch: str = "speaker", level: bool = True, voice: str = "deep",
+             off: tuple[str, ...] = (), speaker: Speaker | None = None, steps: int = 3) -> dict:  # fmt: skip
+    """Render a schedule, with the loop when ``level``: ``steps`` renderings,
+    after each of which the breath of each sonorant is moved towards the
+    person's level (``level_step``) and, with ``speaker``, the tenseness
+    towards the person's H1*-H2* (``speaker_voice.tenseness_step``) and the
+    vowels towards the person's formants (``speaker_voice.formant_step``),
+    unless ``off`` names them; the rendering closest to the person
+    (``transfer_score``) is kept. Returns the schedule rendered, what was
+    measured on each rendering (``levels`` for the level, ``steps`` for
+    all) and the render's spans."""
+    import render as R
+    import speaker_voice as SV
+
+    levels, stats = [], []
+    r = render(sched, out, pitch, voice, off=off)
     if level:
         tried = []
-        for step in range(3):
-            nxt, st = level_step(sched, R.load_audio(out), r["spans"])
+        for step in range(steps):
+            audio = R.load_audio(out)
+            nxt, st = level_step(sched, audio, r["spans"])
+            row = {"level": st}
+            if speaker is not None and not {"tenseness", "formants"} <= set(off):
+                phones = [p["phone"] for p in sched["phones"]]
+                frames = SV.frame_measures(audio, speaker.order)
+                eng = SV.phone_voice(frames, r["spans"][:, 0], r["spans"][:, 1], phones, speaker.scale)
+                if "tenseness" not in off:
+                    nxt, row["h12"] = SV.tenseness_step(nxt, eng, speaker.phones)
+                if "formants" not in off:
+                    s_eng = SV.analyse_like(audio, speaker.ref, speaker.order)["scale"]
+                    row["formants"] = SV.formant_error(eng, speaker.phones, s_eng, speaker.scale)
+                    nxt = SV.formant_step(nxt, eng, speaker.phones, s_eng, speaker.scale)
             levels.append(st)
-            tried.append((st["rms_db"], sched))
-            if step == 2:
+            stats.append(row)
+            tried.append((transfer_score(row), sched))
+            if step == steps - 1:
                 break
             sched = nxt
-            r = render(sched, out, pitch, voice)
+            r = render(sched, out, pitch, voice, off=off)
         best = min(range(len(tried)), key=lambda k: tried[k][0])
         if best != len(tried) - 1:
             sched = tried[best][1]
-            r = render(sched, out, pitch, voice)
-    return {"schedule": sched, "levels": levels, **r}
+            r = render(sched, out, pitch, voice, off=off)
+    return {"schedule": sched, "levels": levels, "steps": stats, **r}
 
 
 def check(pj, sched: dict, audio: np.ndarray, spans: np.ndarray, shift: float = 0.0,
@@ -1134,30 +1226,84 @@ def roundtrip(pj, text: str, out_dir: Path, voice: str = "deep") -> dict:
     return res
 
 
+#: What the recording's analysis keeps in a schedule's ``baseline``.
+BASELINE_KEYS = ("f0_median", "range_st", "scale", "h1h2", "hnr", "alpha", "speech_s", "order")
+
+
+def speaker_of(sched: dict, audio: np.ndarray, voice: str = "deep", off: tuple[str, ...] = (),
+               log=None) -> tuple[Speaker, dict]:  # fmt: skip
+    """The speaker's voice for a schedule, in place: unless ``off`` names
+    ``voice``, the baseline profile (``speaker_voice.baseline``) as the
+    schedule's ``"voice"``; the recording's analysis as its ``"baseline"``,
+    and each phone's voice quality and vowel formants as its
+    ``"speaker"``. Returns what the loop needs (``Speaker``) and the
+    baseline match's report (empty with ``voice`` off)."""
+    import speaker_voice as SV
+
+    rep: dict = {}
+    if "voice" not in off:
+        rep = SV.baseline(sched, audio, voice, log=log)
+        if rep["voice"] is not None:
+            sched["voice"] = rep["voice"]
+        else:
+            print(f"the baseline voice was not trusted (engine against recording: {rep['errors']}); "
+                  "the schedule has none", file=sys.stderr)  # fmt: skip
+    ref = SV.reference_for(sched, voice)
+    rec = rep.get("recording_analysis") or SV.analyse_like(audio, ref, None)
+    sched["baseline"] = {k: rec[k] for k in BASELINE_KEYS}
+    phones, start, end = sched_arrays(sched)
+    spk = SV.phone_voice(SV.frame_measures(audio, rec["order"]), start, end, phones, rec["scale"])
+    for k, p in enumerate(sched["phones"]):
+        p["speaker"] = {f: (None if not np.isfinite(spk[f][k]) else round(float(spk[f][k]), 2))
+                        for f in ("h12", "tilt", "f1", "f2")}  # fmt: skip
+    return Speaker(spk, float(rec["scale"]), int(rec["order"]), ref), rep
+
+
 def transfer_file(pj, wav: Path | str, text: str | Text, out_dir: Path, name: str, pitch: str = "speaker",
-                  voice: str = "deep", level: bool = True, audio: np.ndarray | None = None) -> dict:  # fmt: skip
+                  voice: str = "deep", level: bool = True, audio: np.ndarray | None = None,
+                  off: tuple[str, ...] = ()) -> dict:  # fmt: skip
     """Any recording and its text (a string, or resolved by
     ``resolve_text``): the schedule (``<name>.json``, with ``<name>.txt``
-    beside it when the text was heard), the engine speaking it
-    (``<name>-transfer.wav``) and by its rules (``<name>-rule.wav``), and
-    the checks of the transfer."""
+    beside it when the text was heard), the engine speaking it with the
+    speaker's voice (``<name>-transfer.wav``; ``off`` leaves out parts of
+    ``FOLLOWED``) and by its rules (``<name>-rule.wav``), and the checks of
+    the transfer: durations and pitch (``check``), level, and how close
+    the engine's voice measures to the speaker's (``five``: pitch, formant
+    scale, H1*-H2*, HNR, pace; ``h12``: the H1*-H2* contour; ``formants``:
+    the vowels)."""
     import render as R
+    import speaker_voice as SV
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    off = tuple(off)
     if audio is None:
         audio = R.load_audio(wav)
     if isinstance(text, str):
         text = Text(text, [(0.0, len(audio) / SR)], [text], "given")
     sched = schedule_of(pj, wav, audio, text, voice)
     rule = engine_rule(text.text, voice)[1]
-    tr = transfer(pj, sched, out_dir / f"{name}-transfer.wav", pitch, level, voice)
+    speaker, rep = None, {}
+    if level and not {"voice", "tenseness", "formants"} <= set(off):
+        speaker, rep = speaker_of(sched, audio, voice, off)
+    tr = transfer(pj, sched, out_dir / f"{name}-transfer.wav", pitch, level, voice, off, speaker)
     (out_dir / f"{name}.json").write_text(json.dumps(tr["schedule"], indent=1), encoding="utf-8")
     write_heard_text(sched, out_dir / f"{name}.json")
     render({"text": text.text}, out_dir / f"{name}-rule.wav", follow=False, voice=voice)
-    res = check(pj, tr["schedule"], R.load_audio(out_dir / f"{name}-transfer.wav"), tr["spans"], tr["shift"], rule)
-    res.update(levels=tr["levels"], followed=tr["followed"], shift=tr["shift"], pauses=len(sched["pauses"]),
-               median_hz=sched["median_hz"], text=text.text, text_source=text.source,
-               poorly_placed=sched["poorly_placed"])  # fmt: skip
+    final = R.load_audio(out_dir / f"{name}-transfer.wav")
+    res = check(pj, tr["schedule"], final, tr["spans"], tr["shift"], rule)
+    res.update(levels=tr["levels"], steps=tr["steps"], followed=tr["followed"], shift=tr["shift"],
+               pauses=len(sched["pauses"]), median_hz=sched["median_hz"], text=text.text, text_source=text.source,
+               poorly_placed=sched["poorly_placed"], voice=tr["schedule"].get("voice"))  # fmt: skip
+    if speaker is not None:
+        syn = SV.analyse_like(final, speaker.ref, speaker.order)
+        res["five"] = SV.five(tr["schedule"]["baseline"], syn)
+        res["baseline_match"] = rep.get("errors")
+        phones, _, _ = sched_arrays(tr["schedule"])
+        eng = SV.phone_voice(SV.frame_measures(final, speaker.order), tr["spans"][:, 0], tr["spans"][:, 1], phones,
+                             speaker.scale)  # fmt: skip
+        res["h12"] = SV.contour_fit(SV.deviations(eng["h12"], eng["frames"], phones),
+                                    SV.deviations(speaker.phones["h12"], speaker.phones["frames"], phones))  # fmt: skip
+        res["formants"] = SV.formant_error(eng, speaker.phones, syn["scale"], speaker.scale)
     return res
 
 
@@ -1169,8 +1315,9 @@ def cmd_transfer(args) -> int:
     pj = _pj()
     try:
         name = args.name or Path(args.wav).stem
+        off = tuple(p for p in args.off.split(",") if p)
         res = transfer_file(pj, args.wav, text, Path(args.out_dir), name, args.pitch, args.voice, not args.no_level,
-                            audio=audio)  # fmt: skip
+                            audio=audio, off=off)  # fmt: skip
     finally:
         pj.close()
     print(json.dumps(res, indent=1, default=float))
@@ -1252,7 +1399,9 @@ def main(argv: list[str] | None = None) -> int:
     tf.add_argument("--name")
     tf.add_argument("--pitch", choices=["speaker", "voice"], default="speaker")
     tf.add_argument("--voice", default="deep")
-    tf.add_argument("--no-level", action="store_true")
+    tf.add_argument("--no-level", action="store_true", help="no level loop (and so none of the speaker's voice)")
+    tf.add_argument("--off", default="", help="comma-separated parts of the speaker's voice to leave out: "
+                    + ", ".join(FOLLOWED))  # fmt: skip
     sl = sub.add_parser("slope", help="the engine's level per doubling of its breath")
     sl.add_argument("--text", default=FOUR_SENTENCES)
     sl.add_argument("--voice", default="deep")

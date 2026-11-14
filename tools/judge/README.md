@@ -403,6 +403,7 @@ bigger tuning split would help more than a longer search.
 | `judge.py` | the judge: `score`, `report`, `items`, and the probes `vowels`, `voicing`, `confusions`, `probe-report`. |
 | `natural.py` | the naturalness measure against the human recordings (`judge.py natural`, `natural-report`). |
 | `prosody.py` | prosody transfer: a recording and its text as a schedule of phone times, pitch and level for `say --match-prosody`; rendering, checks, round trip (below). |
+| `speaker_voice.py` | the speaker's voice for a schedule: the baseline profile (`match_voice` while the engine follows the schedule), per-phone H1*-H2*, tilt and vowel formants, and the tenseness and formant steps of the transfer loop. |
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
 | `tune.py` | the CMA-ES tuner and the sensitivity scan. |
@@ -545,14 +546,34 @@ the person's durations, pauses and pitch contour.
 ```sh
 uv run python prosody.py transfer speaker.wav --text "what they said" --out-dir out/prosody --name x
     # -> x.json (schedule), x-transfer.wav (the engine with it), x-rule.wav (by its rules), checks printed
+uv run python prosody.py transfer speaker.mp3 --out-dir out/prosody --name x  # no text: Whisper hears it (x.txt)
+uv run python prosody.py transfer speaker.wav --off voice,formants ...        # leave parts of the voice out
 uv run python prosody.py analyse speaker.wav --text "..." --out s.json      # the schedule only
 uv run python prosody.py render s.json --out e.wav --level [--pitch voice]  # speak it (level loop: --level)
 uv run python prosody.py check s.json e.wav                                # durations and pitch against it
 uv run python prosody.py roundtrip "The birch canoe slid on the smooth planks."
 uv run python prosody.py slope                                             # dB per doubling of the breath
 bin/say --engine physical --voice deep --match-prosody s.json [--prosody-pitch voice] \
-    [--prosody-kick off] [--phone-times t.json] --out e.wav "the same text"
+    [--prosody-kick off] [--prosody-voice off] [--prosody-tenseness off] [--prosody-formants off] \
+    [--prosody-speed off] [--phone-times t.json] --out e.wav "the same text"
 ```
+
+**The text.** `--text`, else a `.txt` beside the recording, else what
+the judge's cached Whisper hears (`judge.WordJudge`, never a download);
+a heard text is written beside the *schedule* (`x.txt`) and the output
+says it was heard, not given. A recording longer than 14 s is cut in its
+longest silences (`split_pieces`) into pieces the aligner takes one at a
+time, each with its share of the text (Whisper's of the piece, or the
+given text's words lined up with what Whisper heard in it,
+`distribute_words`), and the pieces' schedules are joined. The phones
+aligned are always the engine's for the text, so a number, an
+abbreviation or a name the engine reads otherwise than the speaker is
+aligned as the engine will say it; every phone carries `align_lp`, the
+best log-probability the phoneme model gives its unit on the frames the
+forced path put it on, and those under -4.5 nats are listed as poorly
+placed (`poorly_placed`; 2 % of the anchors' phones, mostly weak forms and
+/r/; in both reference recordings the /r/ of "dark", which they do not
+say, and the /k g/ of "background", which they say as one).
 
 **The schedule** (JSON, `"format": "synthie-prosody-1"`): the text; one
 entry per phone of the engine's own phonemes for it (the first line of
@@ -563,6 +584,13 @@ loop set it), the pitch at five points inside and the voiced share; the
 `pauses`; `median_hz` over voiced frames; and `pitch`, Hz every 10 ms with
 a value everywhere (a curve through the unvoiced stretches) and the
 `voiced` flags. A gap of 20 ms or more between two phones is a pause.
+Since round 9 also: per phone `tenseness` (a share of the rules'),
+`formants` (for a vowel, F1 and F2 as shares of the voice's own vowel),
+`align_lp`, `word` and the recording's own `speaker` measures (H1*-H2*,
+tilt, F1, F2); `voice`, a profile `say` lays over the voice (tract length,
+tenseness, posterior gap, lung pressure, pitch); `baseline`, the
+recording's analysis; `text_source`, `heard`, `pieces` and
+`poorly_placed`.
 
 **Alignment.** The phone sequence is the engine's, so every aligned stretch
 is a phone the engine says; where the person's pronunciation differs (a
@@ -596,9 +624,62 @@ speaker's median and the voice's own rule median.
 
 **Level.** `render --level` speaks the schedule, measures each phone's
 level against the utterance's vowels, and moves the breath of each sonorant
-towards the person's by the difference (9 dB of level per doubling of the
-breath; `prosody.py slope` measures 9.1), within ±4 dB of the rules'
-(`LEVEL_RANGE`), twice; obstruents take their neighbours'.
+towards the person's by the difference (through the engine's measured
+level against breath, `BREATH_DB`), within -10.5 to +5.2 dB of the rules'
+(`LEVEL_RANGE`; ±4 dB until round 9), twice; obstruents take their
+neighbours'. The range is as far as the engine follows: a sweep of the
+breath share over the four sentences (deep, bright and child voices)
+gives -11 dB at a share of 0.5 with 96 to 99 % of the vowel frames still
+voiced (at 0.4 the folds drop out of 9 to 16 %), +5.4 dB at 1.5, the most
+the lungs give, with H1-H2 within 0.7 dB of the rules' (no pressing).
+
+**The speaker's voice** (`speaker_voice.py`, round 9). `transfer` first
+matches the engine's voice to the recording while the engine follows the
+schedule (`match_voice.match` with every attempt spoken from the schedule,
+so the pitch and pace are already the speaker's): median pitch, formant
+scale (tract length), H1*-H2* (tenseness), HNR and tilt (posterior gap),
+the lung pressure held at 8 cmH2O (free, the matcher took it to its
+floor, where with a quiet phone's half breath the folds stop), the
+formant scale taken as the geometric mean of the candidate-density and
+formant-spacing estimates where they agree within 6 % and the spacing's
+where not (`match_voice.steady_scale`: the density estimate ranged from
+0.69 to 1.30 over the reader's 16 sentences). A match that ends more than
+8 % off in formant scale or 15 % in pitch is not used. Then the loop of
+three renderings moves, besides the breath, each sonorant's tenseness
+share by its H1*-H2* against the engine's mean, compared with the
+speaker's against hers (`tenseness_step`; 5 dB per unit of share, at
+most 0.06 a step, within 0.9 to 1.15: round 8 measured that 12 % less
+clicks in the child voice; the obstruents keep the rules' tenseness), and
+each vowel's F1 and F2 shares by the median over its tokens of the
+speaker's formants against the engine's, each over its voice's formant
+scale, after the speaker's overall bias is taken out (`formant_step`;
+within ±15 %; a step over 30 % is a tracking error). The tilt is measured
+but does not drive the tenseness: in this engine a looser voice is
+brighter (alpha -8.1 dB at tenseness 0.65, -6.6 at 0.5), where a breathier
+speaker is darker. The rendering closest to the speaker is kept
+(`transfer_score`). In the crate, `Utterance::follow_with` gives a vowel
+with formant shares a shape solved through the babble map for the voice's
+formants there times the shares (from the voice's own shape, rounding
+and all), held by the vowel and by the consonants made on its body, and
+moves the tongue body up to 1.6 times faster through a phone shorter
+than the rules make it; phones are made no shorter than 70 % of their
+rule length (`Tuning::follow_shortest`).
+
+Measured in round 9 on the 16 anchors (every part left out in turn from
+the final schedules; F1/F2 errors are against the reader's, each over its
+voice's formant scale, median over the vowels measured in both):
+
+| | timing only | hybrid | without the voice | without tenseness | without vowels |
+|---|---:|---:|---:|---:|---:|
+| formant scale against his, |%| | 4.8 | 1.9 | 4.8 | 1.4 | 1.4 |
+| H1*-H2* against his, |dB| | 1.4 | 0.6 | 1.6 | 0.7 | 0.6 |
+| HNR against his, |dB| (the engine is noisier) | 2.7 | 3.0 | 2.9 | 2.9 | 3.0 |
+| H1*-H2* contour, r with his (RMS) | 0.22 (3.1 dB) | 0.49 (2.7 dB) | 0.53 | 0.22 (3.1 dB) | 0.51 |
+| vowel F1 / F2 error, median | 27 / 22 % | 17 / 16 % | 27 / 21 % | 17 / 16 % | 19 / 19 % |
+| level against his, RMS over sonorants | 3.0 dB | 2.6 dB | 2.8 dB | 2.6 dB | 2.7 dB |
+
+The level loop: 4.7 dB before it, 2.5 dB after (93 of 455 sonorants at
+the limit); with the round 8 range 3.0 dB (218 at the limit).
 
 **Checks** (`check`; `transfer` prints them): the rendering aligned again
 against the schedule, interior phones, mean absolute duration error; how

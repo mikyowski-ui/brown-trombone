@@ -109,9 +109,16 @@ pauses, and `Utterance::follow` gives every phone the person's duration
 (shared out over its segments as the rules had it, closures kept at their
 floor) and the utterance a pitch track (`Utterance::set_pitch_track`) that
 follows the person's contour phone by phone, in place of the rules'
-declination, accents and final fall.
+declination, accents and final fall. `Utterance::follow_with` takes more
+of the speaker, within the limits of `speech::FollowOptions` (from the
+`follow_*` fields of `Tuning`): each sonorant's tenseness, each vowel's
+F1 and F2 (a shape solved through the babble map, held by the vowel and
+the consonants made on its body; `Trombone::hold_speech_vowel`), and
+faster articulators through phones shorter than the rules make them
+(`Trombone::set_articulation_boost`), which are themselves made no shorter
+than 70 % of the rules'.
 
-Both engines read their numbers from `Tuning` (90 fields with defaults
+Both engines read their numbers from `Tuning` (97 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
 `VoiceSettings::with_profile`). The repository README has the details,
@@ -127,7 +134,8 @@ cargo run -p synthie-trombone --example vowels --release                       #
 cargo run -p synthie-trombone --example formants --release                     # F1–F3 table
 cargo run -p synthie-trombone --example say --release -- --engine physical "Hello!"  # the physical engine
 cargo run -p synthie-trombone --example say --release -- --engine physical \
-    --match-prosody schedule.json "the recorded text"                          # a person's timing and pitch
+    --match-prosody schedule.json "the recorded text"                          # a person's timing, pitch and voice
+    # (--prosody-voice / -tenseness / -formants / -speed off leave a part out)
 cargo run -p synthie-trombone --example ab --release                           # both engines → report/
 cargo run -p synthie-trombone --example probe --release                        # measurements of both
 ```

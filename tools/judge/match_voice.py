@@ -641,8 +641,11 @@ def render(text: str, profile: dict | None, out: Path) -> Path:
     return out
 
 
-def render_and_analyse(text: str, profile: dict | None, workdir: Path, name: str, **kw) -> Analysis:
-    return analyse(load_audio(render(text, profile, Path(workdir) / f"{name}.wav")), **kw)
+def render_and_analyse(text: str, profile: dict | None, workdir: Path, name: str, renderer=None,
+                       **kw) -> Analysis:  # fmt: skip
+    """``renderer(text, profile, out) -> out`` speaks it (``render`` by
+    default: the rules)."""
+    return analyse(load_audio((renderer or render)(text, profile, Path(workdir) / f"{name}.wav")), **kw)
 
 
 # --------------------------------------------------------------------------
@@ -1037,12 +1040,19 @@ def _next(cal: Calibration, values: dict, rec: Analysis, syn: Analysis, rounds: 
 
 
 def match(recording: Path | str, text: str | None = None, iters: int = 8, cal: Calibration | None = None,
-          transcript: bool = False, log=print) -> dict:  # fmt: skip
+          transcript: bool = False, log=print, renderer=None, audio: np.ndarray | None = None,
+          fixed: dict | None = None, steady: bool = False) -> dict:  # fmt: skip
     """Find the profile; returns a report (see ``main`` for the table).
 
     ``text`` is what the engine says while it is compared with the
     recording; ``transcript`` says it is exactly what the recording says,
     so speaking rate is matched by speech time rather than syllable rate.
+    ``renderer(text, profile, out) -> out`` speaks each attempt (``render``,
+    the rules, by default; ``prosody.py`` speaks the recording's own
+    schedule), ``audio`` is the recording already loaded, and ``fixed``
+    holds settings that stay as given (``{"lung_pressure": 8.0}``);
+    ``steady`` measures the formant scale as ``steady_scale`` does, on the
+    recording and on every attempt.
     """
     t0 = time.perf_counter()
     cal = cal or Calibration.load()
@@ -1053,18 +1063,26 @@ def match(recording: Path | str, text: str | None = None, iters: int = 8, cal: C
     with tempfile.TemporaryDirectory(prefix="match-") as wd:
         # The formant scale is measured against the default voice saying the
         # comparison text.
-        if text == cal.data["text"]:
+        if text == cal.data["text"] and renderer is None:
             ref = cal.reference
         else:
-            ref = reference_analysis(load_audio(render(text, None, Path(wd) / "ref.wav")))
-        rec = analyse(load_audio(recording), ref=ref)
+            ref = reference_analysis(load_audio((renderer or render)(text, None, Path(wd) / "ref.wav")))
+        rec = analyse(load_audio(recording) if audio is None else audio, ref=ref)
+        if steady:
+            rec = steady_scale(rec)
         order = rec.order
         target = measures(rec)
-        u = cal.solve(target)
+        fixed = fixed or {}
+        if fixed:
+            u = cal.solve(target, start=u_of(fixed), free=[n for n in NAMES if n not in fixed])
+        else:
+            u = cal.solve(target)
         for k in range(iters):
             values = values_of(u)
             prof = profile_of(values)
-            syn = render_and_analyse(text, prof, Path(wd), f"it{k}", order=order, ref=ref)
+            syn = render_and_analyse(text, prof, Path(wd), f"it{k}", renderer, order=order, ref=ref)
+            if steady:
+                syn = steady_scale(syn)
             e = errors(rec, syn, transcript)
             rounds.append({"values": values, "errors": e})
             if log:
@@ -1075,6 +1093,8 @@ def match(recording: Path | str, text: str | None = None, iters: int = 8, cal: C
             if _good_enough(e):
                 break
             u = _next(cal, values, rec, syn, rounds, state)
+            for n, v in fixed.items():
+                u[NAMES.index(n)] = _to_u(n, v)
     return {
         "recording": str(recording),
         "text": text,
@@ -1089,6 +1109,31 @@ def match(recording: Path | str, text: str | None = None, iters: int = 8, cal: C
         "best_round": best["round"],
         "seconds": time.perf_counter() - t0,
     }
+
+
+#: The two estimates of a formant scale (``Analysis.scale`` from the
+#: formant-candidate densities, ``scale_lpc`` from the formant spacing)
+#: disagree when they differ by more than this, ln units.
+SCALE_AGREE = 0.06
+
+
+def steady_scale(a: Analysis) -> Analysis:
+    """The analysis with a formant scale that a few seconds of speech can
+    be trusted with: the geometric mean of the density and spacing
+    estimates where they agree within ``SCALE_AGREE``, the spacing's
+    where they do not. On the 16 LibriSpeech anchors (one reader, 3 to
+    10 s each) the density estimate ranged from 0.69 to 1.30, the spacing
+    from 0.99 to 1.18; they parted by more than 6 % on six of them."""
+    import copy
+
+    out = copy.copy(a)
+    s, lpc = a.scale, a.scale_lpc
+    if math.isfinite(lpc) and lpc > 0:
+        if not (math.isfinite(s) and s > 0) or abs(math.log(s / lpc)) > SCALE_AGREE:
+            out.scale = lpc
+        else:
+            out.scale = math.sqrt(s * lpc)
+    return out
 
 
 def table(rep: dict) -> str:

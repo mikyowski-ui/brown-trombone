@@ -458,10 +458,15 @@ Each of these has its numbers in `Tuning` (above) and its gate in
 ### Speaking with a person's timing and pitch
 
 `say --match-prosody schedule.json` speaks a text with the timing, pauses
-and pitch contour of a recording of it (and, within ±4 dB, its level);
-`tools/judge/prosody.py transfer speaker.wav --text "..."` measures the
-schedule and renders both versions (its README has the details). The
-text is compiled as always, so every articulatory rule stays; only the
+and pitch contour of a recording of it, its level (within -10.5 to +5.2
+dB), and since round 9 the speaker's voice: a baseline profile (tract
+length, tenseness, breathiness, pitch) laid over the voice, each sonorant's
+tenseness and each vowel's F1 and F2 (`--prosody-voice`, `-tenseness`,
+`-formants`, `-speed off` leave a part out);
+`tools/judge/prosody.py transfer speaker.wav` measures the schedule (the
+text given with `--text`, from a `.txt` beside the recording, or heard by
+Whisper) and renders both versions (its README has the details). The text
+is compiled as always, so every articulatory rule stays; only the
 durations, the phrase breaks and the pitch are the person's, and the pitch
 kick after voiceless consonants is kept on top. `--prosody-pitch voice`
 moves the person's contour to the voice's own median.
@@ -494,6 +499,37 @@ sentences (the other two have no recording):
   leave the slow tongue body behind. The owner's recording is 24 % slower
   than the rules, and with that timing the engine is heard a little
   better.
+
+In round 9 the transfer was grown into one of the speaker's voice
+(`prosody.py transfer`; the same 16 anchors and the owner's sentences,
+each part left out in turn from the final schedules; and the two synthetic
+reference recordings the owner supplied, `report/listen/artificialsample.mp3`
+and `artificalsample2.mp3`, whose text Whisper heard):
+
+| anchors | rules | timing only | hybrid (everything) | without the voice | without tenseness | without vowels | without speed-up |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| phoneme error | 18.3 % | 21.7 % | 21.3 % | 21.4 % | 21.4 % | 19.6 % | 25.2 % |
+| vowels heard wrong | 24.1 % | 24.5 % | 26.2 % | 26.6 % | 25.5 % | 22.7 % | 30.1 % |
+| Whisper words | 81.3 % | 78.0 % | 80.9 % | 80.4 % | 80.4 % | 82.8 % | 77.5 % |
+| naturalness distance | 1.10 | 0.89 | 0.93 | 0.89 | 0.91 | 0.91 | 0.93 |
+
+"Timing only" has round 9's level range and 70 % floor on phone length;
+with round 8's transfer the phoneme error was 26.9 % and Whisper 74.6 %.
+
+- Phones no shorter than 70 % of their rule length, with the tongue body
+  sped up through those still shorter (up to 1.6 times), took the reader's
+  own timing from 26.9 % phoneme error to 21.7 %; the speed-up alone is
+  worth about 4 points of it. A faster tongue body in general did not help
+  (the rules with it: 21.6 %); the /d/ he runs into the next sound ("and
+  the") was the phone most often lost.
+- The baseline voice puts the engine's formant scale within 1.9 % of his
+  (4.8 % without) and H1*-H2* within 0.6 dB (1.6), but it did not bring
+  the naturalness distance down; the vowel formants cut the median F2
+  error against him from 19 to 16 % and cost 3.5 points of vowels heard
+  wrong; the tenseness took the correlation of the H1*-H2* contour with
+  his from 0.22 to 0.49. On the two reference recordings the whole
+  transfer did best: phoneme error against the engine's own phones 9 %
+  and 4 % (by the rules 11 % and 19 %), Whisper 14 of 16 words each.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
 two-mass folds; Story & Titze (1995) and Titze & Story (2002) for the

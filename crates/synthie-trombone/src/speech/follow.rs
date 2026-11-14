@@ -418,8 +418,8 @@ impl Utterance {
 
     /// [`follow`](Self::follow), and within the limits of `options`:
     ///
-    /// * **tenseness:** each voiced segment's tenseness is scaled by its
-    ///   phone's [`PhoneSpan::tenseness`];
+    /// * **tenseness:** each voiced sonorant's tenseness is scaled by its
+    ///   phone's [`PhoneSpan::tenseness`] (the obstruents keep the rules');
     /// * **vowels:** a vowel with [`PhoneSpan::formants`] is given a shape
     ///   solved through the babble map ([`inverse::solve_for`], starting
     ///   from the voice's own shape for it, for the voice's tract length)
@@ -744,12 +744,21 @@ impl Utterance {
             );
         }
 
-        // The voice quality: each voiced segment's tenseness by its phone's
-        // share.
+        // The voice quality: each voiced sonorant's tenseness by its phone's
+        // share. Not the obstruents': a voiced closure needs folds held
+        // firmly enough to go on vibrating against the pressure building
+        // in the mouth (with a loose baseline and its breath at the bottom
+        // of its range, a /b/ or /g/ between vowels lost most of its voice
+        // bar), and the speaker's voice quality is measured on the
+        // sonorants anyway.
         let (lo, hi) = options.tenseness_range;
         let mut limited = alloc::vec![false; n];
         for (s, &p) in self.segments.iter_mut().zip(&self.phones) {
-            if p == NO_PHONE || !s.voiced {
+            let sonorant = matches!(
+                s.phoneme.manner(),
+                Manner::Vowel | Manner::Diphthong | Manner::Nasal | Manner::Approximant
+            );
+            if p == NO_PHONE || !s.voiced || !sonorant {
                 continue;
             }
             let share = schedule.phones[p as usize].tenseness;
@@ -1050,10 +1059,15 @@ mod tests {
         }
         // the voiceless /s/ keeps its tenseness
         let s0 = plain.segments.iter().position(|x| x.phoneme == Phoneme::S);
-        assert!(s0.is_some_and(|i| plain.segments[i].tenseness == u.segments[i].tenseness));
+        assert!(
+            s0.is_some_and(
+                |i| (plain.segments[i].tenseness - u.segments[i].tenseness).abs() < 1e-9
+            )
+        );
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn phones_shorter_than_the_rules_move_the_tongue_faster() {
         let text = "the juice of lemons";
         let rule = Utterance::from_tokens(&phonemize(text), &physical()).phone_spans();
@@ -1103,10 +1117,11 @@ mod tests {
         // and never with the speed left alone
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
         u.follow(&s, PitchMode::Speaker).unwrap();
-        assert!(u.followed.speed.is_empty());
+        assert!(u.followed.speed.iter().all(|&f| (f - 1.0).abs() < 1e-9));
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn a_vowel_takes_the_speakers_formants_and_its_consonants_lean_on_them() {
         let text = "a big dog";
         let length = 0.9;
