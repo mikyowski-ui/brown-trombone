@@ -1,7 +1,0 @@
-{
-  "tuning": {
-    "lax_length": 0.82,
-    "lax_floor": 0.06,
-    "ae_nucleus": 0.55
-  }
-}

@@ -407,15 +407,14 @@ as the model goes:
   the speech recognizer (`src/vowel_targets.rs` says which and by how
   much). They are held longer than the classic engine's, since the slow
   tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are
-  as much shorter than the tense ones as a speaker's, by 38 %
-  (`lax_length` and `unstressed_lax_length`, 0.62, chosen by ear), and
-  glide part of the way towards schwa over their last third; /eɪ/ glides
-  the whole way. `profiles/stressed-lax.json` holds round 6's milder
-  stressed length (0.82, "sells", "punch") with a 60 ms floor on the held
-  part (`lax_floor`) and a stressed /æ/ that glides a fifth of the way to
-  schwa (`ae_nucleus`); there the recognizer hears the stressed /ɪ/ as
-  /eɪ/ in a quarter of the LibriSpeech texts' slots, so it is not the
-  default. A vowel shape may also set the tongue root, which widens or narrows
+  shorter than the tense ones: by 38 % when unstressed ("the", "of";
+  `unstressed_lax_length` 0.62) and by 18 % when stressed ("sells",
+  "punch"; `lax_length` 0.82, the owner's choice in round 6, with a 60 ms
+  floor on the held part, `lax_floor`), and glide part of the way towards
+  schwa over their last third; /eɪ/ glides the whole way. A stressed /æ/
+  can be made to glide a fifth of the way to schwa (`ae_nucleus` 0.55);
+  it reaches its formants without, and with the glide the recognizer
+  hears more /æ/ as /ɛ/, so that is off. A vowel shape may also set the tongue root, which widens or narrows
   the pharynx on its own and stays with the tongue body under the
   consonants around the vowel (`Shape::pharynx`); the built-in vowels
   leave it at rest. Round 6 solved it for /ɪ ʌ ʊ/ (pulled back by 0.20,
@@ -507,11 +506,13 @@ real speech (five recordings of one reader gave tract lengths from 0.78 to
 
 **A judge and a tuner** (`tools/judge`, see its README): a phoneme
 recognizer (wav2vec2) and Whisper score how much of the engine's speech a
-machine understands, a naturalness measure compares its level, pitch,
-timing and hiss with a person reading the same text, and CMA-ES searches
-the `Tuning` numbers for a better score, rejecting any candidate that
-fails the gates or moves away from the person. The scoreboard at the end of
-round 5, on material never tuned on (95 % intervals in brackets, from
+machine understands, and a naturalness measure compares its level, pitch,
+timing and hiss with a person reading the same text. A CMA-ES search of the
+`Tuning` numbers was tried in rounds 4 and 5 and retired: every tuned
+profile fitted the tuning sentences and was no better, or worse, on the
+held-out ones. Since round 6 the engine is changed one mechanism at a time
+and scored directly (`judge.py score physical --fast` between changes). The
+scoreboard, on material never tuned on (95 % intervals in brackets, from
 resampling the sentences; one render each, since rendering is
 deterministic):
 
@@ -521,10 +522,22 @@ deterministic):
 | eSpeak NG | 16 % [13, 19] | 87 % [78, 93] | 17 % [14, 21] | 93 % [87, 98] | 89 % [84, 93] |
 | classic engine | 77 % [72, 81] | 21 % [15, 28] | 88 % [85, 91] | 80 % [74, 86] | 46 % [40, 51] |
 | physical engine, start of round 5 | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
-| physical engine now | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
-| physical, lax vowels at the round 4 length (`profiles/long-lax.json`) | 28 % [23, 32] | 63 % [54, 71] | 34 % [29, 39] | 98 % [96, 100] | 89 % [85, 92] |
-| physical, round-5 pass a, rejected (`profiles/tuned-r5a-candidate.json`) | 30 % [25, 36] | 65 % [56, 74] | 33 % [29, 37] | 98 % [96, 100] | 87 % [83, 91] |
-| physical, round-5 pass b+c, rejected (`profiles/tuned-r5-candidate.json`) | 28 % [24, 33] | 65 % [57, 74] | 31 % [27, 35] | 99.5 % [98, 100] | 92 % [89, 94] |
+| physical engine, end of round 5 | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
+| physical engine now (round 6) | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
+
+Round 6 (no intervals: one scoring run of the final build; ten sentences
+carry about ±5 points, thirty about ±4): a stop before /l r/ is released
+with its burst and a short transition of its own ("blue", "glue",
+"planks"; the lips used to part at half speed there), the mouth behind an
+/n/ opens fast enough to keep its antiresonance through the murmur (/n/
+heard as /ŋ/ 7 to 1 over the sentence sets), /f v θ ð/ have an edge source
+where their jet strikes the teeth and lip, a sibilant fades into a
+following /f v/ ("makes fine" was heard as "makes pine"), and stressed lax
+vowels are 18 % shorter than tense ones instead of 38 %. Phoneme error over
+the 30 held-out sentences went from 25.8 to 23.6 % and Whisper's words from
+61.7 to 65.7 % (73.8 % on the ten `sentence_heldout` sentences); vowels in
+the LibriSpeech texts are heard wrong 28.3 % of the time (26.9 % before;
+26.2 % on this build with the stressed lax vowels at their old length).
 
 Round 5 changed the sounds, not the tuning: nasals keep a mouth cavity of
 their own, /ð/ has a dental blade, /p t k/ shut for at least 22 ms, the
@@ -609,35 +622,53 @@ average sentence).
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong 27 % of the time in the
-  LibriSpeech texts and 30 % over the vowel lab's held-out material
+- **Vowels in sentences** are heard wrong 28 % of the time in the
+  LibriSpeech texts and 31 % over the vowel lab's held-out material
   (eSpeak 15 and 17 %, the person 9 %; the target is 22 %). A third of
   the misses in the LibriSpeech texts are words the engine's front end
   says otherwise than eSpeak's reference (a full "and" for a reduced
-  one): over the slots where they agree the error is 20 %. /ʊ/ comes
+  one): over the slots where they agree the error is 22 %. /ʊ/ comes
   through about a quarter of the time, /ɔ/ is
   mostly heard as /ɑ/, /ɑ/ often as /æ/ (its target is Hillenbrand's
   Michigan /ɑ/, F2 1333 Hz; at 1100 to 1180 Hz the recognizer hears it
   better, but that shape at the back of the tongue's reach moves the
   gates measured in "a pa"), /ɔɪ/ not at all, and schwa as /u/ or /ɚ/.
-  The tongue root of /ɪ ʌ ʊ/ (off) brings the LibriSpeech texts to 24 %
-  but costs the carrier phrases 1.7 to 3.5 points of phoneme error.
+- **The tongue root is built and off.** Solved for /ɪ ʌ ʊ/ (set
+  `LAX_ROOTS` in `examples/vowel_size.rs` and regenerate) it passes every
+  gate, but on the round 6 build it moved vowel error in the LibriSpeech
+  texts from 26.2 to 25.9 % and phoneme error on the ten held-out
+  sentences from 18.8 to 21.2 %, all within noise; with the longer
+  stressed lax vowels as well, vowel error was 31.1 %. Drawing the tense
+  vowels' roots forward broke the listener and mimic gates for no gain.
 - **Lax vowels in the engine's sentences sit nearer the tense ones than a
   speaker's**: measured the same way in the LibriSpeech texts, the
   person's /ɪ/ has an F2 at his schwa's and 20 % under his /i/, the
   engine's 14 % over its schwa; but moved there, its /ɪ/ is heard as a
-  high central vowel, and made longer (0.82 of a tense vowel) as /eɪ/.
-- **Whisper gets 62 to 67 % of the held-out words** (target 75 %).
-  "Makes fine" is heard as "makes fine" since round 6 (it was "makes
-  pine": the /s/ cut off in a few milliseconds, the air rushed out before
-  the lip shut, and the /f/'s only source, the free jet in the lip's gap,
-  radiated some 20 dB too weakly); in 24 short /f/ and /θ/ sentences
-  Whisper now gets 19 target words where it got 7. Still short of a
-  speaker: /f/ between vowels is some 22 dB under the vowel where the
-  reader's is 16 (the mouth pressure behind a short /f/ builds slowly);
-  /s/ falls into an /f/ over about 20 ms where the reader's takes 25 to
-  30; after /s/ the /f/ is only 8 dB under it where the reader's is 16;
-  "thin" is still heard as "so nice" or "been".
+  high central vowel. At the stressed length of 0.82 the recognizer hears
+  more stressed /ɪ/ as /eɪ/ (vowel error 28.3 against 26.2 % at 0.62)
+  while Whisper gets a few more words; the length is the owner's choice.
+- **Whisper gets 66 % of the words of the 30 held-out sentences** (74 % of
+  the ten; target 75 %). "Makes fine" is heard as "makes fine" since round
+  6 (it was "makes pine": the /s/ cut off in a few milliseconds, the air
+  rushed out before the lip shut, and the /f/'s only source, the free jet
+  in the lip's gap, radiated some 20 dB too weakly); in 24 short /f/ and
+  /θ/ sentences Whisper now gets 19 target words where it got 7. Still
+  short of a speaker: /f/ between vowels is some 22 dB under the vowel
+  where the reader's is 16 (the mouth pressure behind a short /f/ builds
+  slowly); after /s/ the /f/ is only 8 dB under it where the reader's is
+  16; "thin" is still heard as "so nice" or "been". In the four listening
+  sentences "canoe slid on" is still not heard.
+- **Articulator targets take effect every 10.7 ms** (512 internal
+  samples), so a 20 to 30 ms gesture is two or three steps, and where they
+  fall depends on what was said before: the same /s f/ hand-over measures
+  a fall of 7.5 to 47.5 ms as earlier words change length. A 2.7 ms block
+  for the physical engine (128 samples, tried in round 6) did not make
+  "canoe slid on" heard, left the held-out sentences where they were
+  (25.0 against 23.5 % phoneme error) and broke six gates whose behaviour
+  was set at the long block (the listener's 40 ms formant step became 113
+  ms, a displaced /f/ gap stopped hissing, an /ɚ/ hissed in large voices,
+  a /t/ burst weakened): the articulators' motion is not yet independent
+  of the block length, and that has to be fixed first.
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.

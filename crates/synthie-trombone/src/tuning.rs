@@ -393,14 +393,14 @@ tuning! {
     /// recognizer heard the vowels better (vowel lab held-out −2.7 points)
     /// but the sentences of the tuning material worse (6 points of phoneme
     /// accuracy, Whisper 8.5 of words) than at the round 4 value, 0.905.
-    /// The owner chose 0.62 by ear and asked in round 6 for a milder 0.82
-    /// for the stressed lax vowels ("sells", "punch"; the unstressed ones
-    /// keep `unstressed_lax_length`). At 0.82 the recognizer heard the
-    /// stressed /ɪ/ of the LibriSpeech texts as /eɪ/ 14 times in 54 (2 at
-    /// 0.62): in-sentence vowel error +9.4 points [5.9, 13.2], with the
-    /// sentences' phoneme error and Whisper words unchanged. So it stays at
-    /// 0.62, and `profiles/stressed-lax.json` has 0.82 for listening.
-    lax_length = 0.62, 0.5..=1.0, C;
+    /// The owner chose 0.62 by ear in round 5 and a milder 0.82 for the
+    /// stressed lax vowels in round 6 ("sells", "punch"; the unstressed
+    /// ones keep `unstressed_lax_length`). At 0.82 on the round 6 engine
+    /// the recognizer heard more stressed /ɪ/ as /eɪ/ (vowel error in the
+    /// LibriSpeech texts 28.3 % against 26.2 % at 0.62), the 30 held-out
+    /// sentences' phoneme error was 23.5 % against 24.4 % and Whisper's
+    /// words 65.7 % against 63.1 %, all within the sets' noise.
+    lax_length = 0.82, 0.5..=1.0, C;
     /// Share of a lax vowel held on its own shape before it glides towards
     /// schwa (to its end shape in `vowel_targets`) for the rest.
     lax_nucleus = 0.67, 0.4..=1.0, C;
@@ -475,20 +475,19 @@ tuning! {
     /// Shortest the held part of a stressed lax vowel may be, seconds (its
     /// nucleus: `lax_nucleus` of its length, before its glide towards
     /// schwa), however fast the speech; `0` for none. The owner asked for
-    /// 60 ms with the milder stressed length (`profiles/stressed-lax.json`),
-    /// where of the 136 stressed lax vowels of the judge's sentences it
-    /// lengthens none at the default rate and 39 at 1.2 times the rate (at
-    /// `lax_length` 0.62: 39 already at the default rate). Off by default:
-    /// with it and `ae_nucleus` on, the held-out sentences' phoneme error
-    /// rose 1.9 points [-0.1, 4.2] and the vowel lab's held-out vowel error
-    /// 1.3 [-0.3, 3.0].
-    lax_floor = 0.0, 0.0..=0.09, C;
+    /// 60 ms with the milder stressed length: of the 136 stressed lax
+    /// vowels of the judge's sentences it lengthens none at the default
+    /// rate, 39 at 1.2 times the rate and 93 at 1.4 times (at `lax_length`
+    /// 0.62 it would lengthen 39 already at the default rate).
+    lax_floor = 0.06, 0.0..=0.09, C;
     /// Share of a stressed /æ/ held on its own shape before it glides
     /// towards schwa for the rest ("planks", "background"); `1.0` (the
     /// default) holds it to the end. At 0.55 it ends about a fifth of the
     /// way to schwa (`tests/vowel_glide_gate.rs`; at 0.67, the lax vowels'
-    /// share, 13 %), and the recognizer heard more /æ/ as /ɛ/. In
-    /// `profiles/stressed-lax.json`.
+    /// share, 13 %), and the recognizer heard more /æ/ as /ɛ/ (with it
+    /// the 30 held-out sentences' phoneme error was 24.9 % against 23.5 %
+    /// and vowel error in the LibriSpeech texts 30.1 % against 28.3 %). A
+    /// stressed /æ/ reaches its formants without it ("planks": 229 ms).
     ae_nucleus = 1.0, 0.4..=1.0, C;
 }
 

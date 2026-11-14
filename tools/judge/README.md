@@ -93,7 +93,7 @@ Targeted measurements for the vowel, voicing and consonant-place stages
 (`probes.py`, run through `judge.py`):
 
 ```sh
-uv run python judge.py vowels physical --profile ../../profiles/old/tuned-r3.json   # -> physical-tuned-r3
+uv run python judge.py vowels physical --profile some.json    # -> physical-some
 uv run python judge.py voicing espeak
 uv run python judge.py confusions classic --name classic-x
 uv run python judge.py vowels physical --set human          # the same slots inside the LibriSpeech sentences
@@ -235,7 +235,8 @@ measure on synthetic signals.
 profile fitted the tuning sentences and was no better, or worse, on the held-out ones (Round 5: held-out
 phoneme error +2.9 [1.1, 4.8] and +1.6 [0.1, 3.0] for the two passes), so the engine is now improved by
 changes to its mechanisms, scored directly with `judge.py`. `tune.py` and its tests stay for the gate
-runner, the one-parameter scans and the record; the rejected profiles are in `profiles/`.
+runner, the one-parameter scans and the record; the rejected profiles are in the git history
+(last present in commit b531112).
 
 ```sh
 uv run python tune.py --self-test                    # 7 evaluations on 12 items, then a resume check
@@ -362,8 +363,7 @@ lessons for the next one:
 
 - The best candidate (evaluation 274) failed a gate the loop skips by
   default (`fricatives_keep_their_level_and_no_vowel_hisses_in_any_voice`);
-  the best that passes the whole suite was evaluation 138
-  (`profiles/tuned-r4-candidate.json`). Check the whole suite on the top
+  the best that passes the whole suite was evaluation 138. Check the whole suite on the top
   few, not only the winner.
 - The guard clips each z at 4, so a measure already more than 4 spreads
   from the person can get worse without cost: the candidate's level walls
@@ -381,13 +381,13 @@ sentences, +5.1 [-1.7, 12.2] on the tuning ones.
 the scan's pinned ones excluded, `--sigma 0.08 --word-weight 0.3`, 209
 evaluations, 53 s each with Whisper and the four gate binaries) fitted the
 tuning split (pooled phoneme error -3.8 [-5.4, -2.2], Whisper +8.1) and held
-out was worse (+2.9 [1.1, 4.8]): `profiles/tuned-r5a-candidate.json`. Pass
+out was worse (+2.9 [1.1, 4.8]). Pass
 b+c ran from the defaults on the sentences only (`--sets
 sentence_tune,harvard_tune --sigma 0.05 --prior-weight 1.0`), after a
 gates-only scan of each parameter at one and two steps of 5 % either side
 (`vowel_hold` pinned, ten free on one side only), with `--box` holding each
-to its free side; held out it was worse too (+1.6 [0.1, 3.0]):
-`profiles/tuned-r5-candidate.json`. Neither became the default. The
+to its free side; held out it was worse too (+1.6 [0.1, 3.0]). Neither
+became the default. The
 improvement on the tuning split is about the size of the sets' noise, so a
 bigger tuning split would help more than a longer search.
 

@@ -67,7 +67,7 @@
   "closure_floor": {"lo": 0, "hi": 0.04, "default": 0.022, "pass": "b"},
   "voicing_tail": {"lo": 0, "hi": 0.03, "default": 0.012, "pass": "b"},
   "sibilant_teeth": {"lo": 0.3, "hi": 1.2, "default": 0.6, "pass": "a"},
-  "lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
+  "lax_length": {"lo": 0.5, "hi": 1, "default": 0.82, "pass": "c"},
   "lax_nucleus": {"lo": 0.4, "hi": 1, "default": 0.67, "pass": "c"},
   "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
   "liquid_transition": {"lo": 0, "hi": 0.04, "default": 0.018, "pass": "b"},
@@ -78,6 +78,6 @@
   "labial_lead": {"lo": 0.02, "hi": 0.06, "default": 0.04, "pass": "b"},
   "labial_closing": {"lo": 0.03, "hi": 0.07, "default": 0.048, "pass": "b"},
   "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.06, "pass": "b"},
-  "lax_floor": {"lo": 0, "hi": 0.09, "default": 0, "pass": "c"},
+  "lax_floor": {"lo": 0, "hi": 0.09, "default": 0.06, "pass": "c"},
   "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"}
 }

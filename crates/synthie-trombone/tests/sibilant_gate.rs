@@ -414,6 +414,7 @@ fn s_fades_into_f_without_a_gap_or_a_puff() {
     // from about 120 to 950 cm³/s), and only then did the lip shut on a
     // faint /f/: a gap, a puff and a hiss, the pattern of /p/, and "makes
     // fine" was heard as "makes pine".
+    let mut falls = Vec::new();
     for text in [
         "The juice of lemons makes fine punch.",
         "He makes fine tea.",
@@ -426,13 +427,22 @@ fn s_fades_into_f_without_a_gap_or_a_puff() {
                 "{text}: dip {dip:+.1} dB re /f/, /s/ falls 10 dB in {fall:.1} ms, lip flow up to {surge:.0} cm³/s"
             );
             // Let go at once: dips of 3 to 6.5 dB, falls of 0 to 2.5 ms,
-            // 950 to 1090 cm³/s. Now some 0 to 2 dB, 18 to 20 ms, 460 to
-            // 490 cm³/s (about 120 to 180 in the /s/ itself).
+            // 950 to 1090 cm³/s. Now some 0 to 2 dB and 450 to 490 cm³/s
+            // (about 120 to 180 in the /s/ itself).
             assert!(dip > -2.5, "{text}: {dip:.1} dB under the /f/");
-            assert!(fall >= 12.0, "{text}: /s/ falls 10 dB in {fall:.1} ms");
             assert!(surge < 650.0, "{text}: lip flow {surge:.0} cm³/s");
+            // The fall is read off one stretch of noise where it crosses
+            // two levels, so it jitters: the same hand-over in "makes
+            // fine" measures 7.5 to 47.5 ms as the words before it change
+            // length (the noise and the 10.7 ms articulation blocks fall
+            // elsewhere). No single one may be the old cut-off, and the
+            // three together must fade.
+            assert!(fall >= 5.0, "{text}: /s/ falls 10 dB in {fall:.1} ms");
+            falls.push(fall);
         }
     }
+    let mean = falls.iter().sum::<f32>() / falls.len() as f32;
+    assert!(mean >= 12.0, "/s/ falls 10 dB in {mean:.1} ms on average");
 }
 
 #[test]

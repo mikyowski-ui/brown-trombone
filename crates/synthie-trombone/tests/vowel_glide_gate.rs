@@ -267,9 +267,9 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
         let n = u.segments().iter().filter(|s| s.phoneme == p).count();
         assert_eq!(n, 1, "{p}");
     }
-    // ...nor does /æ/ by default; with `Tuning::ae_nucleus` at 0.55
-    // (`profiles/stressed-lax.json`) a stressed one glides about a fifth
-    // of the way to schwa, an unstressed one not at all.
+    // ...nor does /æ/ by default; with `Tuning::ae_nucleus` at 0.55 a
+    // stressed one glides about a fifth of the way to schwa, an unstressed
+    // one not at all.
     let held = physical();
     let u = Utterance::from_text("[HH AE1]", &held.prosody());
     assert_eq!(
@@ -298,11 +298,10 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
 
 #[test]
 fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
-    // With the owner's milder stressed length (`profiles/stressed-lax.json`)
-    // a stressed lax vowel is 18 % shorter than a tense one, an unstressed
-    // one still 38 % ("sells" against "of"); at the defaults both are 38 %.
-    // With `Tuning::lax_floor` set the held part of a stressed one never
-    // falls under it, however fast the speech.
+    // A stressed lax vowel is 18 % shorter than a tense one, an unstressed
+    // one 38 % ("sells" against "of"); until round 6 both were 38 %. The
+    // held part of a stressed one never falls under `Tuning::lax_floor`,
+    // however fast the speech.
     let ratio = |stress: &str, settings: &VoiceSettings| {
         let len = |v: Phoneme| {
             Utterance::from_text(
@@ -318,19 +317,17 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
         len(Phoneme::Ih) / len(Phoneme::Iy)
     };
     let mut v = physical();
-    let at_default = ratio("1", &v);
-    v.tuning.lax_length = 0.82;
     let (stressed, unstressed) = (ratio("1", &v), ratio("0", &v));
-    println!("IH/IY stressed {stressed:.3} (default {at_default:.3}), unstressed {unstressed:.3}");
-    assert!((0.60..=0.64).contains(&at_default), "{at_default}");
+    v.tuning.lax_length = 0.62;
+    let as_short = ratio("1", &v);
+    println!("IH/IY stressed {stressed:.3} (at 0.62: {as_short:.3}), unstressed {unstressed:.3}");
     assert!((0.80..=0.84).contains(&stressed), "{stressed}");
     assert!((0.60..=0.64).contains(&unstressed), "{unstressed}");
+    assert!((0.60..=0.64).contains(&as_short), "{as_short}");
     // Fast speech: the floor holds every stressed lax nucleus.
     for rate in [1.0f32, 1.4, 2.0] {
         let mut fast = physical();
         fast.rate *= rate;
-        fast.tuning.lax_length = 0.82;
-        fast.tuning.lax_floor = 0.06;
         let u = Utterance::from_text("[P AH1 N CH] [S EH1 L Z] [K IH1 T]", &fast.prosody());
         let segs = u.segments();
         let heads: Vec<f32> = segs
