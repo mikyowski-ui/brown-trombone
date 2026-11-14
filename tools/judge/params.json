@@ -88,5 +88,8 @@
   "sonorant_softness": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
   "unstressed_softness": {"lo": 0, "hi": 1, "default": 0.5, "pass": "a"},
   "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
-  "lateral_release": {"lo": 0, "hi": 0.04, "default": 0.01, "pass": "b"}
+  "lateral_release": {"lo": 0, "hi": 0.04, "default": 0.01, "pass": "b"},
+  "fronted_nucleus": {"lo": 0, "hi": 1, "default": 0.5, "pass": "c"},
+  "tap_length": {"lo": 0, "hi": 0.05, "default": 0.02, "pass": "b"},
+  "tap_lead": {"lo": 0, "hi": 0.04, "default": 0.015, "pass": "b"}
 }

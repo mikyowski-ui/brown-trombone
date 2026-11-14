@@ -1409,7 +1409,7 @@ pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
     ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
     ("ɑ", Phoneme::Aa, shape(16.513, 3.165, None, (10.0, 0.927))),
     ("æ", Phoneme::Ae, shape(19.852, 3.321, None, (28.611, 1.314))),
-    ("ɪ", Phoneme::Ih, shape(26.372, 2.449, None, (24.0, 3.0))),
+    ("ɪ", Phoneme::Ih, shape(25.685, 2.293, None, (24.0, 3.0))),
     ("ɛ", Phoneme::Eh, shape(24.3, 2.811, None, (14.0, 1.483))),
     ("ʌ", Phoneme::Ah, shape(16.588, 2.269, None, (30.423, 1.46))),
     ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.828, 1.8))),
