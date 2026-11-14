@@ -67,7 +67,9 @@ BIAS_TOKENS = 4
 #: voice tightens): from a sweep of the tenseness over the four Harvard
 #: sentences (deep voice: 0.55 -> 0.75 takes it from 8.7 to 6.7 dB; at a
 #: woman's pitch and tract 8.6 to 7.2 dB), about 8 dB per unit of
-#: tenseness, at 0.65 about 5 dB per unit of share.
+#: tenseness, at 0.65 about 5 dB per unit of share. With the round 9
+#: source tilt 9.3 to 7.3 dB (6.5 per unit of share); the loop's steps
+#: are capped (``TENSENESS_STEP``), so the lower slope is kept.
 H12_PER_SHARE = 5.0
 #: Range of a phone's tenseness share (the crate's
 #: ``Tuning::follow_tenseness_low`` and ``_high``).

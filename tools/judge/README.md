@@ -674,20 +674,23 @@ voice's formant scale, median over the vowels measured in both):
 
 | | timing only | hybrid | without the voice | without tenseness | without vowels |
 |---|---:|---:|---:|---:|---:|
-| formant scale against his, |%| | 5.1 | 1.8 | 5.1 | 0.7 | 1.7 |
-| H1*-H2* against his, |dB| | 1.5 | 0.5 | 1.6 | 0.6 | 0.5 |
-| HNR against his, |dB| (the engine is noisier) | 2.8 | 2.9 | 2.9 | 2.9 | 2.9 |
-| H1*-H2* contour, r with his (RMS) | 0.22 (3.1 dB) | 0.60 (2.5 dB) | 0.54 (2.7 dB) | 0.23 (3.1 dB) | 0.58 (2.6 dB) |
-| vowel F1 / F2 error, median | 27 / 22 % | 23 / 20 % | 27 / 22 % | 21 / 20 % | 23 / 22 % |
-| level against his, RMS over sonorants | 2.9 dB | 2.6 dB | 2.8 dB | 2.6 dB | 2.7 dB |
+| formant scale against his, |%| | 5.6 | 0.5 | 5.5 | 0.7 | 0.6 |
+| H1*-H2* against his, |dB| | 0.9 | 0.4 | 0.9 | 0.4 | 0.4 |
+| HNR against his, |dB| | 1.3 | 1.1 | 1.2 | 1.2 | 1.1 |
+| H1*-H2* contour, r with his (RMS) | 0.23 (3.1 dB) | 0.59 (2.5 dB) | 0.42 (2.8 dB) | 0.27 (3.0 dB) | 0.60 (2.5 dB) |
+| vowel F1 / F2 error, median | 22 / 22 % | 22 / 17 % | 23 / 19 % | 21 / 17 % | 23 / 20 % |
+| level against his, RMS over sonorants | 2.7 dB | 2.6 dB | 2.6 dB | 2.6 dB | 2.6 dB |
 
-The level loop: 4.7 dB before it, 2.6 dB after (95 of 455 sonorants at
-the limit); with the round 8 range 3.1 dB (221 at the limit). Sample 2
-(a woman at 204 Hz) was matched with a tract of 0.93 and the tenseness at
-its floor; her vowels' median F1 / F2 error went from 21 / 11 % (the
-deep voice following her timing) to 10 / 6 %, but her H1*-H2* contour was
-not followed (r -0.09; 0.45 with the timing only): at her pitch the
-per-phone H1*-H2* moves by more than the engine's tenseness range can.
+(On the engine with round 9's source tilt; before it the HNR against his
+was 2.8 to 2.9 dB, the engine then the noisier, and the rest within a
+point or two of these.) The level loop: 4.7 dB before it, 2.5 dB after
+(89 of 455 sonorants at the limit); with the round 8 range 3.2 dB (219 at
+the limit). The breath sweep on the darker voice gives the same range
+(-10.3 dB at a share of 0.5 with 98 % of vowel frames voiced, +4.8 dB at
+1.5). Sample 2 (a woman at 204 Hz) is matched with a tract of 0.93 and a
+tenseness of 0.56 (0.45, the floor, on the brighter voice before the
+source tilt); her H1*-H2* contour follows hers with r 0.32 (0.01 with the
+timing only), her vowels' median F2 error is 7 % (9 %), F1 22 % (16 %).
 
 **Checks** (`check`; `transfer` prints them): the rendering aligned again
 against the schedule, interior phones, mean absolute duration error; how
