@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-nine numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the eighty-one numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: sixty-three numbers in three
+        /// How a voice turns sounds into speech: eighty-one numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -393,8 +393,13 @@ tuning! {
     /// recognizer heard the vowels better (vowel lab held-out −2.7 points)
     /// but the sentences of the tuning material worse (6 points of phoneme
     /// accuracy, Whisper 8.5 of words) than at the round 4 value, 0.905.
-    /// The owner, listening to both, chose 0.62 without hesitation, and
-    /// ears outrank the recognizer here.
+    /// The owner chose 0.62 by ear and asked in round 6 for a milder 0.82
+    /// for the stressed lax vowels ("sells", "punch"; the unstressed ones
+    /// keep `unstressed_lax_length`). At 0.82 the recognizer heard the
+    /// stressed /ɪ/ of the LibriSpeech texts as /eɪ/ 14 times in 54 (2 at
+    /// 0.62): in-sentence vowel error +9.4 points [5.9, 13.2], with the
+    /// sentences' phoneme error and Whisper words unchanged. So it stays at
+    /// 0.62, and `profiles/stressed-lax.json` has 0.82 for listening.
     lax_length = 0.62, 0.5..=1.0, C;
     /// Share of a lax vowel held on its own shape before it glides towards
     /// schwa (to its end shape in `vowel_targets`) for the rest.
@@ -464,6 +469,27 @@ tuning! {
     /// only then is let go altogether. 0 switches the hand-over off: the
     /// tongue lets go at once and the lip shuts behind it.
     sibilant_exit = 0.06, 0.0..=0.1, B;
+
+    // ----- C: vowel lengths and glides by stress (round 6) ---------------
+
+    /// Shortest the held part of a stressed lax vowel may be, seconds (its
+    /// nucleus: `lax_nucleus` of its length, before its glide towards
+    /// schwa), however fast the speech; `0` for none. The owner asked for
+    /// 60 ms with the milder stressed length (`profiles/stressed-lax.json`),
+    /// where of the 136 stressed lax vowels of the judge's sentences it
+    /// lengthens none at the default rate and 39 at 1.2 times the rate (at
+    /// `lax_length` 0.62: 39 already at the default rate). Off by default:
+    /// with it and `ae_nucleus` on, the held-out sentences' phoneme error
+    /// rose 1.9 points [-0.1, 4.2] and the vowel lab's held-out vowel error
+    /// 1.3 [-0.3, 3.0].
+    lax_floor = 0.0, 0.0..=0.09, C;
+    /// Share of a stressed /æ/ held on its own shape before it glides
+    /// towards schwa for the rest ("planks", "background"); `1.0` (the
+    /// default) holds it to the end. At 0.55 it ends about a fifth of the
+    /// way to schwa (`tests/vowel_glide_gate.rs`; at 0.67, the lax vowels'
+    /// share, 13 %), and the recognizer heard more /æ/ as /ɛ/. In
+    /// `profiles/stressed-lax.json`.
+    ae_nucleus = 1.0, 0.4..=1.0, C;
 }
 
 impl Default for Tuning {
@@ -497,7 +523,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 4);
+        assert_eq!(c, 6);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

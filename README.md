@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the sixty-three numbers of `Tuning`, each with a default and
+Underneath sit the eighty-one numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -240,7 +240,7 @@ reads the rest as well:
 | gaps | `fricative_gap`, `approximant_gap`, `nasal_port` |
 | larynx in consonants | `abduction_time`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `voiced_stop_slack`, `cavity_expansion`, `onset_kick`, `kick_time` |
 | lengths | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `voiced_sibilant_length`, `approximant_length`, `aspirate_length`, `aspiration`, `stress_stretch`, `vowel_hold` |
-| lax vowels | `lax_length`, `unstressed_lax_length`, `lax_nucleus` |
+| lax vowels | `lax_length`, `unstressed_lax_length`, `lax_nucleus`, `lax_floor`, `ae_nucleus` |
 | voicing timing | `vot_labial`, `vot_alveolar`, `vot_velar`, `devoicing_lead`, `unstressed_vot`, `fortis_closure`, `prefortis_clip`, `prelenis_stretch` |
 | articulators | `lead`, `release_lead`, `articulation_rate`, `body_rate`, `dorsum_rate`, `closing_ratio`, `release_speed`, `closure_overshoot` |
 | breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
@@ -406,18 +406,24 @@ as the model goes:
   protrusion and a jaw; some of them were moved by a few per cent against
   the speech recognizer (`src/vowel_targets.rs` says which and by how
   much). They are held longer than the classic engine's, since the slow
-  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are as
-  much shorter than the tense ones as a speaker's (`lax_length` and
-  `unstressed_lax_length`, 0.62; chosen by ear over the longer round 4
-  value, which the recognizer scores higher on sentences)
-  and glide part of the way towards schwa over their last third, and /eɪ/
-  glides the whole way. A
-  vowel shape may also set the tongue root, which widens or narrows the
-  pharynx on its own and stays with the tongue body under the consonants
-  around the vowel (`Shape::pharynx`); the built-in vowels leave it at
-  rest (`examples/vowel_size.rs` says why). `examples/nucleus.rs`
-  measures, for every vowel of a list of sentences, its length and its
-  formants through it.
+  tongue body needs the time to get there. The lax vowels /ɪ ɛ ʌ ʊ/ are
+  as much shorter than the tense ones as a speaker's, by 38 %
+  (`lax_length` and `unstressed_lax_length`, 0.62, chosen by ear), and
+  glide part of the way towards schwa over their last third; /eɪ/ glides
+  the whole way. `profiles/stressed-lax.json` holds round 6's milder
+  stressed length (0.82, "sells", "punch") with a 60 ms floor on the held
+  part (`lax_floor`) and a stressed /æ/ that glides a fifth of the way to
+  schwa (`ae_nucleus`); there the recognizer hears the stressed /ɪ/ as
+  /eɪ/ in a quarter of the LibriSpeech texts' slots, so it is not the
+  default. A vowel shape may also set the tongue root, which widens or narrows
+  the pharynx on its own and stays with the tongue body under the
+  consonants around the vowel (`Shape::pharynx`); the built-in vowels
+  leave it at rest. Round 6 solved it for /ɪ ʌ ʊ/ (pulled back by 0.20,
+  0.12 and 0.29; `LAX_ROOTS` in `examples/vowel_size.rs`): the vowels of
+  the LibriSpeech texts were heard better (error 27 to 24 %), but the
+  tuning sentences gained nothing and the carrier phrases lost.
+  `examples/nucleus.rs` measures, for every vowel of a list of sentences,
+  its length and its formants through it.
 - **Phrases.** The lungs build their pressure up over the start of a
   phrase, run down over it and let go over its last vowel, so a sentence
   swells in and dies away. Each stressed vowel gets a pitch accent that
@@ -605,14 +611,22 @@ average sentence).
 
 - **Vowels in sentences** are heard wrong 27 % of the time in the
   LibriSpeech texts and 30 % over the vowel lab's held-out material
-  (eSpeak 15 and 17 %, the person 9 %; the round's target was 22 %). /ʊ/
-  comes through about a quarter of the time, /ɔ/ is mostly heard as /ɑ/,
-  /ɑ/ often as /æ/, /ɔɪ/ not at all, and schwa as /u/ or /ɚ/. The tongue
-  root (`Shape::pharynx`) is there but the built-in vowels leave it at
-  rest.
-- **Lax vowels are longer than a speaker's** at the round 4 length and
-  as short as one's at the default (0.62, chosen by ear); the recognizer
-  scores the tuning sentences better at the longer length.
+  (eSpeak 15 and 17 %, the person 9 %; the target is 22 %). A third of
+  the misses in the LibriSpeech texts are words the engine's front end
+  says otherwise than eSpeak's reference (a full "and" for a reduced
+  one): over the slots where they agree the error is 20 %. /ʊ/ comes
+  through about a quarter of the time, /ɔ/ is
+  mostly heard as /ɑ/, /ɑ/ often as /æ/ (its target is Hillenbrand's
+  Michigan /ɑ/, F2 1333 Hz; at 1100 to 1180 Hz the recognizer hears it
+  better, but that shape at the back of the tongue's reach moves the
+  gates measured in "a pa"), /ɔɪ/ not at all, and schwa as /u/ or /ɚ/.
+  The tongue root of /ɪ ʌ ʊ/ (off) brings the LibriSpeech texts to 24 %
+  but costs the carrier phrases 1.7 to 3.5 points of phoneme error.
+- **Lax vowels in the engine's sentences sit nearer the tense ones than a
+  speaker's**: measured the same way in the LibriSpeech texts, the
+  person's /ɪ/ has an F2 at his schwa's and 20 % under his /i/, the
+  engine's 14 % over its schwa; but moved there, its /ɪ/ is heard as a
+  high central vowel, and made longer (0.82 of a tense vowel) as /eɪ/.
 - **Whisper gets 62 to 67 % of the held-out words** (target 75 %).
   "Makes fine" is heard as "makes fine" since round 6 (it was "makes
   pine": the /s/ cut off in a few milliseconds, the air rushed out before

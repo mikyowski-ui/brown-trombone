@@ -80,50 +80,73 @@ const STAY: f32 = 1.0e-3;
 const BEND: f32 = 3.0e-3;
 /// How hard the native shape is pulled towards the articulators' natural
 /// place for it (see [`prior`]), per coordinate, relative to [`STAY`] and
-/// [`BEND`].
-const NATURAL_PULL: [f32; D] = [1.0, 1.0, 1.0, 0.1, NARROWING_PULL, ROOT_PULL];
-/// How hard the tongue root is pulled towards its natural setting: about
-/// half as hard as the tongue, so that it moves where the formants need it
-/// (F3 above all, which the tongue and lips alone leave several per cent
-/// off for /i ɪ/), and otherwise stays where the vowel's class puts it.
+/// [`BEND`]: tongue and lips have a natural place; the narrowing is there
+/// to place F3 and is let go wherever that needs it.
+const NATURAL_PULL: [f32; D] = [1.0, 1.0, 1.0, 0.1, 0.1, ROOT_PULL];
+/// How hard the tongue root is pulled towards its natural setting
+/// ([`LAX_ROOT`]): about half as hard as the tongue, so that it moves where
+/// the formants need it and otherwise stays where the vowel's class puts
+/// it.
 const ROOT_PULL: f32 = 0.5;
-/// How hard the narrowing is pulled towards none (or the sound's natural
-/// one): the narrowing belongs to the vowel alone, and a vowel between two
-/// consonants is often over before it has formed, so the shapes lean on
-/// the tongue, its root and the lips first.
-const NARROWING_PULL: f32 = 1.0;
-/// The tongue roots the shapes may take: all the engine allows pulled back
-/// (`synthie_trombone::PHARYNX`), but drawn forward by at most a third of
-/// what it allows. Drawn further, the root of /i/ and /ɑ/ went to the
-/// limit for the last per cent of F3, and the pharynx it left under the
-/// consonants on either side moved them (an /s/ quieter, a vowel between
-/// the /s/ and /t/ of "street").
+/// The tongue roots the engine allows (`synthie_trombone::PHARYNX`), as
+/// the shape coordinates span them; [`root_range`] says which part of it a
+/// shape may take.
 const PHARYNX: (f32, f32) = (-1.2, 0.3);
-/// The shapes whose tongue root is solved; every other keeps it at rest.
+/// Which tongue roots `key` may take: the lax /ɪ ʌ ʊ/ and the ends of their
+/// glides pull it back (a retracted root, a narrower pharynx) by up to
+/// [`LAX_ROOT_MIN`]; every other shape keeps it at rest, so a tense vowel's
+/// root lies forward of a lax one's. The root belongs to the tongue body
+/// and stays under the consonants around the vowel
+/// (`Articulation::physical_root`).
 ///
-/// None, for now. Solved free (and the narrowing kept out of the pharynx,
-/// so that the root does what it did there), the mid and close vowels
-/// whose shapes narrowed the pharynx took a root of their own: drawn
-/// forward for /i eɪ/, pulled back for /ɪ ɛ ʊ u/ and schwa. Carried under
-/// the consonants around a vowel (see `Articulation::physical_root`) it
-/// mended the short vowels, which had never had the time to form their
-/// narrowing (the recognizer's vowel error in sentences fell from 30 to
-/// 26 %), but it moved the consonants made on those bodies out of their
-/// gates in `tests/physical_gates.rs`, `tests/listen_gate.rs` and
-/// `tests/mimic_gate.rs` (/ð/ after schwa, the hiss regulator, a sung
-/// sequence copied by the mimic). List keys here, regenerate, and run
-/// those gates to try it again: `Vowel(Phoneme::Ih)`, `Vowel(Phoneme::Eh)`,
-/// `Vowel(Phoneme::Uh)`, `Vowel(Phoneme::Uw)`, `Vowel(Phoneme::Ax)` and
-/// the lax vowels' ends were the set measured.
-const ROOT_SOLVED: &[VowelKey] = &[];
+/// What was measured (round 6, every gate run on each): solved free on
+/// both sides for every vowel, /u/ and schwa took a root pulled back as far
+/// as the engine allows (-0.9 and -1.2) and /i/ one drawn forward to the
+/// limit, and twelve gates failed (the voice bar and the onset pitch kick
+/// of /p t/ in "a pa", /ð/ after schwa, /ŋ/ after /i/, the hiss
+/// regulator, a sung /u/ heard and copied, the glides, the table's
+/// smoothness). Drawn forward for the tense /i u eɪ oʊ/ (by up to 0.3 or
+/// 0.15) it moved the listener's step into /i/ (27 to 39 and 91 ms), the
+/// mimic's copy of /i/, /ð/ after /u/ and the nasal notch after /i/ out of
+/// their gates, and the recognizer heard the vowels no better than with the
+/// tense roots at rest. Pulled back for /ɛ/ it moved either the listener's
+/// step into /ɛ/ (at -0.3) or the mimic's copy of the /æ/ sung after it
+/// (-0.35 to -0.6) out of theirs: /ɛ/ keeps the narrowing low in its
+/// pharynx that does the same for its F1.
+///
+/// With /ɪ ʌ ʊ/ alone every gate passed and the recognizer's vowel error in
+/// the LibriSpeech texts fell 2.8 points [0.3, 5.7], but the tuning
+/// sentences gained nothing (phoneme error +0.1 [-1.7, 1.8], vowel lab
+/// +0.5 [-2.1, 2.9]), the carrier phrases lost (phoneme error +3.5
+/// [1.3, 5.6] tuning, +1.7 [0.6, 3.1] held out) and the held-out Harvard
+/// vowels too (+2.9 [0.0, 6.4]). So [`LAX_ROOTS`] is off: set it and
+/// regenerate to hear it.
+fn root_range(key: VowelKey) -> (f32, f32) {
+    use Phoneme as P;
+    match key {
+        VowelKey::Vowel(P::Ih | P::Ah | P::Uh) | VowelKey::End(P::Ih | P::Ah | P::Uh)
+            if LAX_ROOTS =>
+        {
+            (LAX_ROOT_MIN, 0.0)
+        }
+        _ => (0.0, 0.0),
+    }
+}
+
+/// Whether the lax vowels' roots are solved (see [`root_range`]).
+const LAX_ROOTS: bool = false;
+
+/// Furthest back a lax vowel's root may be pulled.
+const LAX_ROOT_MIN: f32 = -0.5;
+/// Natural tongue root of the lax vowels: pulled back, narrowing the
+/// pharynx.
+const LAX_ROOT: f32 = -0.25;
 
 /// Whether the root of `key` is solved.
 fn root_free(key: VowelKey) -> bool {
-    ROOT_SOLVED.contains(&key)
+    let (lo, hi) = root_range(key);
+    hi > lo
 }
-/// Natural tongue root of the tense vowels /i e u o/ (and their glides):
-/// drawn forward, widening the pharynx; the others' is at rest.
-const TENSE_ROOT: f32 = 0.25;
 /// Finite-difference step, in shape coordinates.
 const H: f32 = 0.008;
 /// Tongue body positions and heights the engine allows.
@@ -138,14 +161,8 @@ const START_LIPS: f32 = 1.2;
 /// map, up to the teeth (/i/ in a long tract wants a little more than the
 /// map's 34).
 const NARROWING_AT: (f32, f32) = (10.0, 38.0);
-/// Lowest narrowing place for all but the open vowels: the oral cavity,
-/// above the tongue root. Below it, the pharynx is shaped by the root,
-/// which belongs to the tongue body and so stays in place through the
-/// consonants on either side of a vowel; a narrowing there belonged to the
-/// vowel alone, came only with it and was never made in a short vowel...
-const ORAL: f32 = 20.0;
-/// ...and for the vowels whose root stays at rest.
-const ORAL_AT_REST: f32 = 14.0;
+/// Lowest narrowing place for all but the open vowels...
+const ORAL: f32 = 14.0;
 /// ...and the F1 (adult man, Hz) from which a vowel counts as open.
 const THROAT_F1: f32 = 640.0;
 /// Narrowing openings searched.
@@ -264,6 +281,8 @@ struct Goal {
     pull: [f32; D],
     /// Lowest value of each coordinate (the highest is 1).
     lo: [f32; D],
+    /// Highest value of each coordinate.
+    hi: [f32; D],
     rounded: bool,
     length: f32,
 }
@@ -297,7 +316,7 @@ impl Goal {
     /// coordinates reached, their residuals and cost.
     fn refine(&self, m: &mut Meter, mut x: [f32; D]) -> Option<([f32; D], [f32; 3], f32)> {
         for d in 0..D {
-            x[d] = x[d].clamp(self.lo[d], 1.0);
+            x[d] = x[d].clamp(self.lo[d], self.hi[d]);
         }
         let (mut r, mut cost) = self.eval(m, &x)?;
         let mut damping = 1.0e-3f32;
@@ -311,7 +330,7 @@ impl Goal {
                 if !self.free[d] {
                     continue;
                 }
-                let h = if x[d] + H <= 1.0 { H } else { -H };
+                let h = if x[d] + H <= self.hi[d] { H } else { -H };
                 let mut y = x;
                 y[d] += h;
                 let Some((ry, _)) = self.eval(m, &y) else {
@@ -342,7 +361,7 @@ impl Goal {
                     lhs[d][d] += damping * (a[d][d] + 1.0e-4);
                     let stuck = !self.free[d]
                         || (x[d] <= self.lo[d] && b[d] > 0.0)
-                        || (x[d] >= 1.0 && b[d] < 0.0);
+                        || (x[d] >= self.hi[d] && b[d] < 0.0);
                     if stuck {
                         for c in 0..D {
                             lhs[d][c] = 0.0;
@@ -355,7 +374,7 @@ impl Goal {
                 let Some(step) = solve_d(lhs, rhs) else { break };
                 let mut y = x;
                 for d in 0..D {
-                    y[d] = (x[d] + step[d]).clamp(self.lo[d], 1.0);
+                    y[d] = (x[d] + step[d]).clamp(self.lo[d], self.hi[d]);
                 }
                 if let Some((ry, cy)) = self.eval(m, &y)
                     && cy < cost
@@ -457,15 +476,15 @@ fn prior(t: &Target) -> [f32; D] {
     x
 }
 
-/// The tongue root a vowel shape has by phonetics: drawn forward for the
-/// tense vowels /i e u o/ and their glides, at rest for the others.
+/// The tongue root a vowel shape has by phonetics: pulled back for the
+/// lax vowels whose root is solved, at rest for the others (see
+/// [`root_range`]).
 fn natural_root(key: VowelKey) -> f32 {
-    use Phoneme as P;
-    match key {
-        VowelKey::Vowel(P::Iy | P::Uw | P::Y | P::W)
-        | VowelKey::Start(P::Ey | P::Ow)
-        | VowelKey::End(P::Ey | P::Ow | P::Ay | P::Aw | P::Oy) => TENSE_ROOT,
-        _ => 0.0,
+    let (lo, hi) = root_range(key);
+    if lo < 0.0 && hi <= 0.0 {
+        LAX_ROOT.max(lo)
+    } else {
+        0.0
     }
 }
 
@@ -478,10 +497,23 @@ fn natural_root(key: VowelKey) -> f32 {
 fn lowest(t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
-        let oral = if root_free(t.key) { ORAL } else { ORAL_AT_REST };
-        lo[3] = (oral - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
+        lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
     }
+    lo[5] = root_x(root_range(t.key).0);
     lo
+}
+
+/// Highest coordinates target `t` may take: the root no further forward
+/// than its class allows (see [`root_range`]).
+fn highest(t: &Target) -> [f32; D] {
+    let mut hi = [1.0; D];
+    hi[5] = root_x(root_range(t.key).1);
+    hi
+}
+
+/// The coordinate of tongue root `r`.
+fn root_x(r: f32) -> f32 {
+    ((r - PHARYNX.0) / (PHARYNX.1 - PHARYNX.0)).clamp(0.0, 1.0)
 }
 
 /// Solve the native row of target `t`: from the articulators' natural
@@ -505,8 +537,9 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
     let starts: Vec<([f32; D], bool)> = starts
         .into_iter()
         .map(|(mut x, m)| {
+            let hi = highest(t);
             for d in 0..D {
-                x[d] = x[d].max(lo[d]);
+                x[d] = x[d].clamp(lo[d], hi[d]);
             }
             (x, m)
         })
@@ -516,14 +549,9 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
         near: home,
         ahead: home,
         free: [true, true, rounded, true, true, root_free(t.key)],
-        // Tongue and lips have a natural place; the narrowing is there to
-        // place F3 and is let go wherever that needs it.
-        pull: if root_free(t.key) {
-            NATURAL_PULL
-        } else {
-            [1.0, 1.0, 1.0, 0.1, 0.1, ROOT_PULL]
-        },
+        pull: NATURAL_PULL,
         lo: lowest(t),
+        hi: highest(t),
         rounded,
         length: 1.0,
     };
@@ -578,7 +606,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solve
         let mut ahead = [0.0f32; D];
         for d in 0..D {
             ahead[d] = if free[d] {
-                (2.0 * last[d] - before[d]).clamp(0.0, 1.0)
+                (2.0 * last[d] - before[d]).clamp(0.0, highest(t)[d])
             } else {
                 last[d]
             };
@@ -590,6 +618,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solve
             free,
             pull: [1.0; D],
             lo: lowest(t),
+            hi: highest(t),
             rounded,
             length,
         };

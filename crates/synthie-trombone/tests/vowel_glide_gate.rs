@@ -187,6 +187,11 @@ fn formants(voice: &Trombone) -> (f32, f32) {
 fn trajectory_with(p: Phoneme, nucleus: f32) -> ((f32, f32), (f32, f32)) {
     let mut settings = physical();
     settings.tuning.lax_nucleus = nucleus;
+    trajectory_of(p, &settings)
+}
+
+/// F1 and F2 at 40 % and at 90 % of `[HH p1]` said by `settings`.
+fn trajectory_of(p: Phoneme, settings: &VoiceSettings) -> ((f32, f32), (f32, f32)) {
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
     Speaker::prepare(&mut voice);
@@ -219,6 +224,11 @@ fn trajectory(p: Phoneme) -> ((f32, f32), (f32, f32)) {
     trajectory_with(p, physical().tuning.lax_nucleus)
 }
 
+/// [`trajectory_with`] for a voice of its own.
+fn trajectory_in(p: Phoneme, settings: &VoiceSettings) -> ((f32, f32), (f32, f32)) {
+    trajectory_of(p, settings)
+}
+
 /// How far a vowel has moved from `a` to `b`, as a share of the way from
 /// `from` to `goal`, in `ln` F1 and F2.
 fn share(from: (f32, f32), a: (f32, f32), b: (f32, f32), goal: [f32; 3]) -> f32 {
@@ -247,14 +257,96 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
             glided.1,
             100.0 * s
         );
-        // /ɛ/ moves least: 9 % at the default length, 21 % held longer.
+        // /ɛ/ moves least: 9 % at the default length, 22 % at 0.82 of a
+        // tense vowel's (where /ʊ/ moves most, 55 %).
         assert!((0.07..=0.6).contains(&s), "{p}: {s}");
     }
-    // The tense vowels have no glide of their own.
-    for p in [Phoneme::Iy, Phoneme::Uw, Phoneme::Ae, Phoneme::Aa] {
+    // The tense vowels have no glide of their own...
+    for p in [Phoneme::Iy, Phoneme::Uw, Phoneme::Aa] {
         let u = Utterance::from_text(&format!("[HH {}1]", p.symbol()), &physical().prosody());
         let n = u.segments().iter().filter(|s| s.phoneme == p).count();
         assert_eq!(n, 1, "{p}");
+    }
+    // ...nor does /æ/ by default; with `Tuning::ae_nucleus` at 0.55
+    // (`profiles/stressed-lax.json`) a stressed one glides about a fifth
+    // of the way to schwa, an unstressed one not at all.
+    let held = physical();
+    let u = Utterance::from_text("[HH AE1]", &held.prosody());
+    assert_eq!(
+        u.segments()
+            .iter()
+            .filter(|s| s.phoneme == Phoneme::Ae)
+            .count(),
+        1
+    );
+    let mut gliding = physical();
+    gliding.tuning.ae_nucleus = 0.55;
+    let (mid, glided) = trajectory_in(Phoneme::Ae, &gliding);
+    let (_, still) = trajectory_in(Phoneme::Ae, &held);
+    let s = share(mid, still, glided, schwa);
+    println!("AE: {:.0} % of the way to schwa", 100.0 * s);
+    assert!((0.15..=0.3).contains(&s), "AE: {s}");
+    let u = Utterance::from_text("[HH AE0 D]", &gliding.prosody());
+    assert_eq!(
+        u.segments()
+            .iter()
+            .filter(|s| s.phoneme == Phoneme::Ae)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
+    // With the owner's milder stressed length (`profiles/stressed-lax.json`)
+    // a stressed lax vowel is 18 % shorter than a tense one, an unstressed
+    // one still 38 % ("sells" against "of"); at the defaults both are 38 %.
+    // With `Tuning::lax_floor` set the held part of a stressed one never
+    // falls under it, however fast the speech.
+    let ratio = |stress: &str, settings: &VoiceSettings| {
+        let len = |v: Phoneme| {
+            Utterance::from_text(
+                &format!("[S {}{stress} L] [AX0]", v.symbol()),
+                &settings.prosody(),
+            )
+            .segments()
+            .iter()
+            .filter(|s| s.phoneme == v)
+            .map(|s| s.duration)
+            .sum::<f32>()
+        };
+        len(Phoneme::Ih) / len(Phoneme::Iy)
+    };
+    let mut v = physical();
+    let at_default = ratio("1", &v);
+    v.tuning.lax_length = 0.82;
+    let (stressed, unstressed) = (ratio("1", &v), ratio("0", &v));
+    println!("IH/IY stressed {stressed:.3} (default {at_default:.3}), unstressed {unstressed:.3}");
+    assert!((0.60..=0.64).contains(&at_default), "{at_default}");
+    assert!((0.80..=0.84).contains(&stressed), "{stressed}");
+    assert!((0.60..=0.64).contains(&unstressed), "{unstressed}");
+    // Fast speech: the floor holds every stressed lax nucleus.
+    for rate in [1.0f32, 1.4, 2.0] {
+        let mut fast = physical();
+        fast.rate *= rate;
+        fast.tuning.lax_length = 0.82;
+        fast.tuning.lax_floor = 0.06;
+        let u = Utterance::from_text("[P AH1 N CH] [S EH1 L Z] [K IH1 T]", &fast.prosody());
+        let segs = u.segments();
+        let heads: Vec<f32> = segs
+            .iter()
+            .filter(|s| {
+                matches!(s.phoneme, Phoneme::Ih | Phoneme::Eh | Phoneme::Ah)
+                    && s.articulation.vowel != Some(VowelKey::End(s.phoneme))
+            })
+            .map(|s| s.duration)
+            .collect();
+        println!("rate x{rate}: nuclei {heads:.3?} s");
+        assert_eq!(heads.len(), 3);
+        assert!(
+            heads.iter().all(|&d| d >= fast.tuning.lax_floor - 1e-6),
+            "{heads:?}"
+        );
     }
 }
 
@@ -277,14 +369,35 @@ fn ey_and_ow_glide_the_whole_way() {
 
 #[test]
 fn the_tongue_root_shapes_the_pharynx_and_stays_with_the_body() {
-    // Every built-in vowel keeps its root at rest (see `ROOT_SOLVED` in
-    // `examples/vowel_size.rs`): the root is the profile's or the
+    // Every built-in vowel keeps its root at rest (`LAX_ROOTS` in
+    // `examples/vowel_size.rs` says why): the root is the profile's or the
     // caller's to set, as `Shape::pharynx`.
     for t in vowel_targets::TARGETS {
         let a = t.key.articulation().expect("a vowel");
         let root = a.physical_shape(1.0).expect("a shape").pharynx;
         assert!(root.abs() < 1e-6, "{}: {root}", t.key);
     }
+    // A lax vowel's root, pulled back as round 6 solved it for /ɪ/ (-0.2),
+    // stays under a consonant made on the vowel's body: the pharynx under
+    // an /s/ leaning on it is narrower than with the root at rest.
+    let mid_s_pharynx = |root: bool| {
+        let mut t = Trombone::new(SR);
+        t.set_engine(Engine::Physical);
+        if root {
+            let mut shape = Phoneme::Ih.physical_shape(1.0).expect("a shape");
+            shape.pharynx = -0.2;
+            t.set_vowel_shape(VowelKey::Vowel(Phoneme::Ih), Some(&shape));
+        }
+        let mut s = Phoneme::S.articulation();
+        s.vowel = Some(VowelKey::Vowel(Phoneme::Ih));
+        s.tongue = Phoneme::Ih.articulation().tongue;
+        t.articulate(&s);
+        t.settle();
+        t.target_diameters()[13]
+    };
+    let (with, without) = (mid_s_pharynx(true), mid_s_pharynx(false));
+    println!("pharynx (cell 13) under /s/ after IH: {with:.3} with its root, {without:.3} at rest");
+    assert!(with < 0.95 * without);
     // A widened pharynx lowers F1 and a narrowed one raises it, as an
     // advanced and a retracted tongue root do.
     let f1 = |pharynx: f32| {

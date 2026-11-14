@@ -101,7 +101,7 @@ formants; and breath and intonation shaped per phrase. Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`.
 
-Both engines read their numbers from `Tuning` (63 fields with defaults
+Both engines read their numbers from `Tuning` (81 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
 `VoiceSettings::with_profile`). The repository README has the details,

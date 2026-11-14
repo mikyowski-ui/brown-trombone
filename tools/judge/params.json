@@ -77,5 +77,7 @@
   "dental_edge": {"lo": 0, "hi": 6, "default": 3, "pass": "a"},
   "labial_lead": {"lo": 0.02, "hi": 0.06, "default": 0.04, "pass": "b"},
   "labial_closing": {"lo": 0.03, "hi": 0.07, "default": 0.048, "pass": "b"},
-  "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.06, "pass": "b"}
+  "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.06, "pass": "b"},
+  "lax_floor": {"lo": 0, "hi": 0.09, "default": 0, "pass": "c"},
+  "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"}
 }
