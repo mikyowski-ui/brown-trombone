@@ -391,12 +391,13 @@ as the model goes:
   part (`lax_floor`) and a stressed /æ/ that glides a fifth of the way to
   schwa (`ae_nucleus`); there the recognizer hears the stressed /ɪ/ as
   /eɪ/ in a quarter of the LibriSpeech texts' slots, so it is not the
-  default. A vowel shape also sets the tongue root, which widens or narrows
+  default. A vowel shape may also set the tongue root, which widens or narrows
   the pharynx on its own and stays with the tongue body under the
-  consonants around the vowel (`Shape::pharynx`): /ɪ ʌ ʊ/ pull it back
-  (by 0.20, 0.12 and 0.29), every other vowel leaves it at rest, so the
-  tense vowels' root lies forward of the lax ones'
-  (`examples/vowel_size.rs` says what was measured on the other choices).
+  consonants around the vowel (`Shape::pharynx`); the built-in vowels
+  leave it at rest. Round 6 solved it for /ɪ ʌ ʊ/ (pulled back by 0.20,
+  0.12 and 0.29; `LAX_ROOTS` in `examples/vowel_size.rs`): the vowels of
+  the LibriSpeech texts were heard better (error 27 to 24 %), but the
+  tuning sentences gained nothing and the carrier phrases lost.
   `examples/nucleus.rs` measures, for every vowel of a list of sentences,
   its length and its formants through it.
 - **Phrases.** The lungs build their pressure up over the start of a
@@ -584,19 +585,19 @@ average sentence).
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong 24 % of the time in the
-  LibriSpeech texts (27 % before round 6's tongue root) and 30 % over the
-  vowel lab's held-out material (eSpeak 15 and 17 %, the person 9 %; the
-  target is 22 %). A third of the misses in the LibriSpeech texts are
-  words the engine's front end says otherwise than eSpeak's reference
-  (a full "and" for a reduced one): over the slots where they agree the
-  error is 19 %. /ʊ/ comes through about a quarter of the time, /ɔ/ is
+- **Vowels in sentences** are heard wrong 27 % of the time in the
+  LibriSpeech texts and 30 % over the vowel lab's held-out material
+  (eSpeak 15 and 17 %, the person 9 %; the target is 22 %). A third of
+  the misses in the LibriSpeech texts are words the engine's front end
+  says otherwise than eSpeak's reference (a full "and" for a reduced
+  one): over the slots where they agree the error is 20 %. /ʊ/ comes
+  through about a quarter of the time, /ɔ/ is
   mostly heard as /ɑ/, /ɑ/ often as /æ/ (its target is Hillenbrand's
   Michigan /ɑ/, F2 1333 Hz; at 1100 to 1180 Hz the recognizer hears it
   better, but that shape at the back of the tongue's reach moves the
   gates measured in "a pa"), /ɔɪ/ not at all, and schwa as /u/ or /ɚ/.
-  The tongue root of /ɪ ʌ ʊ/ costs the carrier phrases 1.7 to 3.5 points
-  of phoneme error.
+  The tongue root of /ɪ ʌ ʊ/ (off) brings the LibriSpeech texts to 24 %
+  but costs the carrier phrases 1.7 to 3.5 points of phoneme error.
 - **Lax vowels in the engine's sentences sit nearer the tense ones than a
   speaker's**: measured the same way in the LibriSpeech texts, the
   person's /ɪ/ has an F2 at his schwa's and 20 % under his /i/, the

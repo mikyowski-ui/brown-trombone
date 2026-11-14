@@ -1399,40 +1399,21 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
     }
 }
 
-/// A shape of the babble map's own (the tongue root at rest), for a vowel
-/// whose physical shape pulls the root back: the map has no such shapes.
-const fn mapped(
-    index: f32,
-    height: f32,
-    lips: Option<f32>,
-    narrowing: Option<(f32, f32)>,
-) -> Shape {
-    Shape {
-        tongue_index: index,
-        tongue_diameter: height,
-        lips,
-        narrowing,
-        pharynx: 0.0,
-    }
-}
-
 /// Vowels marked on the vowel chart: IPA letter, phoneme, and the shape the
 /// physical engine gives it (the library's physical vowel shapes; a test
-/// checks that they still agree). The lax /ɪ ʌ ʊ/ pull the tongue root
-/// back, which the babble map that Formant Lock works on does not know:
-/// they have the map's shape for their formants instead. Where two marks
-/// share a cell the first is shown, so the corner vowels come first.
+/// checks that they still agree). Where two marks share a cell the first
+/// is shown, so the corner vowels come first.
 #[rustfmt::skip]
 pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
     ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.649, 0.858))),
     ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
     ("ɑ", Phoneme::Aa, shape(16.513, 3.165, None, (10.0, 0.927))),
     ("æ", Phoneme::Ae, shape(19.852, 3.321, None, (28.611, 1.314))),
-    ("ɪ", Phoneme::Ih, mapped(27.247, 2.533, Some(1.8), None)),
+    ("ɪ", Phoneme::Ih, shape(26.372, 2.449, None, (24.0, 3.0))),
     ("ɛ", Phoneme::Eh, shape(24.3, 2.811, None, (14.0, 1.483))),
-    ("ʌ", Phoneme::Ah, mapped(16.48, 2.276, Some(2.882), Some((29.846, 1.437)))),
+    ("ʌ", Phoneme::Ah, shape(16.588, 2.269, None, (30.423, 1.46))),
     ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.828, 1.8))),
-    ("ʊ", Phoneme::Uh, mapped(19.773, 2.472, Some(0.985), Some((31.596, 1.04)))),
+    ("ʊ", Phoneme::Uh, shape(19.945, 2.387, Some(1.004), (32.018, 1.022))),
     ("o", Phoneme::Ow, shape(15.494, 2.345, Some(0.989), (30.201, 1.519))),
     ("ɝ", Phoneme::Er, shape(15.234, 2.777, Some(1.242), (30.498, 0.7))),
 ];
@@ -2416,7 +2397,6 @@ mod tests {
     // ----- Formant Lock -------------------------------------------------
 
     use synthie_trombone::Trombone;
-    use synthie_trombone::vowel_targets::{self, VowelKey};
 
     /// `laid_out()` with Formant Lock on and a vowel chart the size a
     /// 120×34 terminal draws it (26×9 cells), clear of the other areas.
@@ -2732,16 +2712,6 @@ mod tests {
             let mut held = Trombone::new(48_000.0);
             for voice in [&mut said, &mut held] {
                 voice.set_engine(Engine::Physical);
-            }
-            if v.physical_shape(1.0).is_some_and(|p| p.pharynx != 0.0) {
-                // A vowel with its root pulled back: the map's shape for
-                // its formants, within 2 % of its target.
-                let target = vowel_targets::formants(VowelKey::Vowel(v), 1.0).unwrap();
-                let got = predict_near(&s).expect(name);
-                for k in 0..2 {
-                    assert!((got[k] / target[k] - 1.0).abs() < 0.02, "{name} F{}", k + 1);
-                }
-                continue;
             }
             said.articulate_phoneme(v);
             held.set_shape(&s);

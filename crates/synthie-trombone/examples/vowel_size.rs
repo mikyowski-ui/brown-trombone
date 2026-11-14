@@ -113,15 +113,28 @@ const PHARYNX: (f32, f32) = (-1.2, 0.3);
 /// step into /ɛ/ (at -0.3) or the mimic's copy of the /æ/ sung after it
 /// (-0.35 to -0.6) out of theirs: /ɛ/ keeps the narrowing low in its
 /// pharynx that does the same for its F1.
+///
+/// With /ɪ ʌ ʊ/ alone every gate passed and the recognizer's vowel error in
+/// the LibriSpeech texts fell 2.8 points [0.3, 5.7], but the tuning
+/// sentences gained nothing (phoneme error +0.1 [-1.7, 1.8], vowel lab
+/// +0.5 [-2.1, 2.9]), the carrier phrases lost (phoneme error +3.5
+/// [1.3, 5.6] tuning, +1.7 [0.6, 3.1] held out) and the held-out Harvard
+/// vowels too (+2.9 [0.0, 6.4]). So [`LAX_ROOTS`] is off: set it and
+/// regenerate to hear it.
 fn root_range(key: VowelKey) -> (f32, f32) {
     use Phoneme as P;
     match key {
-        VowelKey::Vowel(P::Ih | P::Ah | P::Uh) | VowelKey::End(P::Ih | P::Ah | P::Uh) => {
+        VowelKey::Vowel(P::Ih | P::Ah | P::Uh) | VowelKey::End(P::Ih | P::Ah | P::Uh)
+            if LAX_ROOTS =>
+        {
             (LAX_ROOT_MIN, 0.0)
         }
         _ => (0.0, 0.0),
     }
 }
+
+/// Whether the lax vowels' roots are solved (see [`root_range`]).
+const LAX_ROOTS: bool = false;
 
 /// Furthest back a lax vowel's root may be pulled.
 const LAX_ROOT_MIN: f32 = -0.5;
