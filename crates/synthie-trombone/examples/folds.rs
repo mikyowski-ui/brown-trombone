@@ -3,6 +3,7 @@
 //!
 //! ```sh
 //! cargo run -p synthie-trombone --example folds --release
+//! cargo run -p synthie-trombone --example folds --release -- --soft --bands   # the softer voice
 //! ```
 
 #![allow(

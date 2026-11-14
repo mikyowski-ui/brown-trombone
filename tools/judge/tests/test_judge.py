@@ -39,7 +39,7 @@ def test_params_file_matches_brief():
     params = T.load_params(HERE / "params.json")
     # Every field of the engine's `Tuning`, in its passes (a: how sounds are
     # made, b: how they follow one another, c: vowel lengths).
-    assert sum(p["pass"] == "a" for p in params.values()) == 37
+    assert sum(p["pass"] == "a" for p in params.values()) == 41
     assert sum(p["pass"] == "b" for p in params.values()) == 41
     assert sum(p["pass"] == "c" for p in params.values()) == 7
     assert len(params) == 89
