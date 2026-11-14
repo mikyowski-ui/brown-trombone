@@ -244,9 +244,10 @@ tuning! {
     /// 0.37, set while the tract's areas were drawn across 10.7 ms blocks,
     /// the tongue tip of a /t/ now crosses the width that hisses slowly
     /// enough for single bursts to stand up to the vowel after them ("two",
-    /// "to": -1 dB in the deep voice, +1.3 dB in the elder one); at 0.6
-    /// the loudest are 6 to 9 dB under it, as they were.
-    release_speed = 0.6, 0.1..=0.8, B;
+    /// "to": -1 dB in the deep voice, +1.3 dB in the elder one); at 0.5
+    /// the loudest are 3 to 7 dB under it. 0.5 is the owner's choice: at
+    /// 0.6 Whisper heard "background" as "back drawing".
+    release_speed = 0.5, 0.1..=0.8, B;
     /// How far past contact a closing articulator aims (diameter units).
     closure_overshoot = 0.3, 0.1..=0.5, B;
 

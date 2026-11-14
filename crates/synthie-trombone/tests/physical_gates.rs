@@ -1690,7 +1690,10 @@ fn stop_releases_are_bursts_not_clicks() {
     for preset in Preset::ALL {
         let settings = tuned(preset.settings());
         let (at_release, step, click) = match preset {
-            Preset::Whisper => (1.0, f32::INFINITY, 6.0),
+            // (1.0 until the release speed went to 0.5 for the sake of
+            // "background": the whisper's largest step at a release is
+            // then 1.08 times its loudest vowel sample.)
+            Preset::Whisper => (1.15, f32::INFINITY, 6.0),
             _ => (AT_RELEASE, STEP, CLICK),
         };
         let (mut worst, mut worst_release, mut worst_click) = (0.0f32, 0.0f32, 0.0f32);
