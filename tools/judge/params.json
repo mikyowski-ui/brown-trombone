@@ -79,5 +79,9 @@
   "labial_closing": {"lo": 0.03, "hi": 0.07, "default": 0.048, "pass": "b"},
   "sibilant_exit": {"lo": 0.04, "hi": 0.08, "default": 0.07, "pass": "b"},
   "lax_floor": {"lo": 0, "hi": 0.09, "default": 0.06, "pass": "c"},
-  "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"}
+  "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"},
+  "ih_length": {"lo": 0.5, "hi": 1, "default": 0.65, "pass": "c"},
+  "lateral_gap": {"lo": -0.3, "hi": 0.1, "default": -0.12, "pass": "a"},
+  "sonorant_slack": {"lo": 0, "hi": 0.4, "default": 0.15, "pass": "a"},
+  "final_slack": {"lo": 0, "hi": 0.4, "default": 0.2, "pass": "a"}
 }

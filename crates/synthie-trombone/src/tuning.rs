@@ -1,4 +1,4 @@
-//! [`Tuning`]: the eighty-one numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the eighty-five numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: eighty-one numbers in three
+        /// How a voice turns sounds into speech: eighty-five numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -496,6 +496,28 @@ tuning! {
     /// and vowel error in the LibriSpeech texts 30.1 % against 28.3 %). A
     /// stressed /æ/ reaches its formants without it ("planks": 229 ms).
     ae_nucleus = 1.0, 0.4..=1.0, C;
+    /// Length of a stressed /ɪ/ ("slid", "big"), as a share of a tense
+    /// vowel's: it keeps the short length while the other stressed lax
+    /// vowels take `lax_length`. At 0.82 the recognizer heard the stressed
+    /// /ɪ/ of the LibriSpeech texts as /eɪ/ ("slid" as "slayed"): a long
+    /// /ɪ/ that glides towards schwa is what /eɪ/ sounds like backwards.
+    ih_length = 0.65, 0.5..=1.0, C;
+    /// Added to the opening the tongue leaves beside its tip for /l/,
+    /// diameter units (physical engine). At the classic engine's opening
+    /// the first formant of /l/ stood near 500 Hz, where a speaker's has
+    /// 350 to 400, and an /l/ running into /ɪ/ or /u/ was heard as the
+    /// start of a diphthong: "slid" as "slayed", "blue" as "b-uh-ue".
+    lateral_gap = -0.12, -0.3..=0.1, A;
+    /// How much more loosely the folds are held through nasals, liquids,
+    /// glides and unaccented vowels than on an accented vowel, as a share
+    /// of the voice's tenseness (physical engine); `0` holds them alike
+    /// throughout, as until round 7. At 0.2 the voice gave out a quarter of
+    /// the way through the closure of a /g/ after an unaccented vowel; at
+    /// 0.15 it lasts the closure.
+    sonorant_slack = 0.15, 0.0..=0.4, A;
+    /// How much the folds slacken over the last 150 ms before a pause, as
+    /// a share of their tenseness there (physical engine).
+    final_slack = 0.2, 0.0..=0.4, A;
 }
 
 impl Default for Tuning {
@@ -518,10 +540,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_four_and_forty_one() {
+    fn two_passes_of_thirty_seven_and_forty_one() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (34, 41));
+        assert_eq!((a, b), (37, 41));
     }
 
     #[test]
@@ -529,7 +551,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 6);
+        assert_eq!(c, 7);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

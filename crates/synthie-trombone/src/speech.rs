@@ -888,9 +888,18 @@ fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
     let mut word = String::new();
     let mut chars = text.chars().peekable();
 
-    let flush = |word: &mut String, out: &mut Vec<Token>| {
+    // Function words with a weak form, and where their phonemes start.
+    let mut weak: Vec<(usize, &'static WeakForm)> = Vec::new();
+    let mut before = String::new();
+    let mut flush = |word: &mut String, out: &mut Vec<Token>| {
         if !word.is_empty() {
+            if let Some(form) = WEAK_FORMS.iter().find(|f| f.word == word.as_str())
+                && !(form.noun && DETERMINERS.contains(&before.as_str()))
+            {
+                weak.push((out.len(), form));
+            }
             push_word(word, lex, out);
+            before.clone_from(word);
             word.clear();
         }
     };
@@ -955,7 +964,86 @@ fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
     if matches!(out.last(), Some(Token::WordBreak)) {
         out.pop();
     }
+    reduce_function_words(&mut out, &weak);
     out
+}
+
+/// A function word that is said in a weak form in running speech.
+struct WeakForm {
+    word: &'static str,
+    /// Its phonemes before a consonant.
+    weak: &'static [Phoneme],
+    /// Its phonemes before a vowel, where they differ.
+    before_vowel: Option<&'static [Phoneme]>,
+    /// Also a noun ("a can"): full after a determiner.
+    noun: bool,
+}
+
+/// Weak forms of function words, used when another word follows in the
+/// same phrase ("to send", "bread and butter", "what he can do"); at the
+/// end of a phrase the word keeps the dictionary's full form ("who is it
+/// for?", "yes I can"). A speaker says these with a schwa nearly always;
+/// said in full, every one of them was a vowel the recognizer marked wrong.
+const WEAK_FORMS: &[WeakForm] = {
+    use Phoneme as P;
+    const fn form(word: &'static str, weak: &'static [Phoneme]) -> WeakForm {
+        WeakForm {
+            word,
+            weak,
+            before_vowel: None,
+            noun: false,
+        }
+    }
+    &[
+        WeakForm {
+            before_vowel: Some(&[P::T, P::Uh]),
+            ..form("to", &[P::T, P::Ax])
+        },
+        WeakForm {
+            // "The apple": /ðɪ/ before a vowel, /ðə/ (the dictionary's)
+            // before a consonant.
+            before_vowel: Some(&[P::Dh, P::Ih]),
+            ..form("the", &[P::Dh, P::Ax])
+        },
+        form("was", &[P::W, P::Ah, P::Z]),
+        form("has", &[P::Hh, P::Ax, P::Z]),
+        form("had", &[P::Hh, P::Ax, P::D]),
+        form("than", &[P::Dh, P::Ax, P::N]),
+        form("your", &[P::Y, P::Uh, P::R]),
+    ]
+};
+
+/// Words after which "can" is the noun.
+const DETERMINERS: &[&str] = &[
+    "a", "the", "this", "that", "my", "his", "her", "your", "our", "tin",
+];
+
+/// Put the weak form of every function word in `weak` (where it starts in
+/// `tokens`, and which word) that is followed by another word in its
+/// phrase.
+fn reduce_function_words(tokens: &mut Vec<Token>, weak: &[(usize, &'static WeakForm)]) {
+    // Last first, so that the places of the earlier ones still hold.
+    for &(start, form) in weak.iter().rev() {
+        let len = tokens[start..]
+            .iter()
+            .take_while(|t| matches!(t, Token::Phone { .. }))
+            .count();
+        let next = match tokens.get(start + len..start + len + 2) {
+            Some([Token::WordBreak, Token::Phone { phoneme, .. }]) => *phoneme,
+            _ => continue,
+        };
+        let phones = match form.before_vowel {
+            Some(v) if is_vowel(next) => v,
+            _ => form.weak,
+        };
+        tokens.splice(
+            start..start + len,
+            phones.iter().map(|&phoneme| Token::Phone {
+                phoneme,
+                stressed: false,
+            }),
+        );
+    }
 }
 
 /// An `[ARPAbet]` span. A `1` after a vowel marks the accent; with no `1`
@@ -1127,6 +1215,7 @@ fn is_lax(p: Phoneme) -> bool {
 fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
+        Phoneme::Ih if stressed => timing.ih_length * timing.vowel_hold,
         _ if is_lax(p) && stressed => timing.lax_length * timing.vowel_hold,
         _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
         P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
@@ -1375,6 +1464,9 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        for &(a, b, _) in &phrases {
+            relax_the_folds(&mut drafts[a..b], tense, &timing);
+        }
         for &(a, b, brk) in &phrases {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
@@ -1457,6 +1549,41 @@ fn assimilate_place(drafts: &mut [Draft]) {
                 own.index = dental.index;
             }
         }
+    }
+}
+
+/// How firmly the folds are held together through a phrase (physical
+/// engine). A speaker presses them fully only on the accented vowels:
+/// through nasals, liquids and glides, and through unaccented vowels, they
+/// are held more loosely (a longer open phase, a steeper spectrum, the
+/// first harmonic a few dB stronger against the second), and they slacken
+/// over the last 150 ms before a pause. Held at the accented vowel's
+/// firmness throughout, every voiced sound had the same bright buzz.
+fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
+    /// The stretch before a pause over which the folds slacken, seconds.
+    const FINAL: f32 = 0.15;
+    for d in phrase.iter_mut() {
+        let sonorant = matches!(d.phoneme.manner(), Manner::Nasal | Manner::Approximant);
+        let unaccented = d.vowel && d.accent <= 0.0;
+        if d.voiced && d.tenseness.is_none() && (sonorant || unaccented) {
+            d.tenseness = Some(tense * (1.0 - timing.sonorant_slack));
+        }
+    }
+    let mut left = FINAL;
+    for d in phrase.iter_mut().rev() {
+        if d.phoneme == Phoneme::Sil {
+            continue;
+        }
+        if left <= 0.0 {
+            break;
+        }
+        if d.voiced {
+            // Slackest at the very end, firm again 150 ms before it.
+            let share = (left - 0.5 * d.duration.min(left)).max(0.0) / FINAL;
+            let now = d.tenseness.unwrap_or(tense);
+            d.tenseness = Some(now * (1.0 - timing.final_slack * share));
+        }
+        left -= d.duration;
     }
 }
 
@@ -1677,7 +1804,15 @@ fn expand(
     timing: &Tuning,
     out: &mut Vec<Draft>,
 ) {
-    let a = p.articulation();
+    let mut a = p.articulation();
+    if context.is_some()
+        && p == Phoneme::L
+        && let Some(c) = &mut a.constriction
+    {
+        // The physical /l/ is made closer than the classic one.
+        c.diameter += timing.lateral_gap;
+    }
+    let a = a;
     let mut dur = base_duration(p, stressed, timing, context.is_some()) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {

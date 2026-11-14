@@ -299,10 +299,11 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
 #[test]
 fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
     // A stressed lax vowel is 18 % shorter than a tense one, an unstressed
-    // one 38 % ("sells" against "of"); until round 6 both were 38 %. The
-    // held part of a stressed one never falls under `Tuning::lax_floor`,
-    // however fast the speech.
-    let ratio = |stress: &str, settings: &VoiceSettings| {
+    // one 38 % ("sells" against "of"); until round 6 both were 38 %. A
+    // stressed /ɪ/ keeps the short length (`Tuning::ih_length`: "slid" was
+    // heard as "slayed" at the longer one). The held part of a stressed one
+    // never falls under `Tuning::lax_floor`, however fast the speech.
+    let ratio = |lax: Phoneme, stress: &str, settings: &VoiceSettings| {
         let len = |v: Phoneme| {
             Utterance::from_text(
                 &format!("[S {}{stress} L] [AX0]", v.symbol()),
@@ -314,16 +315,20 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
             .map(|s| s.duration)
             .sum::<f32>()
         };
-        len(Phoneme::Ih) / len(Phoneme::Iy)
+        len(lax) / len(Phoneme::Iy)
     };
     let mut v = physical();
-    let (stressed, unstressed) = (ratio("1", &v), ratio("0", &v));
+    let (stressed, unstressed) = (ratio(Phoneme::Eh, "1", &v), ratio(Phoneme::Eh, "0", &v));
+    let ih = ratio(Phoneme::Ih, "1", &v);
     v.tuning.lax_length = 0.62;
-    let as_short = ratio("1", &v);
-    println!("IH/IY stressed {stressed:.3} (at 0.62: {as_short:.3}), unstressed {unstressed:.3}");
+    let as_short = ratio(Phoneme::Eh, "1", &v);
+    println!(
+        "EH/IY stressed {stressed:.3} (at 0.62: {as_short:.3}), unstressed {unstressed:.3}; IH/IY stressed {ih:.3}"
+    );
     assert!((0.80..=0.84).contains(&stressed), "{stressed}");
     assert!((0.60..=0.64).contains(&unstressed), "{unstressed}");
     assert!((0.60..=0.64).contains(&as_short), "{as_short}");
+    assert!((0.63..=0.67).contains(&ih), "{ih}");
     // Fast speech: the floor holds every stressed lax nucleus.
     for rate in [1.0f32, 1.4, 2.0] {
         let mut fast = physical();
