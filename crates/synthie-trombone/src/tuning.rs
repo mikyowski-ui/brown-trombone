@@ -512,9 +512,11 @@ tuning! {
     /// glides and unaccented vowels than on an accented vowel, as a share
     /// of the voice's tenseness (physical engine); `0` holds them alike
     /// throughout, as until round 7. At 0.2 the voice gave out a quarter of
-    /// the way through the closure of a /g/ after an unaccented vowel; at
-    /// 0.15 it lasts the closure.
-    sonorant_slack = 0.15, 0.0..=0.4, A;
+    /// the way through the closure of a /g/ after an unaccented vowel, and
+    /// at 0.15 the child voice's folds (290 Hz) fell out of the range they
+    /// can sing and were handed to the pulse source with a click 14 times
+    /// the vowel's peak; at 0.12 neither happens in any preset.
+    sonorant_slack = 0.12, 0.0..=0.4, A;
     /// How much the folds slacken over the last 150 ms before a pause, as
     /// a share of their tenseness there (physical engine).
     final_slack = 0.2, 0.0..=0.4, A;
