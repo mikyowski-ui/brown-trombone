@@ -356,8 +356,9 @@ fn fricative(p: Phoneme) -> (f32, f32) {
 
 #[test]
 fn sibilants_are_loud_and_the_others_faint() {
-    // /s/ and /sh/ sit 10-20 dB under a vowel; /f/ and /th/ another
-    // 10-20 dB down. /s/ is brighter than /sh/.
+    // /s/ and /sh/ sit 4-22 dB under a vowel; /f/ and /th/ at least 8 to
+    // 10 dB further down (the LibriSpeech reader's /f/ is 10.5 dB under his
+    // /s/ in sentences). /s/ is brighter than /sh/.
     let vowel = {
         let mut t = voice(110.0, 0.65, 1.0);
         render(&mut t, 0.6);
@@ -385,7 +386,11 @@ fn sibilants_are_loud_and_the_others_faint() {
         db(sh / vowel)
     );
     assert!(db(s / f) >= 10.0 && db(s / th) >= 8.0);
-    assert!(db(f / vowel) < -20.0 && db(th / vowel) < -18.0);
+    // The reader's /f/ is 16 dB under the louder vowel beside it in
+    // sentences; held as a steady sound behind full lung pressure the
+    // engine's is 15 dB under (it was 27 dB under, and taken for /p/, with
+    // no source where its jet strikes the teeth and the lip).
+    assert!(db(f / vowel) < -13.0 && db(th / vowel) < -18.0);
     assert!(s_hz > sh_hz + 1500.0, "s {s_hz} Hz, sh {sh_hz} Hz");
 }
 

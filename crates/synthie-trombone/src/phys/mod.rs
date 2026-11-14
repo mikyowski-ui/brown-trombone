@@ -173,6 +173,12 @@ const JET_CORE: f32 = 8.0;
 /// Seconds over which the jaw raises the lower incisors to the upper ones,
 /// or lowers them again (see [`Phys::set_teeth`]).
 const TEETH_TIME: f32 = 0.02;
+/// Seconds over which the edge source of /f v θ ð/ comes and goes with
+/// the lip or the tongue tip at the teeth (see [`Phys::set_edge`]).
+const EDGE_TIME: f32 = 0.02;
+/// First cell a jet that strikes the edges of the upper incisors from in
+/// front of the tongue can leave: the tongue tip's gap at the teeth.
+const EDGE_FROM: usize = TEETH_AT - 2;
 
 /// When a closure opens while the voice is wanted, the air the walls took
 /// up behind it is let go for this long, seconds, with this time constant,
@@ -304,6 +310,9 @@ pub(crate) struct Gauge {
     pub u_nose: f32,
     /// Flow radiated through the skin.
     pub u_skin: f32,
+    /// Flow the edge source of /f v θ ð/ radiates as (see
+    /// [`Phys::set_edge`]).
+    pub u_edge: f32,
     /// Noise pressure of the strongest jet in the mouth, dyn/cm².
     pub jet: f32,
     /// Speed of that jet, cm/s, and the cell it leaves.
@@ -413,6 +422,15 @@ pub(crate) struct Phys {
     /// Gap between the incisors when they are together, articulation
     /// diameter units (see `Tuning::sibilant_teeth`).
     teeth_gap: f32,
+    /// Strength of the edge source (see [`Phys::set_edge`]) at the start
+    /// and end of the block, and where it is going; and its strength for a
+    /// dental and a labiodental gap (`Tuning::dental_edge`,
+    /// `Tuning::labial_edge`).
+    edge0: f32,
+    edge1: f32,
+    edge_target: f32,
+    dental_edge: f32,
+    labial_edge: f32,
     /// A measuring pressure source, dyn/cm², in series at joint `probe.0`
     /// (between cells `probe.0 − 1` and `probe.0`) for the next tick only.
     probe: (usize, f32),
@@ -487,6 +505,11 @@ impl Phys {
             teeth1: 0.0,
             teeth_target: 0.0,
             teeth_gap: crate::Tuning::DEFAULT.sibilant_teeth,
+            edge0: 0.0,
+            edge1: 0.0,
+            edge_target: 0.0,
+            dental_edge: crate::Tuning::DEFAULT.dental_edge,
+            labial_edge: crate::Tuning::DEFAULT.labial_edge,
             probe: (0, 0.0),
             gauge: Gauge::default(),
         };
@@ -540,6 +563,8 @@ impl Phys {
     pub(crate) fn set_tuning(&mut self, tuning: &crate::Tuning) {
         self.nasal_port = tuning.nasal_port;
         self.teeth_gap = tuning.sibilant_teeth;
+        self.dental_edge = tuning.dental_edge;
+        self.labial_edge = tuning.labial_edge;
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
     }
@@ -732,6 +757,28 @@ impl Phys {
         self.teeth_target = share.clamp(0.0, 1.0);
     }
 
+    /// Whether a gap meant to hiss is held at the edges of the upper
+    /// incisors, `(dental, labiodental)`, each `0..1` (see
+    /// [`Tract::edges`](crate::tract::Tract::edges)). The jet of /f v/
+    /// leaves the gap between the lower lip and the upper teeth and strikes
+    /// their edges and the upper lip at once; that of /θ ð/ the edges of
+    /// the teeth in front of the tongue tip. An obstacle in a jet makes
+    /// the sound of the force the eddies put on it, a dipole (Curle 1955;
+    /// Shadle 1985), and with nothing in front of these edges but open air
+    /// it radiates straight out, not through the gap behind it: the noise
+    /// of the free jet, a pressure in series with the narrow gap, drives
+    /// only as much flow as the gap's inertance lets through, some 20 dB
+    /// less. The force is its noise pressure over the face it strikes, and
+    /// a force `F` radiates as a flow `F/ρc` would; it scales with the jet
+    /// as the free jet's noise does (`Tuning::labial_edge`,
+    /// `Tuning::dental_edge` are how much face the eddies load, in areas
+    /// of the gap). It adds nothing to the flow through the gap. Call
+    /// before [`begin_block`](Self::begin_block).
+    pub(crate) fn set_edge(&mut self, (dental, labial): (f32, f32)) {
+        self.edge_target =
+            dental.clamp(0.0, 1.0) * self.dental_edge + labial.clamp(0.0, 1.0) * self.labial_edge;
+    }
+
     /// How fast each cell's diameter will be changing at the end of the
     /// coming block, diameter units per second (the articulators' own
     /// speeds). Call before [`begin_block`](Self::begin_block).
@@ -754,6 +801,8 @@ impl Phys {
         self.m0 = self.m1;
         self.teeth0 = self.teeth1;
         self.teeth1 += (self.teeth_target - self.teeth1) * (block_dt / TEETH_TIME).min(1.0);
+        self.edge0 = self.edge1;
+        self.edge1 += (self.edge_target - self.edge1) * (block_dt / EDGE_TIME).min(1.0);
         for (i, &d) in diameter.iter().enumerate() {
             self.a1[i] = self.area_of(d);
             self.d1[i] = d;
@@ -774,6 +823,8 @@ impl Phys {
             self.d0 = self.d1;
             self.teeth1 = self.teeth_target;
             self.teeth0 = self.teeth1;
+            self.edge1 = self.edge_target;
+            self.edge0 = self.edge1;
             self.m0 = [0.0; N];
             self.m1 = [0.0; N];
             for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
@@ -935,6 +986,7 @@ impl Phys {
         );
         let mut sealed = false;
         let teeth = self.teeth0 + (self.teeth1 - self.teeth0) * lambda;
+        let edge = self.edge0 + (self.edge1 - self.edge0) * lambda;
         // The lip opening, as the lips alone make it (the teeth are not
         // the lips rounding).
         let mut lip_opening = f32::INFINITY;
@@ -1131,6 +1183,28 @@ impl Phys {
             u_skin += self.wall_commit(i, s.p1);
         }
         self.probe.1 = 0.0;
+        // The jet of /f v θ ð/ on the edges of the teeth and the lip: out
+        // of the narrowest gap from the tongue tip's at the teeth to the
+        // lips, radiated as the flow its force amounts to.
+        let mut u_edge = 0.0;
+        if self.noisy && edge > 0.0 {
+            let mut c = EDGE_FROM;
+            for k in EDGE_FROM + 1..N {
+                if inv[k] > inv[c] {
+                    c = k;
+                }
+            }
+            let p = jet_noise(
+                self.flow[c + 1],
+                inv[c],
+                0.0,
+                self.turbulence.jet_eff,
+                self.v_max,
+            );
+            if p > 0.0 {
+                u_edge = self.turbulence.edge_hiss() * edge * p * INV_RHO_C / inv[c];
+            }
+        }
         self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
         self.flow_sum[N] += u_lips;
         self.summed += 1.0;
@@ -1144,10 +1218,11 @@ impl Phys {
         self.gauge.u_lips = u_lips;
         self.gauge.u_nose = u_nose;
         self.gauge.u_skin = u_skin;
+        self.gauge.u_edge = u_edge;
         self.gauge.jet = jet.0;
         self.gauge.jet_cell = jet.1;
         self.gauge.jet_speed = (self.flow[jet.1 + 1] * inv[jet.1]).max(0.0);
-        u_lips + u_nose + u_skin
+        u_lips + u_nose + u_skin + u_edge
     }
 
     /// Advance the active widening of the pharynx by one tick; returns the

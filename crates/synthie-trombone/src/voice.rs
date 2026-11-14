@@ -103,6 +103,10 @@ pub struct Gauges {
     pub nose_flow: f32,
     /// Flow radiated through the walls of the throat and cheeks, cm³/s.
     pub skin_flow: f32,
+    /// Flow the jet of /f v θ ð/ radiates as where it strikes the edges of
+    /// the upper teeth and the lip, cm³/s (a dipole's sound, as the flow
+    /// that would make it; it does not pass through the tract).
+    pub edge_flow: f32,
     /// Area between the vocal folds, cm².
     pub glottal_area: f32,
     /// The part of [`glottal_area`](Self::glottal_area) between the
@@ -831,6 +835,7 @@ impl Trombone {
             lip_flow: g.u_lips,
             nose_flow: g.u_nose,
             skin_flow: g.u_skin,
+            edge_flow: g.u_edge,
             glottal_area: self.glottal_area,
             edge_area: self.source.edge_area,
             sounding: self.source.sounding().map(|kind| match kind {
@@ -875,6 +880,7 @@ impl Trombone {
             self.tract.update_block(dt);
         }
         self.phys.set_teeth(self.tract.teeth());
+        self.phys.set_edge(self.tract.edges());
         self.phys
             .snap(&self.tract.diameter, self.tract.velum_openness());
     }
@@ -1046,6 +1052,7 @@ impl Trombone {
             if self.engine == Engine::Physical {
                 self.phys.set_motion(self.tract.velocity());
                 self.phys.set_teeth(self.tract.teeth());
+                self.phys.set_edge(self.tract.edges());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),

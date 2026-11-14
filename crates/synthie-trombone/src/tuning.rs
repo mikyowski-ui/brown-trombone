@@ -1,4 +1,4 @@
-//! [`Tuning`]: the seventy-four numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the seventy-nine numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -428,6 +428,42 @@ tuning! {
     /// rising, the jaw and the blade under it drop), it stands at 1.45 to
     /// 1.55 kHz from the start of the murmur.
     nasal_cavity_rate = 60.0, 10.0..=70.0, B;
+
+    // ----- A and B: the weak fricatives and the end of a sibilant -------
+
+    /// Strength of the sound the jet of /f v/ makes where it strikes the
+    /// edges of the upper incisors and the upper lip (physical engine): the
+    /// face its eddies load, in areas of the lip gap (see `Phys::set_edge`).
+    /// At 0 the hiss of /f/ was the free jet's alone, 27 to 36 dB under the
+    /// vowel beside it in sentences, where the LibriSpeech reader's is 16
+    /// dB under, and Whisper heard "makes fine" as "makes pine" (7 of 24
+    /// /f/ words right in short sentences). At 3 a steady /f/ is 10 dB
+    /// under a steady /s/ (the reader's /f/ is 10.5 dB under his /s/), 11
+    /// dB louder than the free jet alone; in sentences it is some 22 dB
+    /// under its vowel, its pressure still building, and flat from 2 to 7
+    /// kHz. At 7 it matched the reader against the vowel, but a steady /f/
+    /// was only 3 dB under /s/ and, once the hand-over out of /s/ kept the
+    /// pressure up, as loud as the /s/ before it.
+    labial_edge = 3.0, 0.0..=40.0, A;
+    /// The same for the jet of /θ ð/ out of the gap between the tongue tip
+    /// and the edges of the upper incisors. Held low: the reader's /ð/ has
+    /// some 9 dB more hiss above 2 kHz than the engine's without it, but
+    /// at 5 to 7 the recognizer starts to hear /ð/ as /z/; at 3 it hears
+    /// /ð/ as /l/ less often and nothing else changes beyond noise.
+    dental_edge = 3.0, 0.0..=40.0, A;
+    /// Out of /s z ʃ ʒ/ into /f v/: how long before the tongue would let go
+    /// of the sibilant (`lead` before its end) the lower lip sets off for
+    /// the teeth and the tongue starts to let go, s (physical engine).
+    labial_lead = 0.04, 0.0..=0.08, B;
+    /// How long the lower lip then takes to come up to the teeth, s: its
+    /// target moves from the lip's opening to the gap of /f v/ over this
+    /// time, a slower gesture than a lip closing on its own.
+    labial_closing = 0.048, 0.01..=0.08, B;
+    /// How long the tongue takes to let go of the sibilant meanwhile, s:
+    /// its gap widens steadily to just past the widest that hisses, and
+    /// only then is let go altogether. 0 switches the hand-over off: the
+    /// tongue lets go at once and the lip shuts behind it.
+    sibilant_exit = 0.06, 0.0..=0.1, B;
 }
 
 impl Default for Tuning {
@@ -450,10 +486,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_one_and_thirty_six() {
+    fn two_passes_of_thirty_four_and_forty_one() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (32, 38));
+        assert_eq!((a, b), (34, 41));
     }
 
     #[test]
