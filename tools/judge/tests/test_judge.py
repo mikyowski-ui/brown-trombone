@@ -40,9 +40,9 @@ def test_params_file_matches_brief():
     # Every field of the engine's `Tuning`, in its passes (a: how sounds are
     # made, b: how they follow one another, c: vowel lengths).
     assert sum(p["pass"] == "a" for p in params.values()) == 45
-    assert sum(p["pass"] == "b" for p in params.values()) == 43
+    assert sum(p["pass"] == "b" for p in params.values()) == 44
     assert sum(p["pass"] == "c" for p in params.values()) == 8
-    assert len(params) == 96
+    assert len(params) == 97
     # The twelve the classic engine reads as well are not tuned by default.
     shared = {n for n, p in params.items() if p.get("classic")}
     assert len(shared) == 12 and {"vowel_length", "stop_length", "aspiration"} <= shared

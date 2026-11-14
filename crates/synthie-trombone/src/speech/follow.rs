@@ -109,6 +109,9 @@ pub struct FollowOptions {
     /// speed: a phone the schedule makes shorter than the rules do has
     /// them moved faster in proportion, up to this (`1` never).
     pub max_speed: f32,
+    /// Shortest a phone may be made, a share of its rule duration; `0`
+    /// gives every phone the schedule's duration.
+    pub shortest: f32,
 }
 
 impl FollowOptions {
@@ -124,6 +127,7 @@ impl FollowOptions {
             formant_range: t.follow_formant_range,
             tract_length,
             max_speed: t.follow_speed_max,
+            shortest: t.follow_shortest,
         }
     }
 
@@ -134,6 +138,7 @@ impl FollowOptions {
             tenseness_range: (1.0, 1.0),
             formant_range: 0.0,
             max_speed: 1.0,
+            shortest: 0.0,
             ..Self::new(pitch, &Tuning::DEFAULT, 1.0)
         }
     }
@@ -591,7 +596,8 @@ impl Utterance {
                 }
             } else {
                 let floor: Vec<f32> = self.segments[i..j].iter().map(floor_of).collect();
-                let want = target[p as usize];
+                let had: f32 = rule.iter().sum();
+                let want = target[p as usize].max(options.shortest * had);
                 let least: f32 = floor.iter().sum();
                 if want < least {
                     report.too_short += 1;
@@ -599,7 +605,7 @@ impl Utterance {
                 }
                 let got = share_out(&rule, &floor, want);
                 // Shorter than the rules: the articulators get there faster.
-                let (had, has) = (rule.iter().sum::<f32>(), got.iter().sum::<f32>());
+                let has: f32 = got.iter().sum();
                 if options.max_speed > 1.0 && has > 0.0 && had > SPED_UP * has {
                     let f = (had / has).min(options.max_speed);
                     speed[i..j].fill(f);
@@ -1067,7 +1073,9 @@ mod tests {
             t += d;
         }
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
-        let r = u.follow_with(&s, &everything(1.0)).unwrap();
+        let mut options = everything(1.0);
+        options.shortest = 0.0;
+        let r = u.follow_with(&s, &options).unwrap();
         let max = Tuning::DEFAULT.follow_speed_max;
         for i in 0..u.segments.len() {
             let want = match u.phone_of(i) {
@@ -1079,6 +1087,19 @@ mod tests {
             assert!((got - want).abs() < 0.02, "segment {i}: {got} {want}");
         }
         assert!(r.sped == 2 && (r.fastest - max).abs() < 1e-6);
+        // With a floor at 70 % of the rules the third-length phone gets 70 %
+        // of its rule duration, and the speed that goes with it.
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let mut options = everything(1.0);
+        options.shortest = 0.7;
+        u.follow_with(&s, &options).unwrap();
+        let spans = u.phone_spans();
+        let d = spans[4].1 - spans[4].0;
+        assert!((d / (rule[4].1 - rule[4].0) - 0.7).abs() < 0.01, "{d}");
+        let i = (0..u.segments.len())
+            .find(|&i| u.phone_of(i) == Some(4))
+            .unwrap();
+        assert!((u.followed.speed_of(i) - 1.0 / 0.7).abs() < 0.02);
         // and never with the speed left alone
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
         u.follow(&s, PitchMode::Speaker).unwrap();

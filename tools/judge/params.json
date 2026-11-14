@@ -94,5 +94,6 @@
   "follow_tenseness_low": {"lo": 0.7, "hi": 1, "default": 0.9, "pass": "a"},
   "follow_tenseness_high": {"lo": 1, "hi": 1.4, "default": 1.15, "pass": "a"},
   "follow_speed_max": {"lo": 1, "hi": 2.5, "default": 1.6, "pass": "b"},
+  "follow_shortest": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"},
   "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"}
 }

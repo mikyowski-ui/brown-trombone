@@ -1,4 +1,4 @@
-//! [`Tuning`]: the ninety-six numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the ninety-seven numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: ninety-six numbers in three
+        /// How a voice turns sounds into speech: ninety-seven numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -593,6 +593,18 @@ tuning! {
     /// a followed schedule makes shorter than the rules do, a multiple of
     /// their speed (see `Trombone::set_articulation_boost`).
     follow_speed_max = 1.6, 1.0..=2.5, B;
+    /// Shortest a followed schedule may make a phone, a share of its rule
+    /// duration (physical engine); `0` follows the schedule however short.
+    /// The rule durations are about what this tract needs to reach its
+    /// shapes. On the 16 LibriSpeech anchors with the reader's own timing
+    /// (14 % faster than the rules, a third of his phones under 70 % of
+    /// theirs) the phoneme error was 25.0 % at `0`, 21.7 % at 0.7 and
+    /// 19.4 % at 0.8 (the rules: 18.3 %), Whisper's words 74.6, 83.3 and
+    /// 85.6 % (the rules: 81.3 %); the naturalness distance to him 0.925,
+    /// 0.884 and 0.934, with the warped spectral distance 15.3, 14.9 and
+    /// 15.2 dB. A /d/ he runs into the next sound ("and the", "heard
+    /// there") was the one most often lost.
+    follow_shortest = 0.7, 0.0..=1.0, B;
     /// How far a followed schedule may move a vowel's F1 and F2 from the
     /// voice's own, a share either way (see `speech::PhoneSpan::formants`).
     follow_formant_range = 0.15, 0.0..=0.3, C;
@@ -618,10 +630,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_forty_five_and_forty_three() {
+    fn two_passes_of_forty_five_and_forty_four() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (45, 43));
+        assert_eq!((a, b), (45, 44));
     }
 
     #[test]

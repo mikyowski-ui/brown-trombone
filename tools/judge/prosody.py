@@ -864,12 +864,17 @@ def describe_text(sched: dict) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+#: What ``say --match-prosody`` takes from a schedule besides its timing,
+#: pitch and breath, each of which ``render`` can leave out.
+FOLLOWED = ("voice", "tenseness", "formants", "speed")
+
+
 def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str = "deep",
-           follow: bool = True, kick: bool = True) -> dict:  # fmt: skip
+           follow: bool = True, kick: bool = True, off: tuple[str, ...] = ()) -> dict:  # fmt: skip
     """Speak a schedule (or, with ``follow=False``, its text by the rules)
     with ``bin/say``; ``kick=False`` leaves out the engine's pitch kick
-    after voiceless consonants. Returns the phone spans of the output and
-    what ``say`` printed."""
+    after voiceless consonants, and ``off`` the parts of ``FOLLOWED`` named.
+    Returns the phone spans of the output and what ``say`` printed."""
     if isinstance(schedule, dict):
         path = Path(out).with_suffix(".schedule.json")
         path.write_text(json.dumps(schedule), encoding="utf-8")
@@ -880,6 +885,10 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
     cmd = [str(say_bin()), "--engine", "physical", "--voice", voice, "--out", str(out), "--phone-times", str(times)]
     if follow:
         cmd += ["--match-prosody", str(path), "--prosody-pitch", pitch, "--prosody-kick", "on" if kick else "off"]
+        for part in off:
+            if part not in FOLLOWED:
+                raise ValueError(f"no such part of a schedule to leave out: {part!r}")
+            cmd += [f"--prosody-{part}", "off"]
     res = subprocess.run(cmd + [sched["text"]], capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
     rec = json.loads(times.read_text())
     spans = np.array(rec["spans"], float)
