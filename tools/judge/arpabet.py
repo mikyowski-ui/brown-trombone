@@ -299,8 +299,9 @@ def parse_engine_line(line: str) -> list[str]:
     ``say`` prints one symbol per *segment*: diphthongs and affricates are
     two segments, a voiceless stop before a vowel or approximant gets an
     extra aspiration segment, a stop before a pause (physical engine) an
-    extra release segment, a /DH/ after a pause (physical engine) a dental
-    closure first, and pauses are ``SIL``.  This undoes that, so
+    extra release segment, a /B G/ released into an /L R/ of its own word
+    (physical engine) a release segment, a /DH/ after a pause (physical
+    engine) a dental closure first, and pauses are ``SIL``.  This undoes that, so
     ``AA P P AA B AY AY T`` reads ``AA P AA B AY T`` and
     ``SIL DH DH AX K AE T T SIL`` reads ``DH AX K AE T``.  A line that
     already has one symbol per phoneme passes through unchanged.
@@ -323,6 +324,8 @@ def parse_engine_line(line: str) -> list[str]:
             i += 2
         elif nxt == s and s in ("P", "T", "K") and (after in VOCALIC or after in APPROXIMANTS):
             i += 2
+        elif nxt == s and s in ("B", "G") and after in ("L", "R"):
+            i += 2  # a voiced stop and its release into a liquid
         elif nxt == s and s in STOPS and i + 2 <= len(segs) and after is None:
             i += 2  # a stop and its release before a pause
         elif nxt == s and s == "DH" and before is None:

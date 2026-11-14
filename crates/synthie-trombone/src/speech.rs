@@ -162,7 +162,21 @@ pub struct Utterance {
     labial_lead: f32,
     labial_closing: f32,
     sibilant_exit: f32,
+    /// Which phone of the text each segment realises (its place among the
+    /// [`Token::Phone`]s, [`NO_PHONE`] for a pause); empty for hand-made
+    /// segments.
+    phones: Vec<u32>,
+    /// A pitch track the [`Speaker`] follows in place of the segments' own
+    /// pitch: Hz every `pitch_hop` seconds from the start of the utterance,
+    /// on the clock of the segments' durations (see
+    /// [`Utterance::set_pitch_track`]). Empty: the segments' pitch.
+    pitch_track: Vec<f32>,
+    pitch_hop: f32,
 }
+
+/// The phone of a pause, in [`Utterance`]'s record of which phone each
+/// segment realises.
+const NO_PHONE: u32 = u32::MAX;
 
 /// A phoneme with its lexical context, the output of [`phonemize`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,6 +229,9 @@ impl Utterance {
             labial_lead: 0.0,
             labial_closing: 0.0,
             sibilant_exit: 0.0,
+            phones: Vec::new(),
+            pitch_track: Vec::new(),
+            pitch_hop: 0.0,
         }
     }
 
@@ -228,6 +245,59 @@ impl Utterance {
     #[must_use]
     pub fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    /// The segments, to set their durations, pitch or breath by hand (see
+    /// [`Utterance::follow`]). A voiceless stop's closure is still held for
+    /// [`Tuning::closure_floor`] however short it is made.
+    pub fn segments_mut(&mut self) -> &mut [Segment] {
+        &mut self.segments
+    }
+
+    /// Which phone of the text segment `index` realises: its place among
+    /// the [`Token::Phone`]s the utterance was compiled from (a stop's
+    /// closure, release and breath, a diphthong's two parts and a lax
+    /// vowel's glide all belong to one phone). `None` for a pause, and for
+    /// hand-made segments.
+    #[must_use]
+    pub fn phone_of(&self, index: usize) -> Option<usize> {
+        self.phones
+            .get(index)
+            .filter(|&&p| p != NO_PHONE)
+            .map(|&p| p as usize)
+    }
+
+    /// Give the utterance a pitch track, Hz every `hop` seconds from its
+    /// start, which the [`Speaker`] follows in place of each segment's own
+    /// `pitch` (a segment's [`Gesture::kick`] still adds to it). Time on
+    /// the track is the time the segments' durations add up to, so a
+    /// closure held past its segment's end (see [`Tuning::closure_floor`])
+    /// does not shift it. Past its end the last value holds. An empty track
+    /// (or a `hop` that is not positive) gives the segments their own pitch
+    /// back.
+    pub fn set_pitch_track(&mut self, hop: f32, hz: Vec<f32>) {
+        if hop > 0.0 && hop.is_finite() {
+            self.pitch_track = hz;
+            self.pitch_hop = hop;
+        } else {
+            self.pitch_track = Vec::new();
+            self.pitch_hop = 0.0;
+        }
+    }
+
+    /// The pitch track at `t` seconds (see [`Utterance::set_pitch_track`]).
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    fn track_at(&self, t: f32) -> Option<f32> {
+        let track = &self.pitch_track;
+        let last = track.len().checked_sub(1)?;
+        let x = (t / self.pitch_hop).max(0.0);
+        let i = (x as usize).min(last);
+        let j = (i + 1).min(last);
+        Some(lerp(track[i], track[j], (x - i as f32).min(1.0)))
     }
 
     /// Total length in seconds.
@@ -292,6 +362,9 @@ pub struct Speaker {
     /// The lower lip on its way up to the teeth for an /f v/ after a
     /// sibilant (see [`Speaker::move_lip`]).
     labial: Option<LabialGesture>,
+    /// Where the segment being spoken starts by the durations of those
+    /// before it, seconds: the clock of a pitch track.
+    nominal: f32,
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -378,6 +451,7 @@ impl Speaker {
         self.closure_made = false;
         self.opened_at = 0.0;
         self.labial = None;
+        self.nominal = 0.0;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -509,7 +583,10 @@ impl Speaker {
                 };
                 voice.set_breath(breath);
             }
-            let mut hz = lerp(seg.pitch.0, seg.pitch.1, t);
+            let mut hz = self
+                .utterance
+                .track_at(self.nominal + self.elapsed.min(seg.duration))
+                .unwrap_or_else(|| lerp(seg.pitch.0, seg.pitch.1, t));
             if seg.gesture.kick.abs() > 0.0 && self.clock >= self.kick_from {
                 hz += seg.gesture.kick
                     * exp(-(self.clock - self.kick_from) / self.utterance.kick_time);
@@ -658,6 +735,7 @@ impl Speaker {
             }
             if self.elapsed >= seg.duration && !self.holding_closure(&seg) {
                 self.elapsed -= seg.duration;
+                self.nominal += seg.duration;
                 self.index += 1;
                 self.started = false;
                 if self.index == self.utterance.segments.len() {
@@ -862,8 +940,11 @@ fn widened(a: &Articulation, by: f32) -> Articulation {
 
 // ===== text → tokens ======================================================
 
+mod follow;
 mod lexicon;
 mod rules;
+
+pub use follow::{FollowReport, PhoneSpan, PitchMode, Schedule, ScheduleError};
 
 /// Convert English text (with optional `[ARPAbet]` spans) to tokens.
 ///
@@ -1307,6 +1388,8 @@ struct Draft {
     /// A /b p g k/ released into an /l r/ of its own word (physical
     /// engine; see `release_into_liquids`).
     into_liquid: bool,
+    /// Which phone of the text this draft realises ([`NO_PHONE`]: a pause).
+    phone: u32,
 }
 
 /// Where a phone stands, for the physical engine's voicing rules.
@@ -1380,6 +1463,8 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let mut i = 0;
     // Each phrase's drafts and how it ends, for the breath (physical).
     let mut phrases: Vec<(usize, usize, Break)> = Vec::new();
+    // The place of each phone among the text's.
+    let mut phone: u32 = 0;
 
     // The physical engine shapes its phrases once they have their final
     // lengths (see `intonation`).
@@ -1400,6 +1485,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                     })
                     .is_some_and(|p| is_vowel(p) || p.manner() == Manner::Approximant);
                 let context = physical.then(|| Context::at(tokens, i));
+                let first = drafts.len();
                 expand(
                     phoneme,
                     stressed,
@@ -1409,6 +1495,10 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                     &timing,
                     &mut drafts,
                 );
+                for d in &mut drafts[first..] {
+                    d.phone = phone;
+                }
+                phone += 1;
             }
             Token::WordBreak => {}
             Token::Break(b) => {
@@ -1485,6 +1575,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
 
     // Pitch: start each segment where the last ended.
     let mut segments = Vec::with_capacity(drafts.len() + 1);
+    let phones = drafts.iter().map(|d| d.phone).collect();
     let mut last = prosody.pitch;
     for mut d in drafts {
         if d.vowel || d.phoneme.manner() == Manner::Approximant {
@@ -1520,6 +1611,9 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         labial_lead: if physical { timing.labial_lead } else { 0.0 },
         labial_closing: if physical { timing.labial_closing } else { 0.0 },
         sibilant_exit: if physical { timing.sibilant_exit } else { 0.0 },
+        phones,
+        pitch_track: Vec::new(),
+        pitch_hop: 0.0,
     }
 }
 
@@ -1800,6 +1894,7 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
                 },
                 aspiration: false,
                 into_liquid: false,
+                phone: drafts[k].phone,
                 ..liquid
             };
             let after = &mut drafts[last + 1];
@@ -1824,6 +1919,7 @@ fn silence(duration: f32) -> Draft {
         gesture: Gesture::default(),
         aspiration: false,
         into_liquid: false,
+        phone: NO_PHONE,
     }
 }
 
@@ -1861,6 +1957,7 @@ fn expand(
         gesture: Gesture::default(),
         aspiration: false,
         into_liquid: false,
+        phone: NO_PHONE,
     };
     let Some(context) = context else {
         // The classic engine.
@@ -2261,6 +2358,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         gesture: Gesture::default(),
         aspiration: false,
         into_liquid: false,
+        phone: NO_PHONE,
     }
 }
 
