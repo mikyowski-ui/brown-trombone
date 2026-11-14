@@ -88,6 +88,19 @@ def test_a_closure_is_not_a_pause():
     assert abs(al.start[1] - (0.62 - Pr.LEAD_IN["voiceless_stop"])) < 1e-9
 
 
+def test_a_quiet_breath_between_sonorants_is_a_pause_but_not_beside_a_fricative():
+    al = aligned(["IY", "R", "S", "AA"], [0.1, 0.4, 0.7, 0.8, 1.0])
+    assert Pr.carve_pauses(al, [], 1.1, quiet=[(0.3, 0.42)]) == [0]
+    assert abs(al.end[0] - (0.3 + Pr.TAIL)) < 1e-9
+    al = aligned(["IY", "R", "S", "AA"], [0.1, 0.4, 0.7, 0.8, 1.0])
+    assert Pr.carve_pauses(al, [], 1.1, quiet=[(0.62, 0.75)]) == []
+    db = np.full(100, -10.0)
+    db[30:45] = -40.0
+    voiced = np.ones(100, bool)
+    voiced[28:46] = False
+    assert Pr.quiet_runs(db, voiced) == [(0.3, 0.45)]
+
+
 def test_every_phone_gets_its_floor_from_who_can_spare_it():
     al = aligned(["S", "AX", "N", "D"], [0.0, 0.2, 0.21, 0.24, 0.4])
     Pr.enforce_floor(al)

@@ -37,7 +37,9 @@
 //! recording of that text (one span per phone, a pitch track, a breath
 //! share per phone; see `speech::Schedule`). `--prosody-pitch speaker`
 //! (the default) keeps the speaker's pitch as it is, `--prosody-pitch
-//! voice` moves the contour to the voice's own median. `--phone-times
+//! voice` moves the contour to the voice's own median; `--prosody-kick
+//! off` leaves out the engine's pitch kick after voiceless consonants
+//! (the speaker's contour has his own). `--phone-times
 //! file.json` writes where each phone starts and ends in the output.
 
 #![allow(
@@ -165,6 +167,7 @@ fn main() -> std::io::Result<()> {
     let mut schedule: Option<String> = None;
     let mut pitch_mode = PitchMode::Speaker;
     let mut phone_times: Option<String> = None;
+    let mut kick = true;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -220,6 +223,7 @@ fn main() -> std::io::Result<()> {
                 };
             }
             "--phone-times" => phone_times = Some(value("--phone-times")),
+            "--prosody-kick" => kick = value("--prosody-kick") != "off",
             "--dump-profile" => dump = true,
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
@@ -266,6 +270,13 @@ fn main() -> std::io::Result<()> {
             .follow(&schedule, pitch_mode)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
         followed = Some(report);
+        if !kick {
+            // The speaker's contour has his own rise after voiceless
+            // consonants; this leaves out the engine's on top of it.
+            for s in u.segments_mut() {
+                s.gesture.kick = 0.0;
+            }
+        }
         u
     } else {
         talker.compile(&text)

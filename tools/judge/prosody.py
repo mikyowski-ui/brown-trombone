@@ -71,6 +71,10 @@ PAUSE_MIN, PAUSE_MIN_STOP = 0.12, 0.20
 #: floor, within ``NOISE_MARGIN`` of it, but never closer to the peak than
 #: ``SILENCE_CAP``.
 SILENCE_DB, NOISE_MARGIN, SILENCE_CAP = -35.0, 8.0, -20.0
+#: A quieter stretch, unvoiced and this far under the peak (dB), at least
+#: ``QUIET_MIN`` long between two sonorants, is a pause too (a breath, a
+#: hesitation over the noise of the room).
+QUIET_DB, QUIET_MIN = -24.0, 0.08
 #: A pause shorter than this after the phones around it took their share is
 #: not one, s.
 PAUSE_KEEP = 0.05
@@ -94,6 +98,9 @@ SPIKE_SHARE = {"vowel": 0.29, "diphthong": 0.16, "voiceless_stop": 0.70, "voiced
 PRIOR_SIGMA, PRIOR_SIGMA_MIN = 0.3, 0.015
 #: Weights a unit the model writes as one token is shared out by.
 SHARE_WEIGHT = {"vowel": 1.5, "other": 1.0}
+#: The speaker's pitch counts as moving fast from this many semitones a
+#: second (``pitch_error`` reports those frames apart).
+FAST_PITCH = 40.0
 #: How far the level may be moved from the rules', dB either way.
 LEVEL_RANGE = 4.0
 #: Level of the engine's voice per doubling of its breath share, dB
@@ -327,13 +334,38 @@ def bounds_from_units(
     return Aligned(list(phones), start, end, spike)
 
 
-def carve_pauses(al: Aligned, silences: list[tuple[float, float]], length: float) -> list[int]:
+def carve_pauses(al: Aligned, silences: list[tuple[float, float]], length: float,
+                 quiet: list[tuple[float, float]] = ()) -> list[int]:  # fmt: skip
     """Turn silences between phones into pauses, in place: the phone before
     keeps ``TAIL`` of it, the one after its lead-in (its closure, for a
-    stop). Also trims the first phone's start and the last phone's end to
-    the speech. Returns the phones a pause follows."""
+    stop). ``quiet`` stretches (unvoiced and ``QUIET_DB`` under the peak, a
+    breath or a hesitation over the noise) become pauses too, from
+    ``QUIET_MIN`` on, when both phones around them are sonorants, which
+    are never that quiet. Also trims the first phone's start and the last
+    phone's end to the speech. Returns the phones a pause follows."""
     n = len(al.phones)
-    paused = []
+    paused: list[int] = []
+
+    def carve(r0: float, r1: float, shortest: float, sonorants_only: bool) -> None:
+        if r1 - r0 < shortest:
+            return
+        inside = [k for k in range(n - 1) if r0 - 0.03 <= al.end[k] <= r1 + 0.03 and k not in paused]
+        if not inside:
+            return
+        mid = 0.5 * (r0 + r1)
+        k = min(inside, key=lambda q: abs(al.end[q] - mid))
+        pair = {al.phones[k], al.phones[k + 1]}
+        if sonorants_only and not pair <= SONORANTS:
+            return
+        if pair & STOP_LIKE and r1 - r0 < PAUSE_MIN_STOP:
+            return
+        end_k = max(al.start[k] + FLOOR, min(al.end[k], r0 + TAIL))
+        start_n = min(al.end[k + 1] - FLOOR, max(al.start[k + 1], r1 - head_of(al.phones[k + 1])))
+        if start_n - end_k < PAUSE_KEEP:
+            return
+        al.end[k], al.start[k + 1] = end_k, start_n
+        paused.append(k)
+
     for r0, r1 in silences:
         if r0 <= al.start[0] + 1e-9 and r1 > al.start[0]:
             # Silence the first phone was given: it starts where the sound does.
@@ -342,25 +374,22 @@ def carve_pauses(al: Aligned, silences: list[tuple[float, float]], length: float
         if r1 >= al.end[-1] - 1e-9 and r0 < al.end[-1]:
             al.end[-1] = min(al.end[-1], max(r0 + TAIL, al.start[-1] + FLOOR))
             continue
-        if r1 - r0 < PAUSE_MIN:
-            continue
-        inside = [k for k in range(n - 1) if r0 - 0.03 <= al.end[k] <= r1 + 0.03]
-        if not inside:
-            continue
-        mid = 0.5 * (r0 + r1)
-        k = min(inside, key=lambda q: abs(al.end[q] - mid))
-        stop = {al.phones[k], al.phones[k + 1]} & (VOICELESS_STOPS | VOICED_STOPS)
-        if stop and r1 - r0 < PAUSE_MIN_STOP:
-            continue
-        end_k = max(al.start[k] + FLOOR, min(al.end[k], r0 + TAIL))
-        start_n = min(al.end[k + 1] - FLOOR, max(al.start[k + 1], r1 - head_of(al.phones[k + 1])))
-        if start_n - end_k < PAUSE_KEEP:
-            continue
-        al.end[k], al.start[k + 1] = end_k, start_n
-        paused.append(k)
+        carve(r0, r1, PAUSE_MIN, False)
+    for r0, r1 in quiet:
+        if r0 > al.start[0] and r1 < al.end[-1]:
+            carve(r0, r1, QUIET_MIN, True)
     al.start[0] = max(0.0, al.start[0])
     al.end[-1] = min(length, al.end[-1])
     return sorted(paused)
+
+
+def quiet_runs(db: np.ndarray, voiced: np.ndarray, hop: float = HOP) -> list[tuple[float, float]]:
+    """Unvoiced stretches ``QUIET_DB`` under the peak, as (start, end) s."""
+    import natural as N
+
+    n = min(len(db), len(voiced))
+    mask = (db[:n] < N.peak_level(db) + QUIET_DB) & ~np.asarray(voiced[:n], bool)
+    return [(s * hop, e * hop) for s, e in N.runs(mask)]
 
 
 def enforce_floor(al: Aligned, floor: float = FLOOR) -> None:
@@ -415,12 +444,14 @@ def ctc_score(lp, units: list[tuple[str, ...]], pj) -> float:
 
 
 def align(pj, audio: np.ndarray, phones: list[str], lp=None, db: np.ndarray | None = None,
-          rule_durations: np.ndarray | None = None) -> tuple[Aligned, list[int]]:  # fmt: skip
+          rule_durations: np.ndarray | None = None,
+          voiced: np.ndarray | None = None) -> tuple[Aligned, list[int]]:  # fmt: skip
     """Force-align ``phones`` (the engine's) to ``audio``: every phone a
     stretch, pauses carved out of the silences; with ``rule_durations``
     (the engine's for the same phones) the boundaries lean towards their
-    proportions (``boundary_prior``). Returns the alignment and the phones
-    a pause follows."""
+    proportions (``boundary_prior``); with ``voiced`` (per 10 ms frame)
+    quiet unvoiced stretches between sonorants are pauses too. Returns the
+    alignment and the phones a pause follows."""
     import judge as J
     import natural as N
     import probes as P
@@ -444,7 +475,8 @@ def align(pj, audio: np.ndarray, phones: list[str], lp=None, db: np.ndarray | No
     al = bounds_from_units(phones, owners, spans, bounds, length)
     if db is None:
         db = N.level_db(np.asarray(audio, np.float64))
-    paused = carve_pauses(al, silent_runs(db), length)
+    quiet = quiet_runs(db, voiced) if voiced is not None else []
+    paused = carve_pauses(al, silent_runs(db), length, quiet)
     enforce_floor(al)
     return al, paused
 
@@ -526,10 +558,10 @@ def analyse_audio(pj, audio: np.ndarray, text: str, phones: list[str], lp=None, 
 
     x = np.asarray(audio, np.float64)
     db = N.level_db(x)
-    al, paused = align(pj, x, phones, lp, db, rule)
     raw = M.track_pitch(x, SR, 55.0, 450.0).f0
     f0 = clean_pitch(raw)
     v = f0 > 0
+    al, paused = align(pj, x, phones, lp, db, rule, v)
     median = float(np.median(f0[v])) if v.any() else 100.0
     track = fill_pitch(f0, median)
     lv = phone_levels(db, al.start, al.end, al.phones)
@@ -563,10 +595,11 @@ def analyse_audio(pj, audio: np.ndarray, text: str, phones: list[str], lp=None, 
 
 
 def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str = "deep",
-           follow: bool = True) -> dict:  # fmt: skip
+           follow: bool = True, kick: bool = True) -> dict:  # fmt: skip
     """Speak a schedule (or, with ``follow=False``, its text by the rules)
-    with ``bin/say``. Returns the phone spans of the output and what
-    ``say`` printed."""
+    with ``bin/say``; ``kick=False`` leaves out the engine's pitch kick
+    after voiceless consonants. Returns the phone spans of the output and
+    what ``say`` printed."""
     if isinstance(schedule, dict):
         path = Path(out).with_suffix(".schedule.json")
         path.write_text(json.dumps(schedule), encoding="utf-8")
@@ -576,7 +609,7 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
     times = Path(out).with_suffix(".times.json")
     cmd = [str(say_bin()), "--engine", "physical", "--voice", voice, "--out", str(out), "--phone-times", str(times)]
     if follow:
-        cmd += ["--match-prosody", str(path), "--prosody-pitch", pitch]
+        cmd += ["--match-prosody", str(path), "--prosody-pitch", pitch, "--prosody-kick", "on" if kick else "off"]
     res = subprocess.run(cmd + [sched["text"]], capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
     spans = np.array(json.loads(times.read_text())["spans"], float)
     times.unlink()
@@ -625,8 +658,13 @@ def pitch_error(audio: np.ndarray, spans: np.ndarray, sched: dict, shift: float 
     if both.sum() < 5:
         return {"rms_st": None, "mean_st": None, "frames": int(both.sum())}
     d = 12 * np.log2(f_e[both] / (hz[idx[both]] * 2 ** (shift / 12)))
-    return {"rms_st": float(np.sqrt(np.mean(d**2))), "mean_st": float(np.mean(d)), "frames": int(both.sum()),
-            "share": float(both.sum() / max(1, (inside & voiced[idx]).sum()))}  # fmt: skip
+    # where the speaker's pitch moves fast (FAST_PITCH semitones a second or more)
+    slope = np.abs(np.gradient(12 * np.log2(hz), sched["pitch"]["hop"]))[idx[both]]
+    fast = slope >= FAST_PITCH
+    rms = lambda x: float(np.sqrt(np.mean(x**2))) if len(x) else None  # noqa: E731
+    return {"rms_st": rms(d), "mean_st": float(np.mean(d)), "frames": int(both.sum()),
+            "share": float(both.sum() / max(1, (inside & voiced[idx]).sum())),
+            "rms_fast_st": rms(d[fast]), "rms_slow_st": rms(d[~fast]), "fast_share": float(fast.mean())}  # fmt: skip
 
 
 def duration_error(a_start: np.ndarray, a_end: np.ndarray, b_start: np.ndarray, b_end: np.ndarray) -> dict:

@@ -101,6 +101,16 @@ formants; and breath and intonation shaped per phrase. Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`.
 
+An utterance can also be spoken with a person's prosody:
+`speech::Schedule` holds a recording's phone times, pitch track and
+breath per phone (the repository's `tools/judge/prosody.py` measures
+them), `Schedule::phrase` moves the text's phrase breaks to the person's
+pauses, and `Utterance::follow` gives every phone the person's duration
+(shared out over its segments as the rules had it, closures kept at their
+floor) and the utterance a pitch track (`Utterance::set_pitch_track`) that
+follows the person's contour phone by phone, in place of the rules'
+declination, accents and final fall.
+
 Both engines read their numbers from `Tuning` (85 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
@@ -116,6 +126,8 @@ cargo run -p synthie-trombone --example voices --release                       #
 cargo run -p synthie-trombone --example vowels --release                       # → vowels.wav
 cargo run -p synthie-trombone --example formants --release                     # F1–F3 table
 cargo run -p synthie-trombone --example say --release -- --engine physical "Hello!"  # the physical engine
+cargo run -p synthie-trombone --example say --release -- --engine physical \
+    --match-prosody schedule.json "the recorded text"                          # a person's timing and pitch
 cargo run -p synthie-trombone --example ab --release                           # both engines → report/
 cargo run -p synthie-trombone --example probe --release                        # measurements of both
 ```

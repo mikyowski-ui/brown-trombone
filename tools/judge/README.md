@@ -402,6 +402,7 @@ bigger tuning split would help more than a longer search.
 | `render.py` | renders a material set through a system (`classic`, `physical`, `espeak`, `human`); renders are cached under `out/render/` by binary, voice, profile and text. |
 | `judge.py` | the judge: `score`, `report`, `items`, and the probes `vowels`, `voicing`, `confusions`, `probe-report`. |
 | `natural.py` | the naturalness measure against the human recordings (`judge.py natural`, `natural-report`). |
+| `prosody.py` | prosody transfer: a recording and its text as a schedule of phone times, pitch and level for `say --match-prosody`; rendering, checks, round trip (below). |
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
 | `tune.py` | the CMA-ES tuner and the sensitivity scan. |
@@ -532,3 +533,103 @@ reads 0.63 and the tract goes to the end of its range (1.5).
   their overall pitch range is.
 - The scale and the rate depend on what is said; give `--text` (and
   `--transcript`) when you know it.
+
+## Prosody transfer
+
+`prosody.py` measures a person's timing, pitch and level on a recording of
+a text and writes them as a schedule the physical engine speaks with
+(`bin/say --match-prosody`, `speech::Utterance::follow` in the crate):
+the engine's own articulation, coarticulation and laryngeal gestures, with
+the person's durations, pauses and pitch contour.
+
+```sh
+uv run python prosody.py transfer speaker.wav --text "what they said" --out-dir out/prosody --name x
+    # -> x.json (schedule), x-transfer.wav (the engine with it), x-rule.wav (by its rules), checks printed
+uv run python prosody.py analyse speaker.wav --text "..." --out s.json      # the schedule only
+uv run python prosody.py render s.json --out e.wav --level [--pitch voice]  # speak it (level loop: --level)
+uv run python prosody.py check s.json e.wav                                # durations and pitch against it
+uv run python prosody.py roundtrip "The birch canoe slid on the smooth planks."
+uv run python prosody.py slope                                             # dB per doubling of the breath
+bin/say --engine physical --voice deep --match-prosody s.json [--prosody-pitch voice] \
+    [--prosody-kick off] [--phone-times t.json] --out e.wav "the same text"
+```
+
+**The schedule** (JSON, `"format": "synthie-prosody-1"`): the text; one
+entry per phone of the engine's own phonemes for it (the first line of
+`say`, read by `arpabet.parse_engine_line`), with `start` and `end` on the
+recording (s), `level_db` (mean level against the mean of the utterance's
+vowels), `breath` (a share of the rules' lung pressure, 1 unless the level
+loop set it), the pitch at five points inside and the voiced share; the
+`pauses`; `median_hz` over voiced frames; and `pitch`, Hz every 10 ms with
+a value everywhere (a curve through the unvoiced stretches) and the
+`voiced` flags. A gap of 20 ms or more between two phones is a pause.
+
+**Alignment.** The phone sequence is the engine's, so every aligned stretch
+is a phone the engine says; where the person's pronunciation differs (a
+weak form, a dropped sound) the phone still gets a stretch. The judge's
+phoneme model gives the Viterbi CTC path (`probes.ctc_viterbi`, as
+`natural.align`; the pairs the model writes as one token are merged or not,
+whichever it finds likelier, and shared by weight). Its spikes are a frame
+or two wide and sit anywhere in their phone (a vowel's at 29 % of it, a
+stop's at 70 % to 74 %, at the release; `SPIKE_SHARE`, measured on the
+engine's own renderings), so halfway between spikes is off by up to half a
+vowel (52 ms mean duration error on the engine's own audio). Each boundary
+goes where the spectrum moves fastest between the two spikes (40 mel bands,
+5 ms), weighted by a prior where the engine's rule durations for the same
+phones would put it; between two stops (whose closures run into one
+silence) the prior alone. Silences of 120 ms or more between two phones
+(200 ms beside a stop, whose closure is silent too; over a noise floor,
+8 dB above it) and quiet unvoiced stretches of 80 ms or more between two
+sonorants become pauses; every phone gets at least 25 ms, taken from the
+neighbours with time to spare. On the engine's own renderings, where the
+true times are known: 16 ms mean absolute duration error and 10 ms onset
+error without the prior (the four test sentences); with the prior, on
+audio that follows a person's timing, 13 ms (LibriSpeech schedules) and
+18 ms (the owner's two sentences).
+
+**Pitch** is `match_voice.track_pitch` (10 ms), octave jumps against the
+running median folded back, voiced islands under 30 ms dropped, a curve
+linear in semitones through the unvoiced stretches, smoothed 1-2-1.
+`--prosody-pitch speaker` (default) keeps the speaker's Hz,
+`--prosody-pitch voice` moves the contour by the semitones between the
+speaker's median and the voice's own rule median.
+
+**Level.** `render --level` speaks the schedule, measures each phone's
+level against the utterance's vowels, and moves the breath of each sonorant
+towards the person's by the difference (9 dB of level per doubling of the
+breath; `prosody.py slope` measures 9.1), within ±4 dB of the rules'
+(`LEVEL_RANGE`), twice; obstruents take their neighbours'.
+
+**Checks** (`check`; `transfer` prints them): the rendering aligned again
+against the schedule, interior phones, mean absolute duration error; how
+exactly the engine followed (its own phone times, `--phone-times`, against
+the schedule); the rendering's pitch against the schedule's on frames
+voiced in both (RMS semitones, apart where the speaker's pitch moves 40
+st/s or faster). `roundtrip` takes the engine's own rendering of a text as
+the recording and speaks its schedule again.
+
+Measured in round 8 (the four test sentences round trip; the 16
+LibriSpeech anchors and the owner's two recorded sentences transferred):
+
+| | round trip | anchors | owner |
+|---|---:|---:|---:|
+| engine's own phone times vs schedule | 0.0 ms | 0.0 ms (1 phone of 787 at its floor) | 0.0 ms |
+| rendering aligned again vs schedule | 16 ms | 13 ms | 18 ms |
+| pitch vs schedule, RMS (fast-moving / rest) | 1.04 st | 1.17 st (1.43 / 1.06) | 1.20 st (1.43 / 1.14) |
+| mean pitch error | +0.4 st | +0.3 st | +0.2 st |
+| level vs the person's, RMS over sonorants, before / after the loop | 0.9 / 0.5 dB | 4.9 / 3.3 dB | 4.2 / 2.3 dB |
+
+The engine's pitch kick after voiceless consonants is kept (it adds to the
+speaker's own rise there): without it (`--prosody-kick off`) the anchors'
+pitch error is 1.11 st instead of 1.17. The level follows only partly:
+207 of the anchors' 455 sonorants end at the ±4 dB limit (vowels 41 %,
+nasals and liquids about half, glides 17 of 20), about as many lowered as
+raised: the person's level moves more from syllable to syllable than a
+few dB of breath can give, and a sonorant's level against the vowels is
+partly the tract's.
+
+Limits: the model's 20 ms frames limit the boundaries to about a frame; a
+phone the person did not say gets the 25 ms floor; only pauses at word
+boundaries become phrase breaks (a pause inside a word is shared between
+the phones either side); a voiceless stop's closure keeps its floor (22 ms
+plus 8 ms), so a faster stop than that is drawn out.
