@@ -613,20 +613,21 @@ LibriSpeech anchors and the owner's two recorded sentences transferred):
 
 | | round trip | anchors | owner |
 |---|---:|---:|---:|
-| engine's own phone times vs schedule | 0.0 ms | 0.0 ms (1 phone of 787 at its floor) | 0.0 ms |
+| engine's own phone times vs schedule | 0.0 ms | 0.0 ms (1 phone of 736 at its floor) | 0.0 ms |
 | rendering aligned again vs schedule | 16 ms | 13 ms | 18 ms |
-| pitch vs schedule, RMS (fast-moving / rest) | 1.04 st | 1.17 st (1.43 / 1.06) | 1.20 st (1.43 / 1.14) |
+| pitch vs schedule, RMS (fast-moving / rest) | 1.04 st (1.07 / 1.04) | 1.17 st (1.43 / 1.06) | 1.20 st (1.43 / 1.14) |
 | mean pitch error | +0.4 st | +0.3 st | +0.2 st |
 | level vs the person's, RMS over sonorants, before / after the loop | 0.9 / 0.5 dB | 4.9 / 3.3 dB | 4.2 / 2.3 dB |
 
 The engine's pitch kick after voiceless consonants is kept (it adds to the
 speaker's own rise there): without it (`--prosody-kick off`) the anchors'
-pitch error is 1.11 st instead of 1.17. The level follows only partly:
-207 of the anchors' 455 sonorants end at the ±4 dB limit (vowels 41 %,
-nasals and liquids about half, glides 17 of 20), about as many lowered as
+pitch error is 1.12 st instead of 1.18. The level follows only partly:
+195 of the anchors' 455 sonorants end at the ±4 dB limit (vowels 39 %,
+nasals and liquids about 45 %, glides 16 of 20), about as many lowered as
 raised: the person's level moves more from syllable to syllable than a
 few dB of breath can give, and a sonorant's level against the vowels is
-partly the tract's.
+partly the tract's. The level loop keeps whichever of its three
+renderings comes closest.
 
 Limits: the model's 20 ms frames limit the boundaries to about a frame; a
 phone the person did not say gets the 25 ms floor; only pauses at word

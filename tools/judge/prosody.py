@@ -6,13 +6,16 @@ From a recording and its text:
 * **phones** -- the engine's own phonemes for the text (the first line of
   ``bin/say``, read by ``arpabet.parse_engine_line``), force-aligned to the
   recording with the judge's wav2vec2 phoneme model (``natural.align``'s
-  Viterbi CTC path; boundaries placed between the spikes of neighbours where
-  the frame posteriors cross, not halfway), so that every engine phone gets
-  a stretch of the recording. A pair the model writes as one token
-  (``AA R`` = ``ɑːɹ``) is shared between its two phones. Every phone gets at
-  least ``FLOOR``, taken from the neighbours that have the most to spare.
-  Silences of ``PAUSE_MIN`` or more between two phones (longer beside a
-  stop, whose closure is silent too) become pauses.
+  Viterbi CTC path), so that every engine phone gets a stretch of the
+  recording. The model's spikes sit anywhere in their phone, so each
+  boundary goes where the spectrum moves fastest between two spikes,
+  leaning towards where the engine's rule durations would put it
+  (``place_bounds``, ``boundary_prior``). A pair the model writes as one
+  token (``AA R`` = ``ɑːɹ``) is shared between its two phones. Every phone
+  gets at least ``FLOOR``, taken from the neighbours that have the most to
+  spare. Silences of ``PAUSE_MIN`` or more between two phones (longer
+  beside a stop, whose closure is silent too), and quiet unvoiced
+  stretches between two sonorants, become pauses.
 * **pitch** -- ``match_voice.track_pitch`` every 10 ms (autocorrelation with
   a Viterbi path and an octave guard), octave jumps against the running
   median folded back, voiced islands under 30 ms dropped, then a curve
@@ -31,11 +34,12 @@ error, ms) and the pitch against the schedule's (RMS semitones on frames
 voiced in both). ``roundtrip`` does all of it on the engine's own rendering
 of a text, where the true phone times are known.
 
+    uv run python prosody.py transfer speaker.wav --text "what they said" --out-dir DIR --name x
     uv run python prosody.py analyse speaker.wav --text "what they said" --out s.json
     uv run python prosody.py render s.json --out engine.wav --level [--pitch voice]
     uv run python prosody.py check s.json engine.wav
     uv run python prosody.py roundtrip "The birch canoe slid on the smooth planks."
-    uv run python prosody.py demo --out-dir DIR [--listener my.wav]   # the owner's set
+    uv run python prosody.py slope
 
 Model-free parts are tested in ``tests/test_prosody.py``.
 """
@@ -83,9 +87,9 @@ PAUSE_KEEP = 0.05
 LEAD_IN = {"voiceless_stop": 0.05, "voiced_stop": 0.03, "other": 0.01}
 #: How much of a silence after a phone it keeps (its decay), s.
 TAIL = 0.02
-#: Boundary offset found on the engine's own renderings, where the true
-#: phone times are known (``roundtrip``): the model's boundaries come this
-#: much late, s.
+#: Shift added to every boundary, s: none was needed, the mean onset error
+#: on the engine's own renderings (true phone times known, ``roundtrip``)
+#: is -2 ms.
 BOUNDARY_OFFSET = 0.0
 #: Where the phoneme model's spike sits in a phone, as a share of its
 #: duration from its start (median over the engine's renderings of the
@@ -712,20 +716,28 @@ def level_step(sched: dict, audio: np.ndarray, spans: np.ndarray) -> tuple[dict,
 
 
 def transfer(pj, sched: dict, out: Path, pitch: str = "speaker", level: bool = True, voice: str = "deep") -> dict:
-    """Render a schedule, with the level loop when ``level``; returns the
-    final schedule, the level errors and the render's spans."""
+    """Render a schedule, with the level loop when ``level`` (two steps; the
+    rendering whose level is closest to the person's is kept); returns the
+    schedule rendered, the level errors (one per rendering) and the
+    render's spans."""
     import render as R
 
     levels = []
     r = render(sched, out, pitch, voice)
     if level:
-        for _ in range(2):
-            sched2, st = level_step(sched, R.load_audio(out), r["spans"])
+        tried = []
+        for step in range(3):
+            nxt, st = level_step(sched, R.load_audio(out), r["spans"])
             levels.append(st)
-            sched = sched2
+            tried.append((st["rms_db"], sched))
+            if step == 2:
+                break
+            sched = nxt
             r = render(sched, out, pitch, voice)
-        _, st = level_step(sched, R.load_audio(out), r["spans"])
-        levels.append(st)
+        best = min(range(len(tried)), key=lambda k: tried[k][0])
+        if best != len(tried) - 1:
+            sched = tried[best][1]
+            r = render(sched, out, pitch, voice)
     return {"schedule": sched, "levels": levels, **r}
 
 

@@ -451,8 +451,8 @@ sentences (the other two have no recording):
 
 | | rule prosody | the person's | the person |
 |---|---:|---:|---:|
-| anchors: phoneme error | 17.5 % | 26.2 % | 6.4 % |
-| anchors: Whisper words | 81.8 % | 74.2 % | 96.2 % |
+| anchors: phoneme error | 17.5 % | 26.5 % | 6.4 % |
+| anchors: Whisper words | 81.8 % | 72.7 % | 96.2 % |
 | anchors: naturalness distance (`natural.py`) | 1.13 | 0.93 | 0 |
 | owner's two sentences: phoneme error | 11.1 % | 9.3 % | 7.4 % |
 | owner's two sentences: Whisper words | 13 of 16 | 13 of 16 | 16 of 16 |
@@ -460,15 +460,15 @@ sentences (the other two have no recording):
 - Of the naturalness distance, the pitch and timing measures move to the
   person's (their mean |z| 0.67 to 0.15); the warped spectral distance
   (15.8 to 15.4 dB), the level steps and walls and the hiss measures do
-  not. Prosody was about a seventh of the distance; the rest is the tract
-  and the source.
+  not. Pitch and timing were about a fifth of the distance (0.22 of
+  1.13); the rest is the tract, the source and how the level moves.
 - With the owner's own timing and pitch Whisper still writes "The birch
   can you slide down the smooth planks": "canoe" and "slid on" are not a
   matter of prosody.
 - The LibriSpeech reader speaks 14 % faster than the rules (median; from
   10 % slower to 38 % faster), and at his timing the engine is heard
-  worse: the rules at his pace alone give 23.2 % phoneme error, his
-  pattern of durations at the rules' pace 22.9 %. The rule durations are
+  worse: the rules at his pace alone give 23.3 % phoneme error, his
+  pattern of durations at the rules' pace 22.0 %. The rule durations are
   what this tract needs to reach its shapes; a person's shorter sounds
   leave the slow tongue body behind. The owner's recording is 24 % slower
   than the rules, and with that timing the engine is heard a little
