@@ -393,8 +393,13 @@ tuning! {
     /// recognizer heard the vowels better (vowel lab held-out −2.7 points)
     /// but the sentences of the tuning material worse (6 points of phoneme
     /// accuracy, Whisper 8.5 of words) than at the round 4 value, 0.905.
-    /// The owner, listening to both, chose 0.62 without hesitation, and
-    /// ears outrank the recognizer here.
+    /// The owner chose 0.62 by ear and asked in round 6 for a milder 0.82
+    /// for the stressed lax vowels ("sells", "punch"; the unstressed ones
+    /// keep `unstressed_lax_length`). At 0.82 the recognizer heard the
+    /// stressed /ɪ/ of the LibriSpeech texts as /eɪ/ 14 times in 54 (2 at
+    /// 0.62): in-sentence vowel error +9.4 points [5.9, 13.2], with the
+    /// sentences' phoneme error and Whisper words unchanged. So it stays at
+    /// 0.62, and `profiles/stressed-lax.json` has 0.82 for listening.
     lax_length = 0.62, 0.5..=1.0, C;
     /// Share of a lax vowel held on its own shape before it glides towards
     /// schwa (to its end shape in `vowel_targets`) for the rest.
@@ -407,13 +412,17 @@ tuning! {
 
     /// Shortest the held part of a stressed lax vowel may be, seconds (its
     /// nucleus: `lax_nucleus` of its length, before its glide towards
-    /// schwa), however fast the speech.
-    lax_floor = 0.0, 0.0..=0.09, C;
+    /// schwa), however fast the speech; `0` for none. Of the 136 stressed
+    /// lax vowels of the judge's sentences it lengthens 39 at the default
+    /// rate (the shortest held 53 ms), 93 at 1.2 times the rate; with
+    /// `lax_length` at 0.82 none at the default rate, 39 at 1.2 times.
+    lax_floor = 0.06, 0.0..=0.09, C;
     /// Share of a stressed /æ/ held on its own shape before it glides
-    /// towards schwa for the rest ("planks", "background"), as American
-    /// /æ/ does; `1.0` holds it to the end. The glide is measured in
-    /// `tests/vowel_glide_gate.rs`.
-    ae_nucleus = 1.0, 0.4..=1.0, C;
+    /// towards schwa for the rest ("planks", "background"); `1.0` holds it
+    /// to the end, as before round 6. At 0.55 it ends about a fifth of the
+    /// way to schwa (`tests/vowel_glide_gate.rs`); at 0.67, the lax vowels'
+    /// share, only 13 %.
+    ae_nucleus = 0.55, 0.4..=1.0, C;
 }
 
 impl Default for Tuning {
