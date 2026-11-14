@@ -45,6 +45,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 from collections import Counter, defaultdict
@@ -75,6 +76,20 @@ ANCHOR_ORDER = ["human", "espeak", "classic", "physical"]
 SET_ORDER = material.SYNTH_SETS + ["human"]
 SET_LABEL = {"human": "librispeech"}
 LL_FLOOR = -20.0  # nats/phoneme for a reference the model cannot align at all
+
+#: ``score --fast``: the ten held-out sentences and the four listening
+#: sentences (each alone, then all four as the one clip the owner hears).
+FAST_SET = "sentence_heldout"
+BENCH = [
+    ("The birch canoe slid on the smooth planks.",
+     "DH AX B ER CH K AX N UW S L IH D AO N DH AX S M UW DH P L AE NG K S"),
+    ("Glue the sheet to the dark blue background.",
+     "G L UW DH AX SH IY T T AX DH AX D AA R K B L UW B AE K G R AW N D"),
+    ("She sells sea shells by the sea shore.",
+     "SH IY S EH L Z S IY SH EH L Z B AY DH AX S IY SH AO R"),
+    ("The juice of lemons makes fine punch.",
+     "DH AX JH UW S AH V L EH M AX N Z M EY K S F AY N P AH N CH"),
+]  # fmt: skip
 
 
 def default_sets(system: str) -> list[str]:
@@ -565,6 +580,78 @@ def score(
     return results
 
 
+def bench_items() -> list[material.Item]:
+    """The four listening sentences (set ``bench``) and the four as one
+    clip (set ``bench_clip``)."""
+    items = [material.Item(f"bench_{k}", "bench", text, tuple(ph.split()), text) for k, (text, ph) in enumerate(BENCH, 1)]
+    whole = " ".join(text for text, _ in BENCH)
+    phones = tuple(" ".join(ph for _, ph in BENCH).split())
+    return items + [material.Item("bench_all", "bench_clip", whole, phones, whole)]
+
+
+def fast(
+    system: str,
+    profile: Path | None = None,
+    name: str | None = None,
+    jobs: int | None = None,
+    voice: str = render.DEFAULT_VOICE,
+) -> dict:
+    """The quick check between changes: the ten held-out sentences and the
+    four listening sentences, every clip in one pass through each model.
+    Writes ``out/fast-<name>.json`` and the four-sentence clip as
+    ``out/fast-<name>.wav``; prints the change against the last run of the
+    same name.  Leaves the scoreboard (``out/score-*.json``, the report)
+    alone."""
+    t0 = time.perf_counter()
+    engine = system in render.ENGINE_SYSTEMS
+    items = material.load([FAST_SET]) + bench_items()
+    rendered = render.render(items, system, profile if engine else None, voice, jobs)
+    label = name or (f"{system}-{Path(profile).stem}" if profile and engine else system)
+    t_render = time.perf_counter() - t0
+    pj = PhonemeJudge()
+    scores = score_phonemes(pj, rendered, batch_size=len(rendered))
+    pj.close()
+    del pj
+    wj = WordJudge()
+    score_words(wj, rendered, scores, batch_size=len(rendered))
+    wj.close()
+    del wj
+
+    sets = [FAST_SET, "bench", "bench_clip"]
+    res = {
+        "name": label,
+        "system": system,
+        "profile": str(profile) if profile and engine else None,
+        "voice": voice if engine else None,
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "sets": {s: summarize_set([x for x in scores if x.set == s]) for s in sets},
+        "items": [x.to_json() for x in scores],
+    }
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUT_DIR / f"fast-{label}.json"
+    before = json.loads(path.read_text(encoding="utf-8"))["sets"] if path.exists() else {}
+    path.write_text(json.dumps(res, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    clip = OUT_DIR / f"fast-{label}.wav"
+    shutil.copyfile(rendered[-1].path, clip)
+
+    def change(now: float, was: float | None) -> str:
+        return "" if was is None else f" ({100 * (now - was):+.1f})"
+
+    print(f"== {label} (fast)")
+    titles = {FAST_SET: "held-out sentences (10)", "bench": "listening sentences (4)", "bench_clip": "the four as one clip"}
+    for s in sets:
+        d, b = res["sets"][s], before.get(s, {})
+        print(
+            f"  {titles[s]:24} PER {fmt_pct(d['per']):>5}%{change(d['per'], b.get('per'))}"
+            f"   words {fmt_pct(d['word_acc']):>5}%{change(d['word_acc'], b.get('word_acc'))}"
+        )
+    for x in scores:
+        if x.set != FAST_SET:
+            print(f"  {x.id:10} {x.word_hits}/{x.word_n}  {x.whisper}")
+    print(f"-> {path.relative_to(HERE)}, {clip.relative_to(HERE)}  ({time.perf_counter() - t0:.0f} s, render {t_render:.0f} s)")
+    return res
+
+
 # --------------------------------------------------------------------------
 # Reporting
 # --------------------------------------------------------------------------
@@ -694,6 +781,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--voice", default=render.DEFAULT_VOICE)
     sp.add_argument("--no-whisper", action="store_true", help="skip the word judge")
     sp.add_argument("--jobs", type=int, default=None, help="render threads (default: all cores)")
+    sp.add_argument("--fast", action="store_true",
+                    help="quick check: the ten held-out sentences and the four listening sentences only")  # fmt: skip
     sub.add_parser("report", help="rebuild report/judge.md from out/score-*.json")
     si = sub.add_parser("items", help="per-item reference vs heard for a scored system")
     si.add_argument("name")
@@ -753,7 +842,12 @@ def main(argv: list[str] | None = None) -> int:
         probes.probe_report(args.names, args.out, split(args.refs), split(args.scores), args.notes)
     elif args.cmd == "score":
         sets = args.sets.split(",") if args.sets else None
-        score(args.systems, sets, args.profile, args.name, not args.no_whisper, args.jobs, args.voice)
+        if args.fast:
+            if len(args.systems) != 1 or sets or args.no_whisper:
+                ap.error("--fast scores one system on its own sets, with Whisper")
+            fast(args.systems[0], args.profile, args.name, args.jobs, args.voice)
+        else:
+            score(args.systems, sets, args.profile, args.name, not args.no_whisper, args.jobs, args.voice)
     elif args.cmd == "report":
         write_report()
         print(f"wrote {REPORT_PATH}")

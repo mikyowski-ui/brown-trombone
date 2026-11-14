@@ -21,6 +21,20 @@ def test_word_hits():
     assert J.word_hits(["bat"], []) == (0, 1)
 
 
+def test_fast_material_is_the_four_listening_sentences():
+    items = J.bench_items()
+    assert [i.set for i in items] == ["bench"] * 4 + ["bench_clip"]
+    # The clip is the four sentences one after another, text and phonemes.
+    assert items[-1].ortho == " ".join(i.ortho for i in items[:4])
+    assert items[-1].expected == sum((i.expected for i in items[:4]), ())
+    # Every expected phoneme is one the scoring alphabet knows.
+    for i in items:
+        assert set(i.expected) <= set(J.A.SCORING_SYMBOLS), i.id
+    # The three that are also tuning sentences agree with the material files.
+    known = {i.ortho: i.expected for i in J.material.load(["sentence_tune"])}
+    assert sum(known.get(i.ortho) == i.expected for i in items[:4]) == 3
+
+
 def test_params_file_matches_brief():
     params = T.load_params(HERE / "params.json")
     # Every field of the engine's `Tuning`, in its passes (a: how sounds are

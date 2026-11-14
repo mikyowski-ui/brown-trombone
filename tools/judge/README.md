@@ -34,6 +34,7 @@ uv run pytest                             # normalizer + model-free tests
 uv run python judge.py score human espeak classic physical     # the anchors
 uv run python judge.py score physical --profile out/profile-b.json --name physical-b
 uv run python judge.py score physical --sets sentence_heldout --profile out/profile-b.json --name physical-b-heldout
+uv run python judge.py score physical --fast                   # quick check between changes (about 15 s)
 uv run python judge.py report                                  # rebuild report/judge.md
 uv run python judge.py items physical --set vcv                # what was heard, item by item
 ```
@@ -41,6 +42,17 @@ uv run python judge.py items physical --set vcv                # what was heard,
 Each scored system writes `out/score-<name>.json` (per set, per item,
 confusions) and the comparison table `report/judge.md` is rebuilt from every
 `out/score-*.json`. Delete a score file to drop it from the report.
+
+`score --fast` is the check to run between changes: the ten held-out
+sentences (`sentence_heldout`) and the four listening sentences ("The birch
+canoe ...", each alone and all four as the one clip), every clip in one
+pass through each model. It prints phoneme error and Whisper words for the
+three groups with the change since the last fast run of the same name, and
+what Whisper wrote for the listening sentences; it writes
+`out/fast-<name>.json` and the four-sentence clip `out/fast-<name>.wav`,
+and leaves the scoreboard alone. It takes about 15 seconds, nearly all of
+it loading the two models. Ten sentences give an interval of about ±5
+points, so it shows a break or a large gain, not a small one.
 
 What is measured, per material set:
 
