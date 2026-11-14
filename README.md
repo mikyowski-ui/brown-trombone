@@ -332,10 +332,22 @@ against. A few of the figures:
 - The folds sing within a cent of the requested note over every preset's
   range, stop below about 3.4 cmH2O of lung pressure, and keep voicing for
   some 40 ms into a /b/ before the mouth fills.
-- /s/ and /sh/ come out about 20 dB louder than /f/ and /th/. For /s z/
-  the jaw brings the incisors together: the jet strikes them through a
-  narrow gap, and the small cavity behind them puts the peak of /s/ at 7
-  to 8 kHz (centroid 6 kHz, as a speaker's), with /sh/ 2.5 kHz lower.
+- /s/ and /sh/ come out about 10 dB louder than /f/ and 14 dB louder
+  than /th/, held steady (the LibriSpeech reader's /f/ is 10.5 dB under
+  his /s/). For /s z/ the jaw brings the incisors together: the jet
+  strikes them through a narrow gap, and the small cavity behind them
+  puts the peak of /s/ at 7 to 8 kHz (centroid 6 kHz, as a speaker's),
+  with /sh/ 2.5 kHz lower. The jet of /f v/ strikes the edges of the
+  upper teeth and the upper lip, and that of /θ ð/ the edges of the
+  teeth: the force of its eddies there radiates straight out as a dipole
+  (Curle 1955; Shadle 1985), flat from 2 to 7 kHz, without passing
+  through the narrow gap behind it, which let the free jet's noise out
+  some 20 dB weaker.
+- Out of /s z ʃ ʒ/ into /f v/ the lower lip comes up to the teeth while
+  the tongue still holds the sibilant and lets it go gradually: the hiss
+  of /s/ fades over some 20 ms under the closing lip with no gap before
+  the /f/ and no rush of air (lip flow up to about 480 cm³/s, where the
+  tongue letting go at once let 950 out before the lip shut).
 
 It costs more: about 6 times faster than real time on one core at the
 native tract length, against 170 for the classic engine. With the default
@@ -589,12 +601,17 @@ average sentence).
 - **Lax vowels are longer than a speaker's** at the round 4 length and
   as short as one's at the default (0.62, chosen by ear); the recognizer
   scores the tuning sentences better at the longer length.
-- **Whisper gets 62 to 67 % of the held-out words** (target 75 %). In the
-  four listening sentences it hears "makes fine" as "makes pine": the /s/
-  of "makes" cuts off in about 10 ms where a reader's fades over 20 to
-  30 ms, and the /f/ source radiates about 23 dB less than the /s/ source,
-  so the /f/ is lost after the /s/; two attempts at it (branches
-  `r5-sibilants-sf-wip` and `r5-sibilants-sf-wip2`) are not merged.
+- **Whisper gets 62 to 67 % of the held-out words** (target 75 %).
+  "Makes fine" is heard as "makes fine" since round 6 (it was "makes
+  pine": the /s/ cut off in a few milliseconds, the air rushed out before
+  the lip shut, and the /f/'s only source, the free jet in the lip's gap,
+  radiated some 20 dB too weakly); in 24 short /f/ and /θ/ sentences
+  Whisper now gets 19 target words where it got 7. Still short of a
+  speaker: /f/ between vowels is some 22 dB under the vowel where the
+  reader's is 16 (the mouth pressure behind a short /f/ builds slowly);
+  /s/ falls into an /f/ over about 20 ms where the reader's takes 25 to
+  30; after /s/ the /f/ is only 8 dB under it where the reader's is 16;
+  "thin" is still heard as "so nice" or "been".
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
