@@ -523,7 +523,21 @@ deterministic):
 | classic engine | 77 % [72, 81] | 21 % [15, 28] | 88 % [85, 91] | 80 % [74, 86] | 46 % [40, 51] |
 | physical engine, start of round 5 | 35 % [29, 40] | 56 % [47, 66] | 39 % [34, 44] | 97 % [94, 99] | 80 % [77, 84] |
 | physical engine, end of round 5 | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
-| physical engine now (round 6) | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
+| physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
+| physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
+
+Round 7 (single scoring runs again): the articulators and the tract's
+areas are brought up to date every 2.7 ms instead of every 10.7 ms (the
+folds' controls and the hiss regulator keep the long block), function words
+take their weak forms before another word ("to" /tə/, "the" /ðɪ/ before a
+vowel, "was", "has", "had", "than", "your"), a stressed /ɪ/ keeps the short
+length, the physical /l/ is made closer (its first formant stood near 500
+Hz and "slid" was heard as "slayed"), and the folds are held 12 % more
+loosely through nasals, liquids, glides and unaccented vowels and slacken
+over the last 150 ms of a phrase. Phoneme error over the 30 held-out
+sentences 23.0 % (23.6 % after round 6), Whisper's words 70.0 % (65.7 %;
+73.8 % on the ten `sentence_heldout` sentences), vowels in the LibriSpeech
+texts heard wrong 22.7 % of the time (28.3 %).
 
 Round 6 (no intervals: one scoring run of the final build; ten sentences
 carry about ±5 points, thirty about ±4): a stop before /l r/ is released
@@ -622,8 +636,9 @@ average sentence).
 
 **Known limits.** Plainly:
 
-- **Vowels in sentences** are heard wrong 28 % of the time in the
-  LibriSpeech texts and 31 % over the vowel lab's held-out material
+- **Vowels in sentences** are heard wrong 23 % of the time in the
+  LibriSpeech texts (31 % over the vowel lab's held-out material at the
+  end of round 6)
   (eSpeak 15 and 17 %, the person 9 %; the target is 22 %). A third of
   the misses in the LibriSpeech texts are words the engine's front end
   says otherwise than eSpeak's reference (a full "and" for a reduced
@@ -637,7 +652,9 @@ average sentence).
   `LAX_ROOTS` in `examples/vowel_size.rs` and regenerate) it passes every
   gate, but on the round 6 build it moved vowel error in the LibriSpeech
   texts from 26.2 to 25.9 % and phoneme error on the ten held-out
-  sentences from 18.8 to 21.2 %, all within noise; with the longer
+  sentences from 18.8 to 21.2 %, all within noise (round 7, for /ɪ ʊ/
+  alone: vowel error 22.7 to 24.8 %, the 30 held-out sentences 23.0 to
+  24.0 %); with the longer
   stressed lax vowels as well, vowel error was 31.1 %. Drawing the tense
   vowels' roots forward broke the listener and mimic gates for no gain.
 - **Lax vowels in the engine's sentences sit nearer the tense ones than a
@@ -647,7 +664,7 @@ average sentence).
   high central vowel. At the stressed length of 0.82 the recognizer hears
   more stressed /ɪ/ as /eɪ/ (vowel error 28.3 against 26.2 % at 0.62)
   while Whisper gets a few more words; the length is the owner's choice.
-- **Whisper gets 66 % of the words of the 30 held-out sentences** (74 % of
+- **Whisper gets 70 % of the words of the 30 held-out sentences** (74 % of
   the ten; target 75 %). "Makes fine" is heard as "makes fine" since round
   6 (it was "makes pine": the /s/ cut off in a few milliseconds, the air
   rushed out before the lip shut, and the /f/'s only source, the free jet
@@ -658,17 +675,24 @@ average sentence).
   slowly); after /s/ the /f/ is only 8 dB under it where the reader's is
   16; "thin" is still heard as "so nice" or "been". In the four listening
   sentences "canoe slid on" is still not heard.
-- **Articulator targets take effect every 10.7 ms** (512 internal
-  samples), so a 20 to 30 ms gesture is two or three steps, and where they
-  fall depends on what was said before: the same /s f/ hand-over measures
-  a fall of 7.5 to 47.5 ms as earlier words change length. A 2.7 ms block
-  for the physical engine (128 samples, tried in round 6) did not make
-  "canoe slid on" heard, left the held-out sentences where they were
-  (25.0 against 23.5 % phoneme error) and broke six gates whose behaviour
-  was set at the long block (the listener's 40 ms formant step became 113
-  ms, a displaced /f/ gap stopped hissing, an /ɚ/ hissed in large voices,
-  a /t/ burst weakened): the articulators' motion is not yet independent
-  of the block length, and that has to be fixed first.
+- **What depends on the control block.** The articulators and the tract
+  go by a 2.7 ms block, and the same gesture gives the same trajectory
+  within 1 % at 64 to 512 samples (`tests/block_invariance.rs`); the
+  folds' pitch, tenseness and voicing are still read once every 10.7 ms, so
+  a voice onset can fall up to that much late.
+- **Weak forms the recognizer's reference keeps full** ("and", "of", "for",
+  "can") are said in full: reduced to schwa, as a speaker says them, the
+  vowel error in the LibriSpeech texts rose from 24.1 to 28.0 % with
+  Whisper unchanged, because the reference transcription has the full
+  vowel there.
+- **In the four listening sentences** "canoe slid on" is heard as "can you
+  slide down" (the /u/ after /n/ starts with a front glide, and no flap
+  joins "slid" to "on"), and "background" is on the edge: heard right or as
+  "back drawing" as the stop release speed moves by a tenth.
+- **The folds can be relaxed by 12 % and no more**: at 15 % the child
+  voice's folds fall out of the range they can sing at 290 Hz and the
+  hand-over to the pulse source clicks; at 20 % the voice gives out in the
+  closure of a /g/ after an unaccented vowel.
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
