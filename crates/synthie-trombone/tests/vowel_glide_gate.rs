@@ -277,14 +277,57 @@ fn ey_and_ow_glide_the_whole_way() {
 
 #[test]
 fn the_tongue_root_shapes_the_pharynx_and_stays_with_the_body() {
-    // Every built-in vowel keeps its root at rest (see `ROOT_SOLVED` in
-    // `examples/vowel_size.rs`): the root is the profile's or the
-    // caller's to set, as `Shape::pharynx`.
+    // The lax /ɪ ʌ ʊ/ pull the root back, and so do the ends of their
+    // glides; every other built-in shape keeps it at rest, so the tense
+    // vowels' root lies forward of theirs (see `root_range` in
+    // `examples/vowel_size.rs`, which says why /ɛ/ and the tense vowels do
+    // not move it). Solved free in round 6: /ɪ/ -0.20, /ʌ/ -0.12, /ʊ/
+    // -0.29.
+    let root_of = |key: VowelKey| {
+        key.articulation()
+            .and_then(|a| a.physical_shape(1.0))
+            .expect("a shape")
+            .pharynx
+    };
     for t in vowel_targets::TARGETS {
-        let a = t.key.articulation().expect("a vowel");
-        let root = a.physical_shape(1.0).expect("a shape").pharynx;
-        assert!(root.abs() < 1e-6, "{}: {root}", t.key);
+        let root = root_of(t.key);
+        let lax = matches!(t.key.phoneme(), Phoneme::Ih | Phoneme::Ah | Phoneme::Uh)
+            && matches!(t.key, VowelKey::Vowel(_) | VowelKey::End(_));
+        if lax {
+            assert!((-0.5..=0.0).contains(&root), "{}: {root}", t.key);
+        } else {
+            assert!(root.abs() < 1e-6, "{}: {root}", t.key);
+        }
     }
+    for (lax, tense) in [(Phoneme::Ih, Phoneme::Iy), (Phoneme::Uh, Phoneme::Uw)] {
+        let (l, t) = (
+            root_of(VowelKey::Vowel(lax)),
+            root_of(VowelKey::Vowel(tense)),
+        );
+        println!("root of {lax} {l:+.2}, of {tense} {t:+.2}");
+        assert!(l < t - 0.1, "{lax} {l} vs {tense} {t}");
+    }
+    // The built-in lax root stays under a consonant made on the vowel's
+    // body: the pharynx of "[S IH1 S]" in the middle of its second /s/ is
+    // narrower than at rest.
+    let mid_s_pharynx = |root: bool| {
+        let mut t = Trombone::new(SR);
+        t.set_engine(Engine::Physical);
+        if !root {
+            let mut shape = Phoneme::Ih.physical_shape(1.0).expect("a shape");
+            shape.pharynx = 0.0;
+            t.set_vowel_shape(VowelKey::Vowel(Phoneme::Ih), Some(&shape));
+        }
+        let mut s = Phoneme::S.articulation();
+        s.vowel = Some(VowelKey::Vowel(Phoneme::Ih));
+        s.tongue = Phoneme::Ih.articulation().tongue;
+        t.articulate(&s);
+        t.settle();
+        t.target_diameters()[13]
+    };
+    let (with, without) = (mid_s_pharynx(true), mid_s_pharynx(false));
+    println!("pharynx (cell 13) under /s/ after IH: {with:.3} with its root, {without:.3} at rest");
+    assert!(with < 0.95 * without);
     // A widened pharynx lowers F1 and a narrowed one raises it, as an
     // advanced and a retracted tongue root do.
     let f1 = |pharynx: f32| {

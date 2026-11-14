@@ -69,5 +69,7 @@
   "sibilant_teeth": {"lo": 0.3, "hi": 1.2, "default": 0.6, "pass": "a"},
   "lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
   "lax_nucleus": {"lo": 0.4, "hi": 1, "default": 0.67, "pass": "c"},
-  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"}
+  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
+  "lax_floor": {"lo": 0, "hi": 0.09, "default": 0, "pass": "c"},
+  "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"}
 }

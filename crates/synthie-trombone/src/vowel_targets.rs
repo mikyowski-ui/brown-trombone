@@ -189,6 +189,8 @@ pub const TARGETS: &[Target] = &[
     end(Phoneme::Eh, [ 550.0, 1638.0, 2572.0], Lips::Spread),
     end(Phoneme::Ah, [ 543.0, 1422.0, 2550.0], Lips::Spread),
     end(Phoneme::Uh, [ 494.0, 1367.0, 2504.0], Lips::Rounded),
+    // A stressed /æ/ glides the same way over its end ("planks").
+    end(Phoneme::Ae, [ 558.0, 1670.0, 2570.0], Lips::Spread),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

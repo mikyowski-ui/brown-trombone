@@ -1683,14 +1683,22 @@ fn expand(
             };
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
-        Manner::Vowel if is_lax(p) => {
+        Manner::Vowel if is_lax(p) || (p == Phoneme::Ae && stressed) => {
             // A lax vowel holds its shape for `lax_nucleus` of its length
             // and then glides towards schwa, as English lax vowels do (the
             // tense ones hold theirs): its end shape is part of the way
-            // there (see `vowel_targets`).
-            let head = timing.lax_nucleus;
+            // there (see `vowel_targets`). A stressed one holds its shape
+            // for at least `lax_floor`, however fast the speech. A stressed
+            // /æ/ glides too, over its last `1 - ae_nucleus`.
+            let (head, floor) = if p == Phoneme::Ae {
+                (timing.ae_nucleus, 0.0)
+            } else if stressed {
+                (timing.lax_nucleus, timing.lax_floor)
+            } else {
+                (timing.lax_nucleus, 0.0)
+            };
             let end = VowelKey::End(p).articulation().unwrap_or(a);
-            out.push(draft(p, a, dur * head, true));
+            out.push(draft(p, a, (dur * head).max(floor), true));
             if head < 1.0 {
                 let mut tail = draft(p, end, dur * (1.0 - head), true);
                 tail.accent = 0.0;
