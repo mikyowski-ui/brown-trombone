@@ -249,6 +249,7 @@ reads the rest as well:
 | stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
 | a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (and `sonorant_slack`, `final_slack`, now 0) |
 | liquids into vowels | `lateral_gap`, `lateral_release` |
+| the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -399,6 +400,18 @@ as the model goes:
   later (`liquid_transition`), so the burst and the stop's own transition
   are heard before the liquid; after /p k/ the start of the liquid is
   voiceless.
+- **Taps.** A /t d/ between a vowel and an unstressed one, inside a word
+  after its stress ("water", "city", "little") or at the end of a word
+  before a vowel in the same phrase ("slid on", "get it", "a lot of"), is
+  an alveolar tap: one voiced segment of 20 ms (`tap_length`) whose tip is
+  thrown at the ridge 15 ms before it (`tap_lead`) and let go at once, so
+  the mouth is shut for 3 to 7 ms, little pressure builds behind it, and
+  there is no burst and no breath after it. The LibriSpeech reader's taps
+  dip 5 to 13 dB under the vowels beside them and are voiced throughout;
+  the engine's dip 6 to 15 dB, where its /t/ between vowels was a 98 ms
+  voiceless stop 45 to 57 dB down. Not before a stressed vowel, after a
+  consonant, at the end of a phrase, or for a /t/ before a syllabic /n/
+  ("button"); the classic engine has no taps.
 - **Nasals** close the mouth with the velum open, and the tongue drops
   behind the closure so that the closed mouth is a side branch of the
   nose with the antiresonance of its place (`nasal_cavity`); behind the
@@ -432,7 +445,17 @@ as the model goes:
   `unstressed_lax_length` 0.62) and by 18 % when stressed ("sells",
   "punch"; `lax_length` 0.82, the owner's choice in round 6, with a 60 ms
   floor on the held part, `lax_floor`), and glide part of the way towards
-  schwa over their last third; /eɪ/ glides the whole way. A stressed /æ/
+  schwa over their last third, except /ɪ/, which closes a little there as
+  the LibriSpeech reader's and the owner's do; /eɪ/ glides the whole way.
+  /ɪ/ itself (round 9) is closer and further back than Hillenbrand's (F1
+  400, F2 1900 Hz), away from the start of /eɪ/, where the engine's stood
+  in sentences (448 / 1998 Hz against /eɪ/'s 510 / 1930; the reader's /ɪ/
+  385 / 1747, his /eɪ/ 422 / 1892). An /u/ after /t d s z/ is made further
+  front (F2 1600 Hz, the plain /u/ 1000) and glides part of the way back
+  over its second half (`fronted_nucleus`), as the reader's does ("two"
+  1690 to 1300 Hz); after /n/, the postalveolars and /j/, fronted the same
+  way, it was heard as /ju/ ("canoe" as "can use", "the juice" as "the
+  use"), so there it is the plain /u/. A stressed /æ/
   can be made to glide a fifth of the way to schwa (`ae_nucleus` 0.55);
   it reaches its formants without, and with the glide the recognizer
   hears more /æ/ as /ɛ/, so that is off. A vowel shape may also set the tongue root, which widens or narrows
@@ -587,6 +610,16 @@ deterministic):
 | physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
 | physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
 
+Round 9, the front of the tongue (single scoring runs; against the end of
+round 8): /t d/ between a vowel and an unstressed one are taps, the /u/
+after /t d s z/ is fronted and glides back, and /ɪ/ is closer and further
+back and no longer opens towards schwa as it ends. Phoneme error over the
+30 held-out sentences 24.0 % (22.9 %), Whisper's words 67.4 % (68.3 %),
+vowels in the LibriSpeech texts heard wrong 23.1 % (23.1 %), consonants
+there right 87.3 % (89.1 %), voicing forced choice 98.5 % (99.0 %); the
+four-sentence clip 27 of 31 words (25), "The birch canoes feed on the
+smooth planks".
+
 Round 7 (single scoring runs again): the articulators and the tract's
 areas are brought up to date every 2.7 ms instead of every 10.7 ms (the
 folds' controls and the hiss regulator keep the long block), function words
@@ -720,9 +753,10 @@ average sentence).
   vowels' roots forward broke the listener and mimic gates for no gain.
 - **Lax vowels in the engine's sentences sit nearer the tense ones than a
   speaker's**: measured the same way in the LibriSpeech texts, the
-  person's /ɪ/ has an F2 at his schwa's and 20 % under his /i/, the
-  engine's 14 % over its schwa; but moved there, its /ɪ/ is heard as a
-  high central vowel. At the stressed length of 0.82 the recognizer hears
+  person's /ɪ/ has an F2 15 % over his schwa's and 16 % under his /i/;
+  the engine's was 27 % over its schwa (round 9: 22 %, F1 448 to 429 Hz,
+  F2 1998 to 1910); moved all the way there, its /ɪ/ is heard as a high
+  central vowel. At the stressed length of 0.82 the recognizer hears
   more stressed /ɪ/ as /eɪ/ (vowel error 28.3 against 26.2 % at 0.62)
   while Whisper gets a few more words; the length is the owner's choice.
 - **Whisper gets 70 % of the words of the 30 held-out sentences** (74 % of
@@ -746,18 +780,36 @@ average sentence).
   vowel error in the LibriSpeech texts rose from 24.1 to 28.0 % with
   Whisper unchanged, because the reference transcription has the full
   vowel there.
-- **In the four listening sentences** "canoe slid on" is heard as "can use
-  red on" (until round 8 "can you slide down"). The glide into the /u/ is
-  gone: its lips used to round only as the vowel began, over a tongue
-  already in place, and the second formant fell from 1800 to 1000 Hz over
-  its first 150 ms; now they round under the /n/ and it holds within 20
-  Hz. So is the /aɪ/ of "slid" (the first formant no longer rises between
-  the /l/ and the /ɪ/). What is left: the engine's /u/ (F1 380 to 400 Hz,
-  F2 1000) is a back /u/ where the LibriSpeech reader's after /n t d/ is
-  fronted (F1 270 to 310, F2 1600 to 2250), and the recognizer sometimes
-  hears it as /oʊ/; the stressed /ɪ/ is still heard as /eɪ/; and
-  no flap joins "slid" to "on". "Background" is on the edge: heard right
-  or as "back drawing" as the stop release speed moves by a tenth.
+- **In the four listening sentences** "canoe slid on" is heard as
+  "canoes feed on" (round 8: "can use with"): with the tap joining "slid"
+  to "on" Whisper hears the /u/ of "canoe" as /u/, and takes the /s/ of
+  "slid" for a plural. Sentence 1 alone is still heard as "The birch can
+  also eat on this new plane". Measured one change at a time against
+  round 8 (four-sentence clip, words of 31): the tap alone 27 ("canoes
+  rid on"), the /ɪ/ alone and the fronted /u/ after /t d s z/ alone 25,
+  all three 27. What is left: the /l/ of "slid" is heard as /r/, /w/ or
+  not at all, and of 15 /ɪ/ after /l/ in short phrases the recognizer
+  hears 5 right (round 8: 2), 4 as /eɪ/ and 5 as /i/. The /u/ of "canoe"
+  is the plain back /u/: fronted after /n/ (F2 1600 to 1800 Hz, as the
+  reader's and the owner's are), it was heard as /ju/, "can use". The
+  engine's /u/ and /i/ have a first formant 50 to 80 Hz above the reader's
+  in sentences (LPC: /u/ 410 against 274, /i/ 397 against 317), and the
+  tongue body, arriving late from the vowel before, still makes the start
+  of a short /ɪ/ open (F1 falls some 100 Hz over its first 40 %; the
+  reader's rises 10). "Background" is on the edge: heard right or as
+  "back drawing" as the stop release speed moves by a tenth.
+- **Taps cost a little elsewhere.** Over the 30 held-out sentences the
+  phoneme error with the tap is 24.0 % against 22.9 % (within the ±4 of
+  the set) and Whisper's words 69.6 % against 68.3 %; a tap after /ɑ/ is
+  sometimes heard as /r/ ("a rod is", "a pot of"). With all of round 9
+  the consonants of the LibriSpeech texts are heard right 87.3 % of the
+  time against 89.1 %: four slots are a /t d/ the recognizer writes as
+  the flap where the reference has the stop ("middle", "fled in",
+  "lucidity", "not exactly"; the reader taps them), three the /w/ of
+  "quilter" before the new /ɪ/, and two a /d/ after /n/ before an /ɪ/
+  ("send him", "and the [ðɪ]"), heard voiceless since the /ɪ/ moved (not
+  yet measured why; the closure is made on the /ɪ/'s tongue body, which is
+  now closer).
 - **The softer voice is a filter, not the folds.** Held more loosely
   (round 7), the folds open: past 12 % the child voice fell out of its
   folds' range with a click and a /g/ lost its voice bar, and at 12 % the

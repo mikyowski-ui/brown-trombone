@@ -572,21 +572,29 @@ tuning! {
 
     // ----- B and C: the front of the tongue (round 9) -------------------
 
-    /// Share of an /u/ after /t d n s z ʃ ʒ tʃ dʒ j/ held on its fronted
-    /// shape before it glides back towards the plain /u/ for the rest
-    /// (physical engine; `1.0` holds it to the end, `0` makes it the plain
-    /// back /u/ as before). See `speech::fronts_u`.
+    /// Share of an /u/ after /t d s z/ held on its fronted shape (F2 1600
+    /// Hz against the plain /u/'s 1000) before it glides back towards the
+    /// plain /u/ for the rest (physical engine; see `speech::fronts_u`):
+    /// the LibriSpeech reader's /u/ after /t d/ starts at 1700 to 2200 Hz
+    /// and ends some 400 Hz lower. `1.0` holds it to the end (held, the
+    /// recognizer heard 3 to 6 of 20 such /u/ as /i/), `0` makes every /u/
+    /// the plain back one, as until round 9.
     fronted_nucleus = 0.5, 0.0..=1.0, C;
     /// Length of an alveolar tap, s (physical engine): a /t d/ between a
     /// vowel and an unstressed one ("slid on", "get it", "water", "city")
-    /// is a touch of the tongue tip, voiced throughout, with no burst and
-    /// no breath after it. `0` makes them stops again. See `speech::taps`.
+    /// is one voiced segment, the tongue tip thrown against the ridge and
+    /// let go, with no closure held, no pressure built behind it, no burst
+    /// and no breath after it (see `speech::taps`). At 0.02 the mouth is
+    /// shut for 3 to 7 ms and the level dips 6 to 15 dB under the vowels
+    /// beside it in 25 ms frames (the LibriSpeech reader's taps: 5 to 13
+    /// dB, voiced throughout). `0` makes them stops again.
     tap_length = 0.02, 0.0..=0.05, B;
     /// How long before an alveolar tap begins its tip sets off, s
     /// (physical engine), in place of `lead`: the tap is a quick throw of
     /// the tip, which reaches the ridge from a vowel in some 10 to 18 ms.
-    /// Sent with the usual head start, it shut the mouth 10 to 15 ms before
-    /// the tap was due and held it for twice the tap's length.
+    /// Sent with the usual head start (`lead`, 0.03), it shut the mouth 10
+    /// to 15 ms before the tap was due, for 15 to 25 ms, and the level
+    /// dipped 12 to 29 dB.
     tap_lead = 0.015, 0.0..=0.04, B;
 }
 

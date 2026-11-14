@@ -1302,34 +1302,52 @@ fn is_lax(p: Phoneme) -> bool {
 }
 
 /// Whether an /u/ in `context` is made further front (physical engine; see
-/// [`VowelKey::Fronted`]): after a consonant of the front of the tongue in
-/// its own word, /t d n s z/, the postalveolars /ʃ ʒ tʃ dʒ/ and /j/ ("two",
-/// "do", "new", "canoe", "soon", "shoe", "juice", "you"), and not before
-/// the dark /l/ of its own syllable ("school", "pool", "tool"), which
-/// draws the tongue back again.
+/// [`VowelKey::Fronted`] and [`Tuning::fronted_nucleus`]): after /t d s z/
+/// in its own word ("two", "do", "tune", "soon", "zoo"), and not before
+/// the dark /l/ of its own syllable ("tool", "school"), which draws the
+/// tongue back again.
 ///
 /// Measured in the LibriSpeech reader's sentences (aligned, LPC; F2 at a
 /// fifth, half and four fifths of the vowel): after /t d n/ his /u/ starts
 /// at 1700 to 2200 Hz and ends at 1250 to 1650 ("two" 1690, 1360, 1300;
 /// "do" 1700, 1570, 1810; "the new" 1880, 2220, 2240; "too" 1760, 1630,
 /// 1340; "do in" 1790, 1390, 1180), with F1 250 to 310; after /j/ 1840,
-/// 1770, 1650; after his /l/ ("lucidity", unstressed) 1300. The owner's
-/// "canoe" holds 1860 to 1940 Hz for its first 60 ms and glides to 1330 by
-/// its end; his "smooth", "glue" and "who'd" are back /u/s (900 to 1300).
-/// The engine's /u/ was a back one everywhere, F2 1000 to 1100 with F1
-/// 390 to 440.
+/// 1770, 1650; after his /l/ ("lucidity", unstressed) 1300; he has no /u/
+/// before /l/. The owner's "canoe" holds 1860 to 1940 Hz for its first 60
+/// ms and glides to 1330 by its end; the owner's "smooth", "glue" and
+/// "who'd" are back /u/s (900 to 1300 Hz). The engine's /u/ was a back one
+/// everywhere, F2 1000 to 1100 with F1 390 to 440.
+///
+/// After /n/, the postalveolars and /j/ the engine's fronted /u/ was heard
+/// as /ju/ whatever its shape: "canoe" as "can use", "the juice" as "the
+/// use", "the new king" as "the n-ee-oo king" (F2 1600 to 1800 gliding
+/// back: the recognizer heard /i/ inserted before 3 of 20 /u/ after
+/// coronals; held at 1400 to 1800, it heard 3 to 6 of them as /i/). So the
+/// /u/ stays back there. After /t d s z/ alone the recognizer heard 13 of
+/// those 20 /u/ right (12 before), none with an /i/ before it.
 fn fronts_u(context: Context) -> bool {
     use Phoneme as P;
-    let after_front = context.prev.is_some_and(|p| {
-        matches!(
-            p,
-            P::T | P::D | P::S | P::Z
-        )
-    });
-    let dark_l = context
-        .next
-        .is_some_and(|(n, _, same)| same && n == P::L);
+    let after_front = context
+        .prev
+        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z));
+    let dark_l = context.next.is_some_and(|(n, _, same)| same && n == P::L);
     after_front && !dark_l
+}
+
+/// The vowel after an alveolar tap takes the time the tap saves against a
+/// stop's closure (physical engine): the tongue body, heavy and slow, glides
+/// from the vowel before the tap to the one after it underneath the tip, and
+/// in the 35 ms of a tap it had not got there: the recognizer heard the
+/// /ɪ/ of "fled in" as /æ/ and the /ɛ/ of "not exactly" as /ʌ/ (both right
+/// again with the time given back; the stop's own length, `stop_length`, is
+/// what the rules gave the body before).
+fn give_taps_time(drafts: &mut [Draft], timing: &Tuning, rate: f32) {
+    for k in 0..drafts.len().saturating_sub(1) {
+        let tap = drafts[k];
+        if tap.gesture.approach > 0.0 && drafts[k + 1].vowel {
+            drafts[k + 1].duration += (timing.stop_length / rate - tap.duration).max(0.0);
+        }
+    }
 }
 
 /// Whether the /t d/ `p` in `context` is said as an alveolar tap [ɾ]
@@ -1607,6 +1625,10 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         for p in &mut phrases {
             (p.0, p.1) = (p.0 + 1, p.1 + 1);
         }
+    }
+
+    if physical {
+        give_taps_time(&mut drafts, &timing, rate);
     }
 
     // Lengthen the last syllable of each phrase.

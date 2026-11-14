@@ -9,11 +9,16 @@
 //! * From /l/ into /ɪ/ the first formant does not rise above both the
 //!   /l/'s and the vowel's (an /aɪ/: "slid" heard as "slide"), and the /l/
 //!   keeps the low second formant of an /l/.
+//! * After /t d/ the /u/ is fronted and glides part of the way back.
+//! * A /t d/ between a vowel and an unstressed one is a tap: shut for a
+//!   few milliseconds, the voice going on through it, little pressure
+//!   behind it.
 
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
 )]
 
 #[path = "../examples/support/place.rs"]
@@ -58,32 +63,52 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         let s = place::speak(&voice(), text, true);
         let (_, v) = after(&s, c);
         assert_eq!(s.phonemes[v], Phoneme::Uw, "{text}: {:?}", s.phonemes);
-        // A fronted /u/ holds its shape over its first part and glides
-        // back towards the plain one over the rest (see
-        // `Tuning::fronted_nucleus`); the first part is what is held.
+        // After /t d/ the /u/ is a fronted one (`speech::fronts_u`),
+        // gliding back part of the way to the plain one over its second
+        // half (`Tuning::fronted_nucleus`); after /n/ it is the plain back
+        // /u/ (fronted there, it was heard as /ju/: "canoe" as "can use").
+        let fronted = matches!(c, Phoneme::T | Phoneme::D);
         let glides_back = s.phonemes.get(v + 1) == Some(&Phoneme::Uw);
+        assert_eq!(glides_back, fronted, "{text}: {:?}", s.phonemes);
         let (v0, v1) = s.ranges[v];
-        let mid = if glides_back {
-            v1
-        } else {
-            usize::midpoint(v0, v1)
-        };
+        let end = if glides_back { s.ranges[v + 1].1 } else { v1 };
         // The stop's own transition, its first 20 ms, falls from the
         // alveolar locus as a speaker's does; what follows is the vowel.
         let settled = v0 + (0.02 * place::SR) as usize;
+        if fronted {
+            // The LibriSpeech reader's /u/ after /t d/ starts at 1700 to
+            // 2200 Hz and ends some 400 Hz lower ("two" 1690 to 1300, "too"
+            // 1760 to 1340, "do" 1700 to 1810); the owner's "canoe" falls
+            // from 1900 to 1330. The engine's back /u/ stood at 1000 to
+            // 1100; gliding back to it, "do" fell from 1860 to 1140.
+            let frames = oral(&s, settled, end);
+            assert!(frames.len() >= 4, "{text}: {} oral frames", frames.len());
+            let onset = frames[0].1[1];
+            let last = frames.last().expect("frames").1[1];
+            println!("{text}: F2 {onset:.0} to {last:.0} Hz");
+            assert!(
+                onset >= 1550.0,
+                "{text}: the fronted /u/ starts at {onset:.0} Hz"
+            );
+            assert!(
+                (100.0..=600.0).contains(&(onset - last)),
+                "{text}: F2 {onset:.0} to {last:.0} Hz over the /u/"
+            );
+            continue;
+        }
+        let mid = usize::midpoint(v0, end);
         let frames = oral(&s, settled, mid + 2 * place::FRAME);
         assert!(frames.len() >= 4, "{text}: {} oral frames", frames.len());
         let target = frames.last().expect("frames").1[1];
         let highest = frames.iter().map(|f| f.1[1]).fold(0.0f32, f32::max);
         // Before round 8 the first oral frame of the /u/ of "canoe" stood
         // at 1816 Hz and the vowel's middle near 1150: a fall of 650 Hz
-        // over 100 ms, while the lips rounded. A speaker's /u/ after /n d/
-        // holds its F2 (the LibriSpeech reader's "the new", "do": flat,
-        // fronted, near 2200 Hz).
+        // over 100 ms, while the lips rounded: /ju/.
         assert!(
             highest - target <= 200.0,
             "{text}: F2 falls from {highest:.0} to {target:.0} Hz into the /u/"
         );
+        assert!(target <= 1300.0, "{text}: the /u/ holds {target:.0} Hz");
     }
 }
 
@@ -170,11 +195,9 @@ fn touch(text: &str, p: Phoneme) -> (Touch, usize) {
     let (a, b) = at.expect("the consonant was spoken");
     let (from, to) = (a.saturating_sub(margin), (b + margin).min(log.len()));
     let swing = |r: &[(bool, f32, f32)]| {
-        let (lo, hi) = r
-            .iter()
-            .fold((f32::INFINITY, 0.0f32), |(lo, hi), x| {
-                (lo.min(x.1), hi.max(x.1))
-            });
+        let (lo, hi) = r.iter().fold((f32::INFINITY, 0.0f32), |(lo, hi), x| {
+            (lo.min(x.1), hi.max(x.1))
+        });
         hi - lo
     };
     let vowel = swing(&log[from.saturating_sub(4 * window)..from]);

@@ -69,8 +69,7 @@ pub enum VowelKey {
     /// towards the plain one).
     End(Phoneme),
     /// A vowel made further front after a consonant of the tongue's front:
-    /// the /u/ of "two", "do", "new", "juice" (see
-    /// `speech::fronts_u`).
+    /// the /u/ of "two", "do", "soon" (see `speech::fronts_u`).
     Fronted(Phoneme),
 }
 
@@ -162,7 +161,12 @@ const BACK_OFFGLIDE: [f32; 3] = [424.0, 1060.0, 2389.0];
 pub const TARGETS: &[Target] = &[
     //                              F1      F2      F3      Peterson & Barney
     vowel(Phoneme::Iy, [ 342.0, 2322.0, 3000.0], Lips::Spread),  // 270 2290 3010
-    vowel(Phoneme::Ih, [ 400.0, 1900.0, 2650.0], Lips::Spread),  // 390 1990 2550
+    // /ɪ/ closer and further back than Hillenbrand's, away from the start
+    // of /eɪ/ (480 1950): in sentences the engine's stood at 448 / 1998 Hz
+    // (LPC, middle of the vowel) next to its /eɪ/ start at 510 / 1930,
+    // where the LibriSpeech reader's /ɪ/ is 385 / 1747 and his /eɪ/ starts
+    // at 422 / 1892 (round 9; F2 1850 alone, in round 6, made it central).
+    vowel(Phoneme::Ih, [ 400.0, 1900.0, 2650.0], Lips::Spread), // moved; published 427 2034 2684; P&B 390 1990 2550
     vowel(Phoneme::Eh, [ 609.0, 1799.0, 2605.0], Lips::Spread), // tuned; published 580 1799 2605; P&B 530 1840 2480
     vowel(Phoneme::Ae, [ 630.0, 1880.0, 2601.0], Lips::Spread), // tuned; published 588 1952 2601; P&B 660 1720 2410
     vowel(Phoneme::Ah, [ 593.0, 1260.0, 2550.0], Lips::Spread), // tuned; published 623 1200 2550; P&B 640 1190 2390
@@ -199,23 +203,32 @@ pub const TARGETS: &[Target] = &[
     // way from the vowel to schwa (AX above). The heavy tongue body gets
     // a little over a third of the way there before the next sound takes
     // it, so the vowel ends some 15 % of the way to schwa, as English lax
-    // vowels do (they centralise; the tense ones do not).
+    // vowels do (they centralise; the tense ones do not). Not /ɪ/: the
+    // reader's closes a little over its second half (F1 -19 Hz, F2 -34
+    // from 40 to 80 % of it), the owner's "slid" too (F1 -18), and the
+    // engine's, opening towards schwa there (F1 +17, F2 -82) after a
+    // body arriving from the sound before (F1 -80 over its first 40 %),
+    // was open, closed, open: /eɪ/. Its glide end is a little closer.
     end(Phoneme::Ih, [ 385.0, 1860.0, 2650.0], Lips::Spread),
     end(Phoneme::Eh, [ 550.0, 1638.0, 2572.0], Lips::Spread),
     end(Phoneme::Ah, [ 543.0, 1422.0, 2550.0], Lips::Spread),
     end(Phoneme::Uh, [ 494.0, 1367.0, 2504.0], Lips::Rounded),
     // A stressed /æ/ glides the same way over its end ("planks").
     end(Phoneme::Ae, [ 558.0, 1670.0, 2570.0], Lips::Spread),
-    // After /t d n s z ʃ ʒ tʃ dʒ j/ the /u/ is made further front and
-    // closer, still rounded ("two", "do", "new", "canoe", "juice"): the
+    // After /t d s z/ the /u/ is made further front and closer, still
+    // rounded ("two", "do", "soon"; see `speech::fronts_u`): the
     // LibriSpeech reader's starts at F2 1700 to 2200 Hz with F1 250 to
-    // 310 ("the new", "do", "two", "too"; after his labials and /h/ too,
-    // which the owner's are not), the owner's "canoe" at 1860 to 1940 with
-    // F1 340 to 360; both glide back over a long vowel, to 1300 to 1400
-    // at its end, so the fronted /u/ glides to its end shape below.
+    // 310 after /t d n/, the owner's "canoe" at 1860 to 1940 with F1 340
+    // to 360; both glide back over a long vowel, to 1300 to 1400 at its
+    // end, so the fronted /u/ glides to its end shape below. The owner
+    // asked for 1600 to 2000 Hz: at 1600 and at 1800 the recognizer heard
+    // 17 and 18 of 20 /u/ after coronals right, so the lower end is used.
     fronted(Phoneme::Uw, [ 320.0, 1600.0, 2300.0], Lips::Rounded),
-    // Where the fronted /u/ glides back to: the plain /u/.
-    end(Phoneme::Uw, [ 378.0,  997.0, 2343.0], Lips::Rounded),
+    // Where the fronted /u/ glides back to: part of the way to the plain
+    // /u/. The reader's ends at 1250 to 1650 Hz, the owner's "canoe" at
+    // 1330; gliding to the plain /u/ (997 Hz), the engine's "do" fell from
+    // 1860 to 1140.
+    end(Phoneme::Uw, [ 350.0, 1250.0, 2340.0], Lips::Rounded),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

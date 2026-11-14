@@ -258,8 +258,20 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
             100.0 * s
         );
         // /ɛ/ moves least: 9 % at the default length, 22 % at 0.82 of a
-        // tense vowel's (where /ʊ/ moves most, 55 %).
-        assert!((0.07..=0.6).contains(&s), "{p}: {s}");
+        // tense vowel's (where /ʊ/ moves most, 55 %). /ɪ/ does not open
+        // towards schwa: the LibriSpeech reader's closes a little over its
+        // second half (F1 -19 Hz, F2 -34 Hz from 40 to 80 % of the vowel
+        // in his sentences), the owner's in "slid" too (F1 -18, F2 +31),
+        // and the engine's, gliding to schwa (F1 +17, F2 -82), started
+        // open, closed and opened again, which is /eɪ/ ("slid" heard as
+        // "slayed"); its glide end is a little closer than its nucleus
+        // since round 9 (-2 %; 0.07 to 0.6 until then).
+        let range = if p == Phoneme::Ih {
+            -0.1..=0.1
+        } else {
+            0.07..=0.6
+        };
+        assert!(range.contains(&s), "{p}: {s}");
     }
     // The tense vowels have no glide of their own...
     for p in [Phoneme::Iy, Phoneme::Uw, Phoneme::Aa] {
