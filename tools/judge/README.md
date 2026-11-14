@@ -686,7 +686,7 @@ the limit); with the round 8 range 3.1 dB (221 at the limit). Sample 2
 (a woman at 204 Hz) was matched with a tract of 0.93 and the tenseness at
 its floor; her vowels' median F1 / F2 error went from 21 / 11 % (the
 deep voice following her timing) to 10 / 6 %, but her H1*-H2* contour was
-not followed (r -0.09; 0.45 without the tenseness loop): at her pitch the
+not followed (r -0.09; 0.45 with the timing only): at her pitch the
 per-phone H1*-H2* moves by more than the engine's tenseness range can.
 
 **Checks** (`check`; `transfer` prints them): the rendering aligned again
