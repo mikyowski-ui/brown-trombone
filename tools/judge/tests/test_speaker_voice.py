@@ -109,6 +109,20 @@ def test_the_breath_map_reaches_the_new_range_and_turns_round():
     assert np.all(np.diff(Pr.breath_db(np.linspace(0.3, 1.8, 50))) > 0)
 
 
+def test_a_recordings_formant_scale_falls_back_on_the_spacing_when_the_two_part():
+    import match_voice as M
+
+    def a(scale, lpc):
+        return M.Analysis(f0_median=100.0, f0_p10=90.0, f0_p90=110.0, range_st=3.0, formants=[500.0] * 5, dF=1000.0,
+                          order=22, h1h2=5.0, h1h2_raw=4.0, alpha=-10.0, cpp=2.0, hnr=8.0, syll_rate=4.0, voiced_s=2.0,
+                          speech_s=3.0, scale=scale, scale_lpc=lpc)  # fmt: skip
+
+    assert M.steady_scale(a(1.09, 1.07)).scale == pytest.approx(1.09)  # they agree: the density's
+    assert M.steady_scale(a(0.69, 1.015)).scale == pytest.approx(1.015)  # they part: the spacing's
+    assert M.steady_scale(a(float("nan"), 1.02)).scale == pytest.approx(1.02)
+    assert SV.BASELINE_FIXED["lung_pressure"] >= 8.0 and SV.BASELINE_BOUNDS["tenseness"][0] >= 0.45
+
+
 def test_the_five_are_engine_against_speaker():
     rec = {"f0_median": 200.0, "range_st": 8.0, "scale": 1.1, "h1h2": 10.0, "hnr": 9.0, "speech_s": 4.0}
     syn = {"f0_median": 210.0, "range_st": 7.0, "scale": 1.1 * 1.02, "h1h2": 9.0, "hnr": 10.0, "speech_s": 4.4}

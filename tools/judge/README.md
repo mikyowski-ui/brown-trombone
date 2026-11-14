@@ -576,8 +576,8 @@ placed (`poorly_placed`; 2 % of the anchors' phones, mostly weak forms and
 say, and the /k g/ of "background", which they say as one).
 
 **The schedule** (JSON, `"format": "synthie-prosody-1"`): the text; one
-entry per phone of the engine's own phonemes for it (the first line of
-`say`, read by `arpabet.parse_engine_line`), with `start` and `end` on the
+entry per phone of the engine's own phonemes for it (as `say` names them
+in `--phone-times`), with `start` and `end` on the
 recording (s), `level_db` (mean level against the mean of the utterance's
 vowels), `breath` (a share of the rules' lung pressure, 1 unless the level
 loop set it), the pitch at five points inside and the voiced share; the

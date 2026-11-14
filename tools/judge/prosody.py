@@ -3,8 +3,10 @@ physical engine speaks with (``say --match-prosody``).
 
 From a recording and its text:
 
-* **phones** -- the engine's own phonemes for the text (the first line of
-  ``bin/say``, read by ``arpabet.parse_engine_line``), force-aligned to the
+* **phones** -- the engine's own phonemes for the text (as ``bin/say``
+  names them in ``--phone-times``; the first line of its output, read by
+  ``arpabet.parse_engine_line``, counts the two segments of an /l/ before
+  a vowel as two /l/ since round 8), force-aligned to the
   recording with the judge's wav2vec2 phoneme model (``natural.align``'s
   Viterbi CTC path), so that every engine phone gets a stretch of the
   recording. The model's spikes sit anywhere in their phone, so each
