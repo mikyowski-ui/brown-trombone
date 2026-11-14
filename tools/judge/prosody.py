@@ -1249,7 +1249,7 @@ def speaker_of(sched: dict, audio: np.ndarray, voice: str = "deep", off: tuple[s
             print(f"the baseline voice was not trusted (engine against recording: {rep['errors']}); "
                   "the schedule has none", file=sys.stderr)  # fmt: skip
     ref = SV.reference_for(sched, voice)
-    rec = rep.get("recording_analysis") or SV.analyse_like(audio, ref, None)
+    rec = rep.get("recording_analysis") or SV.analyse_like(audio, ref, None, recording=True)
     sched["baseline"] = {k: rec[k] for k in BASELINE_KEYS}
     phones, start, end = sched_arrays(sched)
     spk = SV.phone_voice(SV.frame_measures(audio, rec["order"]), start, end, phones, rec["scale"])

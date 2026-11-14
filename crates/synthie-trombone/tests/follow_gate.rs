@@ -5,10 +5,12 @@
 //! as they may go, and every phone at the shortest the schedule may make it
 //! (so the articulators are driven at their fastest) — in the voices a
 //! transfer gives: the deep and child presets and the baselines matched to
-//! the two reference recordings (a man at 112 Hz, a woman at 204 Hz with a
-//! loose voice, tenseness 0.35). No click stands out of the speech, the
-//! pulse source never sings a note the folds could, and the voiced stops
-//! keep their voice bar.
+//! the two reference recordings (a man at 112 Hz; a woman at 204 Hz with a
+//! loose voice, tenseness 0.45, the floor of the baseline match: at its
+//! own match of 0.29 that voice's medial voiced stops were voiced through
+//! 62 % of their closures by the schedule alone, one /b/ through 24 %).
+//! No click stands out of the speech, the pulse source never sings a note
+//! the folds could, and the voiced stops keep their voice bar.
 
 #![allow(
     clippy::many_single_char_names,
@@ -51,17 +53,17 @@ fn voices() -> Vec<(&'static str, VoiceSettings)> {
     let child = Preset::Child.settings().with_engine(Engine::Physical);
     // As `prosody.py transfer` matched them to the reference recordings.
     let woman = VoiceSettings {
-        pitch: 164.0,
-        tract_length: 0.932,
-        tenseness: 0.35,
+        pitch: 160.6,
+        tract_length: 0.935,
+        tenseness: 0.45,
         ..deep
     }
-    .with_profile(r#"{"tuning": {"posterior_gap": 0.156, "lung_pressure": 5.44}}"#)
+    .with_profile(r#"{"tuning": {"posterior_gap": 0.119, "lung_pressure": 8.0}}"#)
     .expect("profile");
     let man = VoiceSettings {
-        pitch: 112.0,
-        tract_length: 1.0,
-        tenseness: 0.6,
+        pitch: 83.6,
+        tract_length: 1.065,
+        tenseness: 0.88,
         ..deep
     };
     vec![

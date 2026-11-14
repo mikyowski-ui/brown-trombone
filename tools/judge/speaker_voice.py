@@ -83,6 +83,12 @@ VOICE_KEYS = ("engine", "pitch", "tract_length", "tenseness", "tuning")
 #: quiet phone (half of it) the folds no longer vibrate and every other
 #: round of the match measured a whisper.
 BASELINE_FIXED = {"lung_pressure": 8.0}
+#: Narrower ranges for the baseline match. Tenseness no lower than 0.45:
+#: matched to sample 2's H1*-H2* (10.5 dB) it went to 0.29, and the voiced
+#: stops between vowels of that voice were voiced through 62 % of their
+#: closures on average, one /b/ through 24 % (at 0.4: 87 %, at 0.45: 96 %,
+#: the least 63 %; ``tests/follow_gate.rs``).
+BASELINE_BOUNDS = {"tenseness": (0.45, 0.95)}
 #: A baseline match that ends further than this from the recording (formant
 #: scale, %; median pitch, %) is not trusted: the schedule gets no voice.
 BASELINE_TRUST = {"formant_pct": 8.0, "pitch_pct": 15.0}
@@ -311,7 +317,8 @@ def baseline(sched: dict, audio: np.ndarray, voice: str = "deep", iters: int = 6
         return out
 
     rep = M.match("recording", sched["text"], iters=iters, transcript=True, log=log, renderer=renderer,
-                  audio=np.asarray(audio, np.float64), fixed=BASELINE_FIXED, steady=True)  # fmt: skip
+                  audio=np.asarray(audio, np.float64), fixed=BASELINE_FIXED, steady=True,
+                  bounds=BASELINE_BOUNDS)  # fmt: skip
     e = rep["errors"]
     rep["trusted"] = all(abs(e[k]) <= v for k, v in BASELINE_TRUST.items())
     rep["voice"] = voice_of(rep["profile"]) if rep["trusted"] else None
@@ -332,13 +339,14 @@ def five(rec: dict, syn: dict) -> dict:
     }
 
 
-def analyse_like(x: np.ndarray, ref: dict, order: int | None) -> dict:
+def analyse_like(x: np.ndarray, ref: dict, order: int | None, recording: bool = False) -> dict:
     """``match_voice.analyse`` against ``ref`` at LPC ``order`` (chosen
-    from the recording when ``None``), with the steadier formant scale of
-    ``match_voice.steady_scale``, as a dict."""
+    from the recording when ``None``), as a dict; for a ``recording``
+    with the steadier formant scale of ``match_voice.steady_scale``."""
     import match_voice as M
 
-    return M.steady_scale(M.analyse(np.asarray(x, np.float64), order=order, ref=ref)).as_dict()
+    a = M.analyse(np.asarray(x, np.float64), order=order, ref=ref)
+    return (M.steady_scale(a) if recording else a).as_dict()
 
 
 def reference_for(sched: dict, voice: str = "deep") -> dict:

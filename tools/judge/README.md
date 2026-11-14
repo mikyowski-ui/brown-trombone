@@ -640,10 +640,13 @@ so the pitch and pace are already the speaker's): median pitch, formant
 scale (tract length), H1*-H2* (tenseness), HNR and tilt (posterior gap),
 the lung pressure held at 8 cmH2O (free, the matcher took it to its
 floor, where with a quiet phone's half breath the folds stop), the
-formant scale taken as the geometric mean of the candidate-density and
-formant-spacing estimates where they agree within 6 % and the spacing's
-where not (`match_voice.steady_scale`: the density estimate ranged from
-0.69 to 1.30 over the reader's 16 sentences). A match that ends more than
+recording's formant scale taken from the formant spacing where the
+candidate-density estimate parts from it by more than 6 %
+(`match_voice.steady_scale`: the density estimate ranged from 0.69 to
+1.30 over the reader's 16 sentences, the spacing from 0.99 to 1.18), and
+the tenseness no lower than 0.45 (sample 2's H1*-H2* took it to 0.29,
+where that voice's voiced stops between vowels were voiced through 62 %
+of their closures, at 0.45 through 96 %). A match that ends more than
 8 % off in formant scale or 15 % in pitch is not used. Then the loop of
 three renderings moves, besides the breath, each sonorant's tenseness
 share by its H1*-H2* against the engine's mean, compared with the
