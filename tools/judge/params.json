@@ -69,5 +69,8 @@
   "sibilant_teeth": {"lo": 0.3, "hi": 1.2, "default": 0.6, "pass": "a"},
   "lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
   "lax_nucleus": {"lo": 0.4, "hi": 1, "default": 0.67, "pass": "c"},
-  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"}
+  "unstressed_lax_length": {"lo": 0.5, "hi": 1, "default": 0.62, "pass": "c"},
+  "liquid_transition": {"lo": 0, "hi": 0.04, "default": 0.018, "pass": "b"},
+  "alveolar_velum": {"lo": 0.5, "hi": 1, "default": 1, "pass": "a"},
+  "nasal_cavity_rate": {"lo": 10, "hi": 70, "default": 60, "pass": "b"}
 }

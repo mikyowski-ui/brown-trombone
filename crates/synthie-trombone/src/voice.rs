@@ -31,6 +31,9 @@ pub(crate) const FRICATIVE_WIDEST: f32 = HISS_WIDEST;
 /// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`Tuning::postalveolar_lips`]);
 /// /r/, further back, keeps its rounding.
 const POSTALVEOLAR_PLACE: core::ops::RangeInclusive<f32> = 32.5..=34.5;
+/// Where the tongue tip closes for /n/ (the alveolar ridge, and the teeth
+/// for an /n/ made there), as a constriction index.
+const ALVEOLAR_NASAL_PLACE: core::ops::RangeInclusive<f32> = 34.5..=40.0;
 
 /// Which model turns the articulation into sound.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -721,9 +724,21 @@ impl Trombone {
         {
             lips.diameter = lips.diameter.max(self.tuning.postalveolar_lips);
         }
+        // The physical /n/ lowers the velum less than /m ŋ/.
+        let velum = match a.constriction {
+            Some(c)
+                if self.engine == Engine::Physical
+                    && a.velum > 0.0
+                    && c.diameter <= 0.3
+                    && ALVEOLAR_NASAL_PLACE.contains(&c.index) =>
+            {
+                a.velum * self.tuning.alveolar_velum
+            }
+            _ => a.velum,
+        };
         self.tract.set_constriction(SLOT_MAIN, a.constriction);
         self.tract.set_constriction(SLOT_LIPS, a.lips);
-        self.tract.set_velum(a.velum);
+        self.tract.set_velum(velum);
     }
 
     /// Move to a phoneme's articulation (see [`articulate`](Self::articulate)).

@@ -1878,9 +1878,10 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
     // /m/ to 420 to 530 Hz, and the recognizer heard /n/ as /m/ (and /m/ as
     // /n/ or /ŋ/) in a third of the nasals in the LibriSpeech sentences.
     // With the tongue lowered behind the closure (`Tuning::nasal_cavity`):
-    // /m/ 780 to 1040 Hz with a notch 23 to 40 dB deep, /n/ 1150 to 1600 Hz
-    // (lowest before /ɔ ʌ/), and in every vowel /n/ at least 340 Hz above
-    // /m/. (The notch /n/ leaves is shallower, 2 to 30 dB: a resonance of
+    // /m/ 750 to 1060 Hz with a notch 23 to 40 dB deep, /n/ 1200 to 1550 Hz
+    // (lowest before /ɔ/; with the tongue lowered at the back of the
+    // tongue's speed, 1150 Hz there and 1190 Hz before /ʌ/), and in every
+    // vowel /n/ at least 340 Hz above /m/. (The notch /n/ leaves is shallower, 2 to 30 dB: a resonance of
     // the murmur lies close to it.) Lowered only up to the tip's shoulder,
     // /n/ after /i ɪ æ ʊ/ stood at 1.75 to 1.9 kHz, and the recognizer
     // heard /n/ as /ŋ/ in a fifth of those over 1.7 kHz: so /n/ is also
@@ -1921,6 +1922,222 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
             notch_in(&ng_notches, 600.0, 1300.0, 15.0).is_none(),
             "in {v}: /ŋ/ {ng_notches:?}"
         );
+    }
+}
+
+/// A short utterance spoken by the physical engine, sample by sample: the
+/// segment, whether the mouth is shut, the velum, the output and the oral
+/// tract's diameters.
+struct Said {
+    phonemes: Vec<Phoneme>,
+    segment: Vec<usize>,
+    shut: Vec<bool>,
+    velum: Vec<f32>,
+    out: Vec<f32>,
+    diameters: Vec<[f32; synthie_trombone::N]>,
+    tick_rate: f32,
+}
+
+fn say_traced(settings: &VoiceSettings, text: &str) -> Said {
+    use synthie_trombone::speech::{Speaker, Utterance};
+    let settings = tuned(*settings).with_engine(Engine::Physical);
+    let mut t = fresh();
+    settings.apply(&mut t);
+    Speaker::prepare(&mut t);
+    let utterance = Utterance::from_text(text, &settings.prosody());
+    let mut s = Said {
+        phonemes: utterance.segments().iter().map(|s| s.phoneme).collect(),
+        segment: Vec::new(),
+        shut: Vec::new(),
+        velum: Vec::new(),
+        out: Vec::new(),
+        diameters: Vec::new(),
+        tick_rate: t.tick_rate(),
+    };
+    let mut speaker = Speaker::new();
+    speaker.speak(utterance);
+    while let Some((i, _)) = speaker.current() {
+        s.out.push(speaker.process(&mut t));
+        s.segment.push(i);
+        s.shut.push(t.mouth_shut());
+        s.velum.push(t.velum());
+        s.diameters.push(*t.diameters());
+    }
+    s
+}
+
+/// Second-order Butterworth high-pass at `hz`.
+fn high_pass(x: &[f32], hz: f32) -> Vec<f32> {
+    let w = 2.0 * std::f32::consts::PI * hz / SR;
+    let alpha = w.sin() / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
+    let a0 = 1.0 + alpha;
+    let (b0, b1) = (f32::midpoint(1.0, w.cos()) / a0, -(1.0 + w.cos()) / a0);
+    let (a1, a2) = (-2.0 * w.cos() / a0, (1.0 - alpha) / a0);
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    x.iter()
+        .map(|&v| {
+            let y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+            (x2, x1, y2, y1) = (x1, v, y1, y);
+            y
+        })
+        .collect()
+}
+
+#[test]
+#[allow(clippy::cast_precision_loss)]
+fn stops_are_released_into_liquids_with_a_burst_and_a_transition() {
+    // "Dark blue" was heard as "dark loo": a /b p g k/ in front of an /l r/
+    // was released straight into the liquid. Its narrowing came within one
+    // articulator block (10 ms) of the release, and the lips of /b p/,
+    // parting under the liquid's own tongue body, moved at the back of the
+    // tongue's speed: 10 ms after the release they were 0.28 apart before
+    // /l/ (0.15 before /r/), against 0.6 before a vowel, and the burst of
+    // /b/ above 2.5 kHz was 17 dB under that of the same /b/ before a vowel.
+    // A speaker's burst before a liquid is about 7 dB under the one before
+    // a vowel (13 and 36 stops in the LibriSpeech sentences), and what a
+    // listener hears first is the stop: its burst, then a short stretch of
+    // its own transition.
+    //
+    // Now the lips part at their own speed and the liquid's narrowing waits
+    // for the release (`Tuning::liquid_transition`). In these words, 10 ms
+    // after the release the tongue tip is still 0.14 to 0.8 wider than in
+    // the liquid, which it reaches 20 to 31 ms after the release; the lips of
+    // /bl pl/ are 0.56 apart, those of /br pr/ 0.53; the burst of /bl/ is
+    // 1.8 dB over that of /bi/. Without the hold (`liquid_transition` 0)
+    // /br/'s tip was in place after 10 ms and /bl/'s burst 9 dB under /bi/'s.
+    // Bounds: the narrowing no sooner than 15 ms and no later than 45 ms
+    // after the release, the tip at least 0.12 wider than in the liquid
+    // after 10 ms; lips at least 0.45 apart 10 ms after a labial's release
+    // into /l/ and 0.25 into /r/; the burst of /bl/ at most 6 dB under that
+    // of /bi/.
+    let settings = stops::judge_voice();
+    // (word, stop, liquid, cell of the liquid's narrowing)
+    let words = [
+        ("a blue", Phoneme::B, Phoneme::L, 35),
+        ("a plum", Phoneme::P, Phoneme::L, 35),
+        ("a glue", Phoneme::G, Phoneme::L, 35),
+        ("a clue", Phoneme::K, Phoneme::L, 35),
+        ("a brew", Phoneme::B, Phoneme::R, 31),
+        ("a prune", Phoneme::P, Phoneme::R, 31),
+        ("a groom", Phoneme::G, Phoneme::R, 31),
+        ("a crew", Phoneme::K, Phoneme::R, 31),
+    ];
+    // The level above 2.5 kHz over the first 10 ms after the release of
+    // `stop`, dB, and the release itself.
+    let burst = |s: &Said, stop: Phoneme| {
+        let start = (0..s.out.len())
+            .find(|&n| s.phonemes[s.segment[n]] == stop)
+            .expect("the stop");
+        let release = (start.max(1)..s.out.len())
+            .find(|&n| s.shut[n - 1] && !s.shut[n])
+            .expect("a release");
+        let hf = high_pass(&s.out, 2500.0);
+        let n = (0.01 * SR) as usize;
+        (db(rms(&hf[release..release + n])), release)
+    };
+    let before_vowel = burst(&say_traced(&settings, "a bee"), Phoneme::B).0;
+    for (word, stop, liquid, cell) in words {
+        let s = say_traced(&settings, word);
+        let (level, release) = burst(&s, stop);
+        // The liquid's narrowing: the diameter at its place in the middle
+        // of the liquid.
+        let k = s
+            .phonemes
+            .iter()
+            .position(|&p| p == liquid)
+            .expect("the liquid");
+        let span: Vec<usize> = (0..s.out.len()).filter(|&n| s.segment[n] == k).collect();
+        let narrow = s.diameters[span[span.len() / 2]][cell];
+        let reached = (release..s.out.len())
+            .find(|&n| s.diameters[n][cell] <= narrow + 0.05)
+            .map_or(f32::INFINITY, |n| (n - release) as f32 / SR * 1000.0);
+        let lips = s.diameters[release + (0.01 * SR) as usize][39..]
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let tip = s.diameters[release + (0.01 * SR) as usize][cell];
+        println!(
+            "{word}: narrowing {reached:.0} ms after the release ({tip:.2} after 10 ms, {narrow:.2} in the liquid), lips {lips:.2} after 10 ms, burst {level:.1} dB (/bi/ {before_vowel:.1})"
+        );
+        assert!(
+            (15.0..=45.0).contains(&reached),
+            "{word}: the liquid's narrowing {reached:.0} ms after the release"
+        );
+        assert!(
+            tip >= narrow + 0.12,
+            "{word}: tip {tip:.2} 10 ms after the release, {narrow:.2} in the liquid"
+        );
+        if matches!(stop, Phoneme::B | Phoneme::P) {
+            let open = if liquid == Phoneme::L { 0.45 } else { 0.25 };
+            assert!(
+                lips >= open,
+                "{word}: lips {lips:.2} apart 10 ms after the release"
+            );
+        }
+        if stop == Phoneme::B && liquid == Phoneme::L {
+            assert!(
+                level >= before_vowel - 6.0,
+                "{word}: burst {level:.1} dB, /bi/ {before_vowel:.1} dB"
+            );
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::cast_precision_loss)]
+fn the_antiresonance_of_n_holds_through_its_murmur_before_a_consonant() {
+    // In sentences /n/ was still heard as /ŋ/ before consonants ("run
+    // fast", "lemons", "fine punch": 5 of 94 in a set of such sentences).
+    // The tongue was lowered behind the closure at the back of the tongue's
+    // speed, so after /ʌ ə ɛ ɑ aʊ/ the mouth behind it was still the
+    // vowel's for the first third of the murmur: the side branch's
+    // antiresonance stood at 1.2 to 1.35 kHz there, rising to 1.5 kHz only
+    // as the murmur ended (and before a consonant the murmur is short).
+    // Lowered at `Tuning::nasal_cavity_rate` it is 1.45 to 1.55 kHz from the
+    // start. Measured as the first zero of the closed branch from the velum
+    // to the closure, at a quarter, a half and three quarters of the murmur
+    // (mouth shut, velum open); bounds 1.4 to 1.7 kHz.
+    let settings = stops::judge_voice();
+    for text in [
+        "[R AH1 N F AE1 S T]",
+        "[L EH1 M AX N Z]",
+        "[F AY1 N P AH1 N CH]",
+        "[S EH1 V AX N L EH1 M AX N]",
+        "[R AH1 N P AE1 S T]",
+        "[W EH1 N T]",
+        "[D AA1 N T]",
+    ] {
+        let s = say_traced(&settings, text);
+        let k = s
+            .phonemes
+            .iter()
+            .position(|&p| p == Phoneme::N)
+            .expect("/n/");
+        let murmur: Vec<usize> = (0..s.out.len())
+            .filter(|&n| s.shut[n] && s.velum[n] > 0.1 && s.segment[n].abs_diff(k) <= 1)
+            .collect();
+        assert!(
+            murmur.len() as f32 > 0.03 * SR,
+            "{text}: murmur {} samples",
+            murmur.len()
+        );
+        let zeros: Vec<f32> = [0.25, 0.5, 0.75]
+            .iter()
+            .map(|&q| {
+                let n = murmur[(q * murmur.len() as f32) as usize];
+                place::branch_zeros(&s.diameters[n], s.tick_rate)
+                    .first()
+                    .copied()
+                    .unwrap_or(0.0)
+            })
+            .collect();
+        println!(
+            "{text}: murmur {:.0} ms, /n/ antiresonance {zeros:.0?} Hz",
+            murmur.len() as f32 / SR * 1000.0
+        );
+        for z in zeros {
+            assert!((1400.0..=1700.0).contains(&z), "{text}: /n/ at {z:.0} Hz");
+        }
     }
 }
 

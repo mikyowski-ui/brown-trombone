@@ -168,6 +168,9 @@ enum Mover {
     Dorsum,
     /// The tongue tip and blade, or the lips, making a consonant.
     Tip,
+    /// The tongue dropping behind a nasal's closure (see
+    /// [`Tract::open_nasal_cavity`]).
+    Cavity,
 }
 
 /// The articulator that makes a consonant constriction at `index`.
@@ -375,6 +378,8 @@ pub(crate) struct Tract {
     /// (physical engine), and which articulator moves each cell.
     body: [f32; N],
     mover: [Mover; N],
+    /// Lip cells let go of a closure and still on their way out of it.
+    parting: [bool; N],
     /// The tongue body is being held by a consonant of its own (/k g ŋ l
     /// r/): it moves at the back of the tongue's speed, until it is back
     /// with the vowels.
@@ -440,6 +445,7 @@ impl Tract {
             velocity: [0.0; N],
             body: [0.0; N],
             mover: [Mover::Body; N],
+            parting: [false; N],
             quick_body: false,
             nasal: false,
             narrowing: None,
@@ -738,7 +744,7 @@ impl Tract {
             carve(&mut self.target, c, floor);
         }
         self.body = self.target;
-        let opened = self.open_nasal_cavity();
+        let (opened, cavity) = self.open_nasal_cavity();
         let mut by = [None; N];
         for (k, s) in self.slots.iter().enumerate() {
             let Some(s) = s.filter(|s| s.alive) else {
@@ -766,19 +772,28 @@ impl Tract {
                 }
             }
         }
+        for i in LIP_START..N {
+            self.parting[i] |= self.diameter[i] <= 0.0;
+        }
         for i in 0..N {
             if self.target[i] < self.body[i] - CARVED
                 && let Some(m) = by[i]
             {
                 self.mover[i] = m;
-            } else if opened[i] || self.quick_body {
-                // The back of the tongue: lowered behind a nasal's closure,
-                // or making a consonant of its own.
+            } else if opened[i] {
+                // Lowered behind a nasal's closure.
+                self.mover[i] = cavity;
+            } else if self.quick_body && !(self.parting[i] && self.mover[i] == Mover::Tip) {
+                // The back of the tongue making a consonant of its own. Not
+                // lips parting from a closure of theirs: opening from a
+                // /b p/ into an /l r/ they moved at the tongue's speed, half
+                // their own, and the burst came out of lips barely apart.
                 self.mover[i] = Mover::Dorsum;
             } else if self.mover[i] != Mover::Body
                 && (self.diameter[i] - self.target[i]).abs() <= RETURNED
             {
                 self.mover[i] = Mover::Body;
+                self.parting[i] = false;
             }
         }
         if self.relief > 0.0 {
@@ -802,16 +817,16 @@ impl Tract {
     /// the closed end of the branch, /n/'s antiresonance rose to 1.75 to
     /// 1.9 kHz, and the recognizer heard such an /n/ as /ŋ/ (8 of the 38
     /// above 1.7 kHz in the sentences, 2 of the 37 below 1.4 kHz). Returns
-    /// the cells it moved (the back of the tongue moves them, at its speed).
+    /// the cells it moved and the articulator that moves them.
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
-    fn open_nasal_cavity(&mut self) -> [bool; N] {
+    fn open_nasal_cavity(&mut self) -> ([bool; N], Mover) {
         let mut moved = [false; N];
         if !self.nasal {
-            return moved;
+            return (moved, Mover::Dorsum);
         }
         // The closure furthest back in front of the velum.
         let closure = self
@@ -827,11 +842,11 @@ impl Tract {
             .map(|(_, c)| c.index)
             .fold(None, |m: Option<f32>, i| Some(m.map_or(i, |m| m.min(i))));
         let Some(index) = closure else {
-            return moved;
+            return (moved, Mover::Dorsum);
         };
         if index < TIP_START as f32 - 2.0 {
             // A velar closure: nothing of the mouth is left behind it.
-            return moved;
+            return (moved, Mover::Dorsum);
         }
         // Up to the closure: the tip's or the lips' shoulder is carved into
         // the lowered tongue afterwards.
@@ -846,7 +861,15 @@ impl Tract {
                 *moved = true;
             }
         }
-        moved
+        // Behind the tongue tip the blade drops as the tip rises, quickly
+        // (`Tuning::nasal_cavity_rate`); behind the lips the tongue body
+        // lowers at the back of the tongue's speed.
+        let by = if index < LIP_PLACE {
+            Mover::Cavity
+        } else {
+            Mover::Dorsum
+        };
+        (moved, by)
     }
 
     /// Open the vowel shape around the place that hisses, leaving alone
@@ -1076,6 +1099,7 @@ impl Tract {
         let tip = speed * self.motion.articulation_rate;
         let dorsum = speed * self.motion.dorsum_rate;
         let body = speed * self.motion.body_rate;
+        let cavity = speed * self.motion.nasal_cavity_rate;
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];
             // Consonants close twice as fast as they open, as in the
@@ -1089,6 +1113,7 @@ impl Tract {
                 Mover::Body => body,
                 Mover::Dorsum => dorsum * closing,
                 Mover::Tip => tip * closing,
+                Mover::Cavity => cavity * closing,
             };
             let mut v0 = self.velocity[i];
             if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {
