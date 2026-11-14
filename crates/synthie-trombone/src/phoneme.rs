@@ -425,12 +425,18 @@ impl Phoneme {
 impl VowelKey {
     /// The articulation that stands for this shape: the phoneme's own for a
     /// vowel, glide or diphthong start, its [`glide_end`](Phoneme::glide_end)
-    /// for a diphthong's end, and the vowel's own (standing for its end) for
-    /// the end of a vowel that glides on its own (a lax vowel's offglide).
+    /// for a diphthong's end, and the vowel's own (standing for its end or
+    /// its fronted shape) for the end of a vowel that glides on its own (a
+    /// lax vowel's offglide, the glide back of a fronted /u/) and for a
+    /// fronted vowel.
     #[must_use]
     pub const fn articulation(self) -> Option<Articulation> {
         match self {
             VowelKey::Vowel(p) | VowelKey::Start(p) => Some(p.articulation()),
+            VowelKey::Fronted(p) if matches!(p.manner(), Manner::Vowel) => {
+                Some(p.classic().standing_for(VowelKey::Fronted(p)))
+            }
+            VowelKey::Fronted(_) => None,
             VowelKey::End(p) => match p.glide_end() {
                 Some(a) => Some(a),
                 None if matches!(p.manner(), Manner::Vowel) => {

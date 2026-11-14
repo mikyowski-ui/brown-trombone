@@ -797,15 +797,22 @@ impl Utterance {
             if p == NO_PHONE || s.phoneme.manner() != Manner::Vowel {
                 continue;
             }
-            // The vowel's own shape, not its glide towards schwa.
-            let key = VowelKey::Vowel(s.phoneme);
-            if s.articulation.vowel != Some(key) {
+            // The vowel's own shape (or the fronted /u/'s after /t d s z/),
+            // not its glide towards schwa or back.
+            let Some(key) = s
+                .articulation
+                .vowel
+                .filter(|&k| k == VowelKey::Vowel(s.phoneme) || k == VowelKey::Fronted(s.phoneme))
+            else {
                 continue;
-            }
+            };
             let Some((r1, r2)) = schedule.phones[p as usize].formants else {
                 continue;
             };
-            if solved[p as usize].is_none() {
+            // (A phone held on two shapes, the fronted /u/'s and the plain
+            // one it glides back to, is solved for each.)
+            if solved[p as usize].is_none_or(|(k, _)| k != key) {
+                let first = solved[p as usize].is_none();
                 let Some(own) = key.articulation().and_then(|a| a.physical_shape(length)) else {
                     continue;
                 };
@@ -823,7 +830,7 @@ impl Utterance {
                 let shape =
                     inverse::solve_for(at[0] * r1, at[1] * r2, Some(at[2]), Some(&own), length);
                 solved[p as usize] = Some((key, shape));
-                report.shaped += 1;
+                report.shaped += usize::from(first);
             }
             shapes[i] = solved[p as usize];
         }
@@ -1030,6 +1037,21 @@ mod tests {
 
     fn everything(tract_length: f32) -> FollowOptions {
         FollowOptions::new(PitchMode::Speaker, &Tuning::DEFAULT, tract_length)
+    }
+
+    #[test]
+    fn a_fronted_u_takes_the_speakers_formants_too() {
+        let text = "two dogs";
+        let mut s = schedule(text, 0.12, 99, 0.0);
+        s.phones[1].formants = Some((1.05, 0.9)); // the /u/ after /t/
+        let mut u = Utterance::from_tokens(&phonemize(text), &physical());
+        let r = u.follow_with(&s, &everything(1.0)).unwrap();
+        assert!(r.shaped >= 1, "{r:?}");
+        let keys: Vec<VowelKey> = (0..u.segments.len())
+            .filter(|&i| u.phone_of(i) == Some(1))
+            .filter_map(|i| u.followed.shape_of(i).map(|(k, _)| k))
+            .collect();
+        assert!(keys.contains(&VowelKey::Fronted(Phoneme::Uw)), "{keys:?}");
     }
 
     #[test]

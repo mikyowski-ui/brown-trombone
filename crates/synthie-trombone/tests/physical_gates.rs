@@ -356,9 +356,13 @@ fn fricative(p: Phoneme) -> (f32, f32) {
 
 #[test]
 fn sibilants_are_loud_and_the_others_faint() {
-    // /s/ and /sh/ sit 4-22 dB under a vowel; /f/ and /th/ at least 8 to
+    // /s/ and /sh/ sit 1-22 dB under a vowel; /f/ and /th/ at least 8 to
     // 10 dB further down (the LibriSpeech reader's /f/ is 10.5 dB under his
-    // /s/ in sentences). /s/ is brighter than /sh/.
+    // /s/ in sentences). /s/ is brighter than /sh/. (The bound was 4 dB
+    // under until round 9: the voice's source tilt took 1.9 dB off this
+    // held /a/ and the /s/ came 2.9 dB under it; the reader's /s z/ are
+    // 0.4 dB under the vowel beside them in sentences, the engine's 3.3
+    // before the tilt.)
     let vowel = {
         let mut t = voice(110.0, 0.65, 1.0);
         render(&mut t, 0.6);
@@ -376,12 +380,12 @@ fn sibilants_are_loud_and_the_others_faint() {
         db(th / vowel)
     );
     assert!(
-        (-22.0..-4.0).contains(&db(s / vowel)),
+        (-22.0..-1.0).contains(&db(s / vowel)),
         "s {}",
         db(s / vowel)
     );
     assert!(
-        (-22.0..-4.0).contains(&db(sh / vowel)),
+        (-22.0..-1.0).contains(&db(sh / vowel)),
         "sh {}",
         db(sh / vowel)
     );
@@ -389,8 +393,11 @@ fn sibilants_are_loud_and_the_others_faint() {
     // The reader's /f/ is 16 dB under the louder vowel beside it in
     // sentences; held as a steady sound behind full lung pressure the
     // engine's is 15 dB under (it was 27 dB under, and taken for /p/, with
-    // no source where its jet strikes the teeth and the lip).
-    assert!(db(f / vowel) < -13.0 && db(th / vowel) < -18.0);
+    // no source where its jet strikes the teeth and the lip). Bounds 2 dB
+    // nearer the vowel since round 9, whose source tilt took 1.9 dB off
+    // this held /a/ (/f/ -13.1, /th/ -16.8 dB re it; -15.0 and -18.7 re
+    // the untilted /a/).
+    assert!(db(f / vowel) < -11.0 && db(th / vowel) < -16.0);
     assert!(s_hz > sh_hz + 1500.0, "s {s_hz} Hz, sh {sh_hz} Hz");
 }
 
@@ -469,10 +476,14 @@ fn stop(p: Phoneme, voiced: bool) -> Stop {
     t.set_cavity_expansion(0.0);
     let after = render(&mut t, 0.2);
     let burst = after[..1440].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    // 5 ms windows every millisecond (every 5 ms until round 9: once the
+    // arytenoids closed the spread glottis in 10 ms rather than 20, the
+    // voice after /p/ and after /b/ fell into the same 5 ms step).
     let onset = after
-        .chunks(240)
+        .windows(240)
+        .step_by(48)
         .position(|c| rms(c) > 0.5 * vowel)
-        .map_or(f32::INFINITY, |k| k as f32 * 5.0);
+        .map_or(f32::INFINITY, |k| k as f32);
     Stop {
         pressure,
         voicing,
@@ -694,7 +705,11 @@ fn voiced_fricatives_hiss_and_voice_at_once() {
         // -11.8 → +0.3 dB re the vowel, Z -22.3 → -15.8; SH -14.2 → +1.2,
         // ZH -26.2 → -15.1; CH -13.9 → +2.7, JH -27.2 → -15.8 (the vowel
         // itself starts softly now, which lifts every figure here).
-        assert!(v.hiss > u.hiss - 19.0, "{voiced} hiss {:.1} dB", v.hiss);
+        // 23 dB since round 9 (19 before): the hiss is all the energy
+        // above 2.5 kHz, and in a voiced sound some of it is the voice's,
+        // which the source tilt darkened (JH 20.7 dB under CH with it
+        // off, 22.3 with it).
+        assert!(v.hiss > u.hiss - 23.0, "{voiced} hiss {:.1} dB", v.hiss);
     }
 }
 
@@ -1610,7 +1625,10 @@ fn voiceless_stops_shut_the_mouth_for_their_closure() {
 #[test]
 fn affricates_release_into_full_frication() {
     // An affricate's closure opens into the fricative of its place: its
-    // hiss is that of /sh/ or /zh/ (within 3 dB). The noise takes 10 to
+    // hiss is that of /sh/ or /zh/ (within 3 dB; 6 for /dʒ/ since round 9:
+    // the hiss is the energy above 2.5 kHz, and in /dʒ/ much of it was
+    // the voice's, which the source tilt darkened: JH 5.3 dB under ZH with
+    // it, 1.1 to 4.1 without, depending on the round's other changes). The noise takes 10 to
     // 15 ms to build, so the 10 ms after the release that the burst gate
     // reads hold only its start.
     let settings = speech_voice();
@@ -1622,7 +1640,7 @@ fn affricates_release_into_full_frication() {
             a.hiss, f.hiss
         );
         assert!(
-            (a.hiss - f.hiss).abs() <= 3.0,
+            (a.hiss - f.hiss).abs() <= if affricate == Phoneme::Jh { 6.0 } else { 3.0 },
             "{affricate} hiss {:.1} dB",
             a.hiss
         );
@@ -1680,7 +1698,11 @@ fn stop_releases_are_bursts_not_clicks() {
     const AT_RELEASE: f32 = 0.35;
     const STEP: f32 = 3.0;
     const CLICK: f32 = 2.5;
-    const MEAN_BURST: f32 = -6.0;
+    // -6 until round 9: the bursts are held against the vowel's loudest
+    // sample, which is the spike of the folds' closure, and the source
+    // tilt rounds it (a held /a/: 3.5 dB lower in its peak, 1.9 in its
+    // level); the android's /b/ came to -4.6.
+    const MEAN_BURST: f32 = -4.0;
     const MAX_BURST: f32 = 0.0;
     let texts = [
         "As for etchings they are of two kinds British and foreign.",
@@ -2402,7 +2424,12 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
         .filter_map(|row| row.split('\t').nth(2).map(str::to_string))
         .collect();
     assert_eq!(sentences.len(), 16);
-    let soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    // The softening is off by default since round 9 (the owner heard the
+    // accented vowels jump out where it let go); the mechanism is tested
+    // at round 8's setting.
+    let mut soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    soft.tuning.sonorant_softness = 1.0;
+    soft.tuning.unstressed_softness = 0.5;
     let mut firm = soft;
     firm.tuning.sonorant_softness = 0.0;
     firm.tuning.unstressed_softness = 0.0;
@@ -2498,4 +2525,62 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
         (softest / firm - 1.0).abs() < 0.02,
         "threshold {firm} cmH2O firm, {softest} soft"
     );
+}
+
+#[test]
+fn the_accented_vowels_are_as_dark_as_a_speakers() {
+    // The LibriSpeech reader's accented vowels have their 2-4 kHz band 29
+    // dB under their 0-1 kHz band (the judge's alignment, his 16
+    // sentences); the engine's had 16 dB, from a source whose flow
+    // derivative has 2-4 kHz some 20 dB under 0-1 kHz where a modal
+    // Liljencrants-Fant source has 33 to 37, and from the breath noise of
+    // its glottis there. The source tilt (`voice_tilt`) and the breath
+    // noise of a vibrating glottis pitched above 2.5 kHz
+    // (`voiced_breath_corner`) bring them there. Measured over the same
+    // texts at the segments' own times (as
+    // `the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened`
+    // measures them): within 3 dB of the reader, and at least 8 dB darker
+    // than without the two.
+    const PERSON: f32 = -28.9;
+    let path = "../../tools/judge/material/human.tsv";
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let sentences: Vec<String> = text
+        .lines()
+        .skip(1)
+        .filter_map(|row| row.split('\t').nth(2).map(str::to_string))
+        .collect();
+    let dark = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    let mut bright = dark;
+    bright.tuning.voice_tilt = 0.0;
+    bright.tuning.voiced_breath_corner = 0.0;
+    // The accented vowels are told apart as round 8's softening tells them.
+    let mut labels = dark;
+    labels.tuning.sonorant_softness = 1.0;
+    labels.tuning.unstressed_softness = 0.5;
+    let measure = |settings: &VoiceSettings| {
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = sentences
+                .iter()
+                .map(|s| scope.spawn(move || class_quality(settings, &labels, s)))
+                .collect();
+            let (mut sum, mut n) = (0.0f32, 0usize);
+            for job in jobs {
+                let q = job.join().expect("a sentence");
+                if q[0].2 > 0 {
+                    sum += q[0].0;
+                    n += 1;
+                }
+            }
+            sum / n.max(1) as f32
+        })
+    };
+    let (d, b) = (measure(&dark), measure(&bright));
+    println!(
+        "accented vowels, 2-4 kHz against 0-1 kHz: {d:+.1} dB (without: {b:+.1}; the reader {PERSON:+.1})"
+    );
+    assert!(
+        (d - PERSON).abs() < 3.0,
+        "{d:+.1} dB against the reader's {PERSON:+.1}"
+    );
+    assert!(b - d > 8.0, "only {:.1} dB darker", b - d);
 }

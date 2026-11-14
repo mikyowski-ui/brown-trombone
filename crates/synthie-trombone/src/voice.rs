@@ -292,6 +292,7 @@ impl Trombone {
             Engine::Physical => Dynamics::Damped,
         };
         self.tract.jaw = engine == Engine::Physical;
+        self.sync_wander();
         self.set_block(match engine {
             Engine::Classic => BLOCK,
             Engine::Physical => PHYSICAL_BLOCK,
@@ -343,6 +344,18 @@ impl Trombone {
         self.source.set_tuning(&tuning);
         self.phys.set_tuning(&tuning);
         self.tract.motion = tuning;
+        self.sync_wander();
+    }
+
+    /// The physical engine's pitch keeps a clock of its own and flutters
+    /// as `Tuning::pitch_flutter` says; the classic engine's moves as it
+    /// always has.
+    fn sync_wander(&mut self) {
+        self.glottis.flutter = match self.engine {
+            Engine::Classic => 0.0,
+            Engine::Physical => self.tuning.pitch_flutter,
+        };
+        self.glottis.own_clock = self.engine == Engine::Physical;
     }
 
     /// The tuning in use.
@@ -1146,6 +1159,9 @@ impl Trombone {
             let long = self.since_regulated as f32 / self.internal_rate;
             if slow {
                 self.since_regulated = 0;
+                if self.engine == Engine::Physical {
+                    self.glottis.advance(long);
+                }
                 self.glottis.update_block(long, &self.simplex);
                 if self.engine == Engine::Physical {
                     self.phys.end_block();
@@ -1173,6 +1189,11 @@ impl Trombone {
                 if slow {
                     self.source
                         .begin_block(&self.glottis, self.tract.any_constriction());
+                    self.phys.voiced_target = if self.source.sounding().is_some() {
+                        1.0
+                    } else {
+                        0.0
+                    };
                 }
             }
         }
@@ -1210,10 +1231,12 @@ impl Trombone {
     fn physical_sample(&mut self, tract: [f32; 2], folds: [f32; 2]) -> f32 {
         let dt = 0.5 / self.internal_rate;
         let (area, lung) = self.source.tick(folds[0], dt);
-        self.phys.tick(tract[0], Drive::Glottis { area, lung });
+        let flow = self.phys.tick(tract[0], Drive::Glottis { area, lung });
+        self.phys.radiate(flow);
         self.source.react(&self.phys.gauge, folds[0], dt);
         let (area, lung) = self.source.tick(folds[1], dt);
         let flow = self.phys.tick(tract[1], Drive::Glottis { area, lung });
+        let flow = self.phys.radiate(flow);
         self.source.react(&self.phys.gauge, folds[1], dt);
         self.glottal_area = area;
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;

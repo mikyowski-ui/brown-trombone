@@ -13,6 +13,7 @@
 //! The efficiencies below are calibrated against published speech levels;
 //! they are not derived from first principles.
 
+use super::tilt::{Shelf, Tilt};
 use super::{MU, RHO};
 use crate::noise::Rng;
 use crate::tuning::Tuning;
@@ -162,6 +163,22 @@ impl Hiss {
     }
 }
 
+/// A one-pole high-pass's state.
+#[derive(Clone, Copy, Debug, Default)]
+struct HighPass {
+    x: f32,
+    y: f32,
+}
+
+impl HighPass {
+    #[inline]
+    fn high_pass(&mut self, r: f32, x: f32) -> f32 {
+        self.y = r * (self.y + x - self.x);
+        self.x = x;
+        self.y
+    }
+}
+
 /// The random part of every noise source in one tract.
 #[derive(Clone, Debug)]
 pub(crate) struct Turbulence {
@@ -193,6 +210,22 @@ pub(crate) struct Turbulence {
     pub(crate) jet_eff: f32,
     pub(crate) teeth_eff: f32,
     pub(crate) glottal_eff: f32,
+    /// The voice's source tilt (`Tuning::voice_tilt` at
+    /// `Tuning::tilt_corner`): every noise source passes its inverse, as
+    /// far as the voice is on, before it enters the tract, so that the
+    /// tilt the voice takes as it leaves (`Phys::radiate`) leaves the noise
+    /// as it was.
+    pub(crate) tilt_depth: f32,
+    pub(crate) tilt_corner: f32,
+    /// The high-passes of a voice's breath noise: their corner (Hz at
+    /// native size, `0` for none), coefficient and states.
+    pub(crate) slit_corner: f32,
+    slit_r: f32,
+    slit: [HighPass; 2],
+    untilt: Shelf,
+    /// The inverse's state for the jets, the teeth, the glottis and the
+    /// edges.
+    untilted: [Tilt; 4],
 }
 
 impl Turbulence {
@@ -216,6 +249,13 @@ impl Turbulence {
             jet_eff: Tuning::DEFAULT.jet_efficiency,
             teeth_eff: Tuning::DEFAULT.jet_efficiency * Tuning::DEFAULT.teeth_gain,
             glottal_eff: Tuning::DEFAULT.glottal_efficiency,
+            tilt_depth: Tuning::DEFAULT.voice_tilt,
+            tilt_corner: Tuning::DEFAULT.tilt_corner,
+            slit_corner: Tuning::DEFAULT.voiced_breath_corner,
+            slit_r: 1.0,
+            slit: [HighPass::default(); 2],
+            untilt: Shelf::FLAT,
+            untilted: [Tilt::default(); 4],
         }
     }
 
@@ -227,6 +267,9 @@ impl Turbulence {
         self.jet_eff = tuning.jet_efficiency;
         self.teeth_eff = tuning.jet_efficiency * tuning.teeth_gain;
         self.glottal_eff = tuning.glottal_efficiency;
+        self.tilt_depth = tuning.voice_tilt;
+        self.tilt_corner = tuning.tilt_corner;
+        self.slit_corner = tuning.voiced_breath_corner;
     }
 
     /// Set the tick length and the speaker's relative size. A jet's hiss is
@@ -237,6 +280,18 @@ impl Turbulence {
         (self.r, self.k, self.gain) = shaping(RUMBLE_CORNER, self.corner / size, dt);
         (self.r_teeth, self.k_teeth, self.gain_teeth) =
             shaping(self.teeth_floor / size, self.teeth_corner / size, dt);
+        self.untilt = Shelf::new(self.tilt_corner / size, self.tilt_depth, dt, true);
+        self.slit_r = if self.slit_corner > 0.0 {
+            1.0 / (1.0 + 2.0 * PI * self.slit_corner / size * dt)
+        } else {
+            1.0
+        };
+    }
+
+    /// The shelf the voice takes as it leaves (the inverse of the one the
+    /// noise takes here), for ticks of `dt` at relative size `size`.
+    pub(crate) fn tilt(&self, dt: f32, size: f32) -> Shelf {
+        Shelf::new(self.tilt_corner / size, self.tilt_depth, dt, false)
     }
 
     pub(crate) fn reset(&mut self) {
@@ -248,19 +303,25 @@ impl Turbulence {
         ] {
             *h = Hiss::default();
         }
+        self.untilted = [Tilt::default(); 4];
+        self.slit = [HighPass::default(); 2];
     }
 
     /// This tick's noise for free jets and for the teeth. A jet striking the
     /// teeth (/s ʃ/) makes its noise from small, fast eddies, reaching well
     /// past 5 kHz (Stevens 1971; Shadle 1985): its noise has a corner of
     /// its own, higher than the rest.
+    /// `voiced` (`0‥1`) is how far the voice's tilt is on.
     #[inline]
-    pub(crate) fn tick(&mut self) -> (f32, f32) {
+    pub(crate) fn tick(&mut self, voiced: f32) -> (f32, f32) {
         let (r, k, gain) = (self.r, self.k, self.gain);
         let (rt, kt, gt) = (self.r_teeth, self.k_teeth, self.gain_teeth);
+        let jets = self.jets.next(&mut self.rng, r, k, gain);
+        let teeth = self.teeth.next(&mut self.rng, rt, kt, gt);
+        let [a, b, _, _] = &mut self.untilted;
         (
-            self.jets.next(&mut self.rng, r, k, gain),
-            self.teeth.next(&mut self.rng, rt, kt, gt),
+            a.blend(&self.untilt, jets, voiced),
+            b.blend(&self.untilt, teeth, voiced),
         )
     }
 
@@ -268,16 +329,29 @@ impl Turbulence {
     /// and the lip in front of them (/f v θ ð/): an obstacle's noise, shaped
     /// like that of the jet on the teeth, from a generator of its own.
     #[inline]
-    pub(crate) fn edge_hiss(&mut self) -> f32 {
+    pub(crate) fn edge_hiss(&mut self, voiced: f32) -> f32 {
         let (r, k, gain) = (self.r_teeth, self.k_teeth, self.gain_teeth);
-        self.edge.next(&mut self.edge_rng, r, k, gain)
+        let x = self.edge.next(&mut self.edge_rng, r, k, gain);
+        self.untilted[3].blend(&self.untilt, x, voiced)
     }
 
-    /// This tick's noise for the glottal jet.
+    /// This tick's noise for the glottal jet, `voiced` (`0‥1`) of the way
+    /// to that of the narrow slit of vibrating folds: the eddies of a jet
+    /// are pitched by its speed over its width (a fixed Strouhal number),
+    /// and the slit between vibrating folds is a tenth of a millimetre to a
+    /// millimetre wide where an open glottis is several, so the breath
+    /// noise of a voice has little below a few kHz (two more one-pole
+    /// high-passes at `Tuning::voiced_breath_corner`).
     #[inline]
-    pub(crate) fn breath(&mut self) -> f32 {
+    pub(crate) fn breath(&mut self, voiced: f32) -> f32 {
         let (r, k, gain) = (self.r, self.k, self.gain);
-        self.glottis.next(&mut self.rng, r, k, gain)
+        let mut x = self.glottis.next(&mut self.rng, r, k, gain);
+        if self.slit_r < 1.0 {
+            let once = self.slit[0].high_pass(self.slit_r, x);
+            let twice = self.slit[1].high_pass(self.slit_r, once);
+            x += (twice - x) * voiced;
+        }
+        self.untilted[2].blend(&self.untilt, x, voiced)
     }
 }
 
@@ -308,6 +382,8 @@ mod tests {
     #[test]
     fn hiss_has_unit_variance_and_no_offset() {
         let mut t = Turbulence::new(3);
+        // The shaping alone: without the inverse of the voice's tilt.
+        t.tilt_depth = 0.0;
         // At any tick rate (the rate follows the tract length). The breath
         // and free jets have unit variance, and the jet on the teeth.
         for rate in [60_000.0, 96_000.0, 192_000.0] {
@@ -315,10 +391,10 @@ mod tests {
             let (mut sum, mut sq, mut breath) = (0.0f64, 0.0f64, 0.0f64);
             let n = 300_000;
             for _ in 0..n {
-                let (_, x) = t.tick();
+                let (_, x) = t.tick(0.0);
                 sum += f64::from(x);
                 sq += f64::from(x * x);
-                breath += f64::from(t.breath().powi(2));
+                breath += f64::from(t.breath(0.0).powi(2));
             }
             let mean = sum / f64::from(n);
             let var = sq / f64::from(n);

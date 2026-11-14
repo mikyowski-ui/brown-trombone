@@ -216,6 +216,9 @@ def test_parse_arpabet():
         ("B AE K G G R AW AW N", ["B", "AE", "K", "G", "R", "AW", "N"]),
         ("AH B B B L UW", ["AH", "B", "B", "L", "UW"]),  # "rub blue"
         ("B IH G G AH N", ["B", "IH", "G", "G", "AH", "N"]),  # "big gun": two closures
+        # physical: an /L/ before a vowel ends on the vowel's body
+        ("S L L IH D AA N", ["S", "L", "IH", "D", "AA", "N"]),
+        ("G G L L UW DH AX", ["G", "L", "UW", "DH", "AX"]),
     ],
 )
 def test_parse_engine_line(line, phones):

@@ -1,4 +1,4 @@
-//! [`Tuning`]: the ninety-seven numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and eight numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: ninety-seven numbers in three
+        /// How a voice turns sounds into speech: one hundred and eight numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -543,10 +543,12 @@ tuning! {
     /// How soft the voice is in nasals and liquids, `0` (as on an accented
     /// vowel) to `1` (physical engine). The glides are left firm: under
     /// their narrow lips they are already darker than the reader's (11.6
-    /// dB under the accented vowels in 2-4 kHz, his 4.4).
-    sonorant_softness = 1.0, 0.0..=1.0, A;
-    /// The same in unaccented vowels.
-    unstressed_softness = 0.5, 0.0..=1.0, A;
+    /// dB under the accented vowels in 2-4 kHz, his 4.4). Round 8 had 1;
+    /// `0` since round 9: the owner heard the accented vowels jump out
+    /// sharp where the filter let go of them.
+    sonorant_softness = 0.0, 0.0..=1.0, A;
+    /// The same in unaccented vowels (round 8: 0.5).
+    unstressed_softness = 0.0, 0.0..=1.0, A;
     /// The same at the very end of a phrase, reached over its last 150
     /// ms; `0`, since the engine's last vowels are already darker than the
     /// reader's (see `final_slack`).
@@ -569,6 +571,91 @@ tuning! {
     /// down to 55 Hz, but the /l/ was heard as /w/ or /r/ in sentences and
     /// a /z/ after it at the end of a phrase no longer hissed.
     lateral_release = 0.01, 0.0..=0.04, B;
+
+    // ----- B and C: the front of the tongue (round 9) -------------------
+
+    /// Share of an /u/ after /t d s z/ held on its fronted shape (F2 1600
+    /// Hz against the plain /u/'s 1000) before it glides back towards the
+    /// plain /u/ for the rest (physical engine; see `speech::fronts_u`):
+    /// the LibriSpeech reader's /u/ after /t d/ starts at 1700 to 2200 Hz
+    /// and ends some 400 Hz lower. `1.0` holds it to the end (held, the
+    /// recognizer heard 3 to 6 of 20 such /u/ as /i/), `0` makes every /u/
+    /// the plain back one, as until round 9.
+    fronted_nucleus = 0.5, 0.0..=1.0, C;
+    /// Length of an alveolar tap, s (physical engine): a /t d/ between a
+    /// vowel and an unstressed one ("slid on", "get it", "water", "city")
+    /// is one voiced segment, the tongue tip thrown against the ridge and
+    /// let go, with no closure held, no pressure built behind it, no burst
+    /// and no breath after it (see `speech::taps`). At 0.02 the mouth is
+    /// shut for 3 to 7 ms and the level dips 6 to 15 dB under the vowels
+    /// beside it in 25 ms frames (the LibriSpeech reader's taps: 5 to 13
+    /// dB, voiced throughout). `0` makes them stops again.
+    tap_length = 0.02, 0.0..=0.05, B;
+    /// How long before an alveolar tap begins its tip sets off, s
+    /// (physical engine), in place of `lead`: the tap is a quick throw of
+    /// the tip, which reaches the ridge from a vowel in some 10 to 18 ms.
+    /// Sent with the usual head start (`lead`, 0.03), it shut the mouth 10
+    /// to 15 ms before the tap was due, for 15 to 25 ms, and the level
+    /// dipped 12 to 29 dB.
+    tap_lead = 0.015, 0.0..=0.04, B;
+
+    // ----- A: the voice's source (round 9) -------------------------------
+
+    /// How much darker the voice is at the top than at the bottom, dB
+    /// (physical engine): a first-order shelf on the voice as it leaves,
+    /// falling from `tilt_corner` (where it is unity) and levelling off
+    /// this far down, on while the folds are asked to sing (see
+    /// `phys::tilt`). Every noise source in the tract takes the inverse on
+    /// the way in, so frication, the hiss of a burst and the breath are
+    /// heard as without it. It stands for the glottal return phase these
+    /// folds lack: their flow derivative has 2-4 kHz some 20 dB under 0-1
+    /// kHz, a modal Liljencrants-Fant source 33 to 37. `0` switches it off.
+    voice_tilt = 18.0, 0.0..=30.0, A;
+    /// Corner of that shelf at native size, Hz (it scales with the
+    /// inverse of the voice's size, as the glottal pulse does).
+    tilt_corner = 500.0, 200.0..=2000.0, A;
+    /// Corner below which the breath noise of the glottal jet has less
+    /// and less energy while the folds are asked to sing, Hz at native size
+    /// (physical engine; two one-pole high-passes on top of the breath's
+    /// own shaping; `0` for none). The jet through the narrow slit of
+    /// vibrating folds makes higher-pitched eddies than that of an open
+    /// glottis in /h/. Without it the engine's accented vowels carried
+    /// breath noise some 21 dB under their 0-1 kHz band in 2-4 kHz, where
+    /// the LibriSpeech reader's whole 2-4 kHz band is 29 dB under it (and
+    /// his 4-7.5 kHz band 26 dB under: his voice's noise lies higher).
+    voiced_breath_corner = 3000.0, 0.0..=8000.0, A;
+    /// Cycle-to-cycle jitter of the folds (physical engine): the spread
+    /// of each cycle's tension about its course, per cent, at the voice's
+    /// natural jitter (`VoiceSettings::jitter` 1; it grows with it, up to
+    /// twice). RAP in the LibriSpeech texts 0.23 %, the reader 0.25 %. The
+    /// pitch's slow wander does not change the length of one cycle against
+    /// the next.
+    cycle_jitter = 1.0, 0.0..=2.0, A;
+    /// Depth of a random movement of the pitch at 6 to 10 Hz, as a share
+    /// of it at the voice's natural jitter (physical engine): the movement
+    /// within a vowel that the slow wander of 2 to 4 Hz, a straight line
+    /// across most vowels, does not give.
+    pitch_flutter = 0.02, 0.0..=0.06, A;
+    /// Seconds for the arytenoids to bring the glottis back together
+    /// behind the folds once a voiceless sound is over (physical engine;
+    /// opening it takes `abduction_time`, and the shorter of the two
+    /// applies). With both at 20 ms the spread glottis was still closing
+    /// as the vowel after a voiceless consonant began, and the vowel took
+    /// 19 ms from its voicing onset to come within 3 dB of its peak (the
+    /// LibriSpeech reader's: 7.5 ms), growing for 40 ms.
+    spread_closing = 0.012, 0.004..=0.05, A;
+    /// How far the breath lets the level of each vowel sink from its start
+    /// to its end, dB (physical engine; the lungs take it back in the
+    /// sounds after it). `0` holds it.
+    vowel_decline = 2.5, 0.0..=6.0, A;
+    /// Where in an accented vowel its pitch accent peaks, as a share of the
+    /// vowel (physical engine): the accent rises from the start of its
+    /// syllable to there and sinks back over `accent_decay` (a statement's
+    /// last accent peaks as its vowel begins, whatever this says). At `1`,
+    /// as until round 9, it rose from the vowel's start to its end, and the
+    /// accented vowels of the LibriSpeech texts rose by 1.2 semitones
+    /// (median) where the reader's go either way (median 0.0).
+    accent_peak = 0.55, 0.0..=1.0, B;
 
     // ----- following a speaker's schedule (round 9) ----------------------
 
@@ -630,10 +717,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_forty_five_and_forty_four() {
+    fn two_passes_of_fifty_two_and_forty_seven() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (45, 44));
+        assert_eq!((a, b), (52, 47));
     }
 
     #[test]
@@ -641,7 +728,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 8);
+        assert_eq!(c, 9);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

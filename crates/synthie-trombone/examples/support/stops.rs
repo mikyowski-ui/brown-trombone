@@ -38,6 +38,9 @@ pub struct Recording {
     pub segment: Vec<usize>,
     pub phonemes: Vec<Phoneme>,
     pub durations: Vec<f32>,
+    /// Each segment is an alveolar tap (`Tuning::tap_length`): a /t d/
+    /// with no closure held and no burst.
+    pub taps: Vec<bool>,
     pub glottal_area: Vec<f32>,
     /// The mouth is shut somewhere in front of the pharynx, as the sound
     /// sees it.
@@ -68,6 +71,11 @@ pub fn record_utterance(settings: &VoiceSettings, utterance: Utterance) -> Recor
     Speaker::prepare(&mut voice);
     let phonemes = utterance.segments().iter().map(|s| s.phoneme).collect();
     let durations = utterance.segments().iter().map(|s| s.duration).collect();
+    let taps = utterance
+        .segments()
+        .iter()
+        .map(|s| s.gesture.approach > 0.0)
+        .collect();
     let mut speaker = Speaker::new();
     speaker.speak(utterance);
     let mut r = Recording {
@@ -75,6 +83,7 @@ pub fn record_utterance(settings: &VoiceSettings, utterance: Utterance) -> Recor
         segment: Vec::new(),
         phonemes,
         durations,
+        taps,
         glottal_area: Vec::new(),
         sealed: Vec::new(),
         behind: Vec::new(),
@@ -510,7 +519,10 @@ pub fn bursts(r: &Recording) -> Vec<Burst> {
     for k in 0..r.phonemes.len() {
         let p = r.phonemes[k];
         let first = k == 0 || r.phonemes[k - 1] != p;
-        if !first || !matches!(p.manner(), Manner::Stop | Manner::Affricate) {
+        // A tap has no burst: the tip lets go within the voice, and what
+        // follows its release is the vowel (`tests/transition_gate.rs`
+        // measures the taps).
+        if !first || !matches!(p.manner(), Manner::Stop | Manner::Affricate) || r.taps[k] {
             continue;
         }
         let (s, e) = span(r, k);
