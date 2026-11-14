@@ -82,6 +82,10 @@
   "ae_nucleus": {"lo": 0.4, "hi": 1, "default": 1, "pass": "c"},
   "ih_length": {"lo": 0.5, "hi": 1, "default": 0.65, "pass": "c"},
   "lateral_gap": {"lo": -0.3, "hi": 0.1, "default": -0.12, "pass": "a"},
-  "sonorant_slack": {"lo": 0, "hi": 0.4, "default": 0.12, "pass": "a"},
-  "final_slack": {"lo": 0, "hi": 0.4, "default": 0.2, "pass": "a"}
+  "sonorant_slack": {"lo": 0, "hi": 0.4, "default": 0, "pass": "a"},
+  "final_slack": {"lo": 0, "hi": 0.4, "default": 0, "pass": "a"},
+  "soft_corner": {"lo": 1000, "hi": 8000, "default": 3000, "pass": "a"},
+  "sonorant_softness": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
+  "unstressed_softness": {"lo": 0, "hi": 1, "default": 0.5, "pass": "a"},
+  "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"}
 }

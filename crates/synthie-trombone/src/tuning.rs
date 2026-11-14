@@ -1,4 +1,4 @@
-//! [`Tuning`]: the eighty-five numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the eighty-nine numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: eighty-five numbers in three
+        /// How a voice turns sounds into speech: eighty-nine numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -511,16 +511,46 @@ tuning! {
     lateral_gap = -0.12, -0.3..=0.1, A;
     /// How much more loosely the folds are held through nasals, liquids,
     /// glides and unaccented vowels than on an accented vowel, as a share
-    /// of the voice's tenseness (physical engine); `0` holds them alike
-    /// throughout, as until round 7. At 0.2 the voice gave out a quarter of
-    /// the way through the closure of a /g/ after an unaccented vowel, and
-    /// at 0.15 the child voice's folds (290 Hz) fell out of the range they
-    /// can sing and were handed to the pulse source with a click 14 times
-    /// the vowel's peak; at 0.12 neither happens in any preset.
-    sonorant_slack = 0.12, 0.0..=0.4, A;
+    /// of the voice's tenseness (physical engine); `0` (the default since
+    /// round 8, which softens the voice there instead: `sonorant_softness`)
+    /// holds them alike throughout. Round 7 had 0.12: it opens the folds,
+    /// and at 0.2 the voice gave out a quarter of the way through the
+    /// closure of a /g/ after an unaccented vowel, at 0.15 the child
+    /// voice's folds (290 Hz) fell out of the range they can sing and were
+    /// handed to the pulse source with a click 14 times the vowel's peak;
+    /// at 0.12 it made the nasals and liquids of sentences 1 to 2 dB
+    /// brighter above 2 kHz against the accented vowels, not darker.
+    sonorant_slack = 0.0, 0.0..=0.4, A;
     /// How much the folds slacken over the last 150 ms before a pause, as
-    /// a share of their tenseness there (physical engine).
-    final_slack = 0.2, 0.0..=0.4, A;
+    /// a share of their tenseness there (physical engine). Round 7 had
+    /// 0.2; `0` since round 8: the LibriSpeech reader's last vowel is as
+    /// bright as his accented ones (+1.0 dB in 2-4 kHz against 0-1 kHz)
+    /// and has the same H1-H2 (+0.0 dB), where the engine's, with the
+    /// breath dying away under it, is already 5 dB darker without it, and
+    /// the slackening raised its H1-H2 from +1.0 to +1.9 dB.
+    final_slack = 0.0, 0.0..=0.4, A;
+
+    // ----- A: a softer voice off the accent (round 8) -------------------
+
+    /// Corner of the one-pole low-pass on the voice at full softness, Hz
+    /// (physical engine; see `Trombone::set_fold_softness`). At softness
+    /// `s` the corner is this over `s`. With the default softnesses the
+    /// nasals, liquids and unaccented vowels of the LibriSpeech texts come
+    /// out 6.1, 4.0 and 0.1 dB darker in 2-4 kHz against 0-1 kHz than the
+    /// accented vowels (the reader: 5.6, 5.1 and 0.6; at 2500 Hz 6.7, 4.6
+    /// and 0.4).
+    soft_corner = 3000.0, 1000.0..=8000.0, A;
+    /// How soft the voice is in nasals and liquids, `0` (as on an accented
+    /// vowel) to `1` (physical engine). The glides are left firm: under
+    /// their narrow lips they are already darker than the reader's (11.6
+    /// dB under the accented vowels in 2-4 kHz, his 4.4).
+    sonorant_softness = 1.0, 0.0..=1.0, A;
+    /// The same in unaccented vowels.
+    unstressed_softness = 0.5, 0.0..=1.0, A;
+    /// The same at the very end of a phrase, reached over its last 150
+    /// ms; `0`, since the engine's last vowels are already darker than the
+    /// reader's (see `final_slack`).
+    final_softness = 0.0, 0.0..=1.0, A;
 }
 
 impl Default for Tuning {
@@ -543,10 +573,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_thirty_seven_and_forty_one() {
+    fn two_passes_of_forty_one_each() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (37, 41));
+        assert_eq!((a, b), (41, 41));
     }
 
     #[test]

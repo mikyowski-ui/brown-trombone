@@ -42,7 +42,7 @@ def test_params_file_matches_brief():
     assert sum(p["pass"] == "a" for p in params.values()) == 37
     assert sum(p["pass"] == "b" for p in params.values()) == 41
     assert sum(p["pass"] == "c" for p in params.values()) == 7
-    assert len(params) == 85
+    assert len(params) == 89
     # The twelve the classic engine reads as well are not tuned by default.
     shared = {n for n, p in params.items() if p.get("classic")}
     assert len(shared) == 12 and {"vowel_length", "stop_length", "aspiration"} <= shared
