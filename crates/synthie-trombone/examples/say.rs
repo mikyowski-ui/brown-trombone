@@ -31,6 +31,14 @@
 //! at start-up, scaled to the voice's size, starting from the built-in
 //! shape so that they stay close to it; they land within about 2 % of
 //! the formants asked for.
+//!
+//! `--match-prosody schedule.json` speaks the text with a person's timing
+//! and pitch: the schedule `tools/judge/prosody.py` measures on a
+//! recording of that text (one span per phone, a pitch track, a breath
+//! share per phone; see `speech::Schedule`). `--prosody-pitch speaker`
+//! (the default) keeps the speaker's pitch as it is, `--prosody-pitch
+//! voice` moves the contour to the voice's own median. `--phone-times
+//! file.json` writes where each phone starts and ends in the output.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -44,7 +52,42 @@ mod wav;
 use std::time::Instant;
 use synthie_trombone::vowel_targets::{self, VowelKey};
 use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
+use synthie_trombone::speech::{self, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::{Trombone, normalize};
+
+/// A prosody schedule (`tools/judge/prosody.py`) from its JSON.
+fn read_schedule(json: &str) -> Schedule {
+    let v: serde_json::Value =
+        serde_json::from_str(json).unwrap_or_else(|e| panic!("not a schedule: {e}"));
+    let num = |v: &serde_json::Value, what: &str| {
+        v.as_f64()
+            .unwrap_or_else(|| panic!("schedule: {what} must be a number")) as f32
+    };
+    let phones = v["phones"]
+        .as_array()
+        .expect("schedule: no \"phones\"")
+        .iter()
+        .map(|p| PhoneSpan {
+            phoneme: p["phone"].as_str().and_then(Phoneme::from_symbol),
+            start: num(&p["start"], "start"),
+            end: num(&p["end"], "end"),
+            breath: p["breath"].as_f64().map_or(1.0, |b| b as f32),
+        })
+        .collect();
+    let pitch = &v["pitch"];
+    Schedule {
+        phones,
+        pitch_start: num(&pitch["start"], "pitch.start"),
+        pitch_hop: num(&pitch["hop"], "pitch.hop"),
+        pitch: pitch["hz"]
+            .as_array()
+            .expect("schedule: no pitch.hz")
+            .iter()
+            .map(|x| num(x, "pitch.hz"))
+            .collect(),
+        median_hz: num(&v["median_hz"], "median_hz"),
+    }
+}
 
 /// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`.
 fn vowel_key(name: &str) -> Option<VowelKey> {
@@ -119,6 +162,9 @@ fn main() -> std::io::Result<()> {
     let mut persona = Persona::NEUTRAL;
     let mut profile: Option<String> = None;
     let mut dump = false;
+    let mut schedule: Option<String> = None;
+    let mut pitch_mode = PitchMode::Speaker;
+    let mut phone_times: Option<String> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -165,6 +211,15 @@ fn main() -> std::io::Result<()> {
                     .expect("--clarity needs a number");
             }
             "--profile" => profile = Some(value("--profile")),
+            "--match-prosody" => schedule = Some(value("--match-prosody")),
+            "--prosody-pitch" => {
+                pitch_mode = match value("--prosody-pitch").as_str() {
+                    "speaker" => PitchMode::Speaker,
+                    "voice" => PitchMode::Voice,
+                    other => panic!("unknown pitch mode {other:?}; try speaker or voice"),
+                };
+            }
+            "--phone-times" => phone_times = Some(value("--phone-times")),
             "--dump-profile" => dump = true,
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
@@ -202,7 +257,20 @@ fn main() -> std::io::Result<()> {
     let mut talker = Talker::new(SR as f32, settings);
     talker.voice_mut().set_glottal_source(source);
     hold_vowels(talker.voice_mut(), &vowels);
-    let utterance = talker.compile(&text);
+    let mut followed = None;
+    let utterance = if let Some(file) = &schedule {
+        let schedule = read_schedule(&std::fs::read_to_string(file)?);
+        let tokens = schedule.phrase(&speech::phonemize(&text));
+        let mut u = Utterance::from_tokens(&tokens, &talker.settings().prosody());
+        let report = u
+            .follow(&schedule, pitch_mode)
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
+        followed = Some(report);
+        u
+    } else {
+        talker.compile(&text)
+    };
+    let spans = utterance.phone_spans();
     // One symbol per segment, as the judge reads it; a lax vowel's glide
     // towards schwa is part of the vowel, not a segment of its own.
     let mut last = None;
@@ -227,5 +295,19 @@ fn main() -> std::io::Result<()> {
         "wrote {path} ({seconds:.1} s, rendered in {took:.2} s: {:.0}x real time)",
         seconds / took
     );
+    if let Some(r) = followed {
+        println!(
+            "followed: {} phones, {} below the engine's floor (+{:.0} ms), contour moved {:+.1} st, {} breath shares limited",
+            r.spans.len(),
+            r.too_short,
+            1000.0 * r.added,
+            r.shift,
+            r.breath_limited
+        );
+    }
+    if let Some(file) = phone_times {
+        let spans: Vec<[f32; 2]> = spans.iter().map(|&(a, b)| [a, b]).collect();
+        std::fs::write(&file, serde_json::json!({ "spans": spans }).to_string())?;
+    }
     Ok(())
 }

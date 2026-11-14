@@ -211,6 +211,11 @@ def test_parse_arpabet():
         ("AA D D SIL", ["AA", "D"]),  # physical: a final stop's release
         ("SIL DH DH AX K AE T T", ["DH", "AX", "K", "AE", "T"]),  # dental onset after a pause
         ("AX DH AX", ["AX", "DH", "AX"]),
+        # physical: a voiced stop's release into a liquid is a segment of its own
+        ("SIL SIL G G L UW DH AX", ["G", "L", "UW", "DH", "AX"]),
+        ("B AE K G G R AW AW N", ["B", "AE", "K", "G", "R", "AW", "N"]),
+        ("AH B B B L UW", ["AH", "B", "B", "L", "UW"]),  # "rub blue"
+        ("B IH G G AH N", ["B", "IH", "G", "G", "AH", "N"]),  # "big gun": two closures
     ],
 )
 def test_parse_engine_line(line, phones):
