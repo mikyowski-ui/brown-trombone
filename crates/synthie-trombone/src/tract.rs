@@ -330,6 +330,7 @@ struct Transient {
 
 /// Oral and nasal waveguides plus their articulation state.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)] // independent articulator flags
 pub(crate) struct Tract {
     right: [f32; N],
     left: [f32; N],
@@ -394,6 +395,10 @@ pub(crate) struct Tract {
     /// [`Tract::open_nasal_cavity`]), until another sound is articulated,
     /// even while the velum already rises for what follows.
     pub(crate) nasal: bool,
+    /// The lip rounding being held is the consonant's own gesture (/ʃ ʒ tʃ
+    /// dʒ r w/), not the rounding of the vowel the consonant is made on
+    /// (physical engine; see [`Tract::compute_shaped_targets`]).
+    pub(crate) own_lips: bool,
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
@@ -454,6 +459,7 @@ impl Tract {
             parting: [false; N],
             quick_body: false,
             nasal: false,
+            own_lips: false,
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             trim: [0.0; N / PLACE],
@@ -752,8 +758,16 @@ impl Tract {
     #[allow(clippy::needless_range_loop)] // five arrays, cell by cell
     fn compute_shaped_targets(&mut self, floor: f32) {
         // Lip rounding that belongs to a consonant (/ʃ ʒ tʃ dʒ r/) is the
-        // lips' own gesture and moves at their speed; a vowel's moves with
-        // the vowel shape.
+        // lips' own gesture and moves at their speed. A vowel's moves with
+        // the vowel shape, but while a consonant is made on that vowel (the
+        // rounding of /u/ under the /n/ of "canoe") the lips, lighter than
+        // the tongue body, round at the speed of the back of the tongue
+        // (and, as it closes, twice that, `closing_ratio`), so that the
+        // consonant opens onto rounded lips: at the body's
+        // speed they were a third of the way short at the release of the
+        // /n/ and the second formant fell by 200 Hz into the /u/; at the
+        // lips' own speed they rounded the end of the vowel before the /n/
+        // too, and "canoe" was heard as "can-oh".
         let consonant = self.slots.iter().enumerate().any(|(k, s)| {
             k != ROUNDING_SLOT && s.is_some_and(|s| s.alive && s.c.diameter < CONSONANT_WIDEST)
         });
@@ -763,10 +777,15 @@ impl Tract {
             let before = self.target;
             carve(&mut self.target, s.c, floor);
             if consonant {
+                let by = if self.own_lips {
+                    Mover::Tip
+                } else {
+                    Mover::Dorsum
+                };
                 let lips = self.target[LIP_START..].iter().zip(&before[LIP_START..]);
                 for (m, (t, b)) in self.mover[LIP_START..].iter_mut().zip(lips) {
                     if *t < b - CARVED {
-                        *m = Mover::Tip;
+                        *m = by;
                     }
                 }
             }

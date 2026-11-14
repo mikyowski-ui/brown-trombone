@@ -1475,6 +1475,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
         release_into_liquids(&mut drafts, &timing, rate);
+        lateral_onto_vowels(&mut drafts, &timing, rate);
     }
 
     // Pitch: start each segment where the last ended.
@@ -1588,17 +1589,34 @@ fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
 }
 
 /// The physical engine makes consonants on the tongue body of the vowel
-/// they lead into (of the one before, at the end of an utterance): each
+/// they lead into (of the one before, at the end of an utterance, and for
+/// the stops, nasals and liquids that end a phrase): each
 /// consonant is told which vowel shape that is, so that its tongue tip, lips
 /// or tongue back act on that vowel's body instead of moving the whole
 /// tongue to a body of their own (see `Articulation::leaning_on`).
 fn lean_on_vowels(drafts: &mut [Draft]) {
     let leans = |d: &Draft| !d.vowel && d.phoneme != Phoneme::Sil && d.articulation.vowel.is_none();
+    let hisses = |d: &Draft| {
+        d.articulation
+            .constriction
+            .is_some_and(|c| c.diameter > 0.3 && c.diameter <= crate::tract::HISS_WIDEST)
+    };
     let mut next = None;
+    let mut across = false;
     for d in drafts.iter_mut().rev() {
         if d.vowel {
             next = d.articulation.vowel;
-        } else if leans(d) {
+            across = false;
+        } else if d.phoneme == Phoneme::Sil {
+            across = true;
+        } else if leans(d) && (!across || hisses(d)) {
+            // Across a pause only a fricative's gap is made on the next
+            // phrase's first vowel (on the last vowel's body the final /z/
+            // of "shells;" did not hiss as the breath ran out); the stops,
+            // nasals and liquids that end a phrase are made on its last
+            // vowel. Made on the next one, the /l/ of "shells; who" took
+            // the lips of its /u/, and the /z/ after it was unrounding as
+            // it should have hissed.
             d.articulation.vowel = next;
         }
     }
@@ -1775,6 +1793,70 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
             drafts.insert(last + 1, release);
         }
         k = last + 1;
+    }
+}
+
+/// The physical engine's release of an /l/ into the vowel after it ("slid",
+/// "lid", "blue"). The /l/ holds a body of its own, low and back, under its
+/// tip; the tip is light and lets go within some 20 ms, the body is heavy.
+/// Released together, the tip had gone while the front of the tongue was
+/// still down for the /l/: the mouth stood open over a low tongue, the
+/// first formant rose 100 to 150 Hz above both the /l/'s and the vowel's
+/// and fell again (in "slid" 470, then 585, then 455 Hz), and with the
+/// second formant rising that is the pattern of /aɪ/: "slid" was heard as
+/// "slide". A speaker's first formant runs flat from the /l/ into a close
+/// vowel (the LibriSpeech reader's "sleep": 311 to 328 Hz throughout) or
+/// rises some 60 Hz above both at most ("exactly").
+///
+/// So the end of an /l/ before a vowel, [`Tuning::lateral_release`] of it,
+/// is made on the vowel's body: the tongue body sets off for the vowel
+/// while the tip still holds the /l/, and the tip lets go as the body
+/// arrives.
+fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
+    if timing.lateral_release <= 0.0 {
+        return;
+    }
+    let mut k = 0;
+    while k + 1 < drafts.len() {
+        let (l, next) = (drafts[k], drafts[k + 1]);
+        if l.phoneme != Phoneme::L || !next.vowel || l.articulation.vowel.is_none() {
+            k += 1;
+            continue;
+        }
+        let d = (timing.lateral_release / rate).min(0.6 * l.duration);
+        let share = d / l.duration;
+        let (from, to) = l.gesture.pressure_drop;
+        let between = from + (to - from) * (1.0 - share);
+        let before = if k > 0 {
+            drafts[k - 1].accent
+        } else {
+            l.accent
+        };
+        let accent = if before > 0.0 && l.accent > 0.0 {
+            before * crate::math::powf(l.accent / before, 1.0 - share)
+        } else {
+            l.accent
+        };
+        // The /l/'s tip on the vowel's tongue body and lips.
+        let on_vowel = Draft {
+            articulation: Articulation {
+                tongue: next.articulation.tongue,
+                lips: None,
+                ..l.articulation
+            },
+            duration: d,
+            gesture: Gesture {
+                pressure_drop: (between, to),
+                ..l.gesture
+            },
+            ..l
+        };
+        let own = &mut drafts[k];
+        own.duration -= d;
+        own.accent = accent;
+        own.gesture.pressure_drop = (from, between);
+        drafts.insert(k + 1, on_vowel);
+        k += 2;
     }
 }
 

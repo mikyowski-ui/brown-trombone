@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the eighty-five numbers of `Tuning`, each with a default and
+Underneath sit the eighty-six numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -247,6 +247,7 @@ reads the rest as well:
 | hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
 | intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
 | stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
+| liquids into vowels | `lateral_gap`, `lateral_release` |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -400,7 +401,19 @@ as the model goes:
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
   the consonants on top of it, and the back of the tongue is in between. A
-  consonant is made on the body of the vowel it leads into.
+  consonant is made on the body of the vowel it leads into (the stops,
+  nasals and liquids that end a phrase on its last vowel), and, unless it
+  shapes the lips itself, hisses or is made by the back of the tongue,
+  with that vowel's lips: the lips of /u/ round through the /n/ of
+  "canoe" (at the back of the tongue's speed, so the vowel before it stays
+  unrounded) and the /n/ opens onto /u/. Each cell moves in place towards
+  its target; the vowel shape is never slid along the tract, and all of a
+  vowel's cells move with one speed, so between two vowels the tract
+  passes through the cross-fade of their diameters (the jaw, a little
+  quicker, aside). An /l/ holds a low tongue body of its own; the last
+  10 ms of an /l/ before a vowel are made on the vowel's body
+  (`lateral_release`), so its tip lets go onto the vowel rather than onto
+  the open mouth over the /l/'s body.
 - **Vowels** are the averages for the 45 men of Hillenbrand, Getty, Clark
   & Wheeler (1995), solved into shapes against the engine itself, with lip
   protrusion and a jaw; some of them were moved by a few per cent against
@@ -674,7 +687,7 @@ average sentence).
   where the reader's is 16 (the mouth pressure behind a short /f/ builds
   slowly); after /s/ the /f/ is only 8 dB under it where the reader's is
   16; "thin" is still heard as "so nice" or "been". In the four listening
-  sentences "canoe slid on" is still not heard.
+  sentences "canoe slid on" is still not heard (below).
 - **What depends on the control block.** The articulators and the tract
   go by a 2.7 ms block, and the same gesture gives the same trajectory
   within 1 % at 64 to 512 samples (`tests/block_invariance.rs`); the
@@ -685,10 +698,18 @@ average sentence).
   vowel error in the LibriSpeech texts rose from 24.1 to 28.0 % with
   Whisper unchanged, because the reference transcription has the full
   vowel there.
-- **In the four listening sentences** "canoe slid on" is heard as "can you
-  slide down" (the /u/ after /n/ starts with a front glide, and no flap
-  joins "slid" to "on"), and "background" is on the edge: heard right or as
-  "back drawing" as the stop release speed moves by a tenth.
+- **In the four listening sentences** "canoe slid on" is heard as "can use
+  red on" (until round 8 "can you slide down"). The glide into the /u/ is
+  gone: its lips used to round only as the vowel began, over a tongue
+  already in place, and the second formant fell from 1800 to 1000 Hz over
+  its first 150 ms; now they round under the /n/ and it holds within 20
+  Hz. So is the /aɪ/ of "slid" (the first formant no longer rises between
+  the /l/ and the /ɪ/). What is left: the engine's /u/ (F1 380 to 400 Hz,
+  F2 1000) is a back /u/ where the LibriSpeech reader's after /n t d/ is
+  fronted (F1 270 to 310, F2 1600 to 2250), and the recognizer sometimes
+  hears it as /oʊ/; the stressed /ɪ/ is still heard as /eɪ/; and
+  no flap joins "slid" to "on". "Background" is on the edge: heard right
+  or as "back drawing" as the stop release speed moves by a tenth.
 - **The folds can be relaxed by 12 % and no more**: at 15 % the child
   voice's folds fall out of the range they can sing at 290 Hz and the
   hand-over to the pulse source clicks; at 20 % the voice gives out in the

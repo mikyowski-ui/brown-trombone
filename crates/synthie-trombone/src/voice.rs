@@ -714,6 +714,7 @@ impl Trombone {
         // back of the tongue (physical engine).
         self.tract.quick_body = a.own_body();
         self.tract.nasal = a.velum > 0.5;
+        self.tract.own_lips = a.lips.is_some() && a.constriction.is_some();
         // Vowel shapes are tuned per engine.
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),
