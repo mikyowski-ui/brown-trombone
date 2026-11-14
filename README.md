@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the ninety-three numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and one numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -247,9 +247,10 @@ reads the rest as well:
 | hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
 | intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
 | stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
-| a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (and `sonorant_slack`, `final_slack`, now 0) |
+| a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (all off since round 9; and `sonorant_slack`, `final_slack`, now 0) |
 | liquids into vowels | `lateral_gap`, `lateral_release` |
 | the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
+| the voice's source (round 9) | `voice_tilt`, `tilt_corner`, `voiced_breath_corner`, `cycle_jitter`, `pitch_flutter`, `spread_closing`, `vowel_decline`, `accent_peak` |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -375,14 +376,31 @@ as the model goes:
 - **The voice.** In modal speech the folds close on every cycle, so the
   voice keeps a steady H1–H2 instead of drifting breathy, and the folds
   carry every sentence of the default voices; the pulse only takes notes
-  out of their range (above). It is brightest on the accented vowels: in
-  nasals and liquids, and half as much in unaccented vowels, it passes a
-  one-pole low-pass at 3 kHz (`Trombone::set_fold_softness`), so that
-  their level in 2 to 4 kHz against 0 to 1 kHz falls under the accented
-  vowels' as the LibriSpeech reader's does (nasals 6.1 dB, his 5.6;
-  liquids 4.0, his 5.1; unaccented vowels 0.1, his 0.6). The folds
-  themselves are left as the tenseness holds them, so nothing about where
-  they can sing or how they start changes.
+  out of their range (above). These folds shut abruptly: the derivative
+  of their flow has its 2 to 4 kHz band some 20 dB under its 0 to 1 kHz
+  band, where a Liljencrants–Fant source of a modal male voice (a return
+  phase of 4 to 5 % of the period) has 33 to 37. So while the folds are
+  asked to sing, the voice leaves through a first-order shelf that falls
+  from its 500 Hz corner (where it is unity) and levels off from about 4
+  kHz, 18 dB under the bottom (`voice_tilt`, `tilt_corner`;
+  `src/phys/tilt.rs`), the same over every
+  voiced sound; every noise source in the tract takes the shelf's inverse
+  on the way in, so frication, bursts and breath are heard as without it.
+  The breath noise of the glottal jet is pitched by the slit it comes
+  through: while the folds vibrate it has little below 3 kHz
+  (`voiced_breath_corner`), where that of an open glottis in /h/ reaches
+  down to 400 Hz. Measured in the LibriSpeech texts, the accented vowels'
+  2 to 4 kHz band now stands 27.1 dB under 0 to 1 kHz (the reader 28.9;
+  16.5 before), 1 to 2 kHz 19.8 (his 20.9; 12.9 before). The pitch of the
+  folds has a cycle-to-cycle jitter with a 1/f-like spectrum
+  (`cycle_jitter`: RAP 0.23 %, the reader 0.25 %, before 0.12 %), its slow
+  wander and vibrato now move in the physical engine too (they were frozen:
+  its glottis clock never ran), and a 6 to 10 Hz flutter (`pitch_flutter`)
+  moves it within a vowel (0.20 semitones about the line through it, the
+  reader 0.21, before 0.11). The softening of nasals, liquids and
+  unaccented vowels by a filter switched per phoneme (round 8,
+  `Trombone::set_fold_softness`) is off: the owner heard the accented
+  vowels jump out where it let go.
 - **Voiced and voiceless.** For /p t k f s/ the arytenoids spread the
   glottis behind the folds, slower than the folds themselves move, and the
   voice stops at the moment the mouth actually shuts (the larynx is timed
@@ -469,9 +487,17 @@ as the model goes:
   its length and its formants through it.
 - **Phrases.** The lungs build their pressure up over the start of a
   phrase, run down over it and let go over its last vowel, so a sentence
-  swells in and dies away. Each stressed vowel gets a pitch accent that
-  sinks back, the pitch declines over the phrase, and a statement falls at
-  its end.
+  swells in and dies away; within it, each vowel starts at full strength
+  and its breath sinks by 2.5 dB of level to its end (`vowel_decline`),
+  and after a voiceless consonant the arytenoids close the spread glottis
+  in 12 ms (`spread_closing`; opening it takes 20), so the vowel is within
+  3 dB of its peak 7.5 ms after its voice starts, as the LibriSpeech
+  reader's (19 ms before, growing for 40 ms). Each stressed vowel gets a
+  pitch accent that rises from the start of its syllable, peaks 55 % of
+  the way through the vowel (`accent_peak`) and sinks back, so accented
+  vowels no longer all rise (median across them −0.3 semitones, the
+  reader's 0.0, before +1.2); the pitch declines over the phrase, and a
+  statement falls at its end.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
@@ -609,6 +635,20 @@ deterministic):
 | physical engine, end of round 5 | 26 % [22, 31] | 62 % [54, 70] | 30 % [27, 34] | 100 % | 91 % [88, 94] |
 | physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
 | physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
+
+Round 9 (single scoring runs): the voice's source. The phoneme-switched
+softening is off; the voice takes a source tilt and a voice's breath
+noise is pitched higher (so its accented vowels are as dark as the
+LibriSpeech reader's: 2 to 4 kHz 27.1 dB under 0 to 1 kHz, his 28.9,
+before 16.5); the folds have cycle-to-cycle jitter, a flutter and a
+working vibrato and wander; vowels start at once after voiceless
+consonants and their breath sinks through them; the pitch accent peaks
+inside its vowel. Phoneme error over the 30 held-out sentences 23.4 %
+(23.2 % with the softening off and nothing else), Whisper's words 68.7 %
+(69.1 %), the ten `sentence_heldout` sentences 16.3 % and 78.8 % (18.8
+and 72.5 %), vowels in the LibriSpeech texts heard wrong 23.1 % (23.1 %),
+consonants there right 89.1 % (90.0 %); the naturalness distance 1.08
+(1.10), its warped spectral part 15.0 dB (15.6).
 
 Round 9, the front of the tongue (single scoring runs; against the end of
 round 8): /t d/ between a vowel and an unstressed one are taps, the /u/
@@ -810,19 +850,16 @@ average sentence).
   ("send him", "and the [ðɪ]"), heard voiceless since the /ɪ/ moved (not
   yet measured why; the closure is made on the /ɪ/'s tongue body, which is
   now closer).
-- **The softer voice is a filter, not the folds.** Held more loosely
+- **The softer voice is a filter, and it is off.** Held more loosely
   (round 7), the folds open: past 12 % the child voice fell out of its
   folds' range with a click and a /g/ lost its voice bar, and at 12 % the
   nasals and liquids came out brighter, not darker. Closing them more
-  softly does not work in this model either: a softer contact lowered
-  H1–H2 (by 3.4 dB at a third of the stiffness), edges meeting along
-  their length closed faster, and a low-pass on the glottal area or on the
-  flow the tract takes up was undone by the tract's pressure on the folds,
-  because the high frequencies of this voice come from the flow's ripple
-  under that pressure, not from the instant of closure. So the low-pass
-  is on the voice as it leaves (for the voice the same as on the glottal
-  flow's derivative); in the /ɪ/ of "of art" it also dulls the start of
-  the /v/, which the recognizer then hears as /l/.
+  softly does not work in this model either (round 8), so the softening
+  is a low-pass on the voice as it leaves, switched by phoneme; since
+  round 9 it is off by default. With the source tilt the engine's nasals
+  are 1.9 dB and its liquids 3.8 dB less dark against the accented vowels
+  than the reader's (his: 5.6 and 5.1 dB darker in 2 to 4 kHz); turning
+  the switch back on for that rest was not tried against the owner's ear.
 - **H1–H2 of the nasals and glides** stays under the reader's: his
   nasals have 4.1 dB more H1–H2 than his accented vowels, the engine's 1.5
   dB less. The engine's nasal murmur resonance stands near 290 Hz with a
@@ -831,11 +868,19 @@ average sentence).
   low-pass leaves it within 0.1 dB). The glides are already darker than
   his (11.6 dB under the accented vowels in 2 to 4 kHz, his 4.4) and are
   not softened.
-- **The voice is brighter than the reader's overall**: his accented
-  vowels have their 2 to 4 kHz band 29 dB under 0 to 1 kHz, the engine's
-  16 dB, and its pitch is steadier (cycle-to-cycle jitter, RAP, 0.11 %
-  against his 0.25 %; wobble about the pitch line within a vowel 0.11
-  against 0.21 semitones; shimmer alike).
+- **The voice's brightness is a filter on the source, not the folds.**
+  The fold model's abrupt closure and the ripple of its flow under the
+  tract's pressure make the bright source; the shelf stands for the
+  return phase they lack. The formants of the tract are narrower than a
+  speaker's at the top (closed glottis: F3 30 to 230 Hz, F4 40 to 90, where
+  100 to 150 and 150 to 250 are typical): the boundary-layer loss is the
+  textbook value at 1.5 kHz, and three times it would give F3 85 to 270
+  and F4 100 to 150 Hz but widen F1 to 70 to 110 as well. Above 4 kHz the
+  reader's vowels have more energy than the engine's (4 to 7.5 kHz 25.7
+  dB under 0 to 1 kHz, the engine's 28.6): his breath noise lies higher
+  still. With the tilt, the listener (`listen.rs`) reads close vowels'
+  F1 10 to 16 % high and settles slowly on /æ/ after /u/ (221 ms), and
+  mimic follows /i/ and /æ/ late; their gates hold those cases apart.
 - **Isolated words** score about 58 % phoneme error, against a 13-of-26
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.

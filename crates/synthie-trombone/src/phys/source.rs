@@ -83,6 +83,13 @@ const STALL_SWING: f32 = 0.03;
 /// that step left the mouth as a click several times the vowel's peak:
 /// the critter's high notes cross its folds' range within a vowel.
 const HANDOVER_TIME: f32 = 0.006;
+/// Largest multiple of the natural voice's cycle-to-cycle jitter a voice's
+/// jitter setting gives.
+const JITTER_MOST: f32 = 2.0;
+/// Seed of the cycle-to-cycle jitter.
+const JITTER_SEED: u32 = 0x5EED_0F0A;
+/// `sqrt(3/5)`: five uniform terms in `[-1, 1)` to unit variance.
+const JITTER_NORM: f32 = 0.774_596_7;
 /// Seconds over which the softness of the folds follows its setting.
 const SOFT_TIME: f32 = 0.01;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
@@ -312,6 +319,16 @@ pub(crate) struct Source {
     pub(crate) probe: Probe,
     /// When the pulse may take over from the folds.
     pub(crate) fallback: Fallback,
+    /// Cycle-to-cycle jitter: the share by which this cycle's tension (or
+    /// the pulse's rate) is off, the size of that share
+    /// (`Tuning::cycle_jitter` times the voice's jitter), and the random
+    /// state behind it (a Voss–McCartney sum, so its spectrum falls like
+    /// 1/f over the cycles rather than staying white).
+    jit: f32,
+    jit_size: f32,
+    jit_rows: [f32; 4],
+    jit_count: u32,
+    jit_seed: u32,
 }
 
 impl Source {
@@ -369,7 +386,39 @@ impl Source {
             edge_area: 0.0,
             probe: Probe::ON,
             fallback: Fallback::Auto,
+            jit: 0.0,
+            jit_size: 0.0,
+            jit_rows: [0.0; 4],
+            jit_count: 0,
+            jit_seed: JITTER_SEED,
         }
+    }
+
+    /// Draw the next cycle's jitter.
+    fn next_jitter(&mut self) {
+        if self.jit_size <= 0.0 {
+            self.jit = 0.0;
+            return;
+        }
+        let mut uniform = || {
+            let mut x = self.jit_seed;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.jit_seed = x;
+            #[allow(clippy::cast_precision_loss)]
+            let u = (x >> 8) as f32 / 8_388_608.0 - 1.0;
+            u
+        };
+        // Row k changes every 2^k cycles; a white part changes every cycle.
+        self.jit_count = self.jit_count.wrapping_add(1);
+        let row = (self.jit_count.trailing_zeros() as usize).min(self.jit_rows.len() - 1);
+        let fresh = uniform();
+        self.jit_rows[row] = fresh;
+        let white = uniform();
+        let sum: f32 = self.jit_rows.iter().sum::<f32>() + white;
+        // Five uniform terms in [-1, 1): variance 5/3; scaled to unit.
+        self.jit = self.jit_size * sum * JITTER_NORM;
     }
 
     pub(crate) fn reset(&mut self) {
@@ -517,6 +566,11 @@ impl Source {
         self.tense1 = t1.clamp(0.0, 1.0);
         self.amp0 = self.amp1;
         self.amp1 = g.intensity;
+        // A shaky voice's slow wander grows with its jitter setting; its
+        // cycle-to-cycle jitter only up to twice the natural voice's (at
+        // the elder's 2.5 times, 2.5 % of the tension from one cycle to the
+        // next made its H1-H2 step by 4 dB between 50 ms frames on /u/).
+        self.jit_size = 0.01 * self.tuning.cycle_jitter * g.jitter.min(JITTER_MOST);
 
         let voicing = g.voiced || g.always_voice;
         if voicing && !self.voicing && !self.building() {
@@ -622,7 +676,13 @@ impl Source {
         self.chink += (self.chink_target - self.chink) * (dt / adduction);
         let arytenoids = self.tuning.abduction_time;
         let spread = self.spread_target * self.size * self.size;
-        self.spread += (spread - self.spread) * (dt / arytenoids);
+        // They bring the glottis back together faster than they open it.
+        let closing = if spread < self.spread {
+            self.tuning.spread_closing.min(arytenoids)
+        } else {
+            arytenoids
+        };
+        self.spread += (spread - self.spread) * (dt / closing);
         self.slack += (self.slack_target - self.slack) * (dt / arytenoids);
         self.soft += (self.soft_target - self.soft) * (dt / SOFT_TIME);
         let f = self.f0 + (self.f1 - self.f0) * lambda;
@@ -643,7 +703,7 @@ impl Source {
         if self.blend > 0.0 {
             self.folds.hold_at(self.gap, dt);
             let tension = self.tension0 + (self.tension1 - self.tension0) * lambda;
-            self.folds.tension = tension * exp(self.trim) * (1.0 - self.slack);
+            self.folds.tension = tension * exp(self.trim) * (1.0 - self.slack) * (1.0 + self.jit);
             let between = self.folds.area();
             let total = between + self.chink + self.spread;
             self.fold_share = if total > 0.0 { between / total } else { 1.0 };
@@ -654,9 +714,12 @@ impl Source {
             folds = total;
         }
 
-        self.phase += f * dt;
+        self.phase += f * (1.0 + self.jit) * dt;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
+            if self.blend <= 0.0 {
+                self.next_jitter();
+            }
         }
         let tense = self.tense0 + (self.tense1 - self.tense0) * lambda;
         let amp = self.amp0 + (self.amp1 - self.amp0) * lambda;
@@ -772,6 +835,7 @@ impl Source {
         let above = edge > self.mean_edge;
         self.since_crossing += dt;
         if above && !self.was_above {
+            self.next_jitter();
             let period = self.since_crossing;
             self.since_crossing = 0.0;
             let target = self.f0 + (self.f1 - self.f0) * lambda;
