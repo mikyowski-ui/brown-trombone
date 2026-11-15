@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and eight numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twelve numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and eight numbers in three
+        /// How a voice turns sounds into speech: one hundred and twelve numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -293,7 +293,13 @@ tuning! {
 
     /// Share of the lung pressure lost between the start and the end of a
     /// phrase: the speaker's breath running down, which lowers the level
-    /// and the pitch together.
+    /// and the pitch together (all of it over a phrase of two seconds or
+    /// more, a shorter one in proportion to its time). 0.15 until round 10,
+    /// when the rules' vowels grew 1 dB louder over a phrase where the
+    /// LibriSpeech reader's lose some 3 (fitted over stress, function word,
+    /// place in the phrase and vowel height; at 0.3 they lose 1). At 0.35
+    /// with `unaccented_level` 3, nearer him, the 30 held-out sentences'
+    /// phoneme error rose from 25 to 28 %.
     phrase_decline = 0.3, 0.0..=0.4, A;
     /// Share of the lung pressure let go over the last vowel of a
     /// statement: the voice dies away instead of being cut off (half of it
@@ -333,7 +339,11 @@ tuning! {
     // ----- B: intonation (physical engine) ------------------------------
 
     /// Rise of the pitch on a stressed vowel, semitones at expressiveness
-    /// 1 (a speaker's accents are 2 to 5).
+    /// 1 (a speaker's accents are 2 to 5). 6 until round 10: the rules'
+    /// pitch spanned 7.2 semitones over the LibriSpeech texts where the
+    /// reader's spans 10.4, and stepped 1.8 semitones from vowel to vowel
+    /// where his steps 3.1; at 8 (4 semitones in the default voice) they
+    /// rise into an accent by 2.9 semitones, he by 2.7.
     accent_size = 8.0, 0.0..=16.0, B;
     /// Seconds over which an accent sinks back after its vowel.
     accent_decay = 0.2, 0.05..=0.5, B;
@@ -702,7 +712,10 @@ tuning! {
     /// what its pitch and length give, dB of level (physical engine): the
     /// lungs push less through it, and the consonants between two vowels
     /// take the breath of the line from one to the other (see
-    /// `speech::weigh_syllables`). `0` breathes every syllable alike.
+    /// `speech::weigh_syllables`). `0` breathes every syllable alike. The
+    /// LibriSpeech reader's accented vowels stand 2.7 dB over his others,
+    /// the rules' 1.2 without this and 1.9 with it; at 3 dB the 30
+    /// held-out sentences' phoneme error went from 25.5 to 26.6 %.
     unaccented_level = 1.5, 0.0..=6.0, A;
     /// How much longer the consonants after the last vowel of a phrase are
     /// (physical engine), on top of that vowel's own lengthening: the
@@ -739,10 +752,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_two_and_forty_seven() {
+    fn two_passes_of_fifty_four_and_forty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (52, 47));
+        assert_eq!((a, b), (54, 49));
     }
 
     #[test]

@@ -106,5 +106,9 @@
   "follow_tenseness_high": {"lo": 1, "hi": 1.4, "default": 1.15, "pass": "a"},
   "follow_speed_max": {"lo": 1, "hi": 2.5, "default": 1.6, "pass": "b"},
   "follow_shortest": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"},
-  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"}
+  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"},
+  "unaccented_level": {"lo": 0, "hi": 4, "default": 1.5, "pass": "a"},
+  "final_coda_stretch": {"lo": 1, "hi": 1.6, "default": 1.25, "pass": "b"},
+  "sentence_pause": {"lo": 0.3, "hi": 0.8, "default": 0.55, "pass": "b"},
+  "light_laxness": {"lo": 0, "hi": 0.1, "default": 0.08, "pass": "a"}
 }

@@ -1946,19 +1946,25 @@ fn function_words(tokens: &[Token]) -> Vec<bool> {
 fn shade_syllables(phrase: &mut [Draft], light: &[bool], tense: f32, timing: &Tuning) {
     let lo = timing.follow_tenseness_low;
     for k in 0..phrase.len() {
-        if !(phrase[k].vowel && phrase[k].part == Part::Head)
-            || !light.get(phrase[k].phone as usize).copied().unwrap_or(false)
-        {
+        let function_vowel = phrase[k].vowel
+            && phrase[k].part == Part::Head
+            && light
+                .get(phrase[k].phone as usize)
+                .copied()
+                .unwrap_or(false);
+        if !function_vowel {
             continue;
         }
         let share = (1.0 - timing.light_laxness).clamp(lo.min(1.0), 1.0);
         if (share - 1.0).abs() < 1e-6 {
             continue;
         }
-        let end = k + 1 + phrase[k + 1..]
-            .iter()
-            .take_while(|d| d.vowel && d.part != Part::Head)
-            .count();
+        let end = k
+            + 1
+            + phrase[k + 1..]
+                .iter()
+                .take_while(|d| d.vowel && d.part != Part::Head)
+                .count();
         for d in &mut phrase[k..end] {
             if d.voiced {
                 d.tenseness = Some((d.tenseness.unwrap_or(tense) * share).clamp(0.0, 1.0));
@@ -2771,6 +2777,7 @@ fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
 /// vowels stand 2.7 dB over his unaccented ones, the rules' 1.2 (the pitch
 /// accent and the length alone); the two reference recordings 1.9 and 2.2,
 /// the owner's 6.5.
+#[allow(clippy::many_single_char_names)]
 fn weigh_syllables(phrase: &mut [Draft], accented: &[bool], timing: &Tuning) {
     if timing.unaccented_level <= 0.0 {
         return;

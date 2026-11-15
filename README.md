@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and eight numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and twelve numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -251,6 +251,7 @@ reads the rest as well:
 | liquids into vowels | `lateral_gap`, `lateral_release` |
 | the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
 | the voice's source (round 9) | `voice_tilt`, `tilt_corner`, `voiced_breath_corner`, `cycle_jitter`, `pitch_flutter`, `spread_closing`, `vowel_decline`, `accent_peak` |
+| the rules' prosody against speakers' (round 10) | `unaccented_level`, `final_coda_stretch`, `sentence_pause`, `light_laxness` |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:
@@ -410,7 +411,9 @@ as the model goes:
   cheeks widen so the air the voice sends into the shut mouth has
   somewhere to go, and the voice carries on through the closure. A vowel
   is shorter before a voiceless consonant that ends its syllable and
-  longer before a voiced one, as in English.
+  longer before a voiced one, as in English; not before the first sound of
+  the next word (until round 10 the /s/ of "slid" clipped the /u/ of
+  "canoe" to 128 ms, where the reference recordings hold it 180 to 215).
 - **Stops** build pressure behind the closure and burst by themselves,
   without a click at the release. Released into an /l r/ ("blue",
   "play", "cream"), a stop is made on the liquid's tongue body, its lips
@@ -498,6 +501,31 @@ as the model goes:
   vowels no longer all rise (median across them −0.3 semitones, the
   reader's 0.0, before +1.2); the pitch declines over the phrase, and a
   statement falls at its end.
+- **Phrases against speakers (round 10).** Measured phone by phone against
+  the LibriSpeech reader's 16 sentences (his own alignment, the rules saying
+  the same text with a comma where he paused) and the two reference
+  recordings, the rules' phrases were too even: his vowels lose some 3 dB
+  of level over a phrase, the rules' gained 1; his accented vowels stand
+  2.7 dB over the rest, the rules' 1.2; his pitch spans 10.4 semitones, the
+  rules' 7.2. So the lungs now lose 30 % of their pressure over a phrase of
+  two seconds or more (`phrase_decline`, 0.15 before; a shorter phrase in
+  proportion to its time), push 1.5 dB less through an unaccented vowel and
+  the nasals and liquids beside it, the obstruents keeping their breath
+  (`unaccented_level`), and the accents rise by 4 semitones in the default
+  voice (`accent_size` 8, 6 before). The reader draws out the consonants
+  that close a phrase (1.2 to 1.6 times the rules' at his pace), so they
+  are 1.25 times longer (`final_coda_stretch`); the references pause 0.54
+  and 0.62 s between sentences, so the physical engine pauses 0.55 s there
+  (`sentence_pause`, 0.38 before); function words' vowels are held 8 %
+  more loosely (`light_laxness`; the reader's are 1.3 to 1.7 dB breathier
+  in H1*-H2*); and a vowel is no longer clipped or drawn out by the first
+  consonant of the next word. On the LibriSpeech texts the phrase fall
+  (`natural.py`, -6 to -30 dB of the peak) went from 153 to 279 ms (the
+  reader 710), the naturalness distance from 1.05 to 1.01 (its pitch terms
+  0.76 to 0.59), the vowel levels' correlation with his from 0.25 to 0.30.
+  Neither the place of the accent nor the length, level or pitch of the
+  /u/ makes Whisper hear "canoe" in sentence 1 alone: every variant tried
+  gave "can also", "can sleep" or "can use".
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
