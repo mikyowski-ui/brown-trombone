@@ -850,56 +850,60 @@ tuning! {
     /// reader's, the two references' and the owner's are 1.30 to 1.37
     /// times the rules' at their pace with the class of each consonant
     /// fitted alongside, 1.11 to 1.27 without. Not the weak fricatives
-    /// /f v θ ð h/, which are long in the rules already. At 1.3 (with
-    /// `cluster_length` alone) the 30 held-out sentences' phoneme error
-    /// went from 25.9 to 23.4 %, the 30 tuning sentences' from 22.0 to
-    /// 18.6 %, the vowels heard wrong in the LibriSpeech texts from 25.5 to
-    /// 22.4 %, but the android's /b/ released 4.0 dB under the vowel after
-    /// it on average, at the bound of `stop_releases_are_bursts_not_clicks`
-    /// (at 1.2 -4.3 dB, before -4.6): the longer closure builds more
-    /// pressure. `1` makes them as long as anywhere else.
+    /// /f v θ ð h/, which are long in the rules already. With this and
+    /// `cluster_length` alone the 30 held-out sentences' phoneme error went
+    /// from 25.9 to 23.4 %, the 30 tuning sentences' from 22.0 to 18.6 %,
+    /// the vowels heard wrong in the LibriSpeech texts from 25.5 to 22.4 %
+    /// for 1.4 % more time; every stop, every fricative, every nasal or
+    /// every liquid 1.3 times as long, wherever it stood, gained 0.4 to 1.4
+    /// points over the two sets for 2 to 5 % more time. Whisper's words
+    /// fell 2 to 5 points with any of them. `1` makes them as long as
+    /// anywhere else.
     stressed_onset_length = 1.3, 1.0..=1.6, B;
     /// Length of each consonant of a cluster against a single one's
     /// (physical engine): the reader's are 0.81 of his single ones (the
-    /// references' 0.94), where the rules made them alike.
-    cluster_length = 0.85, 0.6..=1.5, B;
+    /// references' 0.94), where the rules made them alike. Not a sibilant
+    /// that closes one, which the reader holds 1.11 times the rules'.
+    cluster_length = 0.85, 0.6..=1.2, B;
     /// Length of the consonants of a function word, its stops excepted
     /// (they keep their closure and release), against their own (physical
     /// engine): the reader's /ð v/ of "the", "of" are 0.78 of the rules'.
-    /// The reader's 0.85 with `schwa_length` at his 0.75 lost Whisper 7.8
-    /// points of the held-out sentences' words (it gained 3.7 on the
-    /// tuning sentences); at 0.9 and 0.85 the two sets moved -2.6 and
-    /// +5.5.
+    /// At 0.85 (with `schwa_length` 0.75) Whisper's words over the 30
+    /// held-out sentences fell 7.8 points and rose 3.7 over the tuning
+    /// ones; at 0.9 (and 0.85) -2.6 and +5.5.
     function_consonant_length = 0.9, 0.5..=1.0, B;
     /// Length of /ə/ against an unstressed vowel's (physical engine): the
     /// speakers' are 0.69 to 0.76 of the rules', in function and content
-    /// words alike; milder than theirs, see `function_consonant_length`.
-    schwa_length = 0.85, 0.5..=1.0, C;
+    /// words alike (the /ə/ of "canoe" was 100 ms, the reader's 65 and the
+    /// references' 50 to 52; now 77).
+    schwa_length = 0.75, 0.5..=1.0, C;
     /// Length of a diphthong against what `diphthong_length`, `vowel_hold`
     /// and the stress give it (physical engine): the reader's are 0.67 of
     /// the rules' (a stressed /oʊ eɪ/ was 226 to 266 ms, his 70 to 250 at
     /// the rules' pace).
     diphthong_hold = 0.75, 0.5..=1.0, C;
     /// How much longer every phone of the physical engine's rules is held,
-    /// the phrase's last syllable excepted, to give back what the fields
-    /// above take from the rate of speech. At 1.032 they kept it (10.8
-    /// phones a second over the reader's texts), but a vowel held 3 %
+    /// the first and last syllable of a phrase excepted, to give back what
+    /// the fields above take from the rate of speech (the four listening
+    /// sentences last 11.86 s, 11.84 before). At 1.032 a vowel held 3 %
     /// longer before /ʃ/ darkened its hiss past the bound of
     /// `hisses_are_broad_and_s_is_brighter_than_sh` (centroid 4350 to 3840
     /// Hz, flatness 0.42 to 0.29; at 1.02 0.32).
     rhythm_pace = 1.02, 0.8..=1.25, B;
     /// Shortest a followed schedule may make a phone the floor of
     /// `follow_shortest` does not hold (physical engine; see
-    /// `speech::rhythm::held_in_transfer`), a share of its rule duration:
-    /// the unstressed vowels, and the nasals, liquids, glides and weak
-    /// fricatives that are not in a cluster of a content word. Left off
-    /// one class at a time on the 16 LibriSpeech anchors with the reader's
-    /// own timing, the floor mattered most in the function words (their
-    /// vowels: phoneme error 22.5 to 24.7 %; their consonants: 25.2 %,
-    /// Whisper 81.8 to 74.6 %) and not on the stressed vowels or clusters
-    /// (22.2 and 22.1 %); held only on the stressed vowels, stops,
-    /// sibilants and clusters (this at `0`) the phoneme error was 27.6 %
-    /// and Whisper 74.6 %, at 0.6 23.5 and 80.9 %, at 0.5 25.1 and 75.6 %.
+    /// `speech::rhythm::held_in_transfer`), a share of its own rule
+    /// duration: the vowels of unstressed syllables and function words,
+    /// the consonants of function words but their stops and sibilants, the
+    /// single nasals, liquids, glides and weak fricatives of content words.
+    /// `0.7`, the same floor as the rest: left off one class at a time on
+    /// the 16 LibriSpeech anchors with the reader's own timing, the floor
+    /// mattered most in the function words (their vowels: phoneme error
+    /// 22.5 to 24.7 %; their consonants: 25.2 %, Whisper 81.8 to 74.6 %)
+    /// and not on the stressed vowels or clusters (22.2 and 22.1 %); held
+    /// only on the stressed vowels, stops, sibilants and clusters (this at
+    /// `0`) the phoneme error was 27.6 % and Whisper 74.6 %, at 0.6 23.5
+    /// and 80.9 %, at 0.5 25.1 and 75.6 % (round 10's rules).
     follow_shortest_light = 0.7, 0.0..=1.0, B;
 }
 

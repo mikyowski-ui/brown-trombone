@@ -182,6 +182,9 @@ pub struct Utterance {
     /// Where each phone of the text stands in its word and syllable (empty
     /// for hand-made segments).
     roles: Vec<rhythm::Role>,
+    /// How much longer than its own length the rules made each phone where
+    /// it stands ([`rhythm::stretch`]; `1` on the classic engine).
+    stretches: Vec<f32>,
     /// A pitch track the [`Speaker`] follows in place of the segments' own
     /// pitch: Hz every `pitch_hop` seconds from the start of the utterance,
     /// on the clock of the segments' durations (see
@@ -251,6 +254,7 @@ impl Utterance {
             sibilant_exit: 0.0,
             phones: Vec::new(),
             roles: Vec::new(),
+            stretches: Vec::new(),
             pitch_track: Vec::new(),
             pitch_hop: 0.0,
             followed: follow::Followed::default(),
@@ -1676,6 +1680,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     // The place of each phone among the text's, and where it stands.
     let mut phone: u32 = 0;
     let roles = rhythm::roles(tokens);
+    let mut stretches = Vec::with_capacity(roles.len());
 
     // The physical engine shapes its phrases once they have their final
     // lengths (see `intonation`).
@@ -1698,9 +1703,15 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 let context = physical.then(|| Context::at(tokens, i));
                 let first = drafts.len();
                 let role = roles.get(phone as usize).copied().unwrap_or_default();
+                let stretch = if physical {
+                    rhythm::stretch(phoneme, role, &timing)
+                } else {
+                    1.0
+                };
+                stretches.push(stretch);
                 expand(
                     phoneme,
-                    (stressed, rhythm::stretch(phoneme, role, &timing)),
+                    (stressed, stretch),
                     next_vowel_or_approx,
                     context,
                     rate,
@@ -1862,6 +1873,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         sibilant_exit: if physical { timing.sibilant_exit } else { 0.0 },
         phones,
         roles,
+        stretches,
         pitch_track: Vec::new(),
         pitch_hop: 0.0,
         followed: follow::Followed::default(),

@@ -622,6 +622,54 @@ as the model goes:
   lighter unaccented syllables); and /ɪ/ in short phrases is heard as /eɪ/
   or /i/ after any consonant (1 of 26 right, after /l/ 8 of 19), not only
   after an /l/.
+- **Rhythm (round 11).** Measured phone by phone against the LibriSpeech
+  reader's 16 sentences, the two reference recordings and the owner's
+  recording of sentences 1 and 2 (the rules saying the same text at the
+  speakers' pauses; each speaker's durations over the rules', at the
+  speaker's own pace; a fit of the log ratio on the phone's class and
+  where it stands, the phrase's last syllable left out), the rules'
+  syllables were too even, and not where the ear guessed: the vowels of
+  stressed content words were not short (tense ones 0.89 to 0.99 of
+  people's), but the consonants that open a stressed syllable were, for all
+  four speakers (people's 1.30 to 1.37 times the rules'); each consonant
+  of a cluster the reader holds for 0.81 of a single one (the rules made
+  them alike); /ə/ is 0.69 to 0.76 of the rules' everywhere (the /ə/ of
+  "canoe" was 100 ms, the reader's 65); the /ð v/ of "the", "of" 0.78, the
+  reader's diphthongs 0.67. The normalised variability of successive
+  vowel intervals (nPVI-V) was 30 to 43 for the rules and 57 to 58 for
+  every speaker; the vowels' share of the time (%V) 48 to 51 %, people's
+  40 to 46 %. So the physical engine's rules now draw out the consonants
+  that open a stressed syllable 1.3 times (`stressed_onset_length`; not
+  /f v θ ð h/, long already), shorten each consonant of a cluster to 0.85
+  (`cluster_length`; not a sibilant closing one, which the reader holds
+  longer), the consonants of function words but their stops to 0.9
+  (`function_consonant_length`), every /ə/ to 0.75 (`schwa_length`) and
+  the diphthongs to 0.75 (`diphthong_hold`), and hold everything else 2 %
+  longer (`rhythm_pace`), the first and last syllable of a phrase excepted
+  (where the breath is still building or the rules' own lengthening
+  rules). The rate stays where it was: the four listening sentences last
+  11.86 s (11.84), the reader's texts 10.96 phones a second of speech
+  (10.78; the reader 12.37, the references 11.25, the owner 7.96: the
+  owner's recording is 22 % slower than the rules, the reader 15 % and the
+  references 10 % faster). Against the speakers the stressed onsets now
+  stand at 1.02 to 1.07, the clusters at 0.92, /ə/ at 0.84 to 0.93; %V is
+  46 to 50 %, the ratio of stressed to unstressed syllables 1.59 to 1.67
+  (1.45 to 1.50 before; the reader 1.60, the references 2.5, the owner
+  2.1); nPVI-V rose to 43 and 44 on the reference texts and stayed at 43
+  on the reader's. Every consonant of a class 1.3 times as long instead
+  (stops, fricatives, nasals or liquids, wherever they stood) gained 0.4
+  to 1.4 points of phoneme error over the held-out and tuning sentences
+  for 2 to 5 % more time; the stressed onsets and clusters alone gained
+  2.9 for 1.4 %. On the engine of round 11 (main 18f28e1; single runs):
+  the 30 held-out sentences' phoneme error 26.1 to 21.9 %, the tuning
+  sentences' 22.3 to 20.8 %, vowels heard wrong in the LibriSpeech texts
+  24.8 to 22.0 %, consonants right 88.2 % (88.2); Whisper's words fell,
+  74.3 to 70.0 % and 72.8 to 71.5 %, and on the ten `sentence_heldout`
+  sentences 81.2 to 71.2 % (every variant of the round that lengthened
+  consonants lost 2 to 5 points of Whisper's words over the 60 sentences);
+  the four-sentence clip went from 25 to 27 of 31 words ("The birch can
+  use lid on the smooth planks. ... by the sea shore."). The naturalness
+  distance to the reader is 1.013 (1.008), its timing part 0.26 (0.31).
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
@@ -718,6 +766,31 @@ between runs that differ only in the level loop's breath.
   Polly sample and 26 % for sample 2 with everything (by the rules 15 %
   and 13 %, with the timing only 7 % and 13 %); Whisper 14 of 16 words
   each.
+- The floor by class (round 11). In the reader's 16 schedules the 70 %
+  floor lengthens 258 of 736 phones by 4.7 s in all (7 % of the time;
+  the references' 34 of 109, 0.5 s), most of it in vowels: the stressed
+  ones of content words 34 %, those of function words 20 %, the
+  unstressed ones of content words 16 %, the /ð v/ of function words 7 %;
+  stops, sibilants and clusters a few per cent each. Left off one class at
+  a time (16 anchors, his schedules spoken as fitted in round 9; phoneme
+  error 22.5 %, vowels wrong 26.6 %, consonants wrong 17.0 %, Whisper
+  81.8 % with it everywhere) it mattered most in the function words (off
+  their vowels 24.7 %, off their consonants 25.2 % and Whisper 74.6 %),
+  then the weak fricatives (24.7 %) and the stops (23.9 %), and not on
+  the stressed vowels (22.2 %, Whisper 78.9 %) or the clusters (22.1 %).
+  The floor lengthens 11 of the function words' 28 stops ("to", "but",
+  "at"; 0.16 s), and off the stops the phoneme error rose by 1.4 points,
+  so stops keep it whatever the word. So the floor is built by
+  class (`speech::rhythm::held_in_transfer`): the stressed vowels of
+  content words, the stops, the sibilants and affricates and the
+  consonants of a content word's clusters keep `follow_shortest`, the rest
+  take `follow_shortest_light`, and both are shares of a phone's own rule
+  length, not of the length round 11's rhythm gives it. The light floor is
+  0.7 as the rest: held only on those classes (`follow_shortest_light` 0,
+  the floor asked for) the 16 anchors scored 28.2 % phoneme error, 32.2 %
+  vowels wrong and 78.5 % of Whisper's words, against 21.0 %, 25.2 % and
+  85.2 % with it (round 10's rules and floor 19.8 %, 23.4 %, 79.9 %); its
+  phones lie 4.5 ms from the speaker's on average instead of 7.8.
 
 The models and numbers come from: Steinecke & Herzel (1995) for the
 two-mass folds; Story & Titze (1995) and Titze & Story (2002) for the

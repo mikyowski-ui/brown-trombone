@@ -616,7 +616,17 @@ impl Utterance {
                 } else {
                     options.shortest_light
                 };
-                let want = target[p as usize].max(shortest * had);
+                // The floor is a share of the phone's own rule length, what
+                // the tract needs, not of the length the rules' rhythm gives
+                // it (`rhythm::stretch`): with the function words' shorter
+                // the floor let the reader's run past (phoneme error on the
+                // 16 anchors with his timing 19.8 to 22.0 %).
+                let own = self
+                    .stretches
+                    .get(p as usize)
+                    .filter(|&&s| s > 0.0)
+                    .map_or(had, |&s| had / s);
+                let want = target[p as usize].max(shortest * own);
                 let least: f32 = floor.iter().sum();
                 if want < least {
                     report.too_short += 1;
@@ -1142,19 +1152,24 @@ mod tests {
             assert!((got - want).abs() < 0.02, "segment {i}: {got} {want}");
         }
         assert!(r.sped == 2 && (r.fastest - max).abs() < 1e-6);
-        // With a floor at 70 % of the rules the third-length phone gets 70 %
-        // of its rule duration, and the speed that goes with it.
+        // With a floor at 70 % the third-length phone gets 70 % of its own
+        // rule duration (before the rhythm's stretch), and the speed that
+        // goes with it.
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
         let mut options = everything(1.0);
         options.shortest = 0.7;
         u.follow_with(&s, &options).unwrap();
         let spans = u.phone_spans();
         let d = spans[4].1 - spans[4].0;
-        assert!((d / (rule[4].1 - rule[4].0) - 0.7).abs() < 0.01, "{d}");
+        let stretch = u.stretches[4];
+        assert!(
+            (d * stretch / (rule[4].1 - rule[4].0) - 0.7).abs() < 0.01,
+            "{d}"
+        );
         let i = (0..u.segments.len())
             .find(|&i| u.phone_of(i) == Some(4))
             .unwrap();
-        assert!((u.followed.speed_of(i) - 1.0 / 0.7).abs() < 0.02);
+        assert!((u.followed.speed_of(i) - stretch / 0.7).abs() < 0.02);
         // and never with the speed left alone
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
         u.follow(&s, PitchMode::Speaker).unwrap();

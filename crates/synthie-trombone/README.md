@@ -116,7 +116,8 @@ F1 and F2 (a shape solved through the babble map, held by the vowel and
 the consonants made on its body; `Trombone::hold_speech_vowel`), and
 faster articulators through phones shorter than the rules make them
 (`Trombone::set_articulation_boost`), which are themselves made no shorter
-than 70 % of the rules'.
+than 70 % of their own rule length (by class since round 11, see
+`Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning` (127 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
