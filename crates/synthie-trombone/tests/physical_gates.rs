@@ -1754,7 +1754,8 @@ fn stop_releases_are_bursts_not_clicks() {
             // closure (at 85 to 97 % of them): its loudest vowel sample was
             // the jet of the closing gap, which since round 10 is bounded
             // by the pressure behind it (`phys::Phys::jet_cap`), and its /b/
-            // went from -6.7 to -1.8 dB against them.
+            // went from -6.7 to -3.5 dB against them (its largest step from
+            // 14.2 to 4.0 times its loudest vowel sample).
             let mean_burst = if preset == Preset::Whisper {
                 0.0
             } else {
