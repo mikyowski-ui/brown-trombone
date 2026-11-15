@@ -6,7 +6,7 @@
 //! Everything here is fixed-size: no allocation, ever.
 
 use crate::INTERNAL_RATE;
-use crate::math::{cos, exp, lerp, move_towards, powf};
+use crate::math::{cos, exp, lerp, move_towards, powf, sin};
 use crate::phys::Stream;
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
@@ -1226,10 +1226,13 @@ impl Tract {
                 // starts at speed instead of from rest.
                 v0 = self.motion.release_speed * w * -e0;
             }
-            let decay = exp(-w * dt);
-            let c = v0 + w * e0;
-            let mut d = self.target[i] + (e0 + c * dt) * decay;
-            let mut v = (v0 - w * c * dt) * decay;
+            let zeta = if self.mover[i] == Mover::Body {
+                self.motion.body_damping
+            } else {
+                1.0
+            };
+            let (e, mut v) = spring_step(e0, v0, w, zeta, dt);
+            let mut d = self.target[i] + e;
             if d <= 0.0 {
                 // Contact: the surfaces meet and stop.
                 d = 0.0;
@@ -1558,6 +1561,26 @@ fn shoulder(target: &mut [f32; N], index: f32, d: f32, back: f32, front: f32) {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn place(index: f32) -> usize {
     ((index.max(0.0) as usize) / PLACE).min(N / PLACE - 1)
+}
+
+/// One exact step of `dt` seconds of a spring of natural frequency `w`
+/// (rad/s) and damping ratio `zeta` (`1` critical; below it a little
+/// overshoot and a shorter tail) from displacement `e0` and velocity `v0`:
+/// the displacement and velocity after it. Exact for any `dt`, so a move
+/// does not depend on how the control blocks fall.
+fn spring_step(e0: f32, v0: f32, w: f32, zeta: f32, dt: f32) -> (f32, f32) {
+    if zeta >= 0.999 {
+        let decay = exp(-w * dt);
+        let c = v0 + w * e0;
+        return ((e0 + c * dt) * decay, (v0 - w * c * dt) * decay);
+    }
+    let wd = w * crate::math::sqrt(1.0 - zeta * zeta);
+    let decay = exp(-zeta * w * dt);
+    let (sine, cosine) = (sin(wd * dt), cos(wd * dt));
+    (
+        decay * (e0 * cosine + (v0 + zeta * w * e0) / wd * sine),
+        decay * (v0 * cosine - (w * w * e0 + zeta * w * v0) / wd * sine),
+    )
 }
 
 fn sanitize(c: Constriction) -> Constriction {
