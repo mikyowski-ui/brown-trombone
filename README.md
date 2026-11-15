@@ -892,6 +892,22 @@ deterministic):
 | physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
 | physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
 
+Round 11, all of it together (single scoring runs; against the end of
+round 10): phoneme error over the 30 held-out sentences 21.9 % (25.9 %),
+Whisper's words 70.0 % (74.8 %), the ten `sentence_heldout` sentences
+15.5 % and 71.2 % (19.2 and 81.2 %), the 30 tuning sentences 20.8 % and
+71.5 % (22.0 and 73.2 %), vowels in the LibriSpeech texts heard wrong
+22.0 % (25.5 %), consonants there right 88.2 % (85.7 %). The four-sentence
+clip: "The birch can use lid on the smooth planks. Glue the sheet to the
+dark blue background. She sells seashells by the sea shore. The juice of
+lemons makes fine punch." (27 of 31 words). Following the two reference
+recordings: "The birch can go slid on the smooth planks." and "The birch
+can move slid on the smooth plaques."; "canoe" is still not heard. The
+new phone lengths account for the phoneme error (with them off: 26.1 %
+held out, 22.3 % tuning) and for Whisper's loss on the held-out sentences
+(74.3 % with them off, 72.8 % tuning); switched off one at a time no
+single one of them does.
+
 Round 10, all of it together (single scoring runs; against the end of
 round 9): phoneme error over the 30 held-out sentences 25.9 % (25.1 %),
 Whisper's words 74.8 % (68.3 %), the ten `sentence_heldout` sentences
