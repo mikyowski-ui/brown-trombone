@@ -30,7 +30,7 @@ const TOP: f32 = 16_000.0;
 /// the environment variable `SYNTHIE_TROMBONE_PROFILE` names a profile
 /// file, that profile's (as in `physical_gates`, so the tuner can hold a
 /// candidate to these gates too).
-fn tuned(settings: VoiceSettings) -> VoiceSettings {
+fn tuned(settings: &VoiceSettings) -> VoiceSettings {
     static PROFILE: OnceLock<Option<String>> = OnceLock::new();
     let profile = PROFILE.get_or_init(|| {
         let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
@@ -39,12 +39,12 @@ fn tuned(settings: VoiceSettings) -> VoiceSettings {
         Some(text)
     });
     let Some(profile) = profile else {
-        return settings;
+        return *settings;
     };
     let laid = settings.with_profile(profile).expect("a voice profile");
     VoiceSettings {
         tuning: laid.tuning,
-        ..settings
+        ..*settings
     }
 }
 
@@ -52,7 +52,7 @@ fn tuned(settings: VoiceSettings) -> VoiceSettings {
 /// engine: the audio, and each segment's phoneme with its start and end,
 /// seconds.
 fn say(text: &str, size: f32) -> (Vec<f32>, Vec<(Phoneme, f32, f32)>) {
-    let mut settings = tuned(Preset::Deep.settings().with_engine(Engine::Physical));
+    let mut settings = tuned(&Preset::Deep.settings().with_engine(Engine::Physical));
     settings.tract_length = size;
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
@@ -326,7 +326,7 @@ type Segments = Vec<(Phoneme, f32, f32)>;
 
 /// [`say`] with the flow out of the lips, cm³/s, at every sample.
 fn say_with_lips(text: &str) -> (Vec<f32>, Segments, Vec<f32>) {
-    let settings = tuned(Preset::Deep.settings().with_engine(Engine::Physical));
+    let settings = tuned(&Preset::Deep.settings().with_engine(Engine::Physical));
     let mut voice = Trombone::new(SR);
     settings.apply(&mut voice);
     Speaker::prepare(&mut voice);

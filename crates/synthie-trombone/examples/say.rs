@@ -357,12 +357,15 @@ fn main() -> std::io::Result<()> {
             phones[p] = s.phoneme.to_string();
         }
     }
-    // One symbol per segment, as the judge reads it; a lax vowel's glide
-    // towards schwa is part of the vowel, not a segment of its own.
+    // One symbol per segment, as the judge reads it; a vowel's glide on
+    // another shape than its own (a lax vowel's towards schwa, a vowel's
+    // towards the dark /l/ after it) is part of the vowel, not a segment of
+    // its own.
     let mut last = None;
     for s in utterance.segments() {
         let offglide = s.phoneme.manner() == Manner::Vowel
-            && s.articulation.vowel == Some(VowelKey::End(s.phoneme))
+            && s.articulation.vowel.is_some()
+            && s.articulation.vowel != Some(VowelKey::Vowel(s.phoneme))
             && last == Some(s.phoneme);
         if !offglide {
             print!("{} ", s.phoneme);

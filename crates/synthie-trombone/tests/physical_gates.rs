@@ -35,7 +35,7 @@ mod stops;
 /// ```text
 /// SYNTHIE_TROMBONE_PROFILE=profiles/tuned.json cargo test --release --test physical_gates
 /// ```
-fn tuned(settings: VoiceSettings) -> VoiceSettings {
+fn tuned(settings: &VoiceSettings) -> VoiceSettings {
     static PROFILE: OnceLock<Option<String>> = OnceLock::new();
     let profile = PROFILE.get_or_init(|| {
         let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
@@ -44,20 +44,20 @@ fn tuned(settings: VoiceSettings) -> VoiceSettings {
         Some(text)
     });
     let Some(profile) = profile else {
-        return settings;
+        return *settings;
     };
     // Only the tuning is taken: each test chooses its own voice.
     let laid = settings.with_profile(profile).expect("a voice profile");
     VoiceSettings {
         tuning: laid.tuning,
-        ..settings
+        ..*settings
     }
 }
 
 /// A voice with the tuning under test.
 fn fresh() -> Trombone {
     let mut t = Trombone::new(SR);
-    t.set_tuning(&tuned(VoiceSettings::default()).tuning);
+    t.set_tuning(&tuned(&VoiceSettings::default()).tuning);
     t
 }
 
@@ -432,7 +432,7 @@ struct Stop {
 /// with the glottis spread, a voiced one with the folds slackened and the
 /// pharynx widening; both let go at the release.
 fn stop(p: Phoneme, voiced: bool) -> Stop {
-    let tuning = tuned(VoiceSettings::default()).tuning;
+    let tuning = tuned(&VoiceSettings::default()).tuning;
     let mut t = voice(110.0, 0.65, 1.0);
     render(&mut t, 0.5);
     let vowel = rms(&render(&mut t, 0.1));
@@ -534,7 +534,7 @@ fn stops_build_pressure_and_burst_by_themselves() {
 /// The voice the speech gates listen to: the judge's, with the tuning
 /// under test.
 fn speech_voice() -> VoiceSettings {
-    tuned(stops::judge_voice())
+    tuned(&stops::judge_voice())
 }
 
 #[test]
@@ -744,7 +744,7 @@ fn muscle_driven_folds_sing_and_follow_their_muscles() {
 /// The default voice at another body size and lung pressure, as a
 /// [`Persona`] would make it.
 fn sized_voice(size: f32, lung: f32) -> Trombone {
-    let mut settings = tuned(VoiceSettings::default())
+    let mut settings = tuned(&VoiceSettings::default())
         .with_engine(Engine::Physical)
         .with_persona(&Persona {
             size,
@@ -943,7 +943,7 @@ fn the_regulator_barely_touches_the_default_voice() {
     let speak = |regulated: bool| {
         let mut talker = Talker::new(
             SR,
-            tuned(VoiceSettings::default()).with_engine(Engine::Physical),
+            tuned(&VoiceSettings::default()).with_engine(Engine::Physical),
         );
         talker.voice_mut().set_regulation(regulated);
         talker.say(text);
@@ -971,7 +971,7 @@ fn the_regulator_barely_touches_the_default_voice() {
 /// three tenseness settings. Returns the quietest: level in dB re
 /// `reference`, the note and the tenseness.
 fn sweep_notes(preset: Preset, vowel: Phoneme, reference: f32) -> (f32, usize, f32) {
-    let settings = tuned(preset.settings()).with_engine(Engine::Physical);
+    let settings = tuned(&preset.settings()).with_engine(Engine::Physical);
     let mut quietest = (0.0f32, 0, 0.0f32);
     for tense in [0.4f32, 0.65, 0.85] {
         for note in (24..=96).step_by(2) {
@@ -1015,7 +1015,7 @@ fn no_held_note_is_ever_silent() {
         for preset in presets {
             let reference = {
                 let mut t = fresh();
-                tuned(preset.settings())
+                tuned(&preset.settings())
                     .with_engine(Engine::Physical)
                     .apply(&mut t);
                 t.articulate_phoneme(Phoneme::Aa);
@@ -1055,7 +1055,7 @@ fn the_voice_recovers_at_once_from_a_pinch() {
         3.0f32, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0, 34.0, 37.0, 40.0, 42.5,
     ] {
         let mut t = fresh();
-        tuned(Preset::Deep.settings())
+        tuned(&Preset::Deep.settings())
             .with_engine(Engine::Physical)
             .apply(&mut t);
         t.articulate_phoneme(Phoneme::Aa);
@@ -1105,7 +1105,7 @@ fn every_preset_speaks_on_the_physical_engine() {
     let text = "[HH AX1 L OW] [DH EH1 R], [HH AW1] [AA0 R] [Y UW0]? \
                 [P IH1 NG K] [T R AA1 M B OW N], [F AO1 R T IY] [T UW1].";
     for p in Preset::ALL {
-        let settings = tuned(p.settings()).with_engine(Engine::Physical);
+        let settings = tuned(&p.settings()).with_engine(Engine::Physical);
         let out = Talker::new(22_050.0, settings).bake(text);
         let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         println!("{p}: rms {:.4}, peak {peak:.3}", rms(&out));
@@ -1118,7 +1118,7 @@ fn every_preset_speaks_on_the_physical_engine() {
 #[test]
 fn speech_ends_in_silence() {
     // Breath stops with the sentence: no hiss in the tail.
-    let settings = tuned(Preset::Deep.settings()).with_engine(Engine::Physical);
+    let settings = tuned(&Preset::Deep.settings()).with_engine(Engine::Physical);
     let out = Talker::new(SR, settings).bake("Stay a while, and listen.");
     let tail = &out[out.len() - (0.1 * SR) as usize..];
     let body = rms(&out[..out.len() / 2]);
@@ -1277,11 +1277,11 @@ struct Closure {
 
 /// Hold `vowel` on `settings` at the voice's own pitch: 0.2 s to start,
 /// then 2 s measured.
-fn hold_closure(settings: VoiceSettings, vowel: Phoneme) -> Closure {
+fn hold_closure(settings: &VoiceSettings, vowel: Phoneme) -> Closure {
     /// A trough below this share of the typical peak counts as closed.
     const CLOSED: f32 = 0.01;
     let mut t = fresh();
-    settings.with_engine(Engine::Physical).apply(&mut t);
+    (*settings).with_engine(Engine::Physical).apply(&mut t);
     t.articulate_phoneme(vowel);
     t.settle();
     t.note_on();
@@ -1332,7 +1332,7 @@ fn closure_voices() -> Vec<(String, VoiceSettings)> {
     let mut voices: Vec<(String, VoiceSettings)> = Preset::ALL
         .into_iter()
         .filter(|&p| p != Preset::Whisper)
-        .map(|p| (p.to_string(), tuned(p.settings())))
+        .map(|p| (p.to_string(), tuned(&p.settings())))
         .collect();
     for size in [0.6f32, 0.8, 1.2, 1.4] {
         let persona = Persona {
@@ -1341,7 +1341,7 @@ fn closure_voices() -> Vec<(String, VoiceSettings)> {
         };
         voices.push((
             format!("deep at size {size}"),
-            tuned(Preset::Deep.settings()).with_persona(&persona),
+            tuned(&Preset::Deep.settings()).with_persona(&persona),
         ));
     }
     voices
@@ -1377,7 +1377,7 @@ fn the_folds_close_on_every_cycle_and_h1_h2_holds_steady() {
                     (
                         name,
                         vowel,
-                        scope.spawn(move || hold_closure(*settings, vowel)),
+                        scope.spawn(move || hold_closure(settings, vowel)),
                     )
                 })
             })
@@ -1466,7 +1466,7 @@ fn the_folds_carry_running_speech() {
             .map(|preset| {
                 let sentences = &sentences;
                 let job = scope.spawn(move || {
-                    let settings = tuned(preset.settings()).with_engine(Engine::Physical);
+                    let settings = tuned(&preset.settings()).with_engine(Engine::Physical);
                     let (mut voiced, mut pulse, mut inside) = (0usize, 0usize, Vec::new());
                     for (id, text) in sentences {
                         let mut t = fresh();
@@ -1544,7 +1544,8 @@ fn voiceless_stops_shut_the_mouth_for_their_closure() {
             .map(|rate| {
                 let texts = &texts;
                 scope.spawn(move || {
-                    let mut settings = tuned(Preset::Deep.settings()).with_engine(Engine::Physical);
+                    let mut settings =
+                        tuned(&Preset::Deep.settings()).with_engine(Engine::Physical);
                     settings.rate = rate;
                     let (mut count, mut shortest, mut short) = (0, f32::INFINITY, Vec::new());
                     for text in texts {
@@ -1719,7 +1720,7 @@ fn stop_releases_are_bursts_not_clicks() {
         "Pick a cup and dig deep to get the chips.",
     ];
     for preset in Preset::ALL {
-        let settings = tuned(preset.settings());
+        let settings = tuned(&preset.settings());
         let (at_release, step, click) = match preset {
             // (1.0 until the release speed went to 0.5 for the sake of
             // "background": the whisper's largest step at a release is
@@ -1992,7 +1993,7 @@ struct Said {
 
 fn say_traced(settings: &VoiceSettings, text: &str) -> Said {
     use synthie_trombone::speech::{Speaker, Utterance};
-    let settings = tuned(*settings).with_engine(Engine::Physical);
+    let settings = tuned(settings).with_engine(Engine::Physical);
     let mut t = fresh();
     settings.apply(&mut t);
     Speaker::prepare(&mut t);
@@ -2447,7 +2448,7 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
     // The softening is off by default since round 9 (the owner heard the
     // accented vowels jump out where it let go); the mechanism is tested
     // at round 8's setting.
-    let mut soft = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    let mut soft = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
     soft.tuning.sonorant_softness = 1.0;
     soft.tuning.unstressed_softness = 0.5;
     let mut firm = soft;
@@ -2577,7 +2578,7 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
         .skip(1)
         .filter_map(|row| row.split('\t').nth(2).map(str::to_string))
         .collect();
-    let dark = tuned(VoiceSettings::default()).with_engine(Engine::Physical);
+    let dark = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
     let mut bright = dark;
     bright.tuning.voice_tilt = 0.0;
     bright.tuning.voiced_breath_corner = 0.0;

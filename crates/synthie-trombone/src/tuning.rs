@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and twenty-four numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twenty-six numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and twenty-four numbers in three
+        /// How a voice turns sounds into speech: one hundred and twenty-six numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -794,6 +794,30 @@ tuning! {
     /// 1.07 % at 0.9); at 0.7 the sentences were heard worse.
     body_damping = 1.0, 0.6..=1.0, B;
 
+    // ----- the dark /l/, phrases opening on a sonorant (round 11) --------
+
+    /// Share of a vowel before a dark /l/ (one that closes its syllable)
+    /// over which the vowel glides towards /ʊ/ (physical engine; see
+    /// `speech::darken_before_coda_l`): the back of the tongue rises for
+    /// the /l/ during the vowel. `0` makes the vowel on its own shape up to
+    /// the /l/, as until round 11. In the LibriSpeech texts, 26 vowels
+    /// before such an /l/: at 0 heard wrong 15 times (the recognizer's
+    /// margin for the vowel −0.30 nats), at 0.5 and 0.7 9 times (+0.50 and
+    /// +0.49); gliding towards /ɔ/ instead, 12 times; towards the /l/'s own
+    /// body without its tip, which lowers the jaw, 10 times (+0.09).
+    dark_l_share = 0.6, 0.0..=1.0, B;
+    /// Seconds by which a phrase that opens on a nasal or a liquid starts
+    /// that sound earlier, out of the pause before it (physical engine;
+    /// see `speech::breathe`): the lungs need some 40 ms to bring the
+    /// pressure up to what the folds need, so the first 40 to 45 ms of an
+    /// opening /n m l/ were 33 dB under the vowel and silent, where the
+    /// LibriSpeech reader's opening /n m/ stand 8 to 20 dB under it from
+    /// their first 10 ms. At 0 the recognizer heard no /n/ in 4 short
+    /// phrases opening on one and 4 of 12 opening /l/ (the rest as /t f v/,
+    /// only the release onto the vowel being heard); at 0.05 4 of 4 and 6
+    /// of 12.
+    sonorant_onset = 0.05, 0.0..=0.08, B;
+
     // ----- the rhythm of the rules and the transfer's floor (round 11) ----
 
     /// How much longer a consonant that opens a stressed syllable of a
@@ -875,10 +899,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_fifty_five() {
+    fn two_passes_of_fifty_eight_and_fifty_seven() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 55));
+        assert_eq!((a, b), (58, 57));
     }
 
     #[test]

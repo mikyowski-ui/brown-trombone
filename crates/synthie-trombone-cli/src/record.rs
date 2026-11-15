@@ -197,6 +197,7 @@ impl Tap {
     }
 
     /// Log a command, applied before the next sample.
+    #[allow(clippy::large_types_passed_by_value)] // moved on into the channel
     pub fn command(&mut self, cmd: Logged) {
         let (Some(r), Some(tx)) = (&mut self.take, &self.tx) else {
             return;
