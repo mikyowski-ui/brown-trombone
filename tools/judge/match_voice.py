@@ -514,13 +514,17 @@ class Analysis:
     voiced_s: float
     speech_s: float
     dF_by_order: dict = field(default_factory=dict)
+    dF_comb: float = float("nan")  #: formant spacing fitted to all candidates (``comb_spacing``), Hz
     #: formant scale relative to the reference voice (``ref`` of ``analyse``):
     #: ``scale`` from lining up the formant-candidate densities
     #: (``density_scale``), guided by ``scale_lpc`` (the ratio of the
-    #: formant spacings); ``scale_corr`` is the correlation where they line
-    #: up and ``scale_how`` how the scale was chosen.
+    #: formant spacings), or in a breathy voice by ``scale_comb`` (that of
+    #: the comb spacings, see ``BREATHY``); ``scale_corr`` is the
+    #: correlation where they line up and ``scale_how`` how the scale was
+    #: chosen.
     scale: float = float("nan")
     scale_lpc: float = float("nan")
+    scale_comb: float = float("nan")
     scale_corr: float = float("nan")
     scale_how: str = ""
     density: list | None = None  #: kept for references only
@@ -530,6 +534,35 @@ class Analysis:
         if d["density"] is None:
             del d["density"]
         return d
+
+
+#: Formant spacings the comb fit (``comb_spacing``) tries, Hz.
+COMB_DF = np.exp(np.linspace(math.log(500.0), math.log(2200.0), 800))
+#: H1*-H2* (dB) from which a voice counts as breathy for the formant scale:
+#: from the first value on the comb spacing begins to guide the density
+#: estimate instead of the ranked one, from the second it guides alone.
+BREATHY = (10.5, 12.5)
+
+
+def comb_spacing(pooled: np.ndarray) -> float:
+    """dF of a uniform tube fitted to every formant candidate of the
+    recording (``pooled``, 200 Hz to 5 kHz) at once: the spacing whose odd
+    multiples of dF/2 the candidates lie closest to (each one's distance
+    capped at a quarter of the spacing). A formant missing from some
+    frames does not move it, where it moves the ranked medians of
+    ``formant_spacing`` up by one formant: in a breathy voice the
+    tracker loses F2 (wider than 400 Hz) in most frames, and the engine
+    at tenseness 0.2-0.45 read 21-48 % short in the tract (16 voices:
+    the comb within 4.3 %). On the LibriSpeech reader's anchors it
+    scatters more than the ranked spacing (sd 13 % of 5) and is not
+    used there (``BREATHY``)."""
+    c = np.asarray(pooled, dtype=float)
+    c = c[(c > 200.0) & (c < 5000.0)]
+    if len(c) < 20:
+        return float("nan")
+    u = c[None, :] / COMB_DF[:, None] - 0.5
+    r = np.abs(u - np.round(u))
+    return float(COMB_DF[np.argmin(np.mean(np.minimum(r, 0.25) ** 2, axis=1))])
 
 
 def formant_spacing(F: np.ndarray) -> float:
@@ -580,16 +613,26 @@ def analyse(x: np.ndarray, sr: int = SR, order: int | None = None, all_orders: b
         for o in ORDERS:
             at(o)
     dens = candidate_density(at(22)[2], int(strong.sum()))
-    scale = scale_lpc = corr = float("nan")
-    how = ""
-    if ref is not None:
-        scale_lpc = dF / ref["dF_by_order"][str(order)]
-        scale, corr, how = density_scale(dens, np.asarray(ref["density"]), scale_lpc)
+    dF_comb = comb_spacing(at(22)[2])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         Fmed = np.nanmedian(forms[strong], axis=0)
     f0s = np.where(strong, p.f0, 0.0)
     h12, h12c, cpp, alpha = harmonic_measures(x, f0s, forms, sr)
+    scale = scale_lpc = scale_comb = corr = float("nan")
+    how = ""
+    if ref is not None:
+        scale_lpc = dF / ref["dF_by_order"][str(order)]
+        guide = scale_lpc
+        if math.isfinite(dF_comb) and math.isfinite(ref.get("dF_comb", float("nan"))):
+            scale_comb = dF_comb / ref["dF_comb"]
+            # A breathy voice loses F2 from its ranked formants: the comb
+            # spacing guides, faded in over BREATHY so that a voice on the
+            # edge is measured alike from one attempt to the next.
+            w = float(np.clip((np.nanmedian(h12c) - BREATHY[0]) / (BREATHY[1] - BREATHY[0]), 0.0, 1.0))
+            if w > 0 and math.isfinite(scale_lpc) and scale_lpc > 0:
+                guide = math.exp((1 - w) * math.log(scale_lpc) + w * math.log(scale_comb))
+        scale, corr, how = density_scale(dens, np.asarray(ref["density"]), guide)
     r = np.clip(p.strength[v], 1e-4, 1 - 1e-4)
     hnr = 10 * np.log10(r / (1 - r))
     rate, speech_s = syllable_rate(x, p.f0, sr)
@@ -610,8 +653,10 @@ def analyse(x: np.ndarray, sr: int = SR, order: int | None = None, all_orders: b
         voiced_s=float(v.sum() * HOP),
         speech_s=speech_s,
         dF_by_order={str(o): d for o, (_, d, _) in sorted(by_order.items())},
+        dF_comb=dF_comb,
         scale=scale,
         scale_lpc=scale_lpc,
+        scale_comb=scale_comb,
         scale_corr=corr,
         scale_how=how,
         density=[round(float(d), 5) for d in dens] if keep_density else None,
