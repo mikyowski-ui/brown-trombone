@@ -893,9 +893,15 @@ def describe_text(sched: dict) -> list[str]:
 #: pitch and breath, each of which ``render`` can leave out.
 FOLLOWED = ("voice", "tenseness", "formants", "speed")
 
+#: The parts left out unless asked for: moved towards the speaker's
+#: formants, the engine's vowels were heard wrong more often (round 9: 29.0
+#: against 26.6 % on the LibriSpeech texts), so a transfer keeps the
+#: engine's own vowels by default (``--formants`` brings them in).
+DEFAULT_OFF = ("formants",)
+
 
 def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str = "deep",
-           follow: bool = True, kick: bool = True, off: tuple[str, ...] = (),
+           follow: bool = True, kick: bool = True, off: tuple[str, ...] = DEFAULT_OFF,
            profile: Path | None = None) -> dict:  # fmt: skip
     """Speak a schedule (or, with ``follow=False``, its text by the rules)
     with ``bin/say``; ``kick=False`` leaves out the engine's pitch kick
@@ -917,7 +923,8 @@ def render(schedule: dict | Path, out: Path, pitch: str = "speaker", voice: str 
         for part in off:
             if part not in FOLLOWED:
                 raise ValueError(f"no such part of a schedule to leave out: {part!r}")
-            cmd += [f"--prosody-{part}", "off"]
+        for part in FOLLOWED:
+            cmd += [f"--prosody-{part}", "off" if part in off else "on"]
     res = subprocess.run(cmd + [sched["text"]], capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
     rec = json.loads(times.read_text())
     spans = np.array(rec["spans"], float)
@@ -1067,7 +1074,7 @@ def transfer_score(st: dict) -> float:
 
 
 def transfer(pj, sched: dict, out: Path, pitch: str = "speaker", level: bool = True, voice: str = "deep",
-             off: tuple[str, ...] = (), speaker: Speaker | None = None, steps: int = 3) -> dict:  # fmt: skip
+             off: tuple[str, ...] = DEFAULT_OFF, speaker: Speaker | None = None, steps: int = 3) -> dict:  # fmt: skip
     """Render a schedule, with the loop when ``level``: ``steps`` renderings,
     after each of which the breath of each sonorant is moved towards the
     person's level (``level_step``) and, with ``speaker``, the tenseness
@@ -1232,7 +1239,7 @@ def roundtrip(pj, text: str, out_dir: Path, voice: str = "deep") -> dict:
 BASELINE_KEYS = ("f0_median", "range_st", "scale", "h1h2", "hnr", "alpha", "speech_s", "order")
 
 
-def speaker_of(sched: dict, audio: np.ndarray, voice: str = "deep", off: tuple[str, ...] = (),
+def speaker_of(sched: dict, audio: np.ndarray, voice: str = "deep", off: tuple[str, ...] = DEFAULT_OFF,
                log=None) -> tuple[Speaker, dict]:  # fmt: skip
     """The speaker's voice for a schedule, in place: unless ``off`` names
     ``voice``, the baseline profile (``speaker_voice.baseline``) as the
@@ -1263,7 +1270,7 @@ def speaker_of(sched: dict, audio: np.ndarray, voice: str = "deep", off: tuple[s
 
 def transfer_file(pj, wav: Path | str, text: str | Text, out_dir: Path, name: str, pitch: str = "speaker",
                   voice: str = "deep", level: bool = True, audio: np.ndarray | None = None,
-                  off: tuple[str, ...] = ()) -> dict:  # fmt: skip
+                  off: tuple[str, ...] = DEFAULT_OFF) -> dict:  # fmt: skip
     """Any recording and its text (a string, or resolved by
     ``resolve_text``): the schedule (``<name>.json``, with ``<name>.txt``
     beside it when the text was heard), the engine speaking it with the
@@ -1317,7 +1324,7 @@ def cmd_transfer(args) -> int:
     pj = _pj()
     try:
         name = args.name or Path(args.wav).stem
-        off = tuple(p for p in args.off.split(",") if p)
+        off = tuple(p for p in args.off.split(",") if p and not (p == "formants" and args.formants))
         res = transfer_file(pj, args.wav, text, Path(args.out_dir), name, args.pitch, args.voice, not args.no_level,
                             audio=audio, off=off)  # fmt: skip
     finally:
@@ -1402,8 +1409,11 @@ def main(argv: list[str] | None = None) -> int:
     tf.add_argument("--pitch", choices=["speaker", "voice"], default="speaker")
     tf.add_argument("--voice", default="deep")
     tf.add_argument("--no-level", action="store_true", help="no level loop (and so none of the speaker's voice)")
-    tf.add_argument("--off", default="", help="comma-separated parts of the speaker's voice to leave out: "
+    tf.add_argument("--off", default=",".join(DEFAULT_OFF),
+                    help="comma-separated parts of the speaker's voice to leave out (default: %(default)s): "
                     + ", ".join(FOLLOWED))  # fmt: skip
+    tf.add_argument("--formants", action="store_true",
+                    help="move each vowel's F1 and F2 towards the speaker's too (off by default)")
     sl = sub.add_parser("slope", help="the engine's level per doubling of its breath")
     sl.add_argument("--text", default=FOUR_SENTENCES)
     sl.add_argument("--voice", default="deep")

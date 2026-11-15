@@ -135,7 +135,7 @@ cargo run -p synthie-trombone --example formants --release                     #
 cargo run -p synthie-trombone --example say --release -- --engine physical "Hello!"  # the physical engine
 cargo run -p synthie-trombone --example say --release -- --engine physical \
     --match-prosody schedule.json "the recorded text"                          # a person's timing, pitch and voice
-    # (--prosody-voice / -tenseness / -formants / -speed off leave a part out)
+    # (--prosody-voice / -tenseness / -speed off leave a part out; --prosody-formants on adds the speaker's vowels)
 cargo run -p synthie-trombone --example ab --release                           # both engines → report/
 cargo run -p synthie-trombone --example probe --release                        # measurements of both
 ```

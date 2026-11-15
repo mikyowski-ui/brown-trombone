@@ -548,13 +548,14 @@ uv run python prosody.py transfer speaker.wav --text "what they said" --out-dir 
     # -> x.json (schedule), x-transfer.wav (the engine with it), x-rule.wav (by its rules), checks printed
 uv run python prosody.py transfer speaker.mp3 --out-dir out/prosody --name x  # no text: Whisper hears it (x.txt)
 uv run python prosody.py transfer speaker.wav --off voice,formants ...        # leave parts of the voice out
+uv run python prosody.py transfer speaker.wav --formants ...                  # the speaker's vowel formants too (off by default)
 uv run python prosody.py analyse speaker.wav --text "..." --out s.json      # the schedule only
 uv run python prosody.py render s.json --out e.wav --level [--pitch voice]  # speak it (level loop: --level)
 uv run python prosody.py check s.json e.wav                                # durations and pitch against it
 uv run python prosody.py roundtrip "The birch canoe slid on the smooth planks."
 uv run python prosody.py slope                                             # dB per doubling of the breath
 bin/say --engine physical --voice deep --match-prosody s.json [--prosody-pitch voice] \
-    [--prosody-kick off] [--prosody-voice off] [--prosody-tenseness off] [--prosody-formants off] \
+    [--prosody-kick off] [--prosody-voice off] [--prosody-tenseness off] [--prosody-formants on] \
     [--prosody-speed off] [--phone-times t.json] --out e.wav "the same text"
 ```
 

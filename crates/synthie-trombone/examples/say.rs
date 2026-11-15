@@ -39,8 +39,13 @@
 //! (the default) keeps the speaker's pitch as it is, `--prosody-pitch
 //! voice` moves the contour to the voice's own median; `--prosody-kick
 //! off` leaves out the engine's pitch kick after voiceless consonants
-//! (the speaker's contour has his own). `--phone-times
-//! file.json` writes where each phone starts and ends in the output.
+//! (the speaker's contour has his own). A schedule's voice profile,
+//! tenseness per phone and quicker articulators are taken unless
+//! `--prosody-voice`, `-tenseness` or `-speed off` says not; its vowel
+//! formants only with `--prosody-formants on` (moved towards the
+//! speaker's, the vowels were heard wrong more often: 29.0 against 26.6 %
+//! on the LibriSpeech texts). `--phone-times file.json` writes where each
+//! phone starts and ends in the output.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -187,7 +192,7 @@ fn main() -> std::io::Result<()> {
     let mut kick = true;
     let mut follow_voice = true;
     let mut follow_tenseness = true;
-    let mut follow_formants = true;
+    let mut follow_formants = false;
     let mut follow_speed = true;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -247,7 +252,7 @@ fn main() -> std::io::Result<()> {
             "--prosody-kick" => kick = value("--prosody-kick") != "off",
             "--prosody-voice" => follow_voice = value("--prosody-voice") != "off",
             "--prosody-tenseness" => follow_tenseness = value("--prosody-tenseness") != "off",
-            "--prosody-formants" => follow_formants = value("--prosody-formants") != "off",
+            "--prosody-formants" => follow_formants = value("--prosody-formants") == "on",
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--dump-profile" => dump = true,
             "--dump-parameters" => {

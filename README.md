@@ -510,8 +510,10 @@ Each of these has its numbers in `Tuning` (above) and its gate in
 and pitch contour of a recording of it, its level (within -10.5 to +5.2
 dB), and since round 9 the speaker's voice: a baseline profile (tract
 length, tenseness, breathiness, pitch) laid over the voice, each sonorant's
-tenseness and each vowel's F1 and F2 (`--prosody-voice`, `-tenseness`,
-`-formants`, `-speed off` leave a part out);
+tenseness (`--prosody-voice`, `-tenseness`, `-speed off` leave a part
+out) and, only with `--prosody-formants on`, each vowel's F1 and F2 (off
+by default since round 10: with them the vowels were heard wrong more
+often);
 `tools/judge/prosody.py transfer speaker.wav` measures the schedule (the
 text given with `--text`, from a `.txt` beside the recording, or heard by
 Whisper) and renders both versions (its README has the details). The text

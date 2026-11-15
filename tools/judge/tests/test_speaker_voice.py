@@ -156,8 +156,11 @@ def test_the_engine_takes_a_schedules_voice_tenseness_and_vowels():
         for p in shaped["phones"]:
             if p["phone"] in Pr.VOCALIC:
                 p["tenseness"], p["formants"] = 1.1, [1.08, 0.95]
-        r = Pr.render(shaped, tmp / "d.wav")
+        r = Pr.render(shaped, tmp / "d.wav", off=())
         assert "0 vowels shaped" not in r["followed"], r["followed"]
+        # The vowels are the engine's own unless asked for.
+        r = Pr.render(shaped, tmp / "f.wav")
+        assert "0 vowels shaped" in r["followed"], r["followed"]
         r = Pr.render(shaped, tmp / "e.wav", off=("tenseness", "formants"))
         assert "0 vowels shaped" in r["followed"]
         assert (tmp / "a.wav").read_bytes() == (tmp / "e.wav").read_bytes()
