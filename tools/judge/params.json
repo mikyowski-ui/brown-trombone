@@ -114,5 +114,11 @@
   "tilt_top": {"lo": -12, "hi": 18, "default": 0, "pass": "a"},
   "tilt_top_corner": {"lo": 1000, "hi": 6000, "default": 3000, "pass": "a"},
   "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"},
-  "lateral_channel": {"lo": 2, "hi": 4, "default": 3, "pass": "a"}
+  "lateral_channel": {"lo": 2, "hi": 4, "default": 3, "pass": "a"},
+  "stressed_onset_length": {"lo": 1, "hi": 1.5, "default": 1.2, "pass": "b"},
+  "cluster_length": {"lo": 0.7, "hi": 1, "default": 0.85, "pass": "b"},
+  "function_consonant_length": {"lo": 0.7, "hi": 1, "default": 0.9, "pass": "b"},
+  "schwa_length": {"lo": 0.65, "hi": 1, "default": 0.85, "pass": "c"},
+  "diphthong_hold": {"lo": 0.6, "hi": 1, "default": 0.75, "pass": "c"},
+  "follow_shortest_light": {"lo": 0, "hi": 1, "default": 0.6, "pass": "b"}
 }

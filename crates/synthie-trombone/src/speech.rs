@@ -176,6 +176,9 @@ pub struct Utterance {
     /// [`Token::Phone`]s, [`NO_PHONE`] for a pause); empty for hand-made
     /// segments.
     phones: Vec<u32>,
+    /// Where each phone of the text stands in its word and syllable (empty
+    /// for hand-made segments).
+    roles: Vec<rhythm::Role>,
     /// A pitch track the [`Speaker`] follows in place of the segments' own
     /// pitch: Hz every `pitch_hop` seconds from the start of the utterance,
     /// on the clock of the segments' durations (see
@@ -243,6 +246,7 @@ impl Utterance {
             labial_closing: 0.0,
             sibilant_exit: 0.0,
             phones: Vec::new(),
+            roles: Vec::new(),
             pitch_track: Vec::new(),
             pitch_hop: 0.0,
             followed: follow::Followed::default(),
@@ -1006,6 +1010,7 @@ fn widened(a: &Articulation, by: f32) -> Articulation {
 
 mod follow;
 mod lexicon;
+mod rhythm;
 mod rules;
 
 pub use follow::{FollowOptions, FollowReport, PhoneSpan, PitchMode, Schedule, ScheduleError};
@@ -1624,8 +1629,9 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let mut i = 0;
     // Each phrase's drafts and how it ends, for the breath (physical).
     let mut phrases: Vec<(usize, usize, Break)> = Vec::new();
-    // The place of each phone among the text's.
+    // The place of each phone among the text's, and where it stands.
     let mut phone: u32 = 0;
+    let roles = rhythm::roles(tokens);
 
     // The physical engine shapes its phrases once they have their final
     // lengths (see `intonation`).
@@ -1647,9 +1653,10 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                     .is_some_and(|p| is_vowel(p) || p.manner() == Manner::Approximant);
                 let context = physical.then(|| Context::at(tokens, i));
                 let first = drafts.len();
+                let role = roles.get(phone as usize).copied().unwrap_or_default();
                 expand(
                     phoneme,
-                    stressed,
+                    (stressed, rhythm::stretch(phoneme, role, &timing)),
                     next_vowel_or_approx,
                     context,
                     rate,
@@ -1805,6 +1812,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         labial_closing: if physical { timing.labial_closing } else { 0.0 },
         sibilant_exit: if physical { timing.sibilant_exit } else { 0.0 },
         phones,
+        roles,
         pitch_track: Vec::new(),
         pitch_hop: 0.0,
         followed: follow::Followed::default(),
@@ -2272,10 +2280,13 @@ fn silence(duration: f32) -> Draft {
     }
 }
 
+/// The drafts of phone `p`; `(stressed, stretch)`: whether it is stressed,
+/// and how much longer than its own length the physical engine makes it
+/// where it stands ([`rhythm::stretch`]).
 #[allow(clippy::too_many_lines)]
 fn expand(
     p: Phoneme,
-    stressed: bool,
+    (stressed, stretch): (bool, f32),
     before_vowel: bool,
     context: Option<Context>,
     rate: f32,
@@ -2341,6 +2352,9 @@ fn expand(
         return;
     };
 
+    // The physical engine's rhythm: where the phone stands in its word and
+    // syllable (see `rhythm`).
+    dur *= stretch;
     // The physical engine: the larynx is a second channel, timed with the
     // tract. Voiceless obstruents spread the glottis, voiced stops slacken
     // the folds and widen the pharynx, voiced fricatives leave a little

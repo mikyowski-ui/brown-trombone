@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and sixteen numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twenty-two numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and sixteen numbers in three
+        /// How a voice turns sounds into speech: one hundred and twenty-two numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -770,6 +770,58 @@ tuning! {
     /// none (at 4, into the teeth's cell, the lips of "a blue" were 0.36
     /// apart 10 ms after the release, where they open to 0.63).
     lateral_channel = 3.0, 1.0..=5.0, A;
+
+    // ----- the rhythm of the rules and the transfer's floor (round 11) ----
+
+    /// How much longer a consonant that opens a stressed syllable of a
+    /// content word is than its own length (physical engine; see
+    /// `speech::rhythm`, which has the measurements): the LibriSpeech
+    /// reader's, the two references' and the owner's are 1.30 to 1.37
+    /// times the rules' at their pace with the class of each consonant
+    /// fitted alongside, 1.11 to 1.27 without. Not the weak fricatives
+    /// /f v θ ð h/, which are long in the rules already. At 1.3 (with
+    /// `cluster_length` alone) the 30 held-out sentences' phoneme error
+    /// went from 25.9 to 23.4 %, the 30 tuning sentences' from 22.0 to
+    /// 18.6 %, the vowels heard wrong in the LibriSpeech texts from 25.5 to
+    /// 22.4 %, but the android's /b/ released 4.0 dB under the vowel after
+    /// it on average, at the bound of `stop_releases_are_bursts_not_clicks`
+    /// (at 1.2 -4.3 dB, before -4.6): the longer closure builds more
+    /// pressure. `1` makes them as long as anywhere else.
+    stressed_onset_length = 1.2, 1.0..=1.6, B;
+    /// Length of each consonant of a cluster against a single one's
+    /// (physical engine): the reader's are 0.81 of his single ones (the
+    /// references' 0.94), where the rules made them alike.
+    cluster_length = 0.85, 0.6..=1.0, B;
+    /// Length of the consonants of a function word, its stops excepted
+    /// (they keep their closure and release), against their own (physical
+    /// engine): the reader's /ð v/ of "the", "of" are 0.78 of the rules'.
+    /// The reader's 0.85 with `schwa_length` at his 0.75 lost Whisper 7.8
+    /// points of the held-out sentences' words (it gained 3.7 on the
+    /// tuning sentences); at 0.9 and 0.85 the two sets moved -2.6 and
+    /// +5.5.
+    function_consonant_length = 0.9, 0.5..=1.0, B;
+    /// Length of /ə/ against an unstressed vowel's (physical engine): the
+    /// speakers' are 0.69 to 0.76 of the rules', in function and content
+    /// words alike; milder than theirs, see `function_consonant_length`.
+    schwa_length = 0.85, 0.5..=1.0, C;
+    /// Length of a diphthong against what `diphthong_length`, `vowel_hold`
+    /// and the stress give it (physical engine): the reader's are 0.67 of
+    /// the rules' (a stressed /oʊ eɪ/ was 226 to 266 ms, his 70 to 250 at
+    /// the rules' pace).
+    diphthong_hold = 0.75, 0.5..=1.0, C;
+    /// Shortest a followed schedule may make a phone the floor of
+    /// `follow_shortest` does not hold (physical engine; see
+    /// `speech::rhythm::held_in_transfer`), a share of its rule duration:
+    /// the unstressed vowels, and the nasals, liquids, glides and weak
+    /// fricatives that are not in a cluster of a content word. Left off
+    /// one class at a time on the 16 LibriSpeech anchors with the reader's
+    /// own timing, the floor mattered most in the function words (their
+    /// vowels: phoneme error 22.5 to 24.7 %; their consonants: 25.2 %,
+    /// Whisper 81.8 to 74.6 %) and not on the stressed vowels or clusters
+    /// (22.2 and 22.1 %); held only on the stressed vowels, stops,
+    /// sibilants and clusters (this at `0`) the phoneme error was 27.6 %
+    /// and Whisper 74.6 %, at 0.6 23.5 and 80.9 %, at 0.5 25.1 and 75.6 %.
+    follow_shortest_light = 0.7, 0.0..=1.0, B;
 }
 
 impl Default for Tuning {
@@ -792,10 +844,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_forty_nine() {
+    fn two_passes_of_fifty_eight_and_fifty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 49));
+        assert_eq!((a, b), (58, 53));
     }
 
     #[test]
@@ -803,7 +855,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 9);
+        assert_eq!(c, 11);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

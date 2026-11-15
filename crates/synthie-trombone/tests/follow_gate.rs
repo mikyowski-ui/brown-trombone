@@ -28,6 +28,8 @@ use synthie_trombone::{Engine, GlottalSource, Phoneme, Preset, Trombone, Tuning,
 mod stops;
 
 const SR: f32 = 48_000.0;
+/// The shortest phone `tools/judge/prosody.py` aligns, seconds.
+const ALIGNER_FLOOR: f32 = 0.025;
 const TEXT: &str =
     "Glue the big dog bag to the dark blue background. The juice of lemons makes fine punch.";
 /// Voiced stops between vowels, where a closure carries a voice bar (the
@@ -105,12 +107,15 @@ fn at_limits_of(
         .iter()
         .enumerate()
         .map(|(k, &(a, b))| {
-            let d = (b - a)
-                * if parts.contains('s') {
-                    t.follow_shortest
-                } else {
-                    1.0
-                };
+            // Short phones: at the lower of the two floors (the engine holds
+            // the phones `follow_shortest` keeps at that share itself), and
+            // no shorter than the aligner makes a phone (`prosody.py`'s
+            // `FLOOR`, 25 ms).
+            let d = if parts.contains('s') {
+                ((b - a) * t.follow_shortest.min(t.follow_shortest_light)).max(ALIGNER_FLOOR)
+            } else {
+                b - a
+            };
             let mut s = PhoneSpan::new(None, at, at + d);
             at += d;
             let odd = (k + phase) % 2 == 1;

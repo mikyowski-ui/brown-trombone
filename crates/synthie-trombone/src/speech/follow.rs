@@ -112,6 +112,13 @@ pub struct FollowOptions {
     /// Shortest a phone may be made, a share of its rule duration; `0`
     /// gives every phone the schedule's duration.
     pub shortest: f32,
+    /// The same for the phones that floor does not hold: the unstressed
+    /// vowels, and the consonants of function words and the single nasals,
+    /// liquids, glides and weak fricatives of content words, stops and
+    /// sibilants excepted (see [`Tuning::follow_shortest_light`]).
+    pub shortest_light: f32,
+    #[doc(hidden)]
+    pub classes_off: u32,
 }
 
 impl FollowOptions {
@@ -128,6 +135,8 @@ impl FollowOptions {
             tract_length,
             max_speed: t.follow_speed_max,
             shortest: t.follow_shortest,
+            shortest_light: t.follow_shortest_light,
+            classes_off: 0,
         }
     }
 
@@ -139,6 +148,7 @@ impl FollowOptions {
             formant_range: 0.0,
             max_speed: 1.0,
             shortest: 0.0,
+            shortest_light: 0.0,
             ..Self::new(pitch, &Tuning::DEFAULT, 1.0)
         }
     }
@@ -597,7 +607,21 @@ impl Utterance {
             } else {
                 let floor: Vec<f32> = self.segments[i..j].iter().map(floor_of).collect();
                 let had: f32 = rule.iter().sum();
-                let want = target[p as usize].max(options.shortest * had);
+                let role = self.roles.get(p as usize).copied();
+                let ph = self.segments[i].phoneme;
+                let held = match role {
+                    Some(r) if options.classes_off != 0 => {
+                        super::rhythm::classes(ph, r) & options.classes_off == 0
+                    }
+                    Some(r) => super::rhythm::held_in_transfer(ph, r),
+                    None => true,
+                };
+                let shortest = if held {
+                    options.shortest
+                } else {
+                    options.shortest_light
+                };
+                let want = target[p as usize].max(shortest * had);
                 let least: f32 = floor.iter().sum();
                 if want < least {
                     report.too_short += 1;
