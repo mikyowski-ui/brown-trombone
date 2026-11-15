@@ -316,7 +316,7 @@ impl App {
 
     /// Start from a voice other than the first preset's, with the persona
     /// dials set (as given on the command line).
-    pub fn set_voice(&mut self, preset: Preset, base: VoiceSettings, persona: Persona) {
+    pub fn set_voice(&mut self, preset: Preset, base: &VoiceSettings, persona: Persona) {
         self.preset = preset;
         self.base = base.with_engine(self.engine);
         self.persona = persona;

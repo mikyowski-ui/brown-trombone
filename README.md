@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and seventeen numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and nineteen numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -587,6 +587,38 @@ as the model goes:
   without its critically damped tail; it is off (see `Tuning`).
   `examples/plateau.rs` writes the tract's areas, targets and own formants
   every 2.5 ms through any lines of text.
+- **The dark /l/ and phrases opening on a sonorant (round 11).** The two
+  points of vowel error round 10's lateral cost in the LibriSpeech texts
+  (23.8 to 25.5 %) were vowels *before* an /l/: of the 26 vowels before an
+  /l/ that closes its syllable ("quilter", "welcome", "also", "middle",
+  "principles"), 11 were heard wrong before the lateral and 15 after (the
+  rest of the 286 slots 59 and 61); the recognizer's own choice among the
+  vowels stood at a margin of −0.3 nats there (the reader's +3.0). The
+  reader's vowels before such an /l/ are dark all through, F2 near 1000 Hz
+  from a quarter of the way in; the engine's held their own shape up to
+  the /l/ (1460 to 1660 Hz) and fell some 500 Hz into it, the more so with
+  the new, darker lateral. So the last 60 % of such a vowel now glides
+  towards /ʊ/, the back of the tongue rising for the /l/ before its tip
+  (`dark_l_share`): there 10 of the 26 are heard wrong, at a margin of
+  +0.2. And a phrase that opens on a nasal or a liquid starts that sound
+  50 ms earlier, out of the pause (`sonorant_onset`): the lungs take some
+  40 ms to bring the folds going, and that much of an opening /n m l/ was 33
+  dB under its vowel, where the reader's /n m/ stand 8 to 20 dB under it
+  from their first 10 ms; the recognizer heard no /n/ in four short
+  phrases opening on one (now four of four), and 4 of 12 opening /l/ (now
+  6, the rest still heard as /v ð/ before a front vowel). In the
+  LibriSpeech texts the vowels are heard wrong 24.5 % of the time, the
+  consonants right 88.2 % (85.7); the 30 held-out sentences 25.9 % and
+  74.3 % (25.9, 74.8), the 30 tuning sentences 22.7 % and 72.4 % (22.0,
+  73.2). Measured but not changed: a voiced /g/ builds almost no pressure
+  behind its closure (some 1 cmH2O against the lungs' 5 to 7, with or
+  without the pharynx widening), so its release is 21 to 37 dB under its
+  voice at 1 to 2.5 kHz where the reader's is 4 to 12, and the recognizer
+  hears /g/ as /d/ before stressed and unstressed vowels alike (8 of 16 /g/
+  before an unstressed vowel right in short phrases, with or without the
+  lighter unaccented syllables); and /ɪ/ in short phrases is heard as /eɪ/
+  or /i/ after any consonant (1 of 26 right, after /l/ 8 of 19), not only
+  after an /l/.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
