@@ -112,13 +112,12 @@ pub struct FollowOptions {
     /// Shortest a phone may be made, a share of its rule duration; `0`
     /// gives every phone the schedule's duration.
     pub shortest: f32,
-    /// The same for the phones that floor does not hold: the unstressed
-    /// vowels, and the consonants of function words and the single nasals,
-    /// liquids, glides and weak fricatives of content words, stops and
-    /// sibilants excepted (see [`Tuning::follow_shortest_light`]).
+    /// The same for the phones that floor does not hold: the vowels of
+    /// unstressed syllables and function words, and the consonants of
+    /// function words and the single nasals, liquids, glides and weak
+    /// fricatives of content words, stops and sibilants excepted (see
+    /// [`Tuning::follow_shortest_light`]).
     pub shortest_light: f32,
-    #[doc(hidden)]
-    pub classes_off: u32,
 }
 
 impl FollowOptions {
@@ -136,7 +135,6 @@ impl FollowOptions {
             max_speed: t.follow_speed_max,
             shortest: t.follow_shortest,
             shortest_light: t.follow_shortest_light,
-            classes_off: 0,
         }
     }
 
@@ -607,15 +605,12 @@ impl Utterance {
             } else {
                 let floor: Vec<f32> = self.segments[i..j].iter().map(floor_of).collect();
                 let had: f32 = rule.iter().sum();
-                let role = self.roles.get(p as usize).copied();
-                let ph = self.segments[i].phoneme;
-                let held = match role {
-                    Some(r) if options.classes_off != 0 => {
-                        super::rhythm::classes(ph, r) & options.classes_off == 0
-                    }
-                    Some(r) => super::rhythm::held_in_transfer(ph, r),
-                    None => true,
-                };
+                // The floor by where the phone stands (see `rhythm`); a phone
+                // of hand-made segments keeps the floor.
+                let held = self
+                    .roles
+                    .get(p as usize)
+                    .is_none_or(|&r| super::rhythm::held_in_transfer(self.segments[i].phoneme, r));
                 let shortest = if held {
                     options.shortest
                 } else {

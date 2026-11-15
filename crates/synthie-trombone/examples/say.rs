@@ -329,9 +329,6 @@ fn main() -> std::io::Result<()> {
         if !follow_speed {
             options.max_speed = 1.0;
         }
-        if let Ok(v) = std::env::var("SAY_FLOOR_OFF") {
-            options.classes_off = v.parse().unwrap_or(0);
-        }
         let report = u
             .follow_with(&schedule, &options)
             .unwrap_or_else(|e| panic!("{file}: {e}"));

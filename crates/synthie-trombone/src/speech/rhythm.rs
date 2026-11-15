@@ -265,37 +265,6 @@ pub(crate) fn held_in_transfer(p: Phoneme, role: Role) -> bool {
         || (role.cluster && !role.function)
 }
 
-/// EXPERIMENT: the classes of a phone for leaving the floor off one at a
-/// time, as bits.
-pub(crate) fn classes(p: Phoneme, role: Role) -> u32 {
-    let mut b = 0;
-    if is_vowel(p) {
-        b |= if role.function {
-            4
-        } else if role.stressed {
-            1
-        } else {
-            2
-        };
-        return b;
-    }
-    b |= match p.manner() {
-        Manner::Stop => 8,
-        Manner::Affricate => 16,
-        Manner::Fricative if matches!(p, Phoneme::S | Phoneme::Z | Phoneme::Sh | Phoneme::Zh) => 16,
-        Manner::Fricative | Manner::Aspirate => 32,
-        Manner::Nasal => 64,
-        _ => 128,
-    };
-    if role.function {
-        b |= 256;
-    }
-    if role.cluster && !role.function {
-        b |= 512;
-    }
-    b
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::phonemize;
