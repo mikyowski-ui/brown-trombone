@@ -22,8 +22,15 @@ use synthie_ui::{Key, KeyCode, KeyKind};
 const SLOT_MOUSE: usize = 2;
 /// Constriction slot for the lip-pop key.
 const SLOT_POP: usize = 3;
-const NO_RELEASE_HINT: &str =
-    "terminal sends no key releases: notes hold, Space stops · Tab to type or paste text";
+const NO_RELEASE_HINT: &str = "terminal sends no key releases: a tapped note holds, Space stops; \
+     a held key plays until let go · Tab to type or paste text";
+/// A held piano key repeats (25 to 40 times a second on most keyboards);
+/// once it has, this long without a repeat means it was let go, in a
+/// terminal that has sent no key release yet.
+const REPEAT_GAP: Duration = Duration::from_millis(200);
+/// Repeats of the held key after which their end is taken for its release:
+/// one alone may be the key tapped again.
+const REPEATS_FOR_RELEASE: u32 = 2;
 /// Piano keys, one semitone apart, starting at C.
 const PIANO: &str = "awsedftgyhujkolp;";
 /// Canvas y range of the tract view (shared with `ui`).
@@ -191,6 +198,10 @@ pub struct App {
     pub octave: i32,
     pub note: i32,
     held: Option<char>,
+    /// How often the held piano key has repeated, and when last.
+    repeats: (u32, Option<Instant>),
+    /// Whether the terminal has reported any key coming up.
+    release_seen: bool,
     pub voiced: bool,
 
     pub tongue: (f32, f32),
@@ -265,6 +276,8 @@ impl App {
             octave: 3,
             note: 45,
             held: None,
+            repeats: (0, None),
+            release_seen: false,
             voiced: false,
             tongue: (12.9, 2.43),
             tenseness: 0.6,
@@ -451,6 +464,23 @@ impl App {
         if self.preview_until.is_some_and(|t| now >= t) {
             self.end_preview();
         }
+        // A terminal that sends no key releases (some say they will and do
+        // not): the held key's repeats ending is its release.
+        if let (n, Some(last)) = self.repeats
+            && self.held.is_some()
+            && !self.release_seen
+            && n >= REPEATS_FOR_RELEASE
+            && now.saturating_duration_since(last) > REPEAT_GAP
+        {
+            self.held = None;
+            self.repeats = (0, None);
+            self.voiced = false;
+            self.send(Cmd::NoteOff);
+            if self.keyboard_release {
+                self.keyboard_release = false;
+                self.status = NO_RELEASE_HINT.into();
+            }
+        }
     }
 
     /// A persona dial or glottis meter changed: let it be heard. With
@@ -480,6 +510,9 @@ impl App {
 
     /// Handle a key; returns `true` to quit.
     pub fn key(&mut self, key: Key) -> bool {
+        if key.kind == KeyKind::Release {
+            self.release_seen = true;
+        }
         if key.code == RECORD_KEY {
             if key.kind == KeyKind::Press {
                 self.toggle_recording();
@@ -506,6 +539,50 @@ impl App {
         quit
     }
 
+    /// A piano key, `semi` semitones above the octave's C, going down,
+    /// repeating or coming up.
+    fn piano_key(&mut self, c: char, semi: i32, kind: KeyKind) {
+        let note = 12 * (self.octave + 1) + semi;
+        match kind {
+            // (Pressed again after the octave moved, the key is a new
+            // note.)
+            KeyKind::Press | KeyKind::Repeat if self.held == Some(c) && note == self.note => {
+                // The held key repeating; the note sounds already. When
+                // the repeats end with no release reported, `tick_at`
+                // takes that for the release.
+                let close = self
+                    .repeats
+                    .1
+                    .is_none_or(|t| self.now.saturating_duration_since(t) <= REPEAT_GAP);
+                self.repeats = (if close { self.repeats.0 + 1 } else { 1 }, Some(self.now));
+                if kind == KeyKind::Press && self.keyboard_release {
+                    // A second press of a held key without a release
+                    // in between: this terminal does not report
+                    // releases after all.
+                    self.keyboard_release = false;
+                    self.status = NO_RELEASE_HINT.into();
+                }
+            }
+            KeyKind::Press => {
+                self.repeats = (0, None);
+                self.note = note;
+                self.held = Some(c);
+                self.voiced = true;
+                // The note takes over from a dial being heard; that
+                // ending must not stop it.
+                self.preview_until = None;
+                self.send(Cmd::NoteOn(self.note_f32()));
+            }
+            KeyKind::Release if self.held == Some(c) => {
+                self.held = None;
+                self.repeats = (0, None);
+                self.voiced = false;
+                self.send(Cmd::NoteOff);
+            }
+            _ => {}
+        }
+    }
+
     fn play_key(&mut self, key: Key) -> bool {
         let KeyCode::Char(c) = key.code else {
             if key.kind != KeyKind::Release {
@@ -517,32 +594,8 @@ impl App {
         let c = c.to_ascii_lowercase();
 
         if let Some(semi) = PIANO.find(c) {
-            match key.kind {
-                KeyKind::Press if self.keyboard_release && self.held == Some(c) => {
-                    // A second press of a held key without a release in
-                    // between: this terminal does not report releases after
-                    // all. Fall back to Space-to-stop.
-                    self.keyboard_release = false;
-                    self.status = NO_RELEASE_HINT.into();
-                }
-                KeyKind::Press => {
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-                    let semi = semi as i32;
-                    self.note = 12 * (self.octave + 1) + semi;
-                    self.held = Some(c);
-                    self.voiced = true;
-                    // The note takes over from a dial being heard; that
-                    // ending must not stop it.
-                    self.preview_until = None;
-                    self.send(Cmd::NoteOn(self.note_f32()));
-                }
-                KeyKind::Release if self.held == Some(c) => {
-                    self.held = None;
-                    self.voiced = false;
-                    self.send(Cmd::NoteOff);
-                }
-                _ => {}
-            }
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            self.piano_key(c, semi as i32, key.kind);
             return false;
         }
 
@@ -807,6 +860,7 @@ impl App {
     /// Stop singing and speaking; the voice fades out. Also ends a drone.
     fn silence(&mut self) {
         self.held = None;
+        self.repeats = (0, None);
         self.voiced = false;
         self.preview_until = None;
         if self.drone {
@@ -1834,6 +1888,95 @@ mod tests {
         sent(&rx);
         app.key(key(' ', KeyKind::Press));
         assert!(sent(&rx).iter().any(|c| matches!(c, Cmd::NoteOff)));
+    }
+
+    /// `n` repeats of key `c`, 33 ms apart, each after a tick; returns
+    /// the time of the last.
+    fn hold(app: &mut App, c: char, kind: KeyKind, from: Instant, n: u32) -> Instant {
+        let mut t = from;
+        for _ in 0..n {
+            t += Duration::from_millis(33);
+            app.tick_at(t);
+            app.key(key(c, kind));
+        }
+        t
+    }
+
+    #[test]
+    fn a_held_key_ends_when_its_repeats_end_in_a_terminal_without_releases() {
+        // The repeats arrive as presses (no key protocol), or as repeats
+        // from a terminal that says it reports releases and sends none.
+        for (protocol, kind) in [
+            (false, KeyKind::Press),
+            (true, KeyKind::Press),
+            (true, KeyKind::Repeat),
+        ] {
+            let (mut app, rx) = app(protocol);
+            let t0 = Instant::now();
+            app.tick_at(t0);
+            app.key(key('a', KeyKind::Press));
+            // The keyboard's delay before the first repeat.
+            app.tick_at(t0 + Duration::from_millis(500));
+            let last = hold(&mut app, 'a', kind, t0 + Duration::from_millis(500), 20);
+            assert!(
+                matches!(sent(&rx)[..], [Cmd::NoteOn(_)]),
+                "{protocol} {kind:?}"
+            );
+            app.tick_at(last + Duration::from_millis(100));
+            assert!(sent(&rx).is_empty(), "still held: {protocol} {kind:?}");
+            app.tick_at(last + Duration::from_millis(250));
+            assert!(
+                matches!(sent(&rx)[..], [Cmd::NoteOff]),
+                "{protocol} {kind:?}"
+            );
+            assert!(!app.voiced && !app.keyboard_release);
+            assert!(app.status.contains("Space stops") || !protocol);
+            // The key pressed again is a new note.
+            app.key(key('a', KeyKind::Press));
+            assert!(matches!(sent(&rx)[..], [Cmd::NoteOn(_)]));
+        }
+    }
+
+    #[test]
+    fn a_tapped_note_holds_without_releases_and_a_second_tap_leaves_it() {
+        let (mut app, rx) = app(false);
+        let t0 = Instant::now();
+        app.tick_at(t0);
+        app.key(key('a', KeyKind::Press));
+        app.tick_at(t0 + Duration::from_secs(3));
+        app.key(key('a', KeyKind::Press));
+        app.tick_at(t0 + Duration::from_secs(6));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOn(_)]));
+        assert!(app.voiced);
+        // An octave up, the same key is another note.
+        app.key(key('x', KeyKind::Press));
+        app.key(key('a', KeyKind::Press));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOn(_)]));
+    }
+
+    #[test]
+    fn repeats_ending_mean_nothing_where_releases_are_reported() {
+        let (mut app, rx) = app(true);
+        let t0 = Instant::now();
+        app.tick_at(t0);
+        // Any key coming up shows that this terminal reports it.
+        app.key(key('z', KeyKind::Press));
+        app.key(key('z', KeyKind::Release));
+        app.key(key('a', KeyKind::Press));
+        let last = hold(
+            &mut app,
+            'a',
+            KeyKind::Repeat,
+            t0 + Duration::from_millis(500),
+            20,
+        );
+        // Another key takes the repeats over while 'a' stays down.
+        app.key(key('x', KeyKind::Press));
+        app.tick_at(last + Duration::from_secs(2));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOn(_)]));
+        assert!(app.voiced && app.keyboard_release);
+        app.key(key('a', KeyKind::Release));
+        assert!(matches!(sent(&rx)[..], [Cmd::NoteOff]));
     }
 
     // ----- the text line -------------------------------------------------

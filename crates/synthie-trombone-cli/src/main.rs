@@ -29,6 +29,7 @@ use crossterm::{
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
 use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
 
@@ -74,6 +75,11 @@ struct Cli {
     /// take-001, take-002, … Created on the first take.
     #[arg(long, value_name = "DIR", default_value = "takes")]
     record: PathBuf,
+    /// Write every key event as the terminal reports it (time, press,
+    /// repeat or release, key) to this file: for finding out why keys
+    /// misbehave in a terminal. It holds whatever is typed.
+    #[arg(long, value_name = "FILE")]
+    key_log: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -139,6 +145,7 @@ fn main() -> Result<()> {
                 cli.mimic,
                 cli.mic.as_deref(),
                 cli.record,
+                cli.key_log.as_deref(),
             )
         }
     }
@@ -150,6 +157,7 @@ fn tui(
     mimic: bool,
     microphone: Option<&str>,
     takes: PathBuf,
+    key_log: Option<&std::path::Path>,
 ) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -161,7 +169,14 @@ fn tui(
     let _streams = streams;
 
     enable_raw_mode()?;
-    let result = session(engine, (preset, base, persona), link);
+    let key_log = key_log
+        .map(|path| {
+            std::fs::File::create(path)
+                .with_context(|| format!("creating {}", path.display()))
+                .map(io::BufWriter::new)
+        })
+        .transpose()?;
+    let result = session(engine, (preset, base, persona), link, key_log);
     // Whatever happened, the terminal is given back as it was.
     restore()?;
     result
@@ -172,6 +187,7 @@ fn session(
     engine: Engine,
     (preset, base, persona): (Preset, VoiceSettings, Persona),
     link: audio::Link,
+    mut key_log: Option<KeyLog>,
 ) -> Result<()> {
     let mut stdout = io::stdout();
     // Bracketed paste: a paste arrives as one piece of text, not as keys
@@ -209,7 +225,10 @@ fn session(
     {
         app.set_voice(preset, &base, persona);
     }
-    let result = run(&mut terminal, &mut app);
+    if let Some(log) = &mut key_log {
+        writeln!(log, "terminal says it reports key releases: {release}")?;
+    }
+    let result = run(&mut terminal, &mut app, key_log);
     // A take still recording is saved while the sound still runs.
     app.finish();
 
@@ -237,7 +256,15 @@ fn is_burst(events: &[Event]) -> bool {
     typed >= BURST_KEYS
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut app::App) -> Result<()> {
+/// Where `--key-log` writes.
+type KeyLog = io::BufWriter<std::fs::File>;
+
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut app::App,
+    mut key_log: Option<KeyLog>,
+) -> Result<()> {
+    let start = std::time::Instant::now();
     loop {
         app.tick();
         terminal.draw(|f| ui::draw(f, app))?;
@@ -251,6 +278,17 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut app::App
             for e in events {
                 match e {
                     Event::Key(k) => {
+                        if let Some(log) = &mut key_log {
+                            writeln!(
+                                log,
+                                "{:9.3} s  {:7?}  {:?}  {:?}",
+                                start.elapsed().as_secs_f64(),
+                                k.kind,
+                                k.code,
+                                k.modifiers
+                            )?;
+                            log.flush()?;
+                        }
                         if app.terminal_key(k, burst) {
                             return Ok(());
                         }

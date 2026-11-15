@@ -120,8 +120,12 @@ still turns line breaks inside a burst of pasted keys into spaces.
 | `↑` `↓` | earlier lines |
 
 Notes stop when you let go of the key in terminals that report key releases
-(kitty, WezTerm, foot, Ghostty). In other terminals a note holds until you
-press `Space`.
+(kitty, WezTerm, foot, Ghostty). In other terminals, and in ones that say
+they report releases and then send none, a key held down plays until you
+let go (the app takes the end of the key's repeats, 0.2 s without one, for
+the release), and a note tapped shorter than the keyboard's repeat delay
+holds until you press Space or play another. `--key-log FILE` writes every
+key event as the terminal reports it, for finding out what a terminal sends.
 
 **Recording takes.** `F5` starts recording a take and `F5` again stops it
 (in either mode; starting one returns to play mode, so the keys sound);
