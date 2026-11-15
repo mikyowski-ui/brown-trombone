@@ -116,10 +116,11 @@
   "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"},
   "lateral_channel": {"lo": 2, "hi": 4, "default": 3, "pass": "a"},
   "body_damping": {"lo": 0.8, "hi": 1, "default": 1, "pass": "b"},
-  "stressed_onset_length": {"lo": 1, "hi": 1.5, "default": 1.2, "pass": "b"},
+  "stressed_onset_length": {"lo": 1, "hi": 1.5, "default": 1.3, "pass": "b"},
   "cluster_length": {"lo": 0.7, "hi": 1, "default": 0.85, "pass": "b"},
   "function_consonant_length": {"lo": 0.7, "hi": 1, "default": 0.9, "pass": "b"},
   "schwa_length": {"lo": 0.65, "hi": 1, "default": 0.85, "pass": "c"},
   "diphthong_hold": {"lo": 0.6, "hi": 1, "default": 0.75, "pass": "c"},
+  "rhythm_pace": {"lo": 0.95, "hi": 1.1, "default": 1.02, "pass": "b"},
   "follow_shortest_light": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"}
 }

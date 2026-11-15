@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and twenty-three numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twenty-four numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and twenty-three numbers in three
+        /// How a voice turns sounds into speech: one hundred and twenty-four numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -810,11 +810,11 @@ tuning! {
     /// it on average, at the bound of `stop_releases_are_bursts_not_clicks`
     /// (at 1.2 -4.3 dB, before -4.6): the longer closure builds more
     /// pressure. `1` makes them as long as anywhere else.
-    stressed_onset_length = 1.2, 1.0..=1.6, B;
+    stressed_onset_length = 1.3, 1.0..=1.6, B;
     /// Length of each consonant of a cluster against a single one's
     /// (physical engine): the reader's are 0.81 of his single ones (the
     /// references' 0.94), where the rules made them alike.
-    cluster_length = 0.85, 0.6..=1.0, B;
+    cluster_length = 0.85, 0.6..=1.5, B;
     /// Length of the consonants of a function word, its stops excepted
     /// (they keep their closure and release), against their own (physical
     /// engine): the reader's /ð v/ of "the", "of" are 0.78 of the rules'.
@@ -832,6 +832,14 @@ tuning! {
     /// the rules' (a stressed /oʊ eɪ/ was 226 to 266 ms, his 70 to 250 at
     /// the rules' pace).
     diphthong_hold = 0.75, 0.5..=1.0, C;
+    /// How much longer every phone of the physical engine's rules is held,
+    /// the phrase's last syllable excepted, to give back what the fields
+    /// above take from the rate of speech. At 1.032 they kept it (10.8
+    /// phones a second over the reader's texts), but a vowel held 3 %
+    /// longer before /ʃ/ darkened its hiss past the bound of
+    /// `hisses_are_broad_and_s_is_brighter_than_sh` (centroid 4350 to 3840
+    /// Hz, flatness 0.42 to 0.29; at 1.02 0.32).
+    rhythm_pace = 1.02, 0.8..=1.25, B;
     /// Shortest a followed schedule may make a phone the floor of
     /// `follow_shortest` does not hold (physical engine; see
     /// `speech::rhythm::held_in_transfer`), a share of its rule duration:
@@ -867,10 +875,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_fifty_four() {
+    fn two_passes_of_fifty_eight_and_fifty_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 54));
+        assert_eq!((a, b), (58, 55));
     }
 
     #[test]

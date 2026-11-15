@@ -39,8 +39,12 @@ pub(crate) struct Role {
     pub(crate) cluster: bool,
     /// In the last syllable of its phrase, which the rules lengthen on
     /// their own (`Tuning::final_coda_stretch` and the last vowel's
-    /// lengthening); [`stretch`] leaves its vowel and coda alone.
+    /// lengthening); [`stretch`] leaves it alone.
     pub(crate) last: bool,
+    /// In the first syllable of its phrase, through which the lungs are
+    /// still building up their pressure (`Tuning::phrase_onset`);
+    /// [`stretch`] leaves it alone.
+    pub(crate) first: bool,
 }
 
 fn is_vowel(p: Phoneme) -> bool {
@@ -113,11 +117,15 @@ pub(crate) fn roles(tokens: &[Token]) -> Vec<Role> {
 }
 
 /// Mark the phones of a phrase (its roles and syllables, starting at phone
-/// `from` of `vowels`) that are in its last syllable.
+/// `from` of `vowels`) that are in its first and in its last syllable.
 fn mark_last(roles: &mut [Role], nuclei: &[Option<usize>], vowels: &[bool], from: usize) {
-    let last = (from..from + roles.len()).rev().find(|&k| vowels[k]);
-    for (r, n) in roles.iter_mut().zip(nuclei) {
+    let span = from..from + roles.len();
+    let last = span.clone().rev().find(|&k| vowels[k]);
+    let first = span.clone().find(|&k| vowels[k]);
+    for (k, (r, n)) in span.zip(roles.iter_mut().zip(nuclei)) {
         r.last = last.is_some() && *n == last;
+        // (A consonant of no syllable before the first vowel counts too.)
+        r.first = first.is_some() && (*n == first || (n.is_none() && first.is_some_and(|f| k < f)));
     }
 }
 
@@ -196,26 +204,33 @@ fn roles_of_word(word: &[(Phoneme, bool)], out: &mut Vec<Role>, nuclei: &mut Vec
 /// stands than its own length (see the module and the `Tuning` fields of
 /// round 11); `1` for a pause or a phone of no word.
 pub(crate) fn stretch(p: Phoneme, role: Role, timing: &Tuning) -> f32 {
-    // The vowel and the coda of a phrase's last syllable keep the rules'
-    // own lengthening; its onset is drawn out as anywhere (the reader's
-    // there are 1.23 times the rules' at his pace).
-    if p == Phoneme::Sil || (role.last && !role.onset) {
+    // A phrase's last syllable keeps the rules' own lengthening (the last
+    // vowel's and `Tuning::final_coda_stretch`); the fit above leaves it
+    // out. Made like the rest, the tap of "water" lost its voice
+    // (`a_t_or_d_between_vowels_is_a_tap`). Its first syllable keeps them
+    // too: the lungs are still building up their pressure there, and with
+    // the /ə/ of "a" shorter the voice after the /p/ of "a pa" did not
+    // start and the /d/ of "a da" was voiced through 0.74 of its closure.
+    if p == Phoneme::Sil || role.last || role.first {
         return 1.0;
     }
+    let pace = timing.rhythm_pace;
     if is_vowel(p) {
-        return match p {
-            Phoneme::Ax => timing.schwa_length,
-            _ if p.manner() == Manner::Diphthong => timing.diphthong_hold,
-            _ => 1.0,
-        };
+        return pace
+            * match p {
+                Phoneme::Ax => timing.schwa_length,
+                _ if p.manner() == Manner::Diphthong => timing.diphthong_hold,
+                _ => 1.0,
+            };
     }
-    // The weak fricatives /f v θ ð h/ keep their own length: the speakers'
-    // are shorter than the rules' already (0.68 to 0.85 of them, wherever
-    // they stand), and a longer /f/ after /s/ ("makes fine") stood out of
-    // the hand-over between them (`tests/sibilant_gate.rs`).
+    // The weak fricatives /f v θ ð h/ are not drawn out at the start of a
+    // stressed syllable: the speakers' are shorter than the rules' already
+    // (0.68 to 0.85 of them, wherever they stand), and a longer /f/ after
+    // /s/ ("makes fine") stood out of the hand-over between them
+    // (`tests/sibilant_gate.rs`).
     let weak = matches!(p.manner(), Manner::Fricative | Manner::Aspirate)
         && !matches!(p, Phoneme::S | Phoneme::Z | Phoneme::Sh | Phoneme::Zh);
-    let mut f = 1.0;
+    let mut f = pace;
     if role.function && p.manner() != Manner::Stop {
         f *= timing.function_consonant_length;
     }
@@ -307,7 +322,7 @@ mod tests {
     #[test]
     fn stressed_onsets_are_drawn_out_and_function_words_brisk() {
         let t = Tuning::DEFAULT;
-        let toks = phonemize("the dark blue sea");
+        let toks = phonemize("in the dark blue sea");
         let r = roles(&toks);
         let p: Vec<Phoneme> = toks
             .iter()
@@ -316,17 +331,19 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(p.len(), 11, "{p:?}"); // DH AX | D AA R K | B L UW | S IY
+        // IH N | DH AX | D AA R K | B L UW | S IY
+        assert_eq!(p.len(), 13, "{p:?}");
         let f = |k: usize| stretch(p[k], r[k], &t);
-        assert!(f(0) < 1.0 && f(1) < 1.0, "the: {} {}", f(0), f(1));
-        assert!(f(2) > 1.15, "the /d/ of dark: {}", f(2));
-        assert!((f(3) - 1.0).abs() < 1e-6);
-        assert!(f(6) > f(3) && f(6) < f(2), "the /b/ of blue: {}", f(6));
-        // The last syllable's vowel keeps the rules' own length, its onset
-        // is drawn out.
-        assert!(r[9].last && r[10].last && !r[8].last);
-        assert!(f(9) > 1.1 && (f(10) - 1.0).abs() < 1e-6);
-        assert!(held_in_transfer(p[2], r[2]) && held_in_transfer(p[3], r[3]));
-        assert!(!held_in_transfer(p[0], r[0]) && !held_in_transfer(p[1], r[1]));
+        // The first and the last syllable keep the rules' own lengths.
+        assert!(r[0].first && r[1].first && !r[2].first);
+        assert!((f(0) - 1.0).abs() < 1e-6 && (f(1) - 1.0).abs() < 1e-6);
+        assert!(r[11].last && r[12].last && !r[10].last);
+        assert!((f(11) - 1.0).abs() < 1e-6 && (f(12) - 1.0).abs() < 1e-6);
+        assert!(f(2) < 1.0 && f(3) < 1.0, "the: {} {}", f(2), f(3));
+        assert!(f(4) > 1.15, "the /d/ of dark: {}", f(4));
+        assert!((f(5) - t.rhythm_pace).abs() < 1e-6);
+        assert!(f(8) > f(5) && f(8) < f(4), "the /b/ of blue: {}", f(8));
+        assert!(held_in_transfer(p[4], r[4]) && held_in_transfer(p[5], r[5]));
+        assert!(!held_in_transfer(p[2], r[2]) && !held_in_transfer(p[3], r[3]));
     }
 }
