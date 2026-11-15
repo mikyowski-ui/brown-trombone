@@ -200,6 +200,30 @@ fn an_l_before_a_vowel_is_a_lateral() {
     }
 }
 
+#[test]
+fn an_s_after_a_k_hisses_at_the_end_of_an_utterance() {
+    // Until round 10 the last /s/ of "planks" took the /k/'s tongue at the
+    // end of an utterance, and with it the velar place: a faint hiss at
+    // the velum, 50 to 56 dB under the vowel (mid-phrase it hissed).
+    let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt();
+    for (text, vowel) in [
+        ("planks", Phoneme::Ae),
+        ("tanks", Phoneme::Ae),
+        ("cakes", Phoneme::Ey),
+        ("the smooth planks.", Phoneme::Ae),
+    ] {
+        let s = place::speak(&voice(), text, false);
+        let v = s.find(vowel, 1).expect("the vowel");
+        let k = s.find(Phoneme::S, v).expect("the /s/");
+        let (s0, s1) = s.ranges[k];
+        let (v0, v1) = s.ranges[v];
+        let hiss = rms(&s.audio[s0..s1]);
+        let level = 20.0 * (hiss / rms(&s.audio[v0..v1])).log10();
+        println!("{text}: /s/ {level:.1} dB against the vowel");
+        assert!(level > -35.0, "{text}: the final /s/ {level:.1} dB under the vowel");
+    }
+}
+
 /// What the larynx and the tract do through one /t d/ between vowels:
 /// how long the mouth is shut, the least the folds open and close over any
 /// 10 ms of it against their swing in the vowel before, and how far the
