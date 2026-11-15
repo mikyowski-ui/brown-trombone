@@ -124,11 +124,15 @@ fn phrases_swell_in_and_die_away() {
         falls += fall;
     }
     let fall = falls / SENTENCES.len() as f32;
-    // 200 ms until round 9: the source tilt takes some 2 dB off the
-    // vowels and nothing off the voiceless sounds after the last of them,
-    // so the level stays within 6 dB of the peak a little longer (180,
-    // 200 and 160 ms here).
-    assert!(fall > 0.15, "mean fall {:.0} ms", fall * 1e3);
+    // Round 9 had moved this to 150 ms (180, 200 and 160 here): each of
+    // its breath decline through the vowels, quicker vowel onsets and
+    // source tilt alone took the second sentence's fall from 360 to 200
+    // ms, the measure hanging on whether one frame of the last word comes
+    // within 6 dB of the sentence's peak. Round 10 lets the breath run
+    // down over the phrase as the reader's does (his vowels lose some 3
+    // dB over it, the rules' gained 1), pushes less through unaccented
+    // vowels and draws out the closing consonants: 230, 390 and 230 ms.
+    assert!(fall > 0.2, "mean fall {:.0} ms", fall * 1e3);
 }
 
 #[test]
