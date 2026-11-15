@@ -470,7 +470,7 @@ The profile sets `pitch`, `tract_length`, `tenseness`, `expressiveness`,
 | quantity | how |
 |---|---|
 | median pitch, range | autocorrelation pitch (Boersma: normalised autocorrelation, 4 candidates per 10 ms frame, Viterbi path with octave-jump cost, frames > 0.8 octave from the median dropped); median and 10th..90th percentile in semitones |
-| formant scale | LPC (order 20/22/26 by the speaker's formant spacing) on pitch-smoothed spectra of the steady voiced frames; the long-term distribution of formant candidates over log frequency is lined up with the default voice's saying the same text. The scale factor that lines them up is the formant scale (1/tract length for the engine, within 2 %). Where the alignment is ambiguous (several scales about 25 % apart fit almost equally well, as for human speech), the ratio of formant spacings `dF` (uniform tube fitted to median F1..F4) chooses |
+| formant scale | LPC (order 20/22/26 by the speaker's formant spacing) on pitch-smoothed spectra of the steady voiced frames; the long-term distribution of formant candidates over log frequency is lined up with the default voice's saying the same text. The scale factor that lines them up is the formant scale (1/tract length for the engine, within 2 %). Where the alignment is ambiguous (several scales about 25 % apart fit almost equally well, as for human speech), the ratio of formant spacings `dF` (uniform tube fitted to median F1..F4) chooses; for a breathy voice (H1*-H2* over 10.5 dB, wholly from 12.5), whose F2 the tracker loses in most frames, the ratio of comb spacings (one `dF` fitted to every formant candidate at once, `comb_spacing`) |
 | H1*-H2* | levels of the first two harmonics (48 ms frames), corrected for the first two formants (Iseli and Alwan), median over voiced frames; the uncorrected H1-H2 is printed too |
 | tilt | alpha ratio: energy 1..5 kHz over 0..1 kHz of the voiced frames |
 | breathiness | harmonics-to-noise ratio from the autocorrelation peak (median), and cepstral peak prominence |
@@ -488,7 +488,12 @@ fitted to it (robustly: samples the analysis got badly wrong are dropped).
 Matching inverts the model for a first guess, then renders, re-analyses and
 corrects: pitch, tract length and rate by ratio, expressiveness by the range
 error over its slope, and tenseness, posterior gap and lung pressure together
-by a Broyden step on H1*-H2*, HNR and tilt. It stops when everything is
+by a Broyden step on H1*-H2*, HNR and tilt. An attempt whose pitch reads
+more than 1.5 times off (a near-whisper: too little breath for folds held
+that loosely) corrects nothing: pitch and tract stay and the voice quality
+goes back to the last attempt that could be read (or the defaults); a
+formant scale read more than 1.3 times off (one formant taken for the
+next) does not move the tract. It stops when everything is
 close, or after 8 rounds, and writes the best round. Rebuild the calibration
 when `bin/say` changes (the tool notes it when the binary differs).
 
@@ -499,6 +504,12 @@ The engine speaking with the produced profile must re-analyse to within
 H1*-H2*. `tests/test_match_voice.py` checks this on eight hidden engine voices
 (pitch 90..300 Hz, tract length 0.7..1.25, tenseness 0.35..0.85) and prints
 the errors and the recovered settings.
+
+Recalibrated for round 10's engine: the eight hidden voices re-analyse
+within 4.5 % on pitch, 0.4 % on formant scale and 0.7 dB on H1*-H2*, and
+every hidden tract length comes back within 0.6 % (the breathy 160 Hz /
+1.1 / 0.35 voice had been read 1.19-1.22 instead of 0.91 since at least
+round 8, and passed or failed by whether its match misread alike).
 
 Recalibrated for round 4's engine (folds that close on every cycle, a
 brighter voice): on the eight hidden voices the re-analysis lands within

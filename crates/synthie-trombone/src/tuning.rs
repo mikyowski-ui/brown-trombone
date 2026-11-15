@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and twelve numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and fifteen numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and twelve numbers in three
+        /// How a voice turns sounds into speech: one hundred and fifteen numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -633,7 +633,8 @@ tuning! {
     /// breath noise some 21 dB under their 0-1 kHz band in 2-4 kHz, where
     /// the LibriSpeech reader's whole 2-4 kHz band is 29 dB under it (and
     /// his 4-7.5 kHz band 26 dB under: his voice's noise lies higher).
-    voiced_breath_corner = 3000.0, 0.0..=8000.0, A;
+    /// 3 kHz in round 9; 5 kHz since round 10, with `voiced_breath_gain`.
+    voiced_breath_corner = 5000.0, 0.0..=8000.0, A;
     /// Cycle-to-cycle jitter of the folds (physical engine): the spread
     /// of each cycle's tension about its course, per cent, at the voice's
     /// natural jitter (`VoiceSettings::jitter` 1; it grows with it, up to
@@ -730,6 +731,33 @@ tuning! {
     /// Share by which the folds are held more loosely through the vowel of
     /// a function word (physical engine; see `speech::shade_syllables`).
     light_laxness = 0.08, 0.0..=0.3, A;
+
+    // ----- the shape of the source tilt (round 10) -----------------------
+
+    /// A second section of the voice's source tilt, dB (physical engine):
+    /// from `tilt_top_corner` on the voice falls this much further, or for
+    /// a negative value rises back as far, unity at 0 Hz; the noise
+    /// sources take its inverse too. `0` leaves the tilt one shelf. Off:
+    /// a gentler shelf with a steeper top (`voice_tilt` 10, this 8 dB at
+    /// 2.5 kHz) brightened the accented vowels' 1-2 and 2-4 kHz bands by
+    /// 0.9 and 1.0 dB (2.4 dB brighter than the LibriSpeech reader's in
+    /// 2-4 kHz), left 4-7.5 kHz where it was, and gave the same phoneme
+    /// error and Whisper words within a point (25.9 % and 68.7 % over the
+    /// 30 held-out sentences, against 25.1 % and 68.3 %).
+    tilt_top = 0.0, -12.0..=18.0, A;
+    /// Corner of that second section at native size, Hz (it scales with
+    /// the inverse of the voice's size, as `tilt_corner` does).
+    tilt_top_corner = 3000.0, 1000.0..=6000.0, A;
+    /// Level of the breath noise of vibrating folds against that of an
+    /// open glottis at the same flow, dB (physical engine; on as far as the
+    /// folds are asked to sing, after the high-passes at
+    /// `voiced_breath_corner`). The accented vowels' 4-7.5 kHz band is
+    /// this noise, not the voice's harmonics (lifting those above 5 kHz by
+    /// 12 dB moved it by 0.0 dB): at 0 dB and 3 kHz it stood 28.6 dB under
+    /// 0-1 kHz, 2.9 dB darker than the LibriSpeech reader's; at 6 dB and
+    /// 5 kHz 25.7, his, with 1-2 and 2-4 kHz as they were (20.0 and 27.4
+    /// dB under; his 20.9 and 28.9).
+    voiced_breath_gain = 6.0, -12.0..=12.0, A;
 }
 
 impl Default for Tuning {
@@ -752,10 +780,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_four_and_forty_nine() {
+    fn two_passes_of_fifty_seven_and_forty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (54, 49));
+        assert_eq!((a, b), (57, 49));
     }
 
     #[test]

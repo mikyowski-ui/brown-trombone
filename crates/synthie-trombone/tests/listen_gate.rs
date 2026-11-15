@@ -281,8 +281,18 @@ fn peak_formants(t: &Trombone) -> [f32; 2] {
 /// reads the classic engine's steeper source 8-14 % low on /u/, levelled
 /// for the classic it reads the physical /i/ and /u/ 13-15 % high. No
 /// choice served both, and the listener's job is any voice, so it was not
-/// adopted. The misses below are bounded at what is measured now.
-const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 9] = [
+/// adopted.
+///
+/// Since round 10 the listener's pre-emphasis has a second stage, from
+/// about 1 kHz, for a source as dark as a speaker's (the physical
+/// engine's since round 9's tilt): it took the lean of F1 down by 2 to 9
+/// points (/i/ at 110 Hz +12.3 → +9.8 %, /u/ +14.0 → +9.2, /u/ at 220 Hz
+/// +10.7 → +2.0, /i/ at 220 Hz +8.0 → +4.9, /ɛ/ and /æ/ at 220 Hz +8.4
+/// and +5.3 → +6.8 and +3.8; with round 10's voiced breath noise), and
+/// moved the physical /i/'s F2 at 220 Hz from +5.4 to +7.8 % and the F1 of
+/// /ɔ/ there from +13.3 to +13.9. The misses below are bounded at what is
+/// measured now.
+const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 5] = [
     (
         Engine::Classic,
         Phoneme::Uw,
@@ -295,74 +305,35 @@ const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 9] = [
         Engine::Physical,
         Phoneme::Iy,
         220.0,
-        0,
-        10.0,
-        "F1 (348 Hz) between the 1st and 2nd harmonic: heard +8.7 %",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Iy,
-        220.0,
         1,
         10.0,
-        "F2 (2350 Hz) between the 10th and 11th harmonic: heard +8.8 %",
+        "F2 (2350 Hz) between the 10th and 11th harmonic: heard +7.8 %",
     ),
     (
         Engine::Physical,
         Phoneme::Ao,
         220.0,
         0,
-        20.0,
-        "the closing source's bump near 440 Hz: heard +17.7 %",
+        16.0,
+        "the closing source's bump near 440 Hz: heard +13.9 %",
     ),
     (
         Engine::Physical,
         Phoneme::Uw,
         110.0,
         0,
-        15.0,
-        "the closing source's bump near 440 Hz: heard +12.9 %, sung harmonics 0 %",
+        12.0,
+        "the closing source's bump near 440 Hz: heard +9.2 %, sung harmonics 0 %",
     ),
     (
         Engine::Physical,
         Phoneme::Iy,
         110.0,
         0,
-        14.0,
-        "the closing source's bump near 440 Hz: heard +11.8 %, sung harmonics +4 %",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Eh,
-        220.0,
-        0,
         12.0,
-        "the closing source leans F1 up: heard +10.5 %",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Ae,
-        220.0,
-        0,
-        10.0,
-        "the closing source leans F1 up: heard +8.8 %",
-    ),
-    (
-        Engine::Physical,
-        Phoneme::Uw,
-        220.0,
-        0,
-        12.0,
-        "since round 9 the voice is as dark as a speaker's (2-4 kHz 29 dB under \
-         0-1 kHz): F1 between the 1st and 2nd harmonic heard +10.4 % (6.9 % before)",
+        "the closing source's bump near 440 Hz: heard +9.8 %, sung harmonics +4 %",
     ),
 ];
-
-/// Whether a step out of the physical /u/ is in place soon enough: 250 ms
-/// (see `formants_follow_an_abrupt_vowel_change_within_40_ms`).
-fn out_of_u_slow(seconds: f32) -> bool {
-    seconds <= 0.25
-}
 
 fn known_miss(engine: Engine, p: Phoneme, hz: f32, k: usize) -> Option<(f32, &'static str)> {
     KNOWN_MISSES
@@ -743,29 +714,20 @@ fn formants_follow_an_abrupt_vowel_change_within_40_ms() {
                 to_own * 1e3
             );
             if engine == Engine::Physical && b == Phoneme::Uw {
-                // The physical /u/'s F1 is heard 15 % over the tract's pole
+                // The physical /u/'s F1 is heard 9 % over the tract's pole
                 // and its frames scatter by 10 %: gated in
                 // `the_physical_u_is_heard_after_any_vowel` instead, on a
                 // continuously sung change.
                 println!("    gated in the_physical_u_is_heard_after_any_vowel");
                 continue;
             }
-            if engine == Engine::Physical && matches!(b, Phoneme::Iy | Phoneme::Ao) {
-                // The physical /i/'s F1 is heard 13 % high (a known miss of
-                // the formant gate) and /ɔ/'s 7 %, so they come within 10 %
-                // of the truth late or never: timed to their own steady
-                // state.
+            if engine == Engine::Physical && b == Phoneme::Iy {
+                // The physical /i/'s F1 is heard 9 % high (a known miss of
+                // the formant gate) and its frames scatter past 10 %, so it
+                // comes within 10 % of the truth late or never: timed to
+                // its own steady state (as /ɔ/ was until round 10, when it
+                // was heard 7 % high; now within 1 %).
                 worst = worst.max(to_own);
-                continue;
-            }
-            if engine == Engine::Physical && a == Phoneme::Uw {
-                // Out of the physical /u/ (whose F1 it hears 14 % high) into
-                // /æ/, since round 9's darker voice (2-4 kHz 29 dB under
-                // 0-1 kHz, as the LibriSpeech reader's; 16 dB before) the
-                // listener takes 221 ms to come within 10 % of /æ/'s
-                // formants (before: 25 ms): a known limit of the listener
-                // on a dark voice, bounded on its own.
-                assert!(out_of_u_slow(to_truth), "{a:?} -> {b:?}: {to_truth} s");
                 continue;
             }
             worst = worst.max(to_truth);
