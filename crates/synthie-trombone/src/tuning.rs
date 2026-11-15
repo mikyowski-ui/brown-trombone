@@ -695,6 +695,16 @@ tuning! {
     /// How far a followed schedule may move a vowel's F1 and F2 from the
     /// voice's own, a share either way (see `speech::PhoneSpan::formants`).
     follow_formant_range = 0.15, 0.0..=0.3, C;
+
+    // ----- the lateral, taps and close vowels (round 10) -----------------
+
+    /// Cells in front of its place over which the side channels of an /l/
+    /// run (physical engine; see `tract::carve_lateral`): the air of a
+    /// lateral leaves round the sides of a tongue whose tip touches the
+    /// ridge, between them and the teeth. At 4 the channel ends at the
+    /// teeth; at 1 (a pinch at the place) the /l/ after a consonant was
+    /// heard as /r/ in 8 of 27 short phrases, at 4 in none.
+    lateral_channel = 4.0, 0.0..=6.0, A;
 }
 
 impl Default for Tuning {

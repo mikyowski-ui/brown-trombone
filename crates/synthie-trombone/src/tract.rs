@@ -123,6 +123,13 @@ const TIP_SHOULDER_FRONT: f32 = 1.5;
 /// teeth, as long in front as behind (the original's shoulder; a shorter
 /// one takes a fifth off the hiss of /ʃ/).
 const BLADE_SHOULDER_FRONT: f32 = 3.5;
+/// Cells behind an /l/'s channel over which its shoulder runs: behind the
+/// tip of a lateral the blade is not raised but drawn down, the sides of the
+/// tongue with it. With the tip's own shoulder (five cells) the raised blade
+/// was a narrowing at the palate as the tip let go into a front vowel: the
+/// second formant of the /ɪ/ of "slid" overshot to 2100 Hz before it settled
+/// at 1900, an /i/ (the owner's rises from his /l/'s 1150 to 1900 and stays).
+const LATERAL_SHOULDER_BACK: f32 = 2.0;
 /// Constriction index from which the tip, not the blade, makes it.
 const BLADE_PLACE: f32 = 34.5;
 /// The front shoulder of /s z/: their jet crosses a short, narrow channel
@@ -403,6 +410,12 @@ pub(crate) struct Tract {
     /// dʒ r w/), not the rounding of the vowel the consonant is made on
     /// (physical engine; see [`Tract::compute_shaped_targets`]).
     pub(crate) own_lips: bool,
+    /// The main constriction is a lateral (/l/; physical engine): the tip
+    /// touches the ridge in the middle and the air goes round its sides.
+    /// However narrow, it is not a gap meant to hiss: the jaw does not
+    /// close the teeth for it, the hiss regulator leaves it alone, and it
+    /// is carved as a channel (see [`carve_lateral`]).
+    pub(crate) lateral: bool,
     /// A narrowing along the tongue that belongs to the vowel shape itself
     /// (physical engine), apart from the consonant slots.
     narrowing: Option<Constriction>,
@@ -465,6 +478,7 @@ impl Tract {
             quick_body: false,
             nasal: false,
             own_lips: false,
+            lateral: false,
             narrowing: None,
             slots: [None; MAX_CONSTRICTIONS],
             trim: [0.0; N / PLACE],
@@ -592,6 +606,16 @@ impl Tract {
         self.narrowing = c.map(sanitize);
     }
 
+    /// What the constriction in slot `k` of touch diameter `diameter` is
+    /// for: [`intent`], except that a lateral is never a gap meant to hiss
+    /// (see [`Tract::lateral`]).
+    fn intent_in(&self, k: usize, diameter: f32) -> Intent {
+        match intent(k, diameter) {
+            Intent::Hiss if self.lateral && k == crate::voice::SLOT_MAIN => Intent::Open,
+            i => i,
+        }
+    }
+
     /// How far the jaw brings the incisors together (physical engine): all
     /// the way while a gap meant to hiss is held between the tongue tip and
     /// the alveolar ridge (/s z/), not at all otherwise. The physical tract
@@ -604,7 +628,7 @@ impl Tract {
             s.is_some_and(|s| {
                 s.alive
                     && k != ROUNDING_SLOT
-                    && intent(k, s.c.diameter) == Intent::Hiss
+                    && self.intent_in(k, s.c.diameter) == Intent::Hiss
                     && (BLADE_PLACE..DENTAL_PLACE).contains(&s.c.index)
             })
         });
@@ -625,7 +649,7 @@ impl Tract {
                 s.is_some_and(|s| {
                     s.alive
                         && k != ROUNDING_SLOT
-                        && intent(k, s.c.diameter) == Intent::Hiss
+                        && self.intent_in(k, s.c.diameter) == Intent::Hiss
                         && range.contains(&s.c.index)
                 })
             })
@@ -809,6 +833,17 @@ impl Tract {
                 continue;
             }
             let mut c = s.c;
+            let lateral = self.lateral && k == crate::voice::SLOT_MAIN;
+            if lateral && intent(k, c.diameter) != Intent::Closure {
+                let before = self.target;
+                carve_lateral(&mut self.target, c, floor, &self.motion);
+                for i in 0..N {
+                    if self.target[i] < before[i] - CARVED * 0.1 {
+                        by[i] = Some(mover_of(c.index));
+                    }
+                }
+                continue;
+            }
             if intent(k, c.diameter) == Intent::Hiss {
                 c.diameter += self.trim[place(c.index)];
             }
@@ -1010,7 +1045,7 @@ impl Tract {
             let Some(s) = self.slots[k].filter(|s| s.alive) else {
                 continue;
             };
-            if intent(k, s.c.diameter) != Intent::Hiss {
+            if self.intent_in(k, s.c.diameter) != Intent::Hiss {
                 continue;
             }
             // The narrowest cell of the gap.
@@ -1407,6 +1442,37 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
         if d < target[j] {
             target[j] = d + (target[j] - d) * shrink;
         }
+    }
+}
+
+/// Carve a lateral (/l/) into a target shape (physical engine). The tip
+/// touches the ridge in the middle and the air leaves round the sides of
+/// the tongue, between them and the teeth: in the tube a narrow channel of
+/// their area from the place [`Tuning::lateral_channel`] cells forward, with
+/// short shoulders at its ends ([`LATERAL_SHOULDER_BACK`] behind it, the
+/// tip's in front), the mouth behind it the tongue body's.
+///
+/// Until round 10 the /l/'s gap counted as one meant to hiss (its opening
+/// was under [`HISS_WIDEST`]), so the jaw shut the incisors in front of it as
+/// for /s/ and its shoulder was the sibilant's; its first formant stood at
+/// 450 to 480 Hz (LPC, middle of the /l/; the LibriSpeech reader's 350 to
+/// 450, the owner's 310 to 330) and it was 4 to 6 dB under the vowel after
+/// it (theirs about 10). Carved as a short pinch with the tip's shoulders it
+/// was heard as /r/ (16 of 27 /l/ after a consonant in short phrases heard
+/// right, 21 before); with the channel running back from the place instead
+/// the third formant fell to 2700 Hz, the second rose to 1400, and 6 of 27
+/// were. With the channel to the teeth all 27 were: the side channels'
+/// open end, not the tip, ends the cavity behind the lips.
+#[allow(clippy::cast_precision_loss)]
+fn carve_lateral(target: &mut [f32; N], c: Constriction, floor: f32, motion: &Tuning) {
+    let d = (c.diameter - 0.3).max(floor);
+    if !(2.0..N as f32).contains(&c.index) || d >= 3.0 {
+        return;
+    }
+    let mut at = c.index;
+    while at <= c.index + motion.lateral_channel.max(0.0) {
+        shoulder(target, at, d, LATERAL_SHOULDER_BACK, TIP_SHOULDER_FRONT);
+        at += 1.0;
     }
 }
 
