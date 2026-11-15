@@ -1715,7 +1715,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     }
 
     if physical {
-        darken_before_coda_l(&mut drafts, &timing);
+        darken_before_coda_l(&mut drafts, &mut phrases, &timing);
     }
 
     // Coarticulation: consonants borrow the tongue of the next vowel (or
@@ -2277,7 +2277,12 @@ fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
 /// glide towards schwa included, glides towards /ʊ/, the vowel of the
 /// back of the tongue raised (the slow tongue body gets part of the way).
 /// Not a diphthong, which glides to its own end, and not /ʊ/ itself.
-fn darken_before_coda_l(drafts: &mut Vec<Draft>, timing: &Tuning) {
+/// `phrases` (each one's drafts) is kept up to date with the split.
+fn darken_before_coda_l(
+    drafts: &mut Vec<Draft>,
+    phrases: &mut [(usize, usize, Break)],
+    timing: &Tuning,
+) {
     let share = timing.dark_l_share;
     if share <= 0.0 {
         return;
@@ -2323,6 +2328,14 @@ fn darken_before_coda_l(drafts: &mut Vec<Draft>, timing: &Tuning) {
             d.accent = 0.0;
             d.part = Part::Offglide;
             drafts.insert(k + 1, d);
+            for q in phrases.iter_mut() {
+                if q.0 > k {
+                    q.0 += 1;
+                }
+                if q.1 > k {
+                    q.1 += 1;
+                }
+            }
             k += 1;
         }
         k += 1;

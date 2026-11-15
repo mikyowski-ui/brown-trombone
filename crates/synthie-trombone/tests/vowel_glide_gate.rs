@@ -29,7 +29,7 @@ const SR: f32 = 48_000.0;
 /// the environment variable `SYNTHIE_TROMBONE_PROFILE` names a profile
 /// file, that profile's (as in `physical_gates`, so the tuner can hold a
 /// candidate to these gates too).
-fn tuned(settings: VoiceSettings) -> VoiceSettings {
+fn tuned(settings: &VoiceSettings) -> VoiceSettings {
     static PROFILE: OnceLock<Option<String>> = OnceLock::new();
     let profile = PROFILE.get_or_init(|| {
         let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
@@ -38,18 +38,18 @@ fn tuned(settings: VoiceSettings) -> VoiceSettings {
         Some(text)
     });
     let Some(profile) = profile else {
-        return settings;
+        return *settings;
     };
     let laid = settings.with_profile(profile).expect("a voice profile");
     VoiceSettings {
         tuning: laid.tuning,
-        ..settings
+        ..*settings
     }
 }
 
 /// The deep voice on the physical engine with the tuning under test.
 fn physical() -> VoiceSettings {
-    tuned(Preset::Deep.settings().with_engine(Engine::Physical))
+    tuned(&Preset::Deep.settings().with_engine(Engine::Physical))
 }
 
 /// The physical voice with its lax vowels as much shorter than its tense

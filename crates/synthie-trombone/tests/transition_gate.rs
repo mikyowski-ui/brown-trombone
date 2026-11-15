@@ -406,26 +406,30 @@ fn a_phrase_opening_on_a_nasal_or_l_is_voiced_before_its_vowel() {
 fn a_vowel_before_a_dark_l_is_dark_already() {
     // The LibriSpeech reader's vowels before an /l/ that closes their
     // syllable have their F2 near 1000 Hz from a quarter of the way in
-    // ("quilter" 1090, "welcome" 1070) and fall some 70 Hz into the /l/;
-    // until round 11 the engine's held their own shape up to the /l/ and
-    // rose into it (1460 to 1660 Hz), then fell 500 Hz into the lateral.
-    for (text, v) in [
-        ("welcome", Phoneme::Eh),
-        ("quilter", Phoneme::Ih),
-        ("help me", Phoneme::Eh),
-    ] {
-        let s = place::speak(&voice(), text, true);
+    // ("quilter" 1090, "welcome" 1070, "help" 1190) and fall some 70 Hz
+    // into the /l/; until round 11 the engine's held their own shape up to
+    // the /l/ (1460 to 1660 Hz by LPC) and fell some 500 Hz into it.
+    let mut light = voice();
+    light.tuning.dark_l_share = 0.0;
+    let end_f2 = |settings: &VoiceSettings, text: &str, v: Phoneme| {
+        let s = place::speak(settings, text, true);
         let k = s.find(v, 0).expect("the vowel");
         let l = s.find(Phoneme::L, k).expect("the /l/");
-        let (v0, _) = s.ranges[k];
         let v1 = s.ranges[l - 1].1;
-        let quarter = v0 + (v1 - v0) / 4;
-        let early = s.formants_at(quarter, 0.0).expect("an open vowel")[1];
-        let late = s.formants_at(v1, -5.0).expect("an open vowel")[1];
-        println!("{text}: F2 {early:.0} at a quarter, {late:.0} at the /l/");
+        s.formants_at(v1, -5.0).expect("an open vowel")[1]
+    };
+    for (text, v) in [
+        ("help me", Phoneme::Eh),
+        ("quilter", Phoneme::Ih),
+        ("a pill", Phoneme::Ih),
+        ("a sell", Phoneme::Eh),
+    ] {
+        let dark = end_f2(&voice(), text, v);
+        let own = end_f2(&light, text, v);
+        println!("{text}: F2 {dark:.0} Hz at the /l/ ({own:.0} on the vowel's own shape)");
         assert!(
-            late <= early - 150.0,
-            "{text}: F2 {early:.0} at a quarter of the vowel, {late:.0} at the /l/"
+            dark <= own - 150.0,
+            "{text}: F2 {dark:.0} Hz at the /l/, {own:.0} on the vowel's own shape"
         );
     }
 }
