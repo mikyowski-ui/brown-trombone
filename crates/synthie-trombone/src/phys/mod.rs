@@ -633,7 +633,10 @@ impl Phys {
         self.turbulence.teeth_corner = old.teeth_corner;
         self.turbulence.tilt_depth = old.tilt_depth;
         self.turbulence.tilt_corner = old.tilt_corner;
+        self.turbulence.tilt_top = old.tilt_top;
+        self.turbulence.tilt_top_corner = old.tilt_top_corner;
         self.turbulence.slit_corner = old.slit_corner;
+        self.turbulence.slit_gain = old.slit_gain;
         self.turbulence.set_rate(self.dt, self.len);
     }
 

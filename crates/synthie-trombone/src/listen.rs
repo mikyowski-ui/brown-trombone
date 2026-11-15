@@ -9,7 +9,9 @@
 //! - **Pitch** by a cumulative normalised difference function (YIN) over
 //!   the last 37 ms, 60–500 Hz; the period is then placed at the peak of
 //!   the normalised cross-correlation, refined between samples.
-//! - **Formants** by linear prediction of order 12: pre-emphasis, a 20 ms
+//! - **Formants** by linear prediction of order 12: pre-emphasis in two
+//!   stages (+6 dB per octave from 60 Hz and again from 1 kHz, for the
+//!   dark spectrum of a speaking voice), a 20 ms
 //!   Hann window, autocorrelation with a Gaussian lag window a third of
 //!   the pitch wide (so the model follows the envelope, not single
 //!   harmonics), the Levinson–Durbin recursion, and the roots of the
@@ -34,13 +36,14 @@
 //! How well it does, measured on this crate's own voices (see
 //! `tests/listen_gate.rs`): pitch within 2 % in every frame from 80 to
 //! 400 Hz (0.2 % on the classic engine). With the classic engine, F1 and
-//! F2 come within 3 % of the tract's resonances at 110 Hz and within 7 %
-//! at 220 Hz, except where F1 falls between the first two harmonics (/u/
-//! at 220 Hz: F1 22 % high), the hard case of any envelope method. The
-//! physical engine's sound at 220 Hz itself carries an F1 10–20 % above
-//! its closed-glottis resonance (the open glottis loads the tract), and
-//! that is what is heard. Formants reach a new vowel (within 10 %) 20–30 ms
-//! after an abrupt change; [`Listener::latency`] gives the bound.
+//! F2 come within 6 % of the tract's resonances at 110 and 220 Hz, except
+//! where F1 falls between the first two harmonics (/u/ at 220 Hz: F1 20 %
+//! high), the hard case of any envelope method. With the physical engine
+//! (whose voice is as dark as a speaker's) they come within 8 %, except
+//! the F1 of /i/ and /u/ at 110 Hz and of /ɔ/ at 220 Hz, which lean 9 to
+//! 14 % towards the bump its closing folds put in the source near 440 Hz.
+//! Formants reach a new vowel (within 10 %) 20–30 ms after an abrupt
+//! change; [`Listener::latency`] gives the bound.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -69,8 +72,24 @@ const LPC_WIN: usize = 240;
 /// the chosen period is taken for the period itself (a voice's own period
 /// sits under 0.15; half the period of a clear voice, above 0.29).
 const SUBPERIOD_DIP: f32 = 0.2;
-/// Pre-emphasis coefficient.
+/// Pre-emphasis coefficient: +6 dB per octave from about 60 Hz, for the
+/// lip radiation's tilt.
 const PRE: f32 = 0.97;
+/// Coefficient of a second stage of pre-emphasis, +6 dB per octave more
+/// from about 1 kHz (a zero at 975 Hz): for the glottal source's own fall
+/// above its return-phase corner. A speaking voice is that dark (the
+/// LibriSpeech reader's vowels have 2-4 kHz 29 dB under 0-1 kHz, and so has
+/// the physical engine's since its source tilt), and with only the first
+/// stage linear prediction spends its poles on the strong band under 1
+/// kHz: in about one frame in ten of the physical /æ/ the pole of F2 came
+/// out 1.9-3.6 kHz broad and F3 (2.2-2.3 kHz) was read as F2, so the step
+/// from /u/ to /æ/ took 220 ms to settle (22 ms with this stage), and the
+/// close vowels' F1 leaned 3 to 9 points further towards the source's
+/// bump. 0.55 to 0.65 pass every gate; 0.5 lets an F2 slip through on the
+/// copied /æ/, 0.7 reads the classic /i/ at 220 Hz 8.2 % high. On the
+/// reader's 16 sentences the vowels' F2 jumps less from frame to frame
+/// (90th percentile 4.6 → 3.8 %), and his vowels are told apart as well.
+const PRE_SOURCE: f32 = 0.6;
 /// Width of the Gaussian lag window, as a fraction of the pitch.
 const LAG_WIDTH: f32 = 0.3;
 /// Most iterations of the root finder per attempt (a warm start needs
@@ -434,7 +453,7 @@ impl Listener {
             self.last_pitch = pitch;
         }
         if ready && level > LEVEL_FLOOR && (self.voiced || share < VOWEL_SHARE) {
-            self.latest(LPC_WIN + 1, false);
+            self.latest(LPC_WIN + 2, false);
             if let Some(f) = self.formants_now(self.last_pitch) {
                 self.recent = [self.recent[1], self.recent[2], f];
                 self.recent_len = (self.recent_len + 1).min(3);
@@ -606,13 +625,14 @@ impl Listener {
         best.clamp(0.0, 1.0)
     }
 
-    /// F1–F3 by linear prediction on `frame[..=LPC_WIN]`, with the lag
+    /// F1–F3 by linear prediction on `frame[..LPC_WIN + 2]`, with the lag
     /// window set for `pitch`.
     #[allow(clippy::many_single_char_names)]
     fn formants_now(&mut self, pitch: f32) -> Option<[f32; 3]> {
         let mut u = [0.0f32; LPC_WIN];
         for (n, v) in u.iter_mut().enumerate() {
-            *v = (self.frame[n + 1] - PRE * self.frame[n]) * self.window[n];
+            let e = |m: usize| self.frame[m + 1] - PRE * self.frame[m];
+            *v = (e(n + 1) - PRE_SOURCE * e(n)) * self.window[n];
         }
         let mut r = [0.0f64; ORDER + 1];
         for (k, rk) in r.iter_mut().enumerate() {
