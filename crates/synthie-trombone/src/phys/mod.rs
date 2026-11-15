@@ -86,6 +86,14 @@ const WALL_RESISTANCE: f32 = 300.0;
 const WALL_LAYER_RESISTANCE: f32 = 650.0;
 const WALL_LAYER_MASS: f32 = 0.8;
 
+/// Seconds over which the pressure that drives a jet is averaged (see
+/// `Phys::jet_cap`): long enough to smooth the voice's own sound waves out
+/// of it in the vowel a closure is made from (at 2 ms the closing tap of "a
+/// pot of" still made the utterance's loudest sample), short enough for the
+/// mouth's pressure to rise with a fricative's gap (at 8 ms the hiss of /s/
+/// between vowels lasted 62 ms where it lasts 78).
+const PRESSURE_AVERAGING: f32 = 0.004;
+
 /// Seconds over which displaced-air flow is smoothed (articulators are
 /// updated in blocks; their velocity must not step).
 const DISPLACEMENT_SMOOTHING: f32 = 0.004;
@@ -403,6 +411,11 @@ pub(crate) struct Phys {
     /// the noise rule sees).
     flow: [f32; N + 1],
     flow_smooth: f32,
+    /// Pressure at each joint, averaged over [`PRESSURE_AVERAGING`],
+    /// dyn/cm²: what drives a jet through the cell in front of it (see
+    /// [`Phys::jet_cap`]).
+    press: [f32; N + 1],
+    press_smooth: f32,
     /// Narrowest cell behind the teeth this block, and how far its jet
     /// travels to strike them, cm (see [`JET_CORE`]).
     jet_cell: usize,
@@ -510,6 +523,8 @@ impl Phys {
             lips: Radiation::default(),
             flow: [0.0; N + 1],
             flow_smooth: 1.0,
+            press: [0.0; N + 1],
+            press_smooth: 1.0,
             jet_cell: TEETH_AT - 1,
             jet_travel: 0.0,
             turbulence: Turbulence::new(0x7B0E_5EED),
@@ -580,6 +595,7 @@ impl Phys {
         self.turbulence.set_rate(dt, len);
         self.tilt = self.turbulence.tilt(dt, len);
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
+        self.press_smooth = (dt / PRESSURE_AVERAGING).min(1.0);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
     }
@@ -1116,7 +1132,7 @@ impl Phys {
                     inv[i],
                     inv[j],
                     self.turbulence.jet_eff,
-                    self.v_max,
+                    self.jet_cap(i),
                 );
                 pn = hiss * free;
                 self.jet_sum[j] += free;
@@ -1137,7 +1153,7 @@ impl Phys {
                         inv[c],
                         inv[j],
                         self.turbulence.teeth_eff,
-                        self.v_max,
+                        self.jet_cap(c),
                     ) * reach
                         * at;
                     pn += hiss_teeth * struck;
@@ -1166,6 +1182,7 @@ impl Phys {
             nl[i] = s.out_left;
             nr[j] = s.out_right;
             self.flow[j] += (s.u - self.flow[j]) * self.flow_smooth;
+            self.press[j] += (s.p1 - self.press[j]) * self.press_smooth;
             self.flow_sum[j] += s.u;
             u_skin += self.wall_commit(i, s.p1);
             if nose_here {
@@ -1205,7 +1222,7 @@ impl Phys {
                     inv[i],
                     0.0,
                     self.turbulence.jet_eff,
-                    self.v_max,
+                    self.jet_cap(i),
                 );
                 joint.pn = hiss * free;
                 self.jet_sum[N] += free;
@@ -1241,7 +1258,7 @@ impl Phys {
                 inv[c],
                 0.0,
                 self.turbulence.jet_eff,
-                self.v_max,
+                self.jet_cap(c),
             );
             if p > 0.0 {
                 u_edge = self.turbulence.edge_hiss(self.voiced) * edge * p * INV_RHO_C / inv[c];
@@ -1265,6 +1282,22 @@ impl Phys {
         self.gauge.jet_cell = jet.1;
         self.gauge.jet_speed = (self.flow[jet.1 + 1] * inv[jet.1]).max(0.0);
         u_lips + u_nose + u_skin + u_edge
+    }
+
+    /// Fastest a jet out of cell `i` can be: what the pressure behind it
+    /// drives against the open air in front, `√(2p/ρ)` with the headroom of
+    /// a throat that wins some of it back (the pressure averaged over
+    /// [`PRESSURE_AVERAGING`]), and never more than lung pressure gives. In
+    /// a steady stream the flow over the area is that speed already. As a
+    /// gap shuts the averaged flow lags it: bounded by lung pressure alone,
+    /// the jet of a closing tongue tip ran at its fastest for the last 5 to
+    /// 8 ms before the closure, where the pressure behind a gap closing on a
+    /// voice is a fraction of the lungs', and that was the loudest moment of
+    /// an utterance (the tap of "a pot of": its loudest sample 8 dB over the
+    /// vowel's; the /d/ of "slid": 6 dB).
+    fn jet_cap(&self, i: usize) -> f32 {
+        self.v_max
+            .min(JET_HEADROOM * sqrt(2.0 * self.press[i].max(0.0) / RHO))
     }
 
     /// Advance the active widening of the pharynx by one tick; returns the
@@ -1359,6 +1392,7 @@ impl Phys {
         self.gauge.u_glottis = s.u;
         self.gauge.p_sub = s.p1;
         self.gauge.p_supra = self.l[0] + s.out_right;
+        self.press[0] += (self.gauge.p_supra - self.press[0]) * self.press_smooth;
 
         for k in 0..NS {
             self.sub_r[k] = nsr[k] * TRACHEA_LOSS;

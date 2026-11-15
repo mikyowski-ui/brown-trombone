@@ -147,6 +147,59 @@ fn the_first_formant_runs_flat_from_l_into_ih() {
     }
 }
 
+#[test]
+fn an_l_before_a_vowel_is_a_lateral() {
+    // Measured with LPC in the middle of the /l/ (the LibriSpeech reader's
+    // /l/ after a consonant or between vowels, 17 of them; the owner's
+    // "slid", "planks", "glue", "blue"): F1 310 to 450 Hz (the owner's 310
+    // to 350), F2 950 to 1200, F3 2450 to 2900, never the low F3 of /r/;
+    // in a cluster the reader holds it some 20 to 35 ms before the second
+    // formant sets off for the vowel, the first rising into it. The
+    // engine's /l/, a gap meant to hiss with the incisors shut in front of
+    // it until round 10, stood at 490 to 500 Hz in the tract (470 by LPC),
+    // above the /ɪ/ after it, with F3 near 3250, and was heard as /r/ after
+    // /s/ ("slim", "sleep", "slate"). The tract reads some 30 Hz above LPC
+    // on the output in the first formant.
+    for text in ["slid", "a lid", "sled", "plan", "glad", "a slim chance"] {
+        let s = place::speak(&voice(), text, true);
+        let (l, v) = after(&s, Phoneme::L);
+        let (l0, l1) = (s.ranges[l].0, s.ranges[v - 1].1);
+        let (v0, v1) = s.ranges[v];
+        let l_mid = usize::midpoint(l0, l1);
+        let lateral = s.formants_at(l_mid, 0.0).expect("an open /l/");
+        let vowel = s.formants_at(usize::midpoint(v0, v1), 0.0).expect("a vowel");
+        println!(
+            "{text}: /l/ {:.0} {:.0} {:.0}, vowel {:.0} {:.0}",
+            lateral[0], lateral[1], lateral[2], vowel[0], vowel[1]
+        );
+        assert!(lateral[0] <= 450.0, "{text}: /l/ F1 {:.0}", lateral[0]);
+        assert!(
+            lateral[0] < vowel[0],
+            "{text}: F1 {:.0} in the /l/, {:.0} in the vowel",
+            lateral[0],
+            vowel[0]
+        );
+        assert!(
+            (950.0..=1350.0).contains(&lateral[1]),
+            "{text}: /l/ F2 {:.0}",
+            lateral[1]
+        );
+        assert!(
+            (2450.0..=3400.0).contains(&lateral[2]),
+            "{text}: /l/ F3 {:.0}",
+            lateral[2]
+        );
+        // The lateral shape is held before the release: frames from the
+        // /l/'s start on whose second formant is within 100 Hz of its
+        // lowest there.
+        let path = oral(&s, l0, v0);
+        let low = path.iter().map(|f| f.1[1]).fold(f32::INFINITY, f32::min);
+        let held = path.iter().filter(|f| f.1[1] <= low + 100.0).count();
+        let held_ms = 1000.0 * (held * place::FRAME) as f32 / place::SR;
+        assert!(held_ms >= 15.0, "{text}: the /l/ is held {held_ms:.0} ms");
+    }
+}
+
 /// What the larynx and the tract do through one /t d/ between vowels:
 /// how long the mouth is shut, the least the folds open and close over any
 /// 10 ms of it against their swing in the vowel before, and how far the
