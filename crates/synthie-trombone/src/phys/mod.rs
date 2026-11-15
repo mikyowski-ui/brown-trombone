@@ -1284,11 +1284,14 @@ impl Phys {
         u_lips + u_nose + u_skin + u_edge
     }
 
-    /// Fastest a jet out of cell `i` can be: what the pressure behind it
-    /// drives against the open air in front, `√(2p/ρ)` with the headroom of
-    /// a throat that wins some of it back (the pressure averaged over
-    /// [`PRESSURE_AVERAGING`]), and never more than lung pressure gives. In
-    /// a steady stream the flow over the area is that speed already. As a
+    /// Fastest a jet out of cell `i` can be: never more than lung pressure
+    /// gives, and while the cell is shutting no more than what the pressure
+    /// behind it drives against the open air in front, `√(2p/ρ)` with the
+    /// headroom of a throat that wins some of it back (the pressure averaged
+    /// over [`PRESSURE_AVERAGING`]). In a steady stream the flow over the
+    /// area is the stream's speed already, and a fricative's hiss is left as
+    /// it was (bounded so in its steady part too, the gap behind a narrow
+    /// channel lost some of its drive: /f θ/ came within 10 dB of /s/). As a
     /// gap shuts the averaged flow lags it: bounded by lung pressure alone,
     /// the jet of a closing tongue tip ran at its fastest for the last 5 to
     /// 8 ms before the closure, where the pressure behind a gap closing on a
@@ -1296,6 +1299,11 @@ impl Phys {
     /// an utterance (the tap of "a pot of": its loudest sample 8 dB over the
     /// vowel's; the /d/ of "slid": 6 dB).
     fn jet_cap(&self, i: usize) -> f32 {
+        if self.a1[i] >= self.a0[i] {
+            // Opening or held: the averaged flow over the area is the
+            // stream's own speed (or lags behind it, as a release opens).
+            return self.v_max;
+        }
         self.v_max
             .min(JET_HEADROOM * sqrt(2.0 * self.press[i].max(0.0) / RHO))
     }

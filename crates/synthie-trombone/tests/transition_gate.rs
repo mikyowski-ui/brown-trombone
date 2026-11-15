@@ -167,7 +167,9 @@ fn an_l_before_a_vowel_is_a_lateral() {
         let (v0, v1) = s.ranges[v];
         let l_mid = usize::midpoint(l0, l1);
         let lateral = s.formants_at(l_mid, 0.0).expect("an open /l/");
-        let vowel = s.formants_at(usize::midpoint(v0, v1), 0.0).expect("a vowel");
+        let vowel = s
+            .formants_at(usize::midpoint(v0, v1), 0.0)
+            .expect("a vowel");
         println!(
             "{text}: /l/ {:.0} {:.0} {:.0}, vowel {:.0} {:.0}",
             lateral[0], lateral[1], lateral[2], vowel[0], vowel[1]
@@ -220,7 +222,10 @@ fn an_s_after_a_k_hisses_at_the_end_of_an_utterance() {
         let hiss = rms(&s.audio[s0..s1]);
         let level = 20.0 * (hiss / rms(&s.audio[v0..v1])).log10();
         println!("{text}: /s/ {level:.1} dB against the vowel");
-        assert!(level > -35.0, "{text}: the final /s/ {level:.1} dB under the vowel");
+        assert!(
+            level > -35.0,
+            "{text}: the final /s/ {level:.1} dB under the vowel"
+        );
     }
 }
 

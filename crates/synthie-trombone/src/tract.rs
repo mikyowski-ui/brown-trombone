@@ -1461,8 +1461,11 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
 /// was heard as /r/ (16 of 27 /l/ after a consonant in short phrases heard
 /// right, 21 before); with the channel running back from the place instead
 /// the third formant fell to 2700 Hz, the second rose to 1400, and 6 of 27
-/// were. With the channel to the teeth all 27 were: the side channels'
-/// open end, not the tip, ends the cavity behind the lips.
+/// were. With the channel run forward to the front of the ridge (three
+/// cells, 35 to 38) or on to the teeth (four) all 27 were, and 28 of 28 in
+/// a larger set: the side channels' open end, not the tip, ends the cavity
+/// behind the lips. Into the teeth's cell it narrowed the opening there
+/// that the lips of a /b/ released into it must pass.
 #[allow(clippy::cast_precision_loss)]
 fn carve_lateral(target: &mut [f32; N], c: Constriction, floor: f32, motion: &Tuning) {
     let d = (c.diameter - 0.3).max(floor);

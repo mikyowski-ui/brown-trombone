@@ -638,7 +638,9 @@ impl Articulation {
     pub(crate) fn lateral(self) -> bool {
         self.velum <= 0.0
             && self.constriction.is_some_and(|c| {
-                c.index == LATERAL_PLACE && c.diameter > SHUT_WIDEST && c.diameter < APPROXIMANT_WIDEST
+                c.index == LATERAL_PLACE
+                    && c.diameter > SHUT_WIDEST
+                    && c.diameter < APPROXIMANT_WIDEST
             })
     }
 

@@ -736,10 +736,12 @@ tuning! {
     /// Cells in front of its place over which the side channels of an /l/
     /// run (physical engine; see `tract::carve_lateral`): the air of a
     /// lateral leaves round the sides of a tongue whose tip touches the
-    /// ridge, between them and the teeth. At 4 the channel ends at the
-    /// teeth; at 1 (a pinch at the place) the /l/ after a consonant was
-    /// heard as /r/ in 8 of 27 short phrases, at 4 in none.
-    lateral_channel = 4.0, 0.0..=6.0, A;
+    /// ridge, between them and the teeth. At 3 the channel ends at the
+    /// front of the ridge; at 1 (a pinch at the place) the /l/ after a
+    /// consonant was heard as /r/ in 8 of 27 short phrases, at 3 and 4 in
+    /// none (at 4, into the teeth's cell, the lips of "a blue" were 0.36
+    /// apart 10 ms after the release, where they open to 0.63).
+    lateral_channel = 3.0, 1.0..=5.0, A;
 }
 
 impl Default for Tuning {
