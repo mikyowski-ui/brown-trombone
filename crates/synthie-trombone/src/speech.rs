@@ -162,7 +162,8 @@ pub struct Utterance {
     devoicing_lead: f32,
     /// Head start of the velum out of a nasal into an obstruent, seconds.
     velum_lead: f32,
-    /// How many times faster the velum shuts out of /n ŋ/ into a vowel.
+    /// How many times faster the velum shuts out of /n ŋ/ into a close
+    /// vowel.
     velum_release: f32,
     /// Shortest complete closure of a voiceless stop, seconds.
     closure_floor: f32,
@@ -732,7 +733,7 @@ impl Speaker {
             {
                 voice.set_velum(next.articulation.velum);
             }
-            // Out of /n ŋ/ into a vowel the velum shuts quickly from the
+            // Out of /n ŋ/ into a close vowel the velum shuts quickly from the
             // release on (`Tuning::velum_release`).
             if physical {
                 let haste = if self.opening_from_nasal(&seg) {
@@ -820,22 +821,28 @@ impl Speaker {
         voice.process()
     }
 
-    /// Whether `seg` is the end of an /n/ or /ŋ/ released into a vowel (its
-    /// articulators already sent on) or a vowel after one. Not /m/: its
-    /// lips open slowly onto a rounded vowel's narrow ones, and with the
-    /// nose shut that soon the voice of "smooth" dipped 6 to 8 dB under the
-    /// /u/ 20 to 40 ms after the release.
+    /// Whether `seg` is the end of an /n/ or /ŋ/ released into a close
+    /// vowel (its articulators already sent on) or a close vowel after one.
+    /// A close vowel's mouth is narrow, so even a velum a quarter open
+    /// takes over its sound (the /u/'s loudest peak moves to 700 Hz, the
+    /// /i/'s to 630); an open vowel keeps its own first formant the
+    /// loudest (/ɑ/ 834 Hz), and shut quickly into /oʊ ɑ/ the /n/ of "no"
+    /// and "gnawed" was heard as /m/ or /l/. Not /m/: its lips open slowly
+    /// onto a rounded vowel's narrow ones, and with the nose shut that soon
+    /// the voice of "smooth" dipped 6 to 8 dB under the /u/ 20 to 40 ms
+    /// after the release.
     fn opening_from_nasal(&self, seg: &Segment) -> bool {
         let nasal = |p: Phoneme| matches!(p, Phoneme::N | Phoneme::Ng);
+        let close = |p: Phoneme| matches!(p, Phoneme::Iy | Phoneme::Ih | Phoneme::Uw | Phoneme::Uh);
         if nasal(seg.phoneme) {
             self.ahead
                 && self
                     .utterance
                     .segments
                     .get(self.index + 1)
-                    .is_some_and(|n| is_vowel(n.phoneme))
+                    .is_some_and(|n| close(n.phoneme))
         } else {
-            is_vowel(seg.phoneme)
+            close(seg.phoneme)
                 && self
                     .index
                     .checked_sub(1)
