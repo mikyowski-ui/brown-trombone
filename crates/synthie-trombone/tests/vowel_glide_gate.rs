@@ -80,7 +80,9 @@ fn lax_vowels_can_be_35_to_40_percent_shorter_than_tense_ones() {
             let text = |v: Phoneme| format!("[S {}{stress} L] [AX0]", v.symbol());
             let ratio = length(&text(lax), lax) / length(&text(tense), tense);
             println!("{lax}/{tense} (stress {stress}): {ratio:.3}");
-            assert!((0.60..=0.65).contains(&ratio), "{lax}/{tense}: {ratio}");
+            // (Bounds as lengths are set, to within the rounding of a
+            // product of lengths.)
+            assert!((0.60..=0.6501).contains(&ratio), "{lax}/{tense}: {ratio}");
         }
     }
     // ...and over whole sentences, against the tense vowels and the

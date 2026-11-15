@@ -33,7 +33,25 @@ use place::Spoken;
 use synthie_trombone::{Phoneme, Preset, VoiceSettings};
 
 fn voice() -> VoiceSettings {
-    Preset::Deep.settings()
+    // The tuning under test: the default one, or, when the environment
+    // variable `SYNTHIE_TROMBONE_PROFILE` names a profile file, that
+    // profile's (as in `physical_gates`).
+    static PROFILE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let settings = Preset::Deep.settings();
+    let profile = PROFILE.get_or_init(|| {
+        let path = std::env::var("SYNTHIE_TROMBONE_PROFILE").ok()?;
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        println!("gates run with the profile {path}");
+        Some(text)
+    });
+    let Some(profile) = profile else {
+        return settings;
+    };
+    let laid = settings.with_profile(profile).expect("a voice profile");
+    VoiceSettings {
+        tuning: laid.tuning,
+        ..settings
+    }
 }
 
 /// The frames from sample `from` to sample `to` whose tract is open and

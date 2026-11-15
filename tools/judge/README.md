@@ -678,7 +678,8 @@ formants there times the shares (from the voice's own shape, rounding
 and all), held by the vowel and by the consonants made on its body, and
 moves the tongue body up to 1.6 times faster through a phone shorter
 than the rules make it; phones are made no shorter than 70 % of their
-rule length (`Tuning::follow_shortest`).
+rule length (`Tuning::follow_shortest`; by class since round 11:
+`Tuning::follow_shortest_light` for the light ones, also 0.7).
 
 Measured in round 9 on the 16 anchors (every part left out in turn from
 the final schedules; F1/F2 errors are against the reader's, each over its
