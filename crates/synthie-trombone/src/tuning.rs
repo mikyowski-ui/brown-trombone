@@ -294,7 +294,7 @@ tuning! {
     /// Share of the lung pressure lost between the start and the end of a
     /// phrase: the speaker's breath running down, which lowers the level
     /// and the pitch together.
-    phrase_decline = 0.15, 0.0..=0.4, A;
+    phrase_decline = 0.3, 0.0..=0.4, A;
     /// Share of the lung pressure let go over the last vowel of a
     /// statement: the voice dies away instead of being cut off (half of it
     /// before a comma).
@@ -334,7 +334,7 @@ tuning! {
 
     /// Rise of the pitch on a stressed vowel, semitones at expressiveness
     /// 1 (a speaker's accents are 2 to 5).
-    accent_size = 6.0, 0.0..=16.0, B;
+    accent_size = 8.0, 0.0..=16.0, B;
     /// Seconds over which an accent sinks back after its vowel.
     accent_decay = 0.2, 0.05..=0.5, B;
     /// Fall of the pitch over a phrase, semitones at expressiveness 1.
@@ -695,6 +695,28 @@ tuning! {
     /// How far a followed schedule may move a vowel's F1 and F2 from the
     /// voice's own, a share either way (see `speech::PhoneSpan::formants`).
     follow_formant_range = 0.15, 0.0..=0.3, C;
+
+    // ----- the rules' prosody against speakers' (round 10) ----------------
+
+    /// How much quieter an unaccented vowel is than an accented one beyond
+    /// what its pitch and length give, dB of level (physical engine): the
+    /// lungs push less through it, and the consonants between two vowels
+    /// take the breath of the line from one to the other (see
+    /// `speech::weigh_syllables`). `0` breathes every syllable alike.
+    unaccented_level = 1.5, 0.0..=6.0, A;
+    /// How much longer the consonants after the last vowel of a phrase are
+    /// (physical engine), on top of that vowel's own lengthening: the
+    /// LibriSpeech reader draws out his whole last syllable, its closing
+    /// consonants most (1.2 to 1.6 times the rules' at his pace, the vowel
+    /// 1.2 times), where the rules lengthened the vowel alone.
+    final_coda_stretch = 1.25, 1.0..=1.8, B;
+    /// Pause after a sentence, s (physical engine; the classic engine keeps
+    /// 0.38, a comma 0.18 in both): the two reference recordings pause 0.54
+    /// and 0.62 s between their two sentences, the owner 0.74.
+    sentence_pause = 0.55, 0.3..=1.0, B;
+    /// Share by which the folds are held more loosely through the vowel of
+    /// a function word (physical engine; see `speech::shade_syllables`).
+    light_laxness = 0.08, 0.0..=0.3, A;
 }
 
 impl Default for Tuning {

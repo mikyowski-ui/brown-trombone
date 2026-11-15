@@ -1667,6 +1667,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 phrases.push((phrase_start, drafts.len(), b));
                 let pause = match b {
                     Break::Comma => 0.18,
+                    _ if physical => timing.sentence_pause,
                     _ => 0.38,
                 } / rate;
                 drafts.push(silence(pause));
@@ -1704,6 +1705,12 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 head -= 1;
                 drafts[head].duration *= 1.4;
             }
+            // And the consonants that close it (see `Tuning::final_coda_stretch`).
+            if physical && drafts[k - 1].phoneme != Phoneme::Sil {
+                for d in &mut drafts[v + 1..k] {
+                    d.duration *= timing.final_coda_stretch;
+                }
+            }
         }
     }
 
@@ -1725,13 +1732,18 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
     if physical {
+        let light = function_words(tokens);
         for &(a, b, _) in &phrases {
             relax_the_folds(&mut drafts[a..b], tense, &timing);
+            shade_syllables(&mut drafts[a..b], &light, tense, &timing);
         }
+        // Which vowels carry an accent, before the intonation turns the
+        // stress marks into pitch.
+        let accented: Vec<bool> = drafts.iter().map(|d| d.vowel && d.accent > 0.0).collect();
         for &(a, b, brk) in &phrases {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
-        breathe(&mut drafts, &mut phrases, &timing);
+        breathe(&mut drafts, &mut phrases, &accented, &timing);
         lean_on_vowels(&mut drafts);
         assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
@@ -1886,6 +1898,72 @@ fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
             d.gesture.softness = d.gesture.softness.max(timing.final_softness * share);
         }
         left -= d.duration;
+    }
+}
+
+/// For each phone of `tokens`, whether its word has no stressed vowel of
+/// its own: a function word ("the", "of", "to", a weak form).
+fn function_words(tokens: &[Token]) -> Vec<bool> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut stressed = false;
+    for t in tokens {
+        match *t {
+            Token::Phone { stressed: s, .. } => {
+                out.push(false);
+                stressed |= s;
+            }
+            Token::WordBreak | Token::Break(_) => {
+                out[start..].fill(!stressed);
+                start = out.len();
+                stressed = false;
+            }
+        }
+    }
+    out[start..].fill(!stressed);
+    out
+}
+
+/// The voice quality of each syllable (physical engine): the folds are held
+/// more loosely through the vowel of a function word, by
+/// [`Tuning::light_laxness`] of the tenseness, within the range a followed
+/// schedule's tenseness keeps to ([`Tuning::follow_tenseness_low`]). The
+/// consonants keep theirs: a voiced closure needs folds held firmly enough
+/// to vibrate against the pressure in the mouth.
+///
+/// Measured in the LibriSpeech reader's 16 sentences (aligned; H1*-H2* of
+/// each vowel against the mean of its sentence's sonorants, fitted over
+/// stress, function word, place in the phrase and vowel height, each half
+/// of the set alone): his function words' vowels are 1.3 to 1.7 dB
+/// breathier than the rest, where the rules' were as breathy as the rest.
+/// His last two syllables are also 0.6 to 1.6 dB less breathy than the
+/// rest, the rules' 0.8 to 1.3 dB more, the breath dying away under them;
+/// folds held 12 % more firmly there made the voice start 43 Hz low after
+/// the /p/ of "a pa" (`the_voice_starts_higher_after_a_voiceless_stop`),
+/// so that is left as it is. These explain little of his contour (held out,
+/// 2 to 8 % of its variance); the rest moves from phone to phone with
+/// nothing the text says.
+fn shade_syllables(phrase: &mut [Draft], light: &[bool], tense: f32, timing: &Tuning) {
+    let lo = timing.follow_tenseness_low;
+    for k in 0..phrase.len() {
+        if !(phrase[k].vowel && phrase[k].part == Part::Head)
+            || !light.get(phrase[k].phone as usize).copied().unwrap_or(false)
+        {
+            continue;
+        }
+        let share = (1.0 - timing.light_laxness).clamp(lo.min(1.0), 1.0);
+        if (share - 1.0).abs() < 1e-6 {
+            continue;
+        }
+        let end = k + 1 + phrase[k + 1..]
+            .iter()
+            .take_while(|d| d.vowel && d.part != Part::Head)
+            .count();
+        for d in &mut phrase[k..end] {
+            if d.voiced {
+                d.tenseness = Some((d.tenseness.unwrap_or(tense) * share).clamp(0.0, 1.0));
+            }
+        }
     }
 }
 
@@ -2288,12 +2366,17 @@ fn expand(
             && next.is_some_and(|(n, _, _)| is_obstruent(n))
     };
     if is_vowel(p)
-        && let Some((n, _, _)) = context.next
+        && let Some((n, _, same_word)) = context.next
+        && same_word
         && is_obstruent(n)
         && !onset_of_stress(context.next, context.after_next)
     {
         // Vowels are clipped before a voiceless coda and drawn out before a
-        // voiced one, by about 2:3 between the two.
+        // voiced one, by about 2:3 between the two. Not before the first
+        // sound of the next word, which is no coda of theirs: clipped by
+        // the /s/ of "slid", the /u/ of "canoe" was 128 ms where the two
+        // reference recordings and the owner hold it for 180 to 215, and
+        // drawn out by the /b/ of "birch", "the" was longer than people's.
         dur *= if n.is_voiced() {
             timing.prelenis_stretch
         } else {
@@ -2530,7 +2613,12 @@ fn expand(
 /// bursts and the first hiss is there from the start (built up from
 /// nothing, an opening /f/, /s/ or /h/ was mostly lost). `phrases` is kept
 /// up to date with the split.
-fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timing: &Tuning) {
+fn breathe(
+    drafts: &mut Vec<Draft>,
+    phrases: &mut [(usize, usize, Break)],
+    accented: &[bool],
+    timing: &Tuning,
+) {
     for d in drafts.iter_mut() {
         if d.phoneme == Phoneme::Sil {
             d.gesture.pressure_drop = (1.0, 1.0);
@@ -2571,7 +2659,7 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
             } else {
                 1.0
             };
-            let decline = 1.0 - timing.phrase_decline * (t / total).max(0.0);
+            let decline = 1.0 - timing.phrase_decline * (t / total.max(DECLINE_SPAN)).max(0.0);
             let fade = if t > final_start && final_end > final_start {
                 let x = ((t - final_start) / (final_end - final_start)).min(1.0);
                 1.0 - final_drop * x * x * (3.0 - 2.0 * x)
@@ -2587,6 +2675,9 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
             d.gesture.pressure_drop = (start, held(t));
         }
         decline_through_vowels(&mut drafts[a..b], timing);
+        if let Some(acc) = accented.get(a..b) {
+            weigh_syllables(&mut drafts[a..b], acc, timing);
+        }
         // After the last phrase the breath dies away over the closing pause,
         // so its last sound is not cut off.
         if b + 1 == drafts.len()
@@ -2611,6 +2702,14 @@ fn breathe(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timin
         }
     }
 }
+
+/// The shortest phrase that loses all of [`Tuning::phrase_decline`] of its
+/// breath, seconds; a shorter one loses as much as the lungs would in its
+/// time. The lungs run down with time, not with the share of a phrase
+/// said: at round 10's 0.3, a two-syllable "a pa" lost it all, and its
+/// last vowel's voice started 40 Hz off, or not at all, after the /p/
+/// (`the_voice_starts_higher_after_a_voiceless_stop`).
+const DECLINE_SPAN: f32 = 2.0;
 
 /// Level of the physical voice against lung pressure: it rises as the
 /// pressure to this power (`examples/tiltprobe.rs --level`: /a/ at 115 Hz,
@@ -2651,6 +2750,77 @@ fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
             }
         }
         k = last + 1;
+    }
+}
+
+/// The breath of each syllable against the accented ones (physical
+/// engine): the lungs push less through an unaccented vowel, by
+/// [`Tuning::unaccented_level`] dB of level, and the nasals and liquids
+/// between two vowels take the breath of the line from the middle of the
+/// one to the middle of the other (those before the first vowel and after
+/// the last take theirs), as a followed schedule's phones do. The
+/// obstruents keep the phrase's breath, as the lungs take back what they
+/// let go through each vowel (`decline_through_vowels`): with their breath
+/// on that line too, the /z/ of "his" and "has" lost so much of its hiss
+/// that it stood 9.6 dB under /s/ at 5 to 8 kHz (8.3 without), where a
+/// /z/ heard as /ð/ begins (`tests/sibilant_gate.rs`).
+///
+/// Measured in the LibriSpeech reader's 16 sentences (aligned; each vowel's
+/// level against the mean of its sentence's vowels, fitted over stress,
+/// function word, place in the phrase and vowel height): his accented
+/// vowels stand 2.7 dB over his unaccented ones, the rules' 1.2 (the pitch
+/// accent and the length alone); the two reference recordings 1.9 and 2.2,
+/// the owner's 6.5.
+fn weigh_syllables(phrase: &mut [Draft], accented: &[bool], timing: &Tuning) {
+    if timing.unaccented_level <= 0.0 {
+        return;
+    }
+    let low = crate::math::powf(10.0, -timing.unaccented_level / (20.0 * LEVEL_EXPONENT));
+    // Each vowel's middle, seconds into the phrase, and its share.
+    let mut mids: Vec<(f32, f32)> = Vec::new();
+    let mut t = 0.0;
+    let mut k = 0;
+    while k < phrase.len() {
+        if !phrase[k].vowel {
+            t += phrase[k].duration;
+            k += 1;
+            continue;
+        }
+        let last = k + phrase[k + 1..]
+            .iter()
+            .take_while(|d| d.vowel && d.part != Part::Head)
+            .count();
+        let total: f32 = phrase[k..=last].iter().map(|d| d.duration).sum();
+        let share = if accented.get(k).copied().unwrap_or(true) {
+            1.0
+        } else {
+            low
+        };
+        mids.push((t + 0.5 * total, share));
+        t += total;
+        k = last + 1;
+    }
+    let share_at = |tau: f32| -> f32 {
+        let i = mids.partition_point(|m| m.0 < tau);
+        match (i.checked_sub(1).map(|j| mids[j]), mids.get(i)) {
+            (Some(a), Some(b)) if b.0 > a.0 => lerp(a.1, b.1, (tau - a.0) / (b.0 - a.0)),
+            (Some(a), _) => a.1,
+            (_, Some(b)) => b.1,
+            _ => 1.0,
+        }
+    };
+    let mut t = 0.0;
+    for d in phrase.iter_mut() {
+        let start = t;
+        t += d.duration;
+        if is_obstruent(d.phoneme) || d.phoneme == Phoneme::Sil {
+            continue;
+        }
+        let (a, b) = d.gesture.pressure_drop;
+        d.gesture.pressure_drop = (
+            1.0 - (1.0 - a) * share_at(start),
+            1.0 - (1.0 - b) * share_at(t),
+        );
     }
 }
 
