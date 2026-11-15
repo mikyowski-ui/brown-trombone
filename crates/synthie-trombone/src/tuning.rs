@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and twenty-six numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twenty-seven numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and twenty-six numbers in three
+        /// How a voice turns sounds into speech: one hundred and twenty-seven numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -818,6 +818,30 @@ tuning! {
     /// of 12.
     sonorant_onset = 0.05, 0.0..=0.08, B;
 
+    // ----- the velum out of a nasal (round 11, "canoe") -----------------
+
+    /// How many times faster than usual the velum shuts out of an /n/ or
+    /// /ŋ/ into a vowel, from the moment the tongue lets go (physical
+    /// engine; usually some 45 ms from open to shut, here 15). Even a
+    /// quarter open, the port (0.2 cm²) couples the nose to a close vowel
+    /// so strongly that the coupled tract's loudest peak moves to 700 Hz,
+    /// above the vowel's own first formant (transfer function of /u/: 322
+    /// and 704 Hz, 10 and 16 dB), and the nose's resonances at 2.5 to 3.4
+    /// kHz come up 17 dB. Shutting at the usual speed, the velum left the
+    /// first 35 ms of the /u/ of "canoe" so: its 550 to 950 Hz band 7 to 9
+    /// dB under its 200 to 450 Hz band, where the owner's "canoe" and
+    /// "smooth" and the LibriSpeech reader's "the new" stand 16 to 26 dB
+    /// under from 5 ms after the release, with a 3.5 dB step in the level
+    /// as it shut; the recognizer heard /ʌ/, /oʊ/ or /l/ there. At 3 the
+    /// band is 18 dB under from 20 ms on and the step is gone; the
+    /// recognizer hears N UW in sentence 1 and in 6 of 10 carrier phrases
+    /// (1 before). At 4 the mouth, still opening, chokes the flow as the
+    /// nose shuts and a cycle of the folds fails to close (heard as /h/).
+    /// Not after /m/, whose lips open slowly onto a rounded vowel's narrow
+    /// ones: with the nose shut that soon, the voice of "smooth" dipped 6
+    /// to 8 dB 20 to 40 ms into the /u/.
+    velum_release = 3.0, 1.0..=5.0, B;
+
     // ----- the rhythm of the rules and the transfer's floor (round 11) ----
 
     /// How much longer a consonant that opens a stressed syllable of a
@@ -899,10 +923,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_fifty_seven() {
+    fn two_passes_of_fifty_eight_and_fifty_eight() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 57));
+        assert_eq!((a, b), (58, 58));
     }
 
     #[test]

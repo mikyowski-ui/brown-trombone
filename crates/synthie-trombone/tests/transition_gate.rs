@@ -6,6 +6,9 @@
 //!   palatal height onto the vowel: that fall is /ju/, and "canoe" was
 //!   heard as "can you" while the lips of /u/ only began to round as the
 //!   vowel did.
+//! * Out of an /n/ into a vowel the nose is shut within 15 ms: left
+//!   coupled, it gave the start of the /u/ of "canoe" a peak near 700 Hz,
+//!   heard as /ʌ oʊ l/.
 //! * From /l/ into /ɪ/ the first formant does not rise above both the
 //!   /l/'s and the vowel's (an /aɪ/: "slid" heard as "slide"), and the /l/
 //!   keeps the low second formant of an /l/.
@@ -127,6 +130,49 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
             "{text}: F2 falls from {highest:.0} to {target:.0} Hz into the /u/"
         );
         assert!(target <= 1300.0, "{text}: the /u/ holds {target:.0} Hz");
+    }
+}
+
+/// Level of `x` (at `place::SR`) between `lo` and `hi` Hz, dB.
+fn band(x: &[f32], lo: f32, hi: f32) -> f32 {
+    let step = 10.0;
+    let w: Vec<f32> = x
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let h = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / x.len() as f32).cos();
+            v * h
+        })
+        .collect();
+    let mag = spectrum::spectrum(&w, place::SR, hi + step, step);
+    let lo = (lo / step) as usize;
+    let power: f32 = mag[lo..].iter().map(|m| m * m).sum();
+    10.0 * power.max(1e-30).log10()
+}
+
+#[test]
+fn the_nose_is_shut_early_in_a_vowel_after_n() {
+    // Shutting at its usual speed (some 45 ms), the velum left the first
+    // 35 ms of the /u/ of "canoe" coupled to the nose: even a quarter open
+    // it moves the coupled tract's loudest peak to some 700 Hz, and the
+    // recognizer heard /ʌ oʊ l/ there. In the owner's "canoe" and the
+    // LibriSpeech reader's "the new" the 550 to 950 Hz band stands 16 to
+    // 26 dB under the 200 to 450 Hz band from 5 ms after the release; the
+    // engine's stood 7 to 9 dB under until 35 ms (`Tuning::velum_release`).
+    for text in ["a canoe", "the new", "the birch canoe slid"] {
+        let s = place::speak(&voice(), text, false);
+        let (_, v) = after(&s, Phoneme::N);
+        assert_eq!(s.phonemes[v], Phoneme::Uw, "{text}: {:?}", s.phonemes);
+        let v0 = s.ranges[v].0;
+        let ms = |t: f32| v0 + (t * 0.001 * place::SR) as usize;
+        let velum = s.frames[Spoken::frame_of(ms(15.0))].velum;
+        assert!(velum < 0.1, "{text}: velum {velum:.2} 15 ms into the /u/");
+        let x = &s.audio[ms(15.0)..ms(35.0)];
+        let pole = band(x, 550.0, 950.0) - band(x, 200.0, 450.0);
+        assert!(
+            pole < -12.0,
+            "{text}: 550-950 Hz {pole:.1} dB against 200-450 Hz, 15 to 35 ms into the /u/"
+        );
     }
 }
 

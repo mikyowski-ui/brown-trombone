@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and twenty-six numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and twenty-seven numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -446,7 +446,10 @@ as the model goes:
   nose with the antiresonance of its place (`nasal_cavity`); behind the
   tip of /n/ it drops quickly (`nasal_cavity_rate`), so the antiresonance
   is at 1.45 to 1.55 kHz from the start of the murmur, also before a
-  consonant.
+  consonant. Out of /n ŋ/ into a close vowel the velum shuts three times
+  as fast as elsewhere (`velum_release`, round 11), so the nose is shut
+  15 ms into the vowel: left open longer, it took over the /u/ of
+  "canoe".
 - **Two speeds of articulator.** The tongue body and the jaw are heavy and
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
@@ -1114,6 +1117,41 @@ average sentence).
   as before, sentence 1 as "can use lead on"; raising the velum 20 to 40
   ms before the release takes the step away and changes nothing heard.
   Neither is on. Pitch, length and level were ruled out by r10-prosody.
+- **"canoe" (round 11): the nose is shut sooner, the word is still not
+  heard.** The velum that stayed open into the /u/ was a real fault: even
+  a quarter open (0.2 cm²) it takes over a close vowel (the coupled /u/'s
+  loudest peak at 704 Hz, above its own F1 at 322; the nose's peaks at 2.5
+  to 3.4 kHz 17 dB up), and for 35 ms after the release the 550 to 950 Hz
+  band of "canoe" stood 7 to 9 dB under its 200 to 450 Hz band, where the
+  owner's "canoe" and "smooth" and the reader's "the new" stand 16 to 26
+  dB under from 5 ms on. Out of /n ŋ/ into a close vowel the velum now
+  shuts three times as fast (`velum_release`; not after /m/, whose slow
+  lips then made "smooth" dip 6 to 8 dB, and not into open vowels, where
+  "no" and "gnawed" were heard with /m/ and /l/): the band is 18 dB under
+  from 20 ms on, the level step is gone, and the recognizer hears N UW in
+  sentence 1 and in about 7 of 10 carrier phrases (2 to 3 before). Whisper
+  does not follow: sentence 1 is "can use it on" (before "can also turn"),
+  carriers 1 of 10 as before, the references re-fitted "conch was slid"
+  and "camo slid" ("can was", "can move" in round 10). Measured, not the
+  cause: the level (the /n/ against the /u/ is 2.3 dB under in the
+  reader's "the new", +0.5 in the owner's "canoe", +4.1 and +3.3 in the
+  engine's; the engine's /u/ is 5 dB quieter against its other vowels
+  than the reader's, its nasals 1.6 dB louder; 3 dB more /u/ changed
+  nothing heard), the first vowel (100 ms where the reader's schwa is 65
+  and the references' 50, and loud; at 55 ms, or as [ɪ], or left out,
+  still "can also"), the 2 to 4 kHz band (a back /u/ is dull by nature:
+  its transfer function 14.5 dB down there against a fronted one's 0.8;
+  20 dB more on the spliced vowel changed nothing). Spliced into the
+  owner's own sentence 1, every engine /u/ tried (back, fronted, longer,
+  lower F1, the one of "smooth") turns "canoe" into "can now", "can go"
+  or "can slide", while the engine's /k/, schwa and /n/ there are heard as
+  "canoe"; a fronted /u/ (F2 1800) with its first 20 ms cut off is heard
+  as "canoe" there. Those 20 ms are the tip of the /n/ letting go slowly
+  onto a fronted tongue (F2 overshooting to 2230 Hz with F3 at 3700, a
+  /j/): so people's fronted /u/ is right, and the engine needs a quicker
+  tip release before it can use it. A fronted /u/ with tight lips is out
+  of this tract's reach (the tongue body stops at cell 29; with lips
+  rounded F2 falls to 1270 and F3 stays at 2700).
 - **Taps after /ɑ/** are heard as /r/ in 7 of 12 short phrases (other
   vowels 1 of 8). Not their third formant (2700 to 3100 Hz at the tap, the
   reader's 2500 to 2800) nor their length (12, 20 or 30 ms, approach 8 to

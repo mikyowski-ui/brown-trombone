@@ -372,6 +372,10 @@ pub(crate) struct Tract {
     /// moved with the tongue body. The classic engine leaves it at rest.
     pub(crate) pharynx: f32,
     pub(crate) velum_target: f32,
+    /// How many times faster than [`VELUM_SHUTTING`] the velum shuts now
+    /// (physical engine; `1` but out of a nasal into a vowel, see
+    /// [`Tuning::velum_release`]).
+    pub(crate) velum_haste: f32,
     pub(crate) movement_speed: f32,
     /// How much faster than `movement_speed` the tongue body and its back
     /// move (physical engine; see
@@ -464,6 +468,7 @@ impl Tract {
             tongue_diameter: 2.43,
             pharynx: 0.0,
             velum_target: VELUM_CLOSED,
+            velum_haste: 1.0,
             movement_speed: MOVEMENT_SPEED,
             boost: 1.0,
             dynamics: Dynamics::Linear,
@@ -1254,7 +1259,7 @@ impl Tract {
             self.nose_diameter[0],
             self.velum_target,
             amount * 0.25,
-            amount * VELUM_SHUTTING,
+            amount * VELUM_SHUTTING * self.velum_haste,
         );
         self.calculate_reflections();
     }
