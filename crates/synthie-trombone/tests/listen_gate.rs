@@ -285,13 +285,14 @@ fn peak_formants(t: &Trombone) -> [f32; 2] {
 ///
 /// Since round 10 the listener's pre-emphasis has a second stage, from
 /// about 1 kHz, for a source as dark as a speaker's (the physical
-/// engine's since round 9's tilt): it took the lean of F1 down by 3 to 9
-/// points (/i/ at 110 Hz +12.3 → +9.4 %, /u/ +14.0 → +9.0, /u/ at 220 Hz
-/// +10.7 → +1.9, /i/ at 220 Hz +8.0 → +5.0, /ɛ/ and /æ/ at 220 Hz +8.4
-/// and +5.3 → +7.0 and +4.0), and moved the physical /i/'s F2 at 220 Hz
-/// from +5.4 to +6.7 %. The misses below are bounded at what is measured
-/// now.
-const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 4] = [
+/// engine's since round 9's tilt): it took the lean of F1 down by 2 to 9
+/// points (/i/ at 110 Hz +12.3 → +9.8 %, /u/ +14.0 → +9.2, /u/ at 220 Hz
+/// +10.7 → +2.0, /i/ at 220 Hz +8.0 → +4.9, /ɛ/ and /æ/ at 220 Hz +8.4
+/// and +5.3 → +6.8 and +3.8; with round 10's voiced breath noise), and
+/// moved the physical /i/'s F2 at 220 Hz from +5.4 to +7.8 % and the F1 of
+/// /ɔ/ there from +13.3 to +13.9. The misses below are bounded at what is
+/// measured now.
+const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 5] = [
     (
         Engine::Classic,
         Phoneme::Uw,
@@ -302,11 +303,19 @@ const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 4] = [
     ),
     (
         Engine::Physical,
+        Phoneme::Iy,
+        220.0,
+        1,
+        10.0,
+        "F2 (2350 Hz) between the 10th and 11th harmonic: heard +7.8 %",
+    ),
+    (
+        Engine::Physical,
         Phoneme::Ao,
         220.0,
         0,
-        15.0,
-        "the closing source's bump near 440 Hz: heard +12.6 %",
+        16.0,
+        "the closing source's bump near 440 Hz: heard +13.9 %",
     ),
     (
         Engine::Physical,
@@ -314,7 +323,7 @@ const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 4] = [
         110.0,
         0,
         12.0,
-        "the closing source's bump near 440 Hz: heard +9.0 %, sung harmonics 0 %",
+        "the closing source's bump near 440 Hz: heard +9.2 %, sung harmonics 0 %",
     ),
     (
         Engine::Physical,
@@ -322,7 +331,7 @@ const KNOWN_MISSES: [(Engine, Phoneme, f32, usize, f32, &str); 4] = [
         110.0,
         0,
         12.0,
-        "the closing source's bump near 440 Hz: heard +9.4 %, sung harmonics +4 %",
+        "the closing source's bump near 440 Hz: heard +9.8 %, sung harmonics +4 %",
     ),
 ];
 

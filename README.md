@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and eight numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and eleven numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -251,6 +251,7 @@ reads the rest as well:
 | liquids into vowels | `lateral_gap`, `lateral_release` |
 | the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
 | the voice's source (round 9) | `voice_tilt`, `tilt_corner`, `voiced_breath_corner`, `cycle_jitter`, `pitch_flutter`, `spread_closing`, `vowel_decline`, `accent_peak` |
+| the tilt's shape and the voice's breath (round 10) | `tilt_top`, `tilt_top_corner` (a second section, off), `voiced_breath_gain` |
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error:

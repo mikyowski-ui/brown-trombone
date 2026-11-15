@@ -118,7 +118,7 @@ faster articulators through phones shorter than the rules make them
 (`Trombone::set_articulation_boost`), which are themselves made no shorter
 than 70 % of the rules'.
 
-Both engines read their numbers from `Tuning` (108 fields with defaults
+Both engines read their numbers from `Tuning` (111 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
 `VoiceSettings::with_profile`). The repository README has the details,

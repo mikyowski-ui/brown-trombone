@@ -705,11 +705,14 @@ fn voiced_fricatives_hiss_and_voice_at_once() {
         // -11.8 → +0.3 dB re the vowel, Z -22.3 → -15.8; SH -14.2 → +1.2,
         // ZH -26.2 → -15.1; CH -13.9 → +2.7, JH -27.2 → -15.8 (the vowel
         // itself starts softly now, which lifts every figure here).
-        // 23 dB since round 9 (19 before): the hiss is all the energy
-        // above 2.5 kHz, and in a voiced sound some of it is the voice's,
-        // which the source tilt darkened (JH 20.7 dB under CH with it
-        // off, 22.3 with it).
-        assert!(v.hiss > u.hiss - 23.0, "{voiced} hiss {:.1} dB", v.hiss);
+        // The hiss is all the energy above 2.5 kHz, and in a voiced sound
+        // some of it is the voice's: round 9's source tilt darkened it (JH
+        // 20.7 dB under CH with it off, 22.3 with it; the bound went from
+        // 19 to 23 dB), and since round 10 the breath noise of the
+        // vibrating folds is at the LibriSpeech reader's level above 5 kHz
+        // (`voiced_breath_gain`): JH 17.6 dB under CH, and the bound is 19
+        // again.
+        assert!(v.hiss > u.hiss - 19.0, "{voiced} hiss {:.1} dB", v.hiss);
     }
 }
 
@@ -1628,7 +1631,13 @@ fn affricates_release_into_full_frication() {
     // hiss is that of /sh/ or /zh/ (within 3 dB; 6 for /dʒ/ since round 9:
     // the hiss is the energy above 2.5 kHz, and in /dʒ/ much of it was
     // the voice's, which the source tilt darkened: JH 5.3 dB under ZH with
-    // it, 1.1 to 4.1 without, depending on the round's other changes). The noise takes 10 to
+    // it, 1.1 to 4.1 without, depending on the round's other changes; 3.8
+    // since round 10's voiced breath noise). Its own frication is weak:
+    // with round 9's breath noise, above 4 kHz, where the voice is far
+    // under the noise, /dʒ/ was 5.5 to 5.9 dB under /ʒ/ with the tilt or
+    // without (the noise sources take the tilt's inverse exactly), and
+    // with the jets' efficiency cut to 0.3 its hiss fell by 2.5 dB where
+    // that of /ʒ/ fell by 9: little of it is the jet's. The noise takes 10 to
     // 15 ms to build, so the 10 ms after the release that the burst gate
     // reads hold only its start.
     let settings = speech_voice();
@@ -2535,12 +2544,15 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
     // derivative has 2-4 kHz some 20 dB under 0-1 kHz where a modal
     // Liljencrants-Fant source has 33 to 37, and from the breath noise of
     // its glottis there. The source tilt (`voice_tilt`) and the breath
-    // noise of a vibrating glottis pitched above 2.5 kHz
-    // (`voiced_breath_corner`) bring them there. Measured over the same
-    // texts at the segments' own times (as
+    // noise of a vibrating glottis pitched higher (`voiced_breath_corner`,
+    // `voiced_breath_gain`: since round 10 at 5 kHz and 6 dB louder, which
+    // gives the accented vowels' 4-7.5 kHz band the reader's level, 25.7
+    // dB under 0-1 kHz, where it was 28.6, and leaves 2-4 kHz as it was)
+    // bring them there. Measured over the same texts at the segments' own
+    // times (as
     // `the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened`
     // measures them): within 3 dB of the reader, and at least 8 dB darker
-    // than without the two.
+    // than without them.
     const PERSON: f32 = -28.9;
     let path = "../../tools/judge/material/human.tsv";
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
@@ -2553,6 +2565,7 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
     let mut bright = dark;
     bright.tuning.voice_tilt = 0.0;
     bright.tuning.voiced_breath_corner = 0.0;
+    bright.tuning.voiced_breath_gain = 0.0;
     // The accented vowels are told apart as round 8's softening tells them.
     let mut labels = dark;
     labels.tuning.sonorant_softness = 1.0;

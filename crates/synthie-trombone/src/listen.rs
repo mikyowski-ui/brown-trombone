@@ -41,7 +41,7 @@
 //! high), the hard case of any envelope method. With the physical engine
 //! (whose voice is as dark as a speaker's) they come within 8 %, except
 //! the F1 of /i/ and /u/ at 110 Hz and of /ɔ/ at 220 Hz, which lean 9 to
-//! 13 % towards the bump its closing folds put in the source near 440 Hz.
+//! 14 % towards the bump its closing folds put in the source near 440 Hz.
 //! Formants reach a new vowel (within 10 %) 20–30 ms after an abrupt
 //! change; [`Listener::latency`] gives the bound.
 

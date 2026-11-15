@@ -94,7 +94,7 @@
   "tap_lead": {"lo": 0, "hi": 0.04, "default": 0.015, "pass": "b"},
   "voice_tilt": {"lo": 0, "hi": 26, "default": 18, "pass": "a"},
   "tilt_corner": {"lo": 300, "hi": 1000, "default": 500, "pass": "a"},
-  "voiced_breath_corner": {"lo": 0, "hi": 5000, "default": 3000, "pass": "a"},
+  "voiced_breath_corner": {"lo": 0, "hi": 8000, "default": 5000, "pass": "a"},
   "cycle_jitter": {"lo": 0, "hi": 1.5, "default": 1, "pass": "a"},
   "pitch_flutter": {"lo": 0, "hi": 0.04, "default": 0.02, "pass": "a"},
   "spread_closing": {"lo": 0.006, "hi": 0.02, "default": 0.012, "pass": "a"},
@@ -106,5 +106,8 @@
   "follow_tenseness_high": {"lo": 1, "hi": 1.4, "default": 1.15, "pass": "a"},
   "follow_speed_max": {"lo": 1, "hi": 2.5, "default": 1.6, "pass": "b"},
   "follow_shortest": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"},
-  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"}
+  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"},
+  "tilt_top": {"lo": -12, "hi": 18, "default": 0, "pass": "a"},
+  "tilt_top_corner": {"lo": 1000, "hi": 6000, "default": 3000, "pass": "a"},
+  "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"}
 }

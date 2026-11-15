@@ -36,32 +36,38 @@ pub(crate) const PIVOT: f32 = 1.0;
 
 /// Coefficients of `y = b0·x + b1·x' + a1·y'` (primes: the last tick).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Shelf {
+struct Section {
     b0: f32,
     b1: f32,
     a1: f32,
 }
 
-impl Shelf {
-    /// Passes everything unchanged.
-    pub(crate) const FLAT: Self = Self {
+impl Section {
+    const FLAT: Self = Self {
         b0: 1.0,
         b1: 0.0,
         a1: 0.0,
     };
 
-    /// The shelf (`inverse == false`) or its inverse, for ticks of `dt`
-    /// seconds: a pole at `corner` Hz and a zero `depth` dB above it
-    /// (matched z-transform), unity gain at `PIVOT · corner`.
-    pub(crate) fn new(corner: f32, depth: f32, dt: f32, inverse: bool) -> Self {
-        if depth <= 0.0 || corner <= 0.0 {
+    /// A first-order shelf (`inverse == false`) or its inverse, for ticks
+    /// of `dt` seconds, starting at `corner` Hz and levelling off `depth` dB
+    /// down (a pole at `corner` and a zero above it), or for a negative
+    /// `depth` as far up (a zero at `corner` and a pole above it); matched
+    /// z-transform, unity gain at `pivot` Hz (`0`: at 0 Hz).
+    fn new(corner: f32, depth: f32, dt: f32, inverse: bool, pivot: f32) -> Self {
+        if depth == 0.0 || corner <= 0.0 {
             return Self::FLAT;
         }
-        let zero = corner * powf(10.0, depth / 20.0);
-        let zp = exp(-2.0 * PI * corner * dt);
+        let other = corner * powf(10.0, depth.abs() / 20.0);
+        let (pole, zero) = if depth > 0.0 {
+            (corner, other)
+        } else {
+            (other, corner)
+        };
+        let zp = exp(-2.0 * PI * pole * dt);
         let zz = exp(-2.0 * PI * zero * dt);
         // |1 - a·e^(-jw)| at the pivot.
-        let w = 2.0 * PI * PIVOT * corner * dt;
+        let w = 2.0 * PI * pivot * dt;
         let mag = |a: f32| sqrt(1.0 - 2.0 * a * cos(w) + a * a);
         let k = mag(zp) / mag(zz);
         if inverse {
@@ -80,20 +86,61 @@ impl Shelf {
     }
 }
 
+/// The source tilt (or its inverse): two first-order sections in a row.
+/// The first falls from its corner, where it is unity ([`PIVOT`]), and
+/// levels off `depth` dB down; the second, unity at 0 Hz, falls (or for a
+/// negative depth rises) by its own depth from a corner of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Shelf {
+    sections: [Section; 2],
+}
+
+impl Shelf {
+    /// Passes everything unchanged.
+    pub(crate) const FLAT: Self = Self {
+        sections: [Section::FLAT; 2],
+    };
+
+    /// The tilt (`inverse == false`) or its inverse, for ticks of `dt`
+    /// seconds: `depth` dB from `corner` Hz, then `top_depth` dB from
+    /// `top_corner` Hz (`0` dB: no second section).
+    pub(crate) fn new(
+        corner: f32,
+        depth: f32,
+        top_corner: f32,
+        top_depth: f32,
+        dt: f32,
+        inverse: bool,
+    ) -> Self {
+        let first = if depth > 0.0 {
+            Section::new(corner, depth, dt, inverse, PIVOT * corner)
+        } else {
+            Section::FLAT
+        };
+        Self {
+            sections: [first, Section::new(top_corner, top_depth, dt, inverse, 0.0)],
+        }
+    }
+}
+
 /// The state of one stream through a [`Shelf`].
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Tilt {
-    x: f32,
-    y: f32,
+    x: [f32; 2],
+    y: [f32; 2],
 }
 
 impl Tilt {
     #[inline]
     pub(crate) fn run(&mut self, s: &Shelf, x: f32) -> f32 {
-        let y = s.b0 * x + s.b1 * self.x + s.a1 * self.y;
-        self.x = x;
-        self.y = y;
-        y
+        let mut v = x;
+        for (k, c) in s.sections.iter().enumerate() {
+            let y = c.b0 * v + c.b1 * self.x[k] + c.a1 * self.y[k];
+            self.x[k] = v;
+            self.y[k] = y;
+            v = y;
+        }
+        v
     }
 
     /// `x` through the shelf as far as `on` (`0‥1`) says, from not at all
@@ -114,8 +161,8 @@ mod tests {
     fn the_inverse_undoes_the_shelf_and_flat_is_exact() {
         let dt = 1.0 / 96_000.0;
         let (fwd, inv) = (
-            Shelf::new(500.0, 18.0, dt, false),
-            Shelf::new(500.0, 18.0, dt, true),
+            Shelf::new(500.0, 18.0, 0.0, 0.0, dt, false),
+            Shelf::new(500.0, 18.0, 0.0, 0.0, dt, true),
         );
         let (mut a, mut b) = (Tilt::default(), Tilt::default());
         let mut seed = 1u32;
@@ -157,5 +204,38 @@ mod tests {
             }
         }
         assert!((peak - 1.0).abs() < 0.01, "{peak} at the pivot");
+        // A second section, falling or rising: the inverse still undoes
+        // it, and it leaves 0 Hz alone.
+        for top in [-6.0f32, 8.0] {
+            let (fwd, inv) = (
+                Shelf::new(500.0, 18.0, 3000.0, top, dt, false),
+                Shelf::new(500.0, 18.0, 3000.0, top, dt, true),
+            );
+            let (mut a, mut b) = (Tilt::default(), Tilt::default());
+            for _ in 0..10_000 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                #[allow(clippy::cast_precision_loss)]
+                let x = (seed >> 8) as f32 / 8_388_608.0 - 1.0;
+                let y = a.run(&fwd, b.run(&inv, x));
+                assert!((y - x).abs() < 1e-4, "{top}: {x} -> {y}");
+            }
+            let (mut one, mut two) = (Tilt::default(), Tilt::default());
+            let only = Shelf::new(500.0, 18.0, 0.0, 0.0, dt, false);
+            let (mut d1, mut d2, mut n1, mut n2) = (0.0, 0.0, 0.0, 0.0);
+            let mut sign = 1.0;
+            for _ in 0..20_000 {
+                d1 = one.run(&only, 1.0);
+                d2 = two.run(&fwd, 1.0);
+            }
+            let (mut one, mut two) = (Tilt::default(), Tilt::default());
+            for _ in 0..20_000 {
+                n1 = one.run(&only, sign);
+                n2 = two.run(&fwd, sign);
+                sign = -sign;
+            }
+            assert!((db(d2) - db(d1)).abs() < 0.05, "{top}: 0 Hz moved");
+            let extra = db(n2) - db(n1);
+            assert!((extra + top).abs() < 1.0, "{top}: {extra} dB at the top");
+        }
     }
 }

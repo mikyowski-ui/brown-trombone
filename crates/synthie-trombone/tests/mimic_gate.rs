@@ -86,7 +86,7 @@ fn a_sung_vowel_sequence_is_followed() {
         // does (see `listen_gate`, KNOWN_MISSES), and the copy makes what it
         // hears: 13.9 and 14.0 % in round 8, held to 16 % (were 20 %, with
         // /ɔ/, which is now within 6 %); 14.9 and 16.0 % with round 9's
-        // darker voice, 12.8 and 10.8 % since the listener's second stage of
+        // darker voice, 12.7 and 11.1 % since the listener's second stage of
         // pre-emphasis (round 10).
         let tolerance = if matches!(p, Phoneme::Iy | Phoneme::Uw) {
             16.0
