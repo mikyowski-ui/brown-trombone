@@ -113,8 +113,13 @@ fn schedule_voice(json: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`.
+/// A key of a profile's `"vowels"` object: `IH`, `AY<` / `AY`, `AY>`, and
+/// `UW+` for a fronted vowel.
 fn vowel_key(name: &str) -> Option<VowelKey> {
+    if let Some(symbol) = name.strip_suffix('+') {
+        let key = VowelKey::Fronted(Phoneme::from_symbol(symbol)?);
+        return vowel_targets::target(key).map(|_| key);
+    }
     let (symbol, end) = match name.strip_suffix('>') {
         Some(s) => (s, true),
         None => (name.strip_suffix('<').unwrap_or(name), false),

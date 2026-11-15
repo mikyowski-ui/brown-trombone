@@ -113,5 +113,6 @@
   "light_laxness": {"lo": 0, "hi": 0.1, "default": 0.08, "pass": "a"},
   "tilt_top": {"lo": -12, "hi": 18, "default": 0, "pass": "a"},
   "tilt_top_corner": {"lo": 1000, "hi": 6000, "default": 3000, "pass": "a"},
-  "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"}
+  "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"},
+  "lateral_channel": {"lo": 2, "hi": 4, "default": 3, "pass": "a"}
 }

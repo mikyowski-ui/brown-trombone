@@ -1724,10 +1724,17 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             d.articulation.tongue = next_tongue;
         }
     }
+    // On the physical engine only a vowel's: after the /k/ of "planks" an
+    // utterance-final /s/ took the /k/'s own tongue, and with it the /k/'s
+    // place (a consonant on the velar body is made at the velum, see
+    // `phoneme::velar_place`), a faint velar hiss 56 dB under the vowel in
+    // place of the /s/ (mid-phrase, and before a comma, it takes the next
+    // vowel's tongue above and hisses).
     let mut prev_tongue = Phoneme::Ax.articulation().tongue;
     for d in &mut drafts {
         match d.articulation.tongue {
-            Some(t) => prev_tongue = Some(t),
+            Some(t) if !physical || d.vowel || d.phoneme == Phoneme::Sil => prev_tongue = Some(t),
+            Some(_) => {}
             None => d.articulation.tongue = prev_tongue,
         }
     }

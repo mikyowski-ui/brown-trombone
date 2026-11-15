@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and fifteen numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and sixteen numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and fifteen numbers in three
+        /// How a voice turns sounds into speech: one hundred and sixteen numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -758,6 +758,18 @@ tuning! {
     /// 5 kHz 25.7, his, with 1-2 and 2-4 kHz as they were (20.0 and 27.4
     /// dB under; his 20.9 and 28.9).
     voiced_breath_gain = 6.0, -12.0..=12.0, A;
+
+    // ----- the lateral, taps and close vowels (round 10) -----------------
+
+    /// Cells in front of its place over which the side channels of an /l/
+    /// run (physical engine; see `tract::carve_lateral`): the air of a
+    /// lateral leaves round the sides of a tongue whose tip touches the
+    /// ridge, between them and the teeth. At 3 the channel ends at the
+    /// front of the ridge; at 1 (a pinch at the place) the /l/ after a
+    /// consonant was heard as /r/ in 8 of 27 short phrases, at 3 and 4 in
+    /// none (at 4, into the teeth's cell, the lips of "a blue" were 0.36
+    /// apart 10 ms after the release, where they open to 0.63).
+    lateral_channel = 3.0, 1.0..=5.0, A;
 }
 
 impl Default for Tuning {
@@ -780,10 +792,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_seven_and_forty_nine() {
+    fn two_passes_of_fifty_eight_and_forty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (57, 49));
+        assert_eq!((a, b), (58, 49));
     }
 
     #[test]

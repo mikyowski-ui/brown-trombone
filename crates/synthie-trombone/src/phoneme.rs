@@ -112,6 +112,8 @@ const LIPS: f32 = 41.0;
 const TEETH: f32 = 39.5;
 /// Alveolar ridge.
 const ALVEOLAR: f32 = 36.0;
+/// Where the tip of an /l/ touches, just behind the alveolars'.
+const LATERAL_PLACE: f32 = ALVEOLAR - 1.0;
 /// Hard palate behind the ridge.
 const POSTALVEOLAR: f32 = 33.0;
 /// Soft palate.
@@ -394,7 +396,7 @@ impl Phoneme {
             P::Zh => Articulation::consonant(POSTALVEOLAR, HISS + 0.05, true).rounded(1.0),
             P::Ch => Articulation::consonant(POSTALVEOLAR + 1.0, SHUT, false).rounded(1.0),
             P::Jh => Articulation::consonant(POSTALVEOLAR + 1.0, SHUT, true).rounded(1.0),
-            P::L => Articulation::consonant(ALVEOLAR - 1.0, 0.9, true).with_tongue(16.0, 2.6),
+            P::L => Articulation::consonant(LATERAL_PLACE, 0.9, true).with_tongue(16.0, 2.6),
             P::R => Articulation::consonant(31.5, 0.85, true)
                 .with_tongue(19.0, 2.6)
                 .rounded(1.1),
@@ -627,6 +629,19 @@ impl Articulation {
             a.tongue = Some(body);
         }
         a
+    }
+
+    /// Whether this is a lateral, an /l/ (physical engine): its tip at the
+    /// lateral's place and not shut, on its own body or the next vowel's
+    /// (see `speech::lateral_onto_vowels`).
+    #[must_use]
+    pub(crate) fn lateral(self) -> bool {
+        self.velum <= 0.0
+            && self.constriction.is_some_and(|c| {
+                c.index == LATERAL_PLACE
+                    && c.diameter > SHUT_WIDEST
+                    && c.diameter < APPROXIMANT_WIDEST
+            })
     }
 
     /// Whether this is a consonant with a tongue body of its own (/k g ŋ l

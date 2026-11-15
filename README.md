@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and fifteen numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and sixteen numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -248,7 +248,7 @@ reads the rest as well:
 | intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
 | stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
 | a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (all off since round 9; and `sonorant_slack`, `final_slack`, now 0) |
-| liquids into vowels | `lateral_gap`, `lateral_release` |
+| liquids into vowels | `lateral_gap`, `lateral_release`, `lateral_channel` (round 10) |
 | the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
 | the voice's source (round 9) | `voice_tilt`, `tilt_corner`, `voiced_breath_corner`, `cycle_jitter`, `pitch_flutter`, `spread_closing`, `vowel_decline`, `accent_peak` |
 | the rules' prosody against speakers' (round 10) | `unaccented_level`, `final_coda_stretch`, `sentence_pause`, `light_laxness` |
@@ -509,6 +509,37 @@ as the model goes:
   vowels no longer all rise (median across them −0.3 semitones, the
   reader's 0.0, before +1.2); the pitch declines over the phrase, and a
   statement falls at its end.
+- **The lateral, jets and the last /s/ (round 10).** The physical /l/ is
+  a lateral: its gap is never one meant to hiss (since round 7 it had been,
+  by its number alone, so the jaw shut the incisors in front of it as for
+  /s/ and its shoulder was the sibilant's), and it is carved as a narrow
+  channel from its place to the front of the ridge with a short shoulder behind, the
+  blade drawn down. In the middle of the /l/ the tract's F1 is now 390 to
+  430 Hz (before 490 to 500, above the /ɪ/ after it; the LibriSpeech
+  reader's 310 to 450 by LPC, the owner's 310 to 350), F2 1030 to 1130
+  (his 950 to 1200), F3 3140 to 3300 (theirs 2450 to 2900; a channel run
+  back from the place brought F3 to 2700 but F2 to 1400, and was heard as
+  /r/), held 25 to 30 ms before the release (the reader's 20 to 35 in a
+  cluster). In 36 short phrases the recognizer hears 28 of 28 /l/ after a
+  consonant (before 22, 3 as /r/; after /s/ 4 of 8 before), 11 of 16 at the
+  end of a syllable (7). While a gap is shutting fast, its jet is no
+  faster than the pressure behind it (averaged over 4 ms) can drive it:
+  bounded by the lungs' pressure alone, the averaged flow lagged the
+  closing gap and the jet of a closing tip ran at its fastest, the loudest
+  moment of an utterance (the tap of "a pot of" 8 dB over its vowel's
+  loudest sample); fricatives keep their hiss. And a consonant after the
+  last vowel of an utterance takes that vowel's tongue, not a /k g ŋ l r/'s
+  own: the last /s/ of "planks" had taken the /k/'s velar place and was a
+  hiss 56 dB under the vowel (now 18 dB). On the round's merged engine
+  (single runs; without these three in brackets): phoneme error over the 30
+  held-out sentences 25.9 % (27.4 %), Whisper's words 74.8 % (69.6 %), the
+  ten `sentence_heldout` sentences 19.2 % and 81.2 % (21.2 and 76.2 %),
+  vowels in the LibriSpeech texts heard wrong 25.5 % (23.8 %; the lateral
+  alone costs about 2 points there, steady over three runs, mostly in
+  slots away from any /l/), consonants there right 85.7 %; the
+  four-sentence clip "The birch can also run the smooth planks. Glue the
+  sheet to the dark blue background. She sells seashells by the seashore.
+  The juice of lemons makes fine punch." (before: "... by the sea shawl").
 - **Phrases against speakers (round 10).** Measured phone by phone against
   the LibriSpeech reader's 16 sentences (his own alignment, the rules saying
   the same text with a comma where he paused) and the two reference
@@ -993,9 +1024,30 @@ average sentence).
   ceiling the judge gives a real person's isolated words; the isolated
   figures are a relative measure only.
 - **Remaining confusions**: stops dropped (/t/ and /d/ in clusters, /d/
-  heard as /n/ in carrier phrases), /z/ as /ð/, and /l/ before /u/
-  ("blue", "glue") often heard as a schwa: its F1 stands near 500 Hz,
-  where a speaker's /l/ has 350 to 400.
+  heard as /n/ in carrier phrases), /z/ as /ð/; an /l/ that starts an
+  utterance is often heard as /t/ or /f/, and /ɪ/ after /l/ as /i/ or /eɪ/.
+- **"canoe" (round 10).** The /u/ after /n/ is a back one, F2 near 970 Hz
+  from 20 % of it on, where the owner's falls from 1920 to 1390 and the
+  reader's after /n t d/ starts at 1600 to 2200; its first formant reads
+  400 to 460 Hz (the owner's 340 to 360, the reader's 250 to 330): the
+  tract's own is 345 to 375 (the target 378), the open glottis adds some
+  40, and the velum, still half open as the /n/ lets go, closes only 30 to
+  35 ms into the vowel, which raises the first 20 % and makes a 3.5 dB
+  step in the level there. Under tight lips the back /u/ is dull: its 2 to
+  4 kHz band stands 53 dB under its 0 to 1 kHz band, the owner's 30, and
+  the /n/ before it is 3 dB louder than it. The recognizer hears it as
+  /ʌ/ or /l/ ("can also"). Fronted after /n/ (F2 1700 at its middle, 2 to
+  4 kHz 15 dB stronger) Whisper hears "canoe" in 2 of 10 carrier phrases
+  as before, sentence 1 as "can use lead on"; raising the velum 20 to 40
+  ms before the release takes the step away and changes nothing heard.
+  Neither is on. Pitch, length and level were ruled out by r10-prosody.
+- **Taps after /ɑ/** are heard as /r/ in 7 of 12 short phrases (other
+  vowels 1 of 8). Not their third formant (2700 to 3100 Hz at the tap, the
+  reader's 2500 to 2800) nor their length (12, 20 or 30 ms, approach 8 to
+  25 ms: 7 to 9 of 12 each): from /ɑ/ the first formant falls smoothly
+  from 780 to 380 Hz and the second dips to 1250 with it, an /ɹ/'s
+  pattern; a faster tongue body (the alveolar locus reached) did not help
+  either.
 - **/s/ is darker** than a person's in sentences.
 - **Closures are steeper than a person's**: about 3.4 level walls (20 dB
   in 10 ms) a second against his 1.1, and level rises of 15 dB per 10 ms
