@@ -1251,7 +1251,7 @@ impl Tract {
             self.nose_diameter[0],
             self.velum_target,
             amount * 0.25,
-            amount * VELUM_SHUTTING,
+            amount * VELUM_SHUTTING * crate::xp::x("CX_VSHUT", 1.0),
         );
         self.calculate_reflections();
     }

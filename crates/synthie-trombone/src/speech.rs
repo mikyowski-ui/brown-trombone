@@ -729,6 +729,15 @@ impl Speaker {
             {
                 voice.set_velum(next.articulation.velum);
             }
+            if physical
+                && seg.phoneme.manner() == Manner::Nasal
+                && let Some(next) = self.utterance.segments.get(self.index + 1)
+                && is_vowel(next.phoneme)
+                && self.elapsed
+                    >= seg.duration - crate::xp::x("CX_VEL_V", -1.0).min(0.9 * seg.duration)
+            {
+                voice.set_velum(next.articulation.velum);
+            }
             // A fricative's gap forming and opening again.
             let (into, out_of) = seg.gesture.gap_opening;
             let lead = self.utterance.lead;
@@ -1386,7 +1395,8 @@ fn fronts_u(context: Context) -> bool {
     use Phoneme as P;
     let after_front = context
         .prev
-        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z));
+        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z))
+        || (crate::xp::x("CX_FRONT_N", 0.0) > 0.0 && context.prev == Some(P::N));
     let dark_l = context.next.is_some_and(|(n, _, same)| same && n == P::L);
     after_front && !dark_l
 }
@@ -1461,6 +1471,8 @@ fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
         _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
         P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
         P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
+        P::Ax => crate::xp::x("CX_AX_LEN", 1.0) * timing.vowel_hold,
+        P::Uw if stressed => crate::xp::x("CX_UW_LEN", 1.0) * timing.vowel_hold,
         _ => timing.vowel_hold,
     }
 }
@@ -2809,6 +2821,15 @@ fn weigh_syllables(phrase: &mut [Draft], accented: &[bool], timing: &Tuning) {
             1.0
         } else {
             low
+        };
+        let share = if phrase[k].phoneme == Phoneme::Uw {
+            share
+                * crate::math::powf(
+                    10.0,
+                    crate::xp::x("CX_UW_DB", 0.0) / (20.0 * LEVEL_EXPONENT),
+                )
+        } else {
+            share
         };
         mids.push((t + 0.5 * total, share));
         t += total;
