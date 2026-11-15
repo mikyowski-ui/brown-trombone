@@ -49,7 +49,7 @@
   "voiced_sibilant_spread": {"lo": 0.02, "hi": 0.09, "default": 0.05, "pass": "a"},
   "voiced_sibilant_length": {"lo": 0.07, "hi": 0.12, "default": 0.095, "pass": "b"},
   "vowel_hold": {"lo": 1.0, "hi": 1.4, "default": 1.18, "pass": "c"},
-  "phrase_decline": {"lo": 0.05, "hi": 0.3, "default": 0.15, "pass": "a"},
+  "phrase_decline": {"lo": 0.05, "hi": 0.4, "default": 0.3, "pass": "a"},
   "final_drop": {"lo": 0.2, "hi": 0.8, "default": 0.5, "pass": "a"},
   "onset_pressure": {"lo": 0.2, "hi": 0.8, "default": 0.5, "pass": "a"},
   "hiss_floor": {"lo": 200, "hi": 2000, "default": 400, "pass": "a"},
@@ -57,7 +57,7 @@
   "postalveolar_lips": {"lo": 0.9, "hi": 1.8, "default": 1.2, "pass": "a"},
   "frication_widening": {"lo": 0.05, "hi": 0.25, "default": 0.15, "pass": "a"},
   "frication_ramp": {"lo": 0.0, "hi": 0.3, "default": 0, "pass": "b"},
-  "accent_size": {"lo": 2, "hi": 10, "default": 6, "pass": "b"},
+  "accent_size": {"lo": 2, "hi": 10, "default": 8, "pass": "b"},
   "accent_decay": {"lo": 0.1, "hi": 0.35, "default": 0.2, "pass": "b"},
   "declination": {"lo": 2, "hi": 10, "default": 6, "pass": "b"},
   "final_fall": {"lo": 3, "hi": 12, "default": 8, "pass": "b"},
@@ -106,5 +106,9 @@
   "follow_tenseness_high": {"lo": 1, "hi": 1.4, "default": 1.15, "pass": "a"},
   "follow_speed_max": {"lo": 1, "hi": 2.5, "default": 1.6, "pass": "b"},
   "follow_shortest": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"},
-  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"}
+  "follow_formant_range": {"lo": 0, "hi": 0.3, "default": 0.15, "pass": "c"},
+  "unaccented_level": {"lo": 0, "hi": 4, "default": 1.5, "pass": "a"},
+  "final_coda_stretch": {"lo": 1, "hi": 1.6, "default": 1.25, "pass": "b"},
+  "sentence_pause": {"lo": 0.3, "hi": 0.8, "default": 0.55, "pass": "b"},
+  "light_laxness": {"lo": 0, "hi": 0.1, "default": 0.08, "pass": "a"}
 }
