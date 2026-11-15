@@ -227,7 +227,7 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and eighteen numbers of `Tuning`, each with a default and
+Underneath sit the one hundred and nineteen numbers of `Tuning`, each with a default and
 a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them). The classic engine reads twelve of
 them (the lengths of sounds, stress and the gaps); the physical engine
@@ -565,6 +565,28 @@ as the model goes:
   Neither the place of the accent nor the length, level or pitch of the
   /u/ makes Whisper hear "canoe" in sentence 1 alone: every variant tried
   gave "can also", "can sleep" or "can use".
+- **Transit and hold (round 11).** Played at 0.78 of its speed in an
+  editor the engine is heard better, and it is heard better still when it
+  speaks at that rate itself (the 30 held-out sentences' phoneme error
+  25.9 to 19.2 %, the tuning sentences' 22.0 to 18.1 %); a larger tract at
+  a lower pitch at the normal pace is heard worse (27.0 %), so the gain is
+  the time, not the spectrum. Of that time, the consonants' share counts
+  most (their lengths alone 1.28 times longer: 22.3 %; the vowels' alone:
+  24.0 %), and the owner reads sentences 1 and 2 1.29 times slower than
+  the rules, almost all of it in the consonants (the LibriSpeech reader is
+  1.14 times faster than the rules). The engine does not lack steady
+  shapes: in the LibriSpeech texts its stressed vowels hold F1 within 40
+  Hz and F2 within 80 Hz for 58 % of their length, the reader's for 46 %,
+  the reference recordings' and the owner's for 42 to 50 %, and its short
+  vowels fall short of its long ones by less than his do; its formant
+  transitions out of a stop are over in some 20 ms, his in 35.
+  Articulators 28 % faster at the same lengths made the vowels heard
+  better and the consonants worse (85.7 to 83.3 % right) and the sentences
+  no better; the same motion slowed as a whole (rate and every speed and
+  lead by 0.78) gave 22.1 %. `body_damping` lets the tongue body settle
+  without its critically damped tail; it is off (see `Tuning`).
+  `examples/plateau.rs` writes the tract's areas, targets and own formants
+  every 2.5 ms through any lines of text.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
