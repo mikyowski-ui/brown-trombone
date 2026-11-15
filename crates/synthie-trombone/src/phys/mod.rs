@@ -93,6 +93,12 @@ const WALL_LAYER_MASS: f32 = 0.8;
 /// mouth's pressure to rise with a fricative's gap (at 8 ms the hiss of /s/
 /// between vowels lasted 62 ms where it lasts 78).
 const PRESSURE_AVERAGING: f32 = 0.004;
+/// Diameter units per second (the articulators' speed at the end of the
+/// block) above which a closing cell's jet is bounded by the pressure
+/// behind it (see `Phys::jet_cap`): at 10 the /f/ of "this fact" still lost
+/// 2.4 dB as the /s/ ran into it, at 20 and 40 1.7; the closing bursts went
+/// at 5 already.
+const SHUTTING_SPEED: f32 = 20.0;
 
 /// Seconds over which displaced-air flow is smoothed (articulators are
 /// updated in blocks; their velocity must not step).
@@ -1294,17 +1300,23 @@ impl Phys {
     /// over [`PRESSURE_AVERAGING`]). In a steady stream the flow over the
     /// area is the stream's speed already, and a fricative's hiss is left as
     /// it was (bounded so in its steady part too, the gap behind a narrow
-    /// channel lost some of its drive: /f θ/ came within 10 dB of /s/). As a
-    /// gap shuts the averaged flow lags it: bounded by lung pressure alone,
-    /// the jet of a closing tongue tip ran at its fastest for the last 5 to
-    /// 8 ms before the closure, where the pressure behind a gap closing on a
-    /// voice is a fraction of the lungs', and that was the loudest moment of
-    /// an utterance (the tap of "a pot of": its loudest sample 8 dB over the
-    /// vowel's; the /d/ of "slid": 6 dB).
+    /// channel lost some of its drive: /f θ/ came within 10 dB of /s/; and
+    /// bounded while a gap closes only to a fricative's, the /f/ of "this
+    /// fact" lost 3.7 dB as the /s/ ran into it, so only a cell still
+    /// closing faster than [`SHUTTING_SPEED`] is: an articulator aiming past
+    /// contact meets it at speed, one settling into a gap slows down). As a
+    /// gap shuts the averaged flow lags it:
+    /// bounded by lung pressure alone, the jet of a closing tongue tip ran
+    /// at its fastest for the last 5 to 8 ms before the closure, where the
+    /// pressure behind a gap closing on a voice is a fraction of the lungs',
+    /// and that was the loudest moment of an utterance (the tap of "a pot
+    /// of": its loudest sample 8 dB over the vowel's; the /d/ of "slid": 6
+    /// dB).
     fn jet_cap(&self, i: usize) -> f32 {
-        if self.a1[i] >= self.a0[i] {
-            // Opening or held: the averaged flow over the area is the
-            // stream's own speed (or lags behind it, as a release opens).
+        if self.a1[i] >= self.a0[i] || self.speed[i] > -SHUTTING_SPEED {
+            // Opening, held, or settling into a fricative's gap: the
+            // averaged flow over the area is the stream's own speed (or lags
+            // behind it, as a release opens).
             return self.v_max;
         }
         self.v_max

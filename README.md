@@ -522,19 +522,24 @@ as the model goes:
   /r/), held 25 to 30 ms before the release (the reader's 20 to 35 in a
   cluster). In 36 short phrases the recognizer hears 28 of 28 /l/ after a
   consonant (before 22, 3 as /r/; after /s/ 4 of 8 before), 11 of 16 at the
-  end of a syllable (7). A jet's speed is bounded by the pressure behind
-  its gap (averaged over 4 ms) as well as the lungs': as a gap shut on the
-  voice the averaged flow lagged it and the jet of a closing tip ran at its
-  fastest, the loudest moment of an utterance (the tap of "a pot of" 8 dB
-  over its vowel's loudest sample); fricatives keep their hiss. And a
-  consonant after the last vowel of an utterance takes that vowel's tongue,
-  not a /k g ŋ l r/'s own: the last /s/ of "planks" had taken the /k/'s
-  velar place and was a hiss 56 dB under the vowel (now 18 dB). Phoneme
-  error over the 30 held-out sentences 27.4 % (26.1 % without these three,
-  single runs), Whisper's words 73.5 % (69.6 %), vowels in the LibriSpeech
-  texts heard wrong 25.9 % (24.1 %; the lateral alone costs about 2 points
-  there, steady over three runs, mostly slots away from any /l/), consonants
-  86.0 % (84.6 %).
+  end of a syllable (7). While a gap is shutting fast, its jet is no
+  faster than the pressure behind it (averaged over 4 ms) can drive it:
+  bounded by the lungs' pressure alone, the averaged flow lagged the
+  closing gap and the jet of a closing tip ran at its fastest, the loudest
+  moment of an utterance (the tap of "a pot of" 8 dB over its vowel's
+  loudest sample); fricatives keep their hiss. And a consonant after the
+  last vowel of an utterance takes that vowel's tongue, not a /k g ŋ l r/'s
+  own: the last /s/ of "planks" had taken the /k/'s velar place and was a
+  hiss 56 dB under the vowel (now 18 dB). On the round's merged engine
+  (single runs; without these three in brackets): phoneme error over the 30
+  held-out sentences 25.9 % (27.4 %), Whisper's words 74.8 % (69.6 %), the
+  ten `sentence_heldout` sentences 19.2 % and 81.2 % (21.2 and 76.2 %),
+  vowels in the LibriSpeech texts heard wrong 25.5 % (23.8 %; the lateral
+  alone costs about 2 points there, steady over three runs, mostly in
+  slots away from any /l/), consonants there right 85.7 %; the
+  four-sentence clip "The birch can also run the smooth planks. Glue the
+  sheet to the dark blue background. She sells seashells by the seashore.
+  The juice of lemons makes fine punch." (before: "... by the sea shawl").
 - **Phrases against speakers (round 10).** Measured phone by phone against
   the LibriSpeech reader's 16 sentences (his own alignment, the rules saying
   the same text with a comma where he paused) and the two reference

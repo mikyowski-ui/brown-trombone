@@ -175,8 +175,9 @@ fn an_l_before_a_vowel_is_a_lateral() {
             lateral[0], lateral[1], lateral[2], vowel[0], vowel[1]
         );
         assert!(lateral[0] <= 450.0, "{text}: /l/ F1 {:.0}", lateral[0]);
+        // Never above the vowel's (the owner's rises from 330 into 440).
         assert!(
-            lateral[0] < vowel[0],
+            lateral[0] <= vowel[0],
             "{text}: F1 {:.0} in the /l/, {:.0} in the vowel",
             lateral[0],
             vowel[0]
