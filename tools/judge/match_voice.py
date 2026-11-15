@@ -1052,6 +1052,14 @@ def _quality_step(cal: Calibration, state: dict, u: np.ndarray, rec: Analysis, s
     return out
 
 
+#: An attempt whose median pitch reads further than this from the
+#: recording's (ln units; 1.5 times) is one the analysis could not read.
+UNREADABLE = math.log(1.5)
+#: A formant scale read further than this from the recording's (ln units;
+#: 1.3 times) is not followed by the tract length.
+SLIP = math.log(1.3)
+
+
 def _next(cal: Calibration, values: dict, rec: Analysis, syn: Analysis, rounds: list, state: dict) -> np.ndarray:
     """The next settings to try, from what this round measured.
 
@@ -1064,7 +1072,12 @@ def _next(cal: Calibration, values: dict, rec: Analysis, syn: Analysis, rounds: 
     """
     v = dict(values)
     v["pitch"] = values["pitch"] * rec.f0_median / syn.f0_median
-    v["tract_length"] = values["tract_length"] * syn.scale / rec.scale
+    # A formant scale read more than SLIP off (in a breathy attempt, one
+    # formant taken for the next: 25 to 75 % off) is not followed; the
+    # start, from the recording's own scale, is never that far.
+    ratio = syn.scale / rec.scale
+    if abs(math.log(ratio)) <= SLIP:
+        v["tract_length"] = values["tract_length"] * ratio
     v["rate"] = values["rate"] / (1 + rounds[-1]["errors"]["rate_pct"] / 100)
     slope = None
     if len(rounds) >= 2:
@@ -1146,7 +1159,20 @@ def match(recording: Path | str, text: str | None = None, iters: int = 8, cal: C
                 best = {"values": values, "profile": prof, "analysis": syn, "errors": e, "round": k}
             if _good_enough(e):
                 break
-            u = _next(cal, values, rec, syn, rounds, state)
+            if abs(math.log(syn.f0_median / rec.f0_median)) > UNREADABLE:
+                # A near-whisper (too little breath for folds held this
+                # loosely; read 2 to 3 times too high, its formant scale
+                # 30-90 % off) says nothing to correct by: pitch and tract
+                # stay, the voice quality goes back to the last attempt that
+                # could be read, or to the defaults, and the Broyden step
+                # starts again.
+                good = [r for r in rounds[:-1] if abs(r["errors"]["pitch_pct"]) < 100 * (math.exp(UNREADABLE) - 1)]
+                back = u_of(good[-1]["values"]) if good else u_of({})
+                for n in QUALITY:
+                    u[NAMES.index(n)] = back[NAMES.index(n)]
+                state.clear()
+            else:
+                u = _next(cal, values, rec, syn, rounds, state)
             for n, v in fixed.items():
                 u[NAMES.index(n)] = _to_u(n, v)
             u = within(u)
