@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and sixteen numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and seventeen numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and sixteen numbers in three
+        /// How a voice turns sounds into speech: one hundred and seventeen numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -770,6 +770,29 @@ tuning! {
     /// none (at 4, into the teeth's cell, the lips of "a blue" were 0.36
     /// apart 10 ms after the release, where they open to 0.63).
     lateral_channel = 3.0, 1.0..=5.0, A;
+
+    // ----- articulators that reach their targets (round 11) -------------
+
+    /// Damping ratio of the tongue body and the jaw (physical engine): `1`
+    /// is the critically damped spring of `body_rate`, which from rest
+    /// covers half its way in 67 ms and nine tenths in 156 ms at the speech
+    /// speed, its speed peaking a quarter of the way through that time and
+    /// then dying away over a long tail. Below `1` it overshoots a little
+    /// and settles sooner: at 0.9 nine tenths in 136 ms and 95 % in 161
+    /// (190 critically damped) with an overshoot of 0.15 % of the move; at
+    /// 0.8 in 119 and 136 ms with 1.5 %. The tip, the lips and the back of
+    /// the tongue stay critically damped. Off (`1`) by default: measured
+    /// in the LibriSpeech texts the engine's vowels already hold their
+    /// formants for more of their length than the reader's (58 % against
+    /// 46 % within 40 Hz on F1 and 80 Hz on F2) and come out of a stop
+    /// sooner (20 ms against 35); at 0.8 the vowels there were heard wrong
+    /// less often (25.5 to 21.7 %) but the 30 held-out and 30 tuning
+    /// sentences no better (25.7 and 21.9 % phoneme error against 25.9 and
+    /// 22.0), a /z/ hissed 9.2 dB under /s/ (8.1 at 1, the gate's limit 9)
+    /// and the tongue's way out of an /n/ came to depend on the control
+    /// block by 1.1 % of its travel (the gate's limit 1 %; 0.98 % at 1, and
+    /// 1.07 % at 0.9); at 0.7 the sentences were heard worse.
+    body_damping = 1.0, 0.6..=1.0, B;
 }
 
 impl Default for Tuning {
@@ -792,10 +815,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_forty_nine() {
+    fn two_passes_of_fifty_eight_and_fifty() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 49));
+        assert_eq!((a, b), (58, 50));
     }
 
     #[test]
