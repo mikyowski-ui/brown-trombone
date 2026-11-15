@@ -389,11 +389,18 @@ as the model goes:
   voiced sound; every noise source in the tract takes the shelf's inverse
   on the way in, so frication, bursts and breath are heard as without it.
   The breath noise of the glottal jet is pitched by the slit it comes
-  through: while the folds vibrate it has little below 3 kHz
-  (`voiced_breath_corner`), where that of an open glottis in /h/ reaches
-  down to 400 Hz. Measured in the LibriSpeech texts, the accented vowels'
-  2 to 4 kHz band now stands 27.1 dB under 0 to 1 kHz (the reader 28.9;
-  16.5 before), 1 to 2 kHz 19.8 (his 20.9; 12.9 before). The pitch of the
+  through: while the folds vibrate it has little below 5 kHz
+  (`voiced_breath_corner`) and is 6 dB stronger above it than an open
+  glottis's at the same flow (`voiced_breath_gain`, round 10), where that
+  of an open glottis in /h/ reaches down to 400 Hz. Measured in the
+  LibriSpeech texts on round 10's engine, the accented vowels' 1 to 2 kHz
+  band stands 21.0 dB under 0 to 1 kHz (the reader 20.9; 12.9 before
+  round 9), 2 to 4 kHz 28.8 (his 28.9; 16.5), and 4 to 7.5 kHz, which is
+  this breath noise and not the voice's harmonics, 26.9 (his 25.7; 30.0
+  with round 9's breath). The tilt can take a second section
+  (`tilt_top`, `tilt_top_corner`); it is off: a gentler shelf with a
+  steeper top, or a shelf 4 dB less deep, brightened 2 to 4 kHz past the
+  reader's and changed no score by more than a point. The pitch of the
   folds has a cycle-to-cycle jitter with a 1/f-like spectrum
   (`cycle_jitter`: RAP 0.23 %, the reader 0.25 %, before 0.12 %), its slow
   wander and vibrato now move in the physical engine too (they were frozen:
@@ -663,8 +670,13 @@ cargo run --release -p synthie-trombone-cli -- --mimic --mic pipewire     # choo
 
 In the tests a second voice copies a first from its sound alone: six sung
 vowels within 4 % on F1 and F2, the copy's tract in place within 95 ms of
-a change (its tongue body is as heavy and slow as the speaking voice's). It has only ever heard the synthesizer; a real microphone in a
-real room is untested. Formants are hard to read from high voices, where
+a change (its tongue body is as heavy and slow as the speaking voice's). The listener pre-emphasises in two stages (+6 dB per octave from
+60 Hz and again from 1 kHz), as a voice as dark as a speaker's needs:
+with one, F3 slipped into F2 in one frame in ten of the physical /æ/ once
+its source took round 9's tilt, and a change of vowel took up to 220 ms
+to settle (22 ms with two). On the LibriSpeech reader's sentences its
+F2 jumps less from frame to frame and his vowels are told apart as well;
+a real microphone in a real room is still untested. Formants are hard to read from high voices, where
 the harmonics are far apart: above about 200 Hz the first formant reads
 10 to 30 % off, and child-sized voices are worse. Pick a voice of about
 your own size; vowels the voice cannot reach are pulled to the nearest one
@@ -681,12 +693,15 @@ uv run python match_voice.py someone.wav --out someone.json
 cargo run --release -p synthie-trombone-cli -- --engine physical --profile tools/judge/someone.json
 ```
 
-Recalibrated on this round's engine (the folds now close on every cycle and
-the voice is brighter), it re-measures eight hidden engine voices within
-1 % on pitch, 0.6 % on formant scale and 0.7 dB on H1-H2; for three of
-them it gets there with a tract length 16 to 38 % off the hidden one,
-because the formant-scale measure has near-equal answers about 25 % apart.
-On six recordings of a human reader it meets those limits on four (on
+Recalibrated on round 10's engine, it re-measures eight hidden engine
+voices within 4.5 % on pitch, 0.4 % on formant scale and 0.7 dB on H1-H2,
+and finds every hidden tract length within 0.6 %. (Until round 10 three of
+them came back with a tract length 16 to 38 % off, and a breathy one was
+misread at every round since at least round 8: a breathy voice loses F2
+from the formant tracker, and its formant spacing read the tract 21 to
+48 % short; for a voice with H1*-H2* over 10.5 dB a spacing fitted to all
+formant candidates at once now guides the estimate. The LibriSpeech
+reader's H1*-H2* is 7 to 11 dB, so his analysis is as it was.) On six recordings of a human reader it meets those limits on four (on
 last round's engine it met them on all six): one is matched 5.7 % low
 in pitch, and in another the formant scale is misread as the longest tract
 the engine allows. It copies those five things, not the person: accent,
