@@ -81,7 +81,7 @@ fn line(settings: &VoiceSettings, text: &str) -> (String, Vec<f32>) {
     let mut n = 0usize;
     while speaker.is_speaking() {
         audio.push(speaker.process(&mut voice));
-        if n % HOP == 0 {
+        if n.is_multiple_of(HOP) {
             if n > 0 {
                 frames.push(',');
             }
@@ -90,7 +90,7 @@ fn line(settings: &VoiceSettings, text: &str) -> (String, Vec<f32>) {
             frames.push_str(",\"g\":");
             list(&mut frames, voice.target_diameters(), 3);
             let _ = write!(frames, ",\"v\":{:.3}", voice.velum());
-            if (n / HOP) % 2 == 0 {
+            if (n / HOP).is_multiple_of(2) {
                 frames.push_str(",\"f\":");
                 list(&mut frames, &formants(&voice), 0);
             }
