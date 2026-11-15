@@ -1714,6 +1714,10 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
     }
 
+    if physical {
+        darken_before_coda_l(&mut drafts, &timing);
+    }
+
     // Coarticulation: consonants borrow the tongue of the next vowel (or
     // the previous one at the end of an utterance).
     let mut next_tongue = None;
@@ -2254,6 +2258,77 @@ fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
     }
 }
 
+/// The vowel before a dark /l/ (physical engine): an /l/ that closes its
+/// syllable, with no vowel after it ("welcome", "also", "middle",
+/// "principles"). English makes such an /l/ with the back of the tongue
+/// first and the tip after, the back drawn up and back during the vowel
+/// before it (Sproat & Fujimura 1993), so that vowel is dark all through:
+/// the LibriSpeech reader's vowels before a coda /l/ have their F2 near
+/// 1000 Hz from a quarter of the way in (the /ɪ/ of "quilter" 1090, the /ɛ/
+/// of "welcome" 1070, the schwa of "pascal" 720), where the engine's,
+/// made on their own shape until the /l/ began, stood at 1460 to 1660 and
+/// rose into the /l/; a fall of some 500 Hz into the lateral, where his
+/// falls by 70, and 15 of the 26 such vowels in the LibriSpeech texts were
+/// heard wrong (11 before round 10's lateral, whose darker /l/ made the
+/// fall larger), the recognizer's own choice among the vowels at a margin
+/// of -0.3 nats (his +3.0).
+///
+/// So the last [`Tuning::dark_l_share`] of such a vowel, a lax vowel's
+/// glide towards schwa included, glides towards /ʊ/, the vowel of the
+/// back of the tongue raised (the slow tongue body gets part of the way).
+/// Not a diphthong, which glides to its own end, and not /ʊ/ itself.
+fn darken_before_coda_l(drafts: &mut Vec<Draft>, timing: &Tuning) {
+    let share = timing.dark_l_share;
+    if share <= 0.0 {
+        return;
+    }
+    let target = Phoneme::Uh.articulation();
+    let mut k = 0;
+    while k + 1 < drafts.len() {
+        let coda = drafts[k].vowel
+            && drafts[k + 1].phoneme == Phoneme::L
+            && drafts.get(k + 2).is_none_or(|d| !d.vowel)
+            && drafts[k].part != Part::Glide
+            && target.vowel != Some(VowelKey::Vowel(drafts[k].phoneme));
+        if !coda {
+            k += 1;
+            continue;
+        }
+        let head = vowel_head(drafts, k);
+        let total: f32 = drafts[head..=k].iter().map(|d| d.duration).sum();
+        let tail = share * total;
+        // A lax vowel's glide (or a fronted /u/'s) takes the dark shape
+        // instead of its own end and is drawn out to the share; any other
+        // vowel's end is split off for it.
+        if drafts[k].part == Part::Offglide && head + 1 == k {
+            drafts[k].articulation = Articulation {
+                voiced: drafts[k].articulation.voiced,
+                tenseness: drafts[k].articulation.tenseness,
+                ..target
+            };
+            // A stressed lax vowel keeps its nucleus (`Tuning::lax_floor`).
+            let keep = drafts[head].duration.min(timing.lax_floor);
+            let tail = tail.min(total - keep);
+            drafts[head].duration += drafts[k].duration - tail;
+            drafts[k].duration = tail;
+        } else if drafts[k].part == Part::Head && drafts[k].duration > tail {
+            drafts[k].duration -= tail;
+            let mut d = drafts[k];
+            d.articulation = Articulation {
+                voiced: d.articulation.voiced,
+                tenseness: d.articulation.tenseness,
+                ..target
+            };
+            d.duration = tail;
+            d.accent = 0.0;
+            d.part = Part::Offglide;
+            drafts.insert(k + 1, d);
+            k += 1;
+        }
+        k += 1;
+    }
+}
+
 fn silence(duration: f32) -> Draft {
     Draft {
         phoneme: Phoneme::Sil,
@@ -2619,7 +2694,10 @@ fn expand(
 ///
 /// A phrase that opens on a vowel or a sonorant starts from
 /// [`Tuning::onset_pressure`] of the pressure, about what the folds need
-/// to start, and the voice grows from there. Before a phrase that opens on
+/// to start, and the voice grows from there; one that opens on a nasal or
+/// a liquid starts that sound [`Tuning::sonorant_onset`] earlier, out of
+/// the pause, so that it is voiced by the time it was due rather than
+/// silent for the 40 ms the lungs take to get there. Before a phrase that opens on
 /// an obstruent or /h/ the lungs start pushing in the pause, its last part
 /// split off for it, with all their pressure, for [`Tuning::lead`]: the
 /// voice starts as from a closure in the middle of speech, the release
@@ -2649,6 +2727,17 @@ fn breathe(
         // pressure they start from, and the seconds over which they build
         // up to all of it.
         let breathy = is_obstruent(first.phoneme) || first.phoneme.manner() == Manner::Aspirate;
+        // A phrase that opens on a nasal or a liquid starts it a little
+        // earlier, out of the pause: the voice needs the lungs' first 40 ms
+        // to start, and the /n m l/ is voiced from then on rather than
+        // heard only in its release (`Tuning::sonorant_onset`).
+        let sonorant =
+            !first.vowel && matches!(first.phoneme.manner(), Manner::Nasal | Manner::Approximant);
+        if let Some(k) = pause.filter(|_| sonorant && timing.sonorant_onset > 0.0) {
+            let early = timing.sonorant_onset.min(0.5 * drafts[k].duration);
+            drafts[k].duration -= early;
+            drafts[a].duration += early;
+        }
         let (ready, floor, swell_time) = match pause {
             Some(k) if breathy => (drafts[k].duration.min(timing.lead), 1.0, 0.0),
             _ => (0.0, timing.onset_pressure, timing.phrase_onset),

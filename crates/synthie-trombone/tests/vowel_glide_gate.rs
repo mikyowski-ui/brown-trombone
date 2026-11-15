@@ -350,8 +350,10 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
         let heads: Vec<f32> = segs
             .iter()
             .filter(|s| {
+                // The nucleus, not its glide (towards schwa, or towards
+                // /ʊ/ before the dark /l/ of "sells").
                 matches!(s.phoneme, Phoneme::Ih | Phoneme::Eh | Phoneme::Ah)
-                    && s.articulation.vowel != Some(VowelKey::End(s.phoneme))
+                    && s.articulation.vowel == Some(VowelKey::Vowel(s.phoneme))
             })
             .map(|s| s.duration)
             .collect();
