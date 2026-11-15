@@ -739,6 +739,16 @@ impl Trombone {
         }
     }
 
+    /// How many times faster than usual the velum shuts from now on
+    /// (physical engine; `1` is its usual speed, some 45 ms from open to
+    /// shut). The speaker hastens it out of a nasal into a vowel once the
+    /// mouth has opened ([`Tuning::velum_release`]).
+    pub(crate) fn set_velum_haste(&mut self, factor: f32) {
+        if factor.is_finite() && factor > 0.0 {
+            self.tract.velum_haste = factor;
+        }
+    }
+
     /// Current velum openness, `0‥1`.
     #[must_use]
     pub fn velum(&self) -> f32 {

@@ -310,23 +310,6 @@ fn main() -> std::io::Result<()> {
     let mut talker = Talker::new(SR as f32, settings);
     talker.voice_mut().set_glottal_source(source);
     hold_vowels(talker.voice_mut(), &vowels);
-    // TEMPORARY (r11-canoe): a fronted /u/ shape given directly.
-    for (var, key) in [
-        ("ZZ_UWF", VowelKey::Fronted(Phoneme::Uw)),
-        ("ZZ_UWE", VowelKey::End(Phoneme::Uw)),
-    ] {
-        if let Ok(s) = std::env::var(var) {
-            let f: Vec<f32> = s.split(',').map(|x| x.parse().unwrap()).collect();
-            let shape = synthie_trombone::inverse::Shape {
-                tongue_index: f[0],
-                tongue_diameter: f[1],
-                lips: (f[2] > 0.0).then_some(f[2]),
-                narrowing: (f[4] > 0.0).then_some((f[3], f[4])),
-                pharynx: 0.0,
-            };
-            talker.voice_mut().set_vowel_shape(key, Some(&shape));
-        }
-    }
     let mut followed = None;
     let utterance = if let (Some(file), Some(json)) = (&schedule, &schedule_json) {
         let schedule = read_schedule(json);

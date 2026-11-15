@@ -162,6 +162,8 @@ pub struct Utterance {
     devoicing_lead: f32,
     /// Head start of the velum out of a nasal into an obstruent, seconds.
     velum_lead: f32,
+    /// How many times faster the velum shuts out of /n ŋ/ into a vowel.
+    velum_release: f32,
     /// Shortest complete closure of a voiceless stop, seconds.
     closure_floor: f32,
     /// How long the voice goes on into a voiceless stop's closure, seconds.
@@ -237,6 +239,7 @@ impl Utterance {
             kick_time: Tuning::DEFAULT.kick_time,
             devoicing_lead: Tuning::DEFAULT.devoicing_lead,
             velum_lead: Tuning::DEFAULT.velum_lead,
+            velum_release: Tuning::DEFAULT.velum_release,
             closure_floor: 0.0,
             voicing_tail: 0.0,
             labial_lead: 0.0,
@@ -729,14 +732,15 @@ impl Speaker {
             {
                 voice.set_velum(next.articulation.velum);
             }
-            if physical
-                && seg.phoneme.manner() == Manner::Nasal
-                && let Some(next) = self.utterance.segments.get(self.index + 1)
-                && is_vowel(next.phoneme)
-                && self.elapsed
-                    >= seg.duration - crate::xp::x("CX_VEL_V", -1.0).min(0.9 * seg.duration)
-            {
-                voice.set_velum(next.articulation.velum);
+            // Out of /n ŋ/ into a vowel the velum shuts quickly from the
+            // release on (`Tuning::velum_release`).
+            if physical {
+                let haste = if self.opening_from_nasal(&seg) {
+                    self.utterance.velum_release
+                } else {
+                    1.0
+                };
+                voice.set_velum_haste(haste);
             }
             // A fricative's gap forming and opening again.
             let (into, out_of) = seg.gesture.gap_opening;
@@ -814,6 +818,30 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Whether `seg` is the end of an /n/ or /ŋ/ released into a vowel (its
+    /// articulators already sent on) or a vowel after one. Not /m/: its
+    /// lips open slowly onto a rounded vowel's narrow ones, and with the
+    /// nose shut that soon the voice of "smooth" dipped 6 to 8 dB under the
+    /// /u/ 20 to 40 ms after the release.
+    fn opening_from_nasal(&self, seg: &Segment) -> bool {
+        let nasal = |p: Phoneme| matches!(p, Phoneme::N | Phoneme::Ng);
+        if nasal(seg.phoneme) {
+            self.ahead
+                && self
+                    .utterance
+                    .segments
+                    .get(self.index + 1)
+                    .is_some_and(|n| is_vowel(n.phoneme))
+        } else {
+            is_vowel(seg.phoneme)
+                && self
+                    .index
+                    .checked_sub(1)
+                    .and_then(|k| self.utterance.segments.get(k))
+                    .is_some_and(|p| nasal(p.phoneme))
+        }
     }
 
     /// Whether a voiceless stop's closure is still to be held: the mouth
@@ -1395,8 +1423,7 @@ fn fronts_u(context: Context) -> bool {
     use Phoneme as P;
     let after_front = context
         .prev
-        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z))
-        || (crate::xp::x("CX_FRONT_N", 0.0) > 0.0 && context.prev == Some(P::N));
+        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z));
     let dark_l = context.next.is_some_and(|(n, _, same)| same && n == P::L);
     after_front && !dark_l
 }
@@ -1471,8 +1498,6 @@ fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
         _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
         P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
         P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
-        P::Ax => crate::xp::x("CX_AX_LEN", 1.0) * timing.vowel_hold,
-        P::Uw if stressed => crate::xp::x("CX_UW_LEN", 1.0) * timing.vowel_hold,
         _ => timing.vowel_hold,
     }
 }
@@ -1811,6 +1836,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
         velum_lead: timing.velum_lead,
+        velum_release: timing.velum_release,
         closure_floor: if physical { timing.closure_floor } else { 0.0 },
         voicing_tail: timing.voicing_tail,
         labial_lead: if physical { timing.labial_lead } else { 0.0 },
@@ -2821,15 +2847,6 @@ fn weigh_syllables(phrase: &mut [Draft], accented: &[bool], timing: &Tuning) {
             1.0
         } else {
             low
-        };
-        let share = if phrase[k].phoneme == Phoneme::Uw {
-            share
-                * crate::math::powf(
-                    10.0,
-                    crate::xp::x("CX_UW_DB", 0.0) / (20.0 * LEVEL_EXPONENT),
-                )
-        } else {
-            share
         };
         mids.push((t + 0.5 * total, share));
         t += total;

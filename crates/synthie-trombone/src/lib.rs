@@ -84,7 +84,6 @@ mod tuning;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;
-mod xp;
 
 /// LPC formant estimation, shared with the examples.
 #[cfg(test)]
