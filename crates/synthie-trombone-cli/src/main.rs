@@ -207,7 +207,7 @@ fn session(
             Persona::NEUTRAL,
         )
     {
-        app.set_voice(preset, base, persona);
+        app.set_voice(preset, &base, persona);
     }
     let result = run(&mut terminal, &mut app);
     // A take still recording is saved while the sound still runs.

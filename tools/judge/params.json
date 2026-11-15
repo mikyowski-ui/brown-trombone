@@ -116,5 +116,7 @@
   "voiced_breath_gain": {"lo": -12, "hi": 12, "default": 6, "pass": "a"},
   "lateral_channel": {"lo": 2, "hi": 4, "default": 3, "pass": "a"},
   "body_damping": {"lo": 0.8, "hi": 1, "default": 1, "pass": "b"},
+  "dark_l_share": {"lo": 0, "hi": 0.9, "default": 0.6, "pass": "b"},
+  "sonorant_onset": {"lo": 0, "hi": 0.08, "default": 0.05, "pass": "b"},
   "velum_release": {"lo": 1, "hi": 5, "default": 3, "pass": "b"}
 }

@@ -407,3 +407,75 @@ fn a_t_or_d_between_vowels_is_a_tap() {
         );
     }
 }
+
+#[test]
+fn a_phrase_opening_on_a_nasal_or_l_is_voiced_before_its_vowel() {
+    // The LibriSpeech reader's opening /n m/ ("Nor", "Near", "Not",
+    // "Mister") stand 8 to 20 dB under the vowel after them from their
+    // first 10 ms on, for 40 to 55 ms. Until round 11 the lungs took the
+    // first 40 to 45 ms of an opening /n m l/ to bring the folds going, and
+    // that much of it was 33 dB under the vowel: the recognizer heard no
+    // /n/ in "Nine of them" and "Not at all", and an /l/ before a front
+    // vowel as /t f v/, of which only the release was left.
+    let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt();
+    let window = (0.01 * place::SR) as usize;
+    for (text, c) in [
+        ("Nine of them.", Phoneme::N),
+        ("Not at all.", Phoneme::N),
+        ("More of it.", Phoneme::M),
+        ("Lift it up.", Phoneme::L),
+        ("Let it go.", Phoneme::L),
+    ] {
+        let s = place::speak(&voice(), text, false);
+        let k = s.find(c, 0).expect("the consonant");
+        let (_, e) = s.consonant_span(k);
+        let (c0, _) = s.ranges[k];
+        let (v0, v1) = s.ranges[e + 1];
+        let loudest = (v0..v1.saturating_sub(window))
+            .step_by(window / 2)
+            .map(|i| rms(&s.audio[i..i + window]))
+            .fold(0.0f32, f32::max);
+        // How long before the vowel the consonant is within 20 dB of it.
+        let audible = (c0..v0.saturating_sub(window))
+            .step_by(window / 4)
+            .find(|&i| 20.0 * (rms(&s.audio[i..i + window]) / loudest).log10() > -20.0)
+            .map_or(0.0, |i| 1000.0 * (v0 - i) as f32 / place::SR);
+        println!("{text}: the opening {c} is within 20 dB of the vowel for {audible:.0} ms");
+        assert!(
+            audible >= 35.0,
+            "{text}: the opening {c} is within 20 dB of its vowel for {audible:.0} ms"
+        );
+    }
+}
+
+#[test]
+fn a_vowel_before_a_dark_l_is_dark_already() {
+    // The LibriSpeech reader's vowels before an /l/ that closes their
+    // syllable have their F2 near 1000 Hz from a quarter of the way in
+    // ("quilter" 1090, "welcome" 1070, "help" 1190) and fall some 70 Hz
+    // into the /l/; until round 11 the engine's held their own shape up to
+    // the /l/ (1460 to 1660 Hz by LPC) and fell some 500 Hz into it.
+    let mut light = voice();
+    light.tuning.dark_l_share = 0.0;
+    let end_f2 = |settings: &VoiceSettings, text: &str, v: Phoneme| {
+        let s = place::speak(settings, text, true);
+        let k = s.find(v, 0).expect("the vowel");
+        let l = s.find(Phoneme::L, k).expect("the /l/");
+        let v1 = s.ranges[l - 1].1;
+        s.formants_at(v1, -5.0).expect("an open vowel")[1]
+    };
+    for (text, v) in [
+        ("help me", Phoneme::Eh),
+        ("quilter", Phoneme::Ih),
+        ("a pill", Phoneme::Ih),
+        ("a sell", Phoneme::Eh),
+    ] {
+        let dark = end_f2(&voice(), text, v);
+        let own = end_f2(&light, text, v);
+        println!("{text}: F2 {dark:.0} Hz at the /l/ ({own:.0} on the vowel's own shape)");
+        assert!(
+            dark <= own - 150.0,
+            "{text}: F2 {dark:.0} Hz at the /l/, {own:.0} on the vowel's own shape"
+        );
+    }
+}
