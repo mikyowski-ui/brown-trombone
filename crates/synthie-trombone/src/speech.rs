@@ -162,6 +162,9 @@ pub struct Utterance {
     devoicing_lead: f32,
     /// Head start of the velum out of a nasal into an obstruent, seconds.
     velum_lead: f32,
+    /// How many times faster the velum shuts out of /n ŋ/ into a close
+    /// vowel.
+    velum_release: f32,
     /// Shortest complete closure of a voiceless stop, seconds.
     closure_floor: f32,
     /// How long the voice goes on into a voiceless stop's closure, seconds.
@@ -237,6 +240,7 @@ impl Utterance {
             kick_time: Tuning::DEFAULT.kick_time,
             devoicing_lead: Tuning::DEFAULT.devoicing_lead,
             velum_lead: Tuning::DEFAULT.velum_lead,
+            velum_release: Tuning::DEFAULT.velum_release,
             closure_floor: 0.0,
             voicing_tail: 0.0,
             labial_lead: 0.0,
@@ -729,6 +733,16 @@ impl Speaker {
             {
                 voice.set_velum(next.articulation.velum);
             }
+            // Out of /n ŋ/ into a close vowel the velum shuts quickly from the
+            // release on (`Tuning::velum_release`).
+            if physical {
+                let haste = if self.opening_from_nasal(&seg) {
+                    self.utterance.velum_release
+                } else {
+                    1.0
+                };
+                voice.set_velum_haste(haste);
+            }
             // A fricative's gap forming and opening again.
             let (into, out_of) = seg.gesture.gap_opening;
             let lead = self.utterance.lead;
@@ -805,6 +819,36 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Whether `seg` is the end of an /n/ or /ŋ/ released into a close
+    /// vowel (its articulators already sent on) or a close vowel after one.
+    /// A close vowel's mouth is narrow, so even a velum a quarter open
+    /// takes over its sound (the /u/'s loudest peak moves to 700 Hz, the
+    /// /i/'s to 630); an open vowel keeps its own first formant the
+    /// loudest (/ɑ/ 834 Hz), and shut quickly into /oʊ ɑ/ the /n/ of "no"
+    /// and "gnawed" was heard as /m/ or /l/. Not /m/: its lips open slowly
+    /// onto a rounded vowel's narrow ones, and with the nose shut that soon
+    /// the voice of "smooth" dipped 6 to 8 dB under the /u/ 20 to 40 ms
+    /// after the release.
+    fn opening_from_nasal(&self, seg: &Segment) -> bool {
+        let nasal = |p: Phoneme| matches!(p, Phoneme::N | Phoneme::Ng);
+        let close = |p: Phoneme| matches!(p, Phoneme::Iy | Phoneme::Ih | Phoneme::Uw | Phoneme::Uh);
+        if nasal(seg.phoneme) {
+            self.ahead
+                && self
+                    .utterance
+                    .segments
+                    .get(self.index + 1)
+                    .is_some_and(|n| close(n.phoneme))
+        } else {
+            close(seg.phoneme)
+                && self
+                    .index
+                    .checked_sub(1)
+                    .and_then(|k| self.utterance.segments.get(k))
+                    .is_some_and(|p| nasal(p.phoneme))
+        }
     }
 
     /// Whether a voiceless stop's closure is still to be held: the mouth
@@ -1803,6 +1847,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         kick_time: timing.kick_time,
         devoicing_lead: timing.devoicing_lead,
         velum_lead: timing.velum_lead,
+        velum_release: timing.velum_release,
         closure_floor: if physical { timing.closure_floor } else { 0.0 },
         voicing_tail: timing.voicing_tail,
         labial_lead: if physical { timing.labial_lead } else { 0.0 },
