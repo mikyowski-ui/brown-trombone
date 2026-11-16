@@ -112,7 +112,7 @@ let taken = voice.push_gesture(
     Gesture::new(Tier::TongueTip, closure).window(Window::between(0.01, 0.09).ramps(0.01, 0.02)),
 );
 assert!(taken);
-let mut buf = [0.0f32; 256];
+let mut buf = [0.0f32; 1024]; // 21 ms
 voice.render(&mut buf);
 let tip = voice.tier_activity()[Tier::TongueTip.index()];
 assert_eq!(tip.gestures, 1);
