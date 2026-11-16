@@ -25,6 +25,8 @@
     "dental_edge": {"lo": 0, "hi": 6, "default": 3, "pass": "a"},
     "nasal_port": {"lo": 0.3, "hi": 1.6, "default": 0.8, "pass": "a"},
     "cavity_expansion": {"lo": 50, "hi": 250, "default": 150, "pass": "a"},
+    "lip_horn": {"lo": 0, "hi": 2, "default": 0, "pass": "a"},
+    "larynx_travel": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
     "epilarynx_cells": {"lo": 4, "hi": 9, "default": 7, "pass": "a"},
     "epilarynx_diameter": {"lo": 0.4, "hi": 0.8, "default": 0.6, "pass": "a"},
     "epilarynx_flare": {"lo": 0.8, "hi": 2.2, "default": 1.1, "pass": "a"},
@@ -95,10 +97,14 @@
     "nasal_cavity_held": {"lo": 0, "hi": 1, "default": 0, "pass": "b"},
     "schwa_colour": {"lo": 0, "hi": 1, "default": 1, "pass": "c"},
     "schwa_dominance": {"lo": 0.25, "hi": 8, "default": 2, "pass": "c"},
+    "voiced_stop_larynx": {"lo": 0, "hi": 0.8, "default": 0, "pass": "a"},
+    "rounded_larynx": {"lo": 0, "hi": 0.8, "default": 0, "pass": "c"},
     "articulation_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "lips_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "body_rate": {"lo": 8, "hi": 18, "default": 11.4, "pass": "b"},
-    "body_damping": {"lo": 0.8, "hi": 1, "default": 1, "pass": "b"}
+    "body_damping": {"lo": 0.8, "hi": 1, "default": 1, "pass": "b"},
+    "larynx_rate": {"lo": 8, "hi": 40, "default": 18, "pass": "b"},
+    "larynx_damping": {"lo": 0.6, "hi": 1, "default": 1, "pass": "b"}
   },
   "prosody": {
     "vowel_length": {"lo": 0.06, "hi": 0.14, "default": 0.085, "pass": "b", "classic": true},
