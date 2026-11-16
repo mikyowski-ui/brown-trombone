@@ -5,11 +5,13 @@
 //! (`Trombone::energy_share`), and the level of the 2.8 to 3.2 kHz band
 //! against 0 to 1 kHz. `examples/epilarynx.rs` prints the same per shape.
 //!
-//! The gate is for the setting it is meant for: with the recommended tube
-//! ([`RECOMMENDED`]) every shape must have a resonance between 2.85 and 3.3
+//! The gate is for the setting it is meant for: with the tube that gives
+//! the cluster ([`CLUSTER`]) every shape must have a resonance between 2.85 and 3.3
 //! kHz that holds at least half its energy in the tube (its F3 in the front
-//! vowels, F4 in the others), and the band must be lifted; the default (the
-//! original's tube) is held to what it does, ringing above the cluster.
+//! vowels, F4 in the others), and the band must be lifted; the original's
+//! tube ([`ORIGINAL`], today's default) is held to what it does, ringing
+//! above the cluster. The vowel shapes are the table's, solved for the
+//! default tube.
 //!
 //! ```sh
 //! cargo test -p synthie-trombone --release --test epilarynx_gate -- --nocapture
@@ -28,12 +30,33 @@ use synthie_trombone::vowel_targets::TARGETS;
 use synthie_trombone::{Engine, Trombone, Tuning};
 
 /// The tube that gives the cluster: eight cells (2.92 cm), 0.25 cm²
-/// (diameter 0.45), opening in a step into 3.6 cm² (diameter 1.7).
-const RECOMMENDED: [(&str, f32); 3] = [
+/// (diameter 0.45), opening in a step into 3.6 cm² (diameter 1.7), not
+/// tied to the folds.
+const CLUSTER: [(&str, f32); 5] = [
     ("epilarynx_cells", 8.0),
     ("epilarynx_diameter", 0.45),
     ("epilarynx_flare", 1.7),
+    ("epilarynx_flare_cells", 0.0),
+    ("epilarynx_effort", 0.0),
 ];
+
+/// The original's tube: seven cells of 0.45 cm² (diameter 0.6), a step
+/// to 1.52 cm² (1.1); today's defaults, set by name.
+const ORIGINAL: [(&str, f32); 5] = [
+    ("epilarynx_cells", 7.0),
+    ("epilarynx_diameter", 0.6),
+    ("epilarynx_flare", 1.1),
+    ("epilarynx_flare_cells", 0.0),
+    ("epilarynx_effort", 0.0),
+];
+
+fn tuning(fields: &[(&str, f32)]) -> Tuning {
+    let mut t = Tuning::DEFAULT;
+    for &(name, value) in fields {
+        assert!(t.set(name, value), "{name}");
+    }
+    t
+}
 
 /// Spectrum step, Hz.
 const STEP: f32 = 4.0;
@@ -156,13 +179,9 @@ fn report(name: &str, shapes: &[Shape]) -> f32 {
 }
 
 #[test]
-fn recommended_tube_rings_in_the_cluster() {
-    let mut tuning = Tuning::DEFAULT;
-    for (name, value) in RECOMMENDED {
-        assert!(tuning.set(name, value));
-    }
-    let shapes = survey(&tuning);
-    let mean = report("recommended", &shapes);
+fn the_cluster_tube_rings_in_the_cluster() {
+    let shapes = survey(&tuning(&CLUSTER));
+    let mean = report("cluster", &shapes);
     for s in &shapes {
         assert!(
             rings(s, 2850.0, 3300.0).is_some(),
@@ -176,9 +195,9 @@ fn recommended_tube_rings_in_the_cluster() {
 }
 
 #[test]
-fn original_tube_rings_above_the_cluster() {
-    let shapes = survey(&Tuning::DEFAULT);
-    let mean = report("default", &shapes);
+fn the_original_tube_rings_above_the_cluster() {
+    let shapes = survey(&tuning(&ORIGINAL));
+    let mean = report("original", &shapes);
     // Its own resonance (F4 in most shapes) at 3.3 to 3.9 kHz.
     let at: Vec<f32> = shapes.iter().filter_map(own).collect();
     let above = at.iter().filter(|&&hz| hz > 3300.0).count();

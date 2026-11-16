@@ -1457,10 +1457,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_sixty_two() {
+    fn two_passes_of_sixty_three_and_sixty_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 63));
+        assert_eq!((a, b), (63, 63));
     }
 
     #[test]

@@ -350,10 +350,23 @@ fn tract_with(tuning: crate::Tuning) -> crate::tract::Tract {
     t
 }
 
+/// The tuning with the original's epilarynx (seven cells of 0.6, a step
+/// to 1.1, not tied to the folds): today's defaults, set by name so that
+/// the tests below hold whatever the defaults become.
+fn original_epilarynx() -> crate::Tuning {
+    let mut t = crate::Tuning::DEFAULT;
+    t.anatomy.epilarynx_cells = 7.0;
+    t.anatomy.epilarynx_diameter = 0.6;
+    t.anatomy.epilarynx_flare = 1.1;
+    t.anatomy.epilarynx_flare_cells = 0.0;
+    t.anatomy.epilarynx_effort = 0.0;
+    t
+}
+
 #[test]
-fn epilarynx_defaults_are_the_original_cells() {
+fn epilarynx_original_numbers_give_the_original_cells() {
     // Seven cells of 0.6 and three of 1.1, exactly, as the original's tube.
-    let t = tract_with(crate::Tuning::DEFAULT);
+    let t = tract_with(original_epilarynx());
     for i in 0..crate::tract::BLADE_START {
         let want = if i < 7 { 0.6f32 } else { 1.1 };
         let got = t.epilarynx(i).expect("a cell of the tube or its flare");
@@ -361,7 +374,7 @@ fn epilarynx_defaults_are_the_original_cells() {
     }
     assert!(t.epilarynx(crate::tract::BLADE_START).is_none());
     // The classic engine keeps the original's whatever the anatomy says.
-    let mut odd = crate::Tuning::DEFAULT;
+    let mut odd = original_epilarynx();
     odd.anatomy.epilarynx_cells = 4.0;
     odd.anatomy.epilarynx_diameter = 0.4;
     let mut classic = tract_with(odd);
@@ -371,7 +384,7 @@ fn epilarynx_defaults_are_the_original_cells() {
 
 #[test]
 fn epilarynx_takes_its_length_area_and_flare() {
-    let mut tuning = crate::Tuning::DEFAULT;
+    let mut tuning = original_epilarynx();
     tuning.anatomy.epilarynx_cells = 4.5;
     tuning.anatomy.epilarynx_diameter = 0.5;
     tuning.anatomy.epilarynx_flare = 1.5;
@@ -395,7 +408,7 @@ fn epilarynx_takes_its_length_area_and_flare() {
 
 #[test]
 fn epilarynx_narrows_with_pressed_folds() {
-    let mut tuning = crate::Tuning::DEFAULT;
+    let mut tuning = original_epilarynx();
     tuning.anatomy.epilarynx_effort = 1.0;
     let mut t = tract_with(tuning);
     let area = |t: &crate::tract::Tract| t.epilarynx(0).unwrap().powi(2) / 0.36;
@@ -409,7 +422,7 @@ fn epilarynx_narrows_with_pressed_folds() {
     t.tenseness = 0.0;
     assert!(area(&t) <= 2.0 + 1e-4);
     // Off, the folds change nothing.
-    let mut off = tract_with(crate::Tuning::DEFAULT);
+    let mut off = tract_with(original_epilarynx());
     off.tenseness = 0.95;
     assert_eq!(off.epilarynx(0).unwrap().to_bits(), 0.6f32.to_bits());
 }
@@ -452,7 +465,7 @@ fn epilarynx_tube_resonates_where_theory_says() {
     // lips' end correction is 8r/3π, as for the uniform tube. The engine
     // must put it within 3 %.
     for cells in [4.0f32, 5.0, 6.0, 7.0, 8.0] {
-        let mut tuning = crate::Tuning::DEFAULT;
+        let mut tuning = original_epilarynx();
         tuning.anatomy.epilarynx_cells = cells;
         tuning.anatomy.epilarynx_flare = 2.2;
         let t = tract_with(tuning);
