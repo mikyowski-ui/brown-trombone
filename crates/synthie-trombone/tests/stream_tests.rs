@@ -9,14 +9,20 @@
 )]
 
 use std::time::Instant;
+use synthie_trombone::gesture::{Target, var};
 use synthie_trombone::speech::{Prosody, Speaker, Utterance};
-use synthie_trombone::stream::standin::{Gesture, Tier, tier_activity};
 use synthie_trombone::stream::{
     Event, Full, Granularity, StreamBuffer, UTTERANCES, When, voice_stream,
 };
 use synthie_trombone::{Constriction, Engine, Phoneme, Preset, Trombone};
+use synthie_trombone::{Gesture, Tier};
 
 const SR: f32 = 48_000.0;
+
+/// A gesture opening the velar port to `port`.
+fn velum(port: f32) -> Gesture {
+    Gesture::new(Tier::Velum, Target::NONE.with(var::velum::PORT, port)).dominance(2.0)
+}
 
 #[test]
 fn timed_events_land_on_their_sample() {
@@ -92,7 +98,7 @@ fn every_event_survives_the_wire() {
         }),
         Event::TractLength(0.8),
         Event::ArticulationSpeed(2.0),
-        Event::Gesture(Gesture::new(Tier::Velum, 0.5).at(17.0)),
+        Event::Gesture(velum(0.5)),
         Event::StopSpeaking,
     ];
     // A voice driven through the stream ends where one driven directly
@@ -131,10 +137,7 @@ fn every_event_survives_the_wire() {
     });
     b.set_tract_length(0.8);
     b.set_articulation_speed(2.0);
-    synthie_trombone::stream::standin::push_gesture(
-        &mut b,
-        &Gesture::new(Tier::Velum, 0.5).at(17.0),
-    );
+    b.push_gesture(velum(0.5));
     b.process();
     let mut x = vec![0.0; 9_600];
     let mut y = vec![0.0; 9_600];
@@ -163,11 +166,10 @@ fn a_full_stream_refuses_hands_back_and_recovers() {
     assert_eq!(accepted, 16);
     assert_eq!(refused, Full(Event::Pitch(116.0)));
     assert_eq!(stream.free(), 0);
-    let Err(Full(g)) = stream.push_gesture(Gesture::new(Tier::Velum, 1.0).at(17.0), When::Now)
-    else {
+    let Err(Full(g)) = stream.push_gesture(velum(1.0), When::Now) else {
         panic!("a full stream took a gesture");
     };
-    assert_eq!(g, Gesture::new(Tier::Velum, 1.0).at(17.0));
+    assert_eq!(g, velum(1.0));
     // The player takes all that was queued, in order, and there is room
     // again.
     player.process(&mut voice);
@@ -187,7 +189,7 @@ fn a_no_std_buffer_carries_gestures_between_threads() {
             let mut sent = 0;
             while sent < 200 {
                 let target = f32::from(u8::try_from(sent % 10).unwrap()) / 9.0;
-                let g = Gesture::new(Tier::Velum, target);
+                let g = velum(target);
                 if stream.push_gesture(g, When::Now).is_ok() {
                     sent += 1;
                 } else {
@@ -207,9 +209,10 @@ fn a_no_std_buffer_carries_gestures_between_threads() {
             );
             player.process(&mut voice);
         }
-        // The last velum gesture (199 % 10 = 9) asked for it wide open.
-        assert!((voice.velum_target() - 1.0).abs() < 1e-6);
-        assert!(tier_activity(&voice)[Tier::Velum.index()].activation > 0.5);
+        // The gestures reached the score, and the score the velum.
+        let velum = voice.tier_activity()[Tier::Velum.index()];
+        assert!(velum.activation > 0.5 && velum.gestures > 0, "{velum:?}");
+        assert!(voice.velum_target() > 0.2, "{}", voice.velum_target());
     });
 }
 
@@ -309,8 +312,15 @@ fn chunked_text_is_spoken_as_the_text_whole() {
         " Glue the sheet to the dark blue background.",
         " She sells sea shells by the sea shore.",
     ];
-    for engine in [Engine::Classic, Engine::Physical] {
-        let prosody = Preset::Deep.settings().with_engine(engine).prosody();
+    // The physical engine also with speech through the gesture score.
+    for (engine, score) in [
+        (Engine::Classic, 0.0),
+        (Engine::Physical, 0.0),
+        (Engine::Physical, 1.0),
+    ] {
+        let mut settings = Preset::Deep.settings().with_engine(engine);
+        settings.tuning.articulation.gesture_score = score;
+        let prosody = settings.prosody();
         let (streamed, said) = stream_text(&chunks(TEXT), &prosody, Granularity::Sentence);
         // Each sentence is spoken as it is compiled on its own, however
         // the chunks cut it: nothing resets where they meet.
@@ -327,8 +337,8 @@ fn chunked_text_is_spoken_as_the_text_whole() {
         ));
         let apart = trimmed(speak_all(alone, engine));
         println!(
-            "{engine:?}: streamed {:.3} s, the text as one utterance {:.3} s, its sentences \
-             back to back {:.3} s",
+            "{engine:?}, score {score}: streamed {:.3} s, the text as one utterance {:.3} s, \
+             its sentences back to back {:.3} s",
             speech_seconds(&streamed),
             speech_seconds(&whole),
             speech_seconds(&apart)

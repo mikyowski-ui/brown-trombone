@@ -16,8 +16,8 @@ use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
 use ratatui::widgets::{Padding, Paragraph};
 use synthie_trombone::inverse;
-use synthie_trombone::stream::standin::{Tier, TierActivity};
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
+use synthie_trombone::{Tier, TierActivity};
 use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, RED, YELLOW, bold, fg};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
 
@@ -577,6 +577,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             }
             let settings = key_hints(&[
                 ("F5", "record"),
+                ("F6", "score"),
                 ("v V", "voice"),
                 ("- =", "vibrato"),
                 ("m", "wobble"),
@@ -605,6 +606,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("Ctrl Shift V", "paste"),
                 ("Shift middle-click", "paste the selection"),
                 ("F5", "record"),
+                ("F6", "gesture score"),
             ]),
         ],
     };
@@ -864,15 +866,32 @@ fn summary_text(app: &App) -> String {
     }
 }
 
+/// A tier's name on its row.
+fn short_name(tier: Tier) -> &'static str {
+    match tier {
+        Tier::GlottalAdduction => "glottis",
+        Tier::LarynxAndPitch => "larynx",
+        Tier::Velum => "velum",
+        Tier::TongueBody => "body",
+        Tier::TongueTip => "tip",
+        Tier::LipsAndJaw => "lips",
+    }
+}
+
 /// One tier as a row: its name, a track with where it is now (the bar)
-/// and where its target is (`┃`), and how many gestures drive it.
-fn tier_line(name: &str, t: &TierActivity, width: usize) -> Line<'static> {
+/// and where its target is (`┃`), and how many gestures drive it. The name
+/// is cyan where the gesture score's gestures act on the tier (`scored`),
+/// white where the row is read off the controls, dim while nothing drives
+/// it.
+fn tier_line(name: &str, t: &TierActivity, width: usize, scored: bool) -> Line<'static> {
     let active = t.activation >= 0.5;
     let track = width.saturating_sub(8 + 2).max(4);
-    let mut spans = vec![Span::styled(
-        format!("{name:<7} "),
-        if active { bold(FG) } else { fg(DIM) },
-    )];
+    let style = match (active, scored) {
+        (true, true) => bold(CYAN),
+        (true, false) => bold(FG),
+        (false, _) => fg(DIM),
+    };
+    let mut spans = vec![Span::styled(format!("{name:<7} "), style)];
     let mut bar = if active {
         meter(t.value, track)
     } else {
@@ -900,7 +919,12 @@ fn tier_line(name: &str, t: &TierActivity, width: usize) -> Line<'static> {
 /// and closure, and the tiers of the gesture score.
 #[allow(clippy::too_many_lines)]
 fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
-    let block = panel("instrument", false).padding(Padding::left(1));
+    let title = if app.gesture_score() {
+        "instrument  ·  score"
+    } else {
+        "instrument"
+    };
+    let block = panel(title, false).padding(Padding::left(1));
     let inner = block.inner(area);
     let (w, h) = (usize::from(inner.width), usize::from(inner.height));
     let g = app.snap.glottis;
@@ -970,8 +994,8 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
     });
     let tiers: Vec<Line> = Tier::ALL
         .iter()
-        .zip(&app.snap.tiers)
-        .map(|(tier, t)| tier_line(tier.name(), t, w))
+        .zip(app.snap.tiers.iter().zip(&app.snap.scored))
+        .map(|(tier, (t, &scored))| tier_line(short_name(*tier), t, w, scored))
         .collect();
 
     // What must be there, then what fits.
@@ -986,7 +1010,12 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
     };
     let age = take(age);
     let gap = take(gap);
-    let spacer = take(Some(Line::default()));
+    let spacer = take(Some(Line::from(vec![
+        Span::styled("tiers: ", fg(DIM)),
+        Span::styled("score", bold(CYAN)),
+        Span::styled(" · ", fg(DIM)),
+        Span::styled("controls", bold(FG)),
+    ])));
     let mut lines = vec![formants];
     lines.extend(age);
     lines.push(pressure);
@@ -1701,7 +1730,7 @@ mod tests {
             value: 0.5,
             gestures: 2,
         };
-        let line = tier_line("velum", &t, 30);
+        let line = tier_line("velum", &t, 30, false);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         println!("{text}");
         assert_eq!(text.chars().count(), 30);
@@ -1709,7 +1738,7 @@ mod tests {
         // The target at the right end, the count after it.
         assert!(text.ends_with("┃ 2"), "{text}");
         assert_eq!(line.spans[0].style, bold(FG));
-        let idle = tier_line("tip", &TierActivity::default(), 30);
+        let idle = tier_line("tip", &TierActivity::default(), 30, false);
         let text: String = idle.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(
             text.starts_with("tip     ┃") && text.ends_with(" ·"),

@@ -17,7 +17,7 @@
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use std::time::{Duration, Instant};
-use synthie_trombone::{GlottalSource, N, NOSE_LEN, Trombone};
+use synthie_trombone::{GlottalSource, N, NOSE_LEN, Tier, TierActivity, Trombone};
 
 /// Area under which the vibrating edges count as shut, cm².
 const SHUT_AREA: f32 = 1e-4;
@@ -228,6 +228,115 @@ impl FormantMeter {
     pub fn poll(&self) -> Option<Formants> {
         self.from.try_iter().last()
     }
+}
+
+// ----- the tiers --------------------------------------------------------------
+
+/// What each tier of the gesture score is doing, for the panel: the
+/// score's own reading where gestures act on the tier (`true` beside it),
+/// and where none does (speech on the old path, playing by hand) the tier
+/// as the voice's controls hold it, on the same scales: the voicing gate,
+/// the pitch (50 to 400 Hz, logarithmic), the velum, and how far the
+/// tongue body, the tip and the lips close the tract.
+#[must_use]
+pub fn tiers(voice: &Trombone) -> ([TierActivity; Tier::COUNT], [bool; Tier::COUNT]) {
+    let score = voice.tier_activity();
+    let hand = tiers_from_controls(voice);
+    let mut out = hand;
+    let mut scored = [false; Tier::COUNT];
+    for k in 0..Tier::COUNT {
+        if score[k].gestures > 0 || score[k].activation > 1e-3 {
+            out[k] = score[k];
+            scored[k] = true;
+        }
+    }
+    (out, scored)
+}
+
+/// Pitch on the larynx tier's scale (as the gesture score reads it).
+fn pitch_unit(hz: f32) -> f32 {
+    ((hz.max(1.0) / 50.0).ln() / 8.0f32.ln()).clamp(0.0, 1.0)
+}
+
+/// How close a tract opening of diameter `d` is, `1` shut (as the gesture
+/// score reads the tip and the lips).
+fn closeness(d: f32) -> f32 {
+    (1.0 - d / 1.5).clamp(0.0, 1.0)
+}
+
+fn narrowest(d: &[f32; N], cells: std::ops::Range<usize>) -> f32 {
+    d[cells].iter().copied().fold(f32::INFINITY, f32::min)
+}
+
+/// The tiers read off the voice's controls and its tract (see [`tiers`]).
+#[must_use]
+pub fn tiers_from_controls(voice: &Trombone) -> [TierActivity; Tier::COUNT] {
+    use synthie_trombone::{BLADE_START, LIP_START, MAX_CONSTRICTIONS, TIP_START, TONGUE_DIAMETER};
+    let gate = voice.is_voiced() || voice.always_voice();
+    let intensity = voice.intensity().clamp(0.0, 1.0);
+    let (target, now) = (voice.target_diameters(), voice.diameters());
+    let regions = [
+        (BLADE_START, TIP_START),
+        (TIP_START, LIP_START),
+        (LIP_START, N),
+    ];
+    let mut held = [0u8; 3];
+    #[allow(clippy::cast_precision_loss)] // cell indices
+    for c in (0..MAX_CONSTRICTIONS).filter_map(|k| voice.constriction(k)) {
+        // A constriction belongs to the region of the cell it presses on.
+        if let Some(r) = regions
+            .iter()
+            .position(|&(a, b)| (a as f32 - 0.5..b as f32 - 0.5).contains(&c.index))
+        {
+            held[r] = held[r].saturating_add(1);
+        }
+    }
+    let tract = |r: usize| {
+        let (a, b) = regions[r];
+        TierActivity {
+            activation: if held[r] > 0 { 1.0 } else { 0.0 },
+            target: closeness(narrowest(target, a..b)),
+            value: closeness(narrowest(now, a..b)),
+            gestures: held[r],
+        }
+    };
+    // The tongue body: its height, as the score reads it, from its target;
+    // now, from how far the tract under it has got there.
+    let (lo, hi) = (*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end());
+    let height = ((hi - voice.tongue().1) / (hi - lo)).clamp(0.0, 1.0);
+    let (a, b) = regions[0];
+    let got = narrowest(target, a..b) / narrowest(now, a..b).max(1e-3);
+    let body = TierActivity {
+        activation: 1.0,
+        target: height,
+        value: (height * got.clamp(0.0, 1.5)).clamp(0.0, 1.0),
+        gestures: 1 + held[0],
+    };
+    let velum = voice.velum_target();
+    let moving = (voice.velum() - velum).abs() > 0.02;
+    [
+        TierActivity {
+            activation: if gate { 1.0 } else { intensity },
+            target: if gate { 1.0 } else { 0.0 },
+            value: intensity,
+            gestures: u8::from(gate),
+        },
+        TierActivity {
+            activation: intensity,
+            target: pitch_unit(voice.target_frequency()),
+            value: pitch_unit(voice.frequency()),
+            gestures: u8::from(intensity > 0.05),
+        },
+        TierActivity {
+            activation: if velum > 0.01 || moving { 1.0 } else { 0.0 },
+            target: velum,
+            value: voice.velum(),
+            gestures: u8::from(velum > 0.01),
+        },
+        body,
+        tract(1),
+        tract(2),
+    ]
 }
 
 /// F1, F2, F3 of `voice` as the meter measures them, at once (for tests

@@ -8,7 +8,7 @@
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 /// Longest message, in words (header and time included).
-pub(crate) const MAX_MESSAGE: usize = 16;
+pub(crate) const MAX_MESSAGE: usize = 32;
 
 /// How far each end has got: words written and words read, counted from
 /// the start (they wrap around together).

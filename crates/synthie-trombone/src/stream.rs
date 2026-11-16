@@ -58,10 +58,10 @@
 //!
 //! ## Gestures
 //!
-//! Gestures go to the gesture score through the same ring
-//! ([`VoiceStream::push_gesture`]). Until the gesture engine lands they are
-//! the stand-in [`standin::Gesture`], carried out by
-//! [`standin::push_gesture`].
+//! Gestures ([`Gesture`](crate::Gesture)) go to the voice's gesture score
+//! through the same ring ([`VoiceStream::push_gesture`]): the player gives
+//! each to [`Trombone::push_gesture`] at its sample, and its window counts
+//! from there.
 //!
 //! ```
 //! use synthie_trombone::stream::{Event, voice_stream};
@@ -81,20 +81,20 @@
 //! ```
 
 mod ring;
-pub mod standin;
 #[cfg(feature = "std")]
 mod text;
 
 #[cfg(feature = "std")]
 pub use text::Granularity;
 
+use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
 use crate::{Constriction, Phoneme, Trombone};
+use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::{AtomicU32, Ordering};
 use ring::{Counters, MAX_MESSAGE};
-use standin::{Gesture, Tier};
 
 #[cfg(feature = "std")]
 use crate::VoiceSettings;
@@ -160,7 +160,8 @@ pub enum Event {
     TractLength(f32),
     /// Articulator speed multiplier.
     ArticulationSpeed(f32),
-    /// A gesture for the gesture score (see [`VoiceStream::push_gesture`]).
+    /// A gesture for the gesture score (see [`VoiceStream::push_gesture`];
+    /// a score that is full drops it, as [`Trombone::push_gesture`] does).
     Gesture(Gesture),
     /// Stop speaking, and drop the speech queued after it.
     StopSpeaking,
@@ -359,10 +360,28 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         }
         Event::Gesture(g) => {
             #[allow(clippy::cast_possible_truncation)]
-            m.word(g.tier.index() as u32);
-            m.float(g.target);
-            m.float(g.place);
-            m.float(g.duration);
+            m.word(g.tier.index() as u32 | u32::from(g.flags) << 8 | u32::from(g.layer) << 16);
+            let set = |v: usize| g.target.get(v);
+            let mask = (0..VARIABLES)
+                .filter(|&v| set(v).is_some())
+                .fold(0u32, |m, v| m | 1 << v);
+            m.word(mask);
+            for v in 0..VARIABLES {
+                if let Some(x) = set(v) {
+                    m.float(x);
+                }
+            }
+            for x in [
+                g.stiffness,
+                g.damping,
+                g.dominance,
+                g.window.start,
+                g.window.end,
+                g.window.ramp_in,
+                g.window.ramp_out,
+            ] {
+                m.float(x);
+            }
         }
         Event::NoteOff | Event::StopSpeaking => {}
     }
@@ -435,15 +454,34 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
         TAG_LENGTH => Event::TractLength(r.float()),
         TAG_SPEED => Event::ArticulationSpeed(r.float()),
         TAG_GESTURE => {
+            let head = r.word();
             let tier = Tier::ALL
-                .get(r.word() as usize)
+                .get((head & 0xFF) as usize)
                 .copied()
                 .unwrap_or(Tier::GlottalAdduction);
+            let mask = r.word();
+            let mut target = Target::NONE;
+            for v in 0..VARIABLES {
+                if mask & (1 << v) != 0 {
+                    target.set(v, r.float());
+                }
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            let (flags, layer) = ((head >> 8) as u8, (head >> 16) as u8);
             Event::Gesture(Gesture {
                 tier,
-                target: r.float(),
-                place: r.float(),
-                duration: r.float(),
+                target,
+                stiffness: r.float(),
+                damping: r.float(),
+                dominance: r.float(),
+                window: Window {
+                    start: r.float(),
+                    end: r.float(),
+                    ramp_in: r.float(),
+                    ramp_out: r.float(),
+                },
+                flags,
+                layer,
             })
         }
         TAG_STOP => Event::StopSpeaking,
@@ -731,8 +769,9 @@ impl<'a> VoiceStream<'a> {
         }
     }
 
-    /// Send a gesture to the voice's gesture score (stand-in: carried out
-    /// by [`standin::push_gesture`]).
+    /// Send a gesture to the voice's gesture score
+    /// ([`Trombone::push_gesture`]); its window counts from when the player
+    /// carries it out.
     ///
     /// # Errors
     ///
@@ -1154,7 +1193,9 @@ impl<'a> VoicePlayer<'a> {
             Event::Shape(s) => voice.set_shape(&s),
             Event::TractLength(l) => voice.set_tract_length(l),
             Event::ArticulationSpeed(f) => voice.set_articulation_speed(f),
-            Event::Gesture(g) => standin::push_gesture(voice, &g),
+            Event::Gesture(g) => {
+                voice.push_gesture(g);
+            }
             Event::StopSpeaking => {
                 #[cfg(feature = "std")]
                 {

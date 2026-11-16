@@ -58,6 +58,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
 | `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
 | `F5` | start or stop recording a take (see below) |
+| `F6` | speech through the gesture score or the old path (A/B them by ear; see the instrument panel below) |
 | `Tab` | type a line, or paste one; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
@@ -131,11 +132,23 @@ what the voice is doing inside:
   folds' vibrating edges are closed while the voice sounds, and whether the
   folds, the pulse source or nothing is sounding. The classic engine has no
   air: it shows `classic: no air` and its LF pulse.
-- **The tiers** are the gesture engine's (glottal adduction, larynx and
-  pitch, velum, tongue body, tongue tip, lips and jaw). Until that engine
-  lands they are read off the controls the voice has when played by hand:
-  the voicing gate, the pitch, the velum, and how far the tongue body, the
-  tip and the lips close the tract (0 open, 1 shut).
+- **The tiers** are the gesture score's (glottal adduction, larynx and
+  pitch, velum, tongue body, tongue tip, lips and jaw), on the score's
+  scales (pitch 50 to 400 Hz, logarithmic; the tip's and the lips'
+  closeness, 1 shut). A tier whose name is cyan is driven by the score's
+  gestures and shows `Trombone::tier_activity`; a white one is read off the
+  controls the voice has (the voicing gate, the pitch, the velum, the
+  tongue body's height, the constrictions of the tip and the lips), which
+  is what drives it when it is played by hand or when speech takes the old
+  path.
+- **`F6`** switches speech between the gesture score and the old path
+  (`ArticulationConfig::gesture_score`, physical engine; the panel's title
+  says `score` while it is on), so the two can be heard side by side on the
+  same text: type it and press `Enter`, then `F6` and `↑` `Enter` (or, in
+  play mode, `Enter`, which says the last line again). While the score is on,
+  the lip pop (`b`) is played by hand as a gesture on the lips' tier (held
+  while the key is, ended on release) instead of as a constriction; a take
+  logs it and replays it to the sample.
 
 Below 80 columns the panel gives way to a summary on the tract view's lower
 edge (`F1 … F2 … F3 … · ΔP … · shut … folds`).
@@ -281,7 +294,7 @@ range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
 physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-59) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+61) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.

@@ -4,7 +4,7 @@
 
 use crate::record::{self, Clock, Recorder, Tap};
 use crate::take::{Logged, Performer};
-use crate::telemetry::{GlottisGauge, GlottisWatch, PROBE_RATE, Probe, ShapeKey};
+use crate::telemetry::{self, GlottisGauge, GlottisWatch, PROBE_RATE, Probe, ShapeKey};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender, bounded};
@@ -15,7 +15,6 @@ use synthie::audio::fx::Reverb;
 use synthie_trombone::listen::{Heard, Listener};
 use synthie_trombone::mimic::{Gesture, Mimic};
 use synthie_trombone::speech::{Speaker, Utterance};
-use synthie_trombone::stream::standin::{self, TierActivity};
 use synthie_trombone::{
     Constriction, Engine as SoundModel, MAX_CONSTRICTIONS, N, NOSE_LEN, Phoneme, Trombone,
     VoiceSettings,
@@ -57,6 +56,10 @@ pub enum Cmd {
     Shape(synthie_trombone::inverse::Shape),
     /// Start (`true`) or stop recording a take.
     Record(bool),
+    /// Play a gesture on the voice's gesture score, kept in a slot.
+    Push(u8, synthie_trombone::Gesture),
+    /// End the gesture in a slot over this many seconds.
+    EndGesture(u8, f32),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -86,9 +89,11 @@ pub struct Snapshot {
     pub at: u64,
     /// The glottis's pressures and closure over the last snapshots.
     pub glottis: GlottisGauge,
-    /// What each tier of the gesture score is doing, in `Tier::ALL` order
-    /// (stand-in until the gesture engine lands: read off the controls).
-    pub tiers: [TierActivity; 6],
+    /// What each tier of the gesture score is doing, in `Tier::ALL` order,
+    /// and whether the score's gestures act on it (`false`: read off the
+    /// controls; see [`telemetry::tiers`]).
+    pub tiers: [synthie_trombone::TierActivity; synthie_trombone::Tier::COUNT],
+    pub scored: [bool; synthie_trombone::Tier::COUNT],
 }
 
 impl Snapshot {
@@ -97,6 +102,7 @@ impl Snapshot {
         for (k, c) in constrictions.iter_mut().enumerate() {
             *c = voice.constriction(k);
         }
+        let (tiers, scored) = telemetry::tiers(voice);
         Self {
             diameters: *voice.diameters(),
             targets: *voice.target_diameters(),
@@ -116,7 +122,8 @@ impl Snapshot {
             take: None,
             at: 0,
             glottis: GlottisGauge::default(),
-            tiers: standin::tier_activity(voice),
+            tiers,
+            scored,
         }
     }
 }
@@ -220,6 +227,8 @@ impl Engine {
             Cmd::Vowel(p) => Logged::Vowel(p),
             Cmd::StopSpeaking => Logged::StopSpeaking,
             Cmd::Shape(shape) => Logged::Shape(shape),
+            Cmd::Push(slot, g) => Logged::Push(slot, g),
+            Cmd::EndGesture(slot, ramp) => Logged::EndGesture(slot, ramp),
         };
         if let Some(old) = self.core.apply(&logged) {
             self.trash(old);

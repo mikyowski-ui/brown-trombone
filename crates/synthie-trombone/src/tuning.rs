@@ -792,6 +792,29 @@ tuning! {
         /// ones: with the nose shut that soon, the voice of "smooth" dipped 6
         /// to 8 dB 20 to 40 ms into the /u/.
         velum_release = 3.0, 1.0..=5.0, B;
+
+        // ----- the gesture score (Wave 1, w1-gesture) ------------------------
+
+        /// Whether the physical engine's speech is played as a gesture score
+        /// (`1`; see `crate::gesture`): each segment's articulation becomes
+        /// gestures on the tiers that make it (the tongue body, the tip, the
+        /// lips and jaw, the velum), the larynx's settings and the pitch
+        /// gestures on the glottal and laryngeal tiers, and the tract follows
+        /// the tiers' blend. `0` sends each segment's shape to the tract as
+        /// before. `2` is the gesture path with the series plant, a
+        /// measurement: the tiers' own task-space state, integrated at their
+        /// stiffness, is what the tract is sent, so the tract's articulators
+        /// lag behind a second spring.
+        gesture_score = 0.0, 0.0..=2.0, B;
+        /// On the gesture path, which of the rules about neighbouring sounds
+        /// are left to the overlap of gestures instead (counted in order, `0`
+        /// none): `1` the tongue body and the lips under a consonant made by
+        /// the tip or the lips (and /h/) are the gestures of the vowel the
+        /// consonant leans on, spanning it, and the consonant adds only its
+        /// own (its constriction, a weak pull of the body towards the tip's,
+        /// lips of its own or, under a gap meant to hiss, lips held as they
+        /// are).
+        gesture_overlap = 1.0, 0.0..=1.0, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1287,7 +1310,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_twenty_five_fifty_nine_and_forty_three() {
+    fn three_parts_of_twenty_five_sixty_one_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1295,9 +1318,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (25, 59, 43)
+            (25, 61, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 127);
+        assert_eq!(Tuning::FIELDS.len(), 129);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1312,10 +1335,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_fifty_eight() {
+    fn two_passes_of_fifty_eight_and_sixty() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 58));
+        assert_eq!((a, b), (58, 60));
     }
 
     #[test]

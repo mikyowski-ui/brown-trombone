@@ -7,9 +7,10 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use synthie_trombone::stream::standin::{Gesture, Tier};
+use synthie_trombone::gesture::{Target, Window, var};
 use synthie_trombone::stream::{Event, When, voice_stream};
 use synthie_trombone::{Engine, Phoneme, Preset, Trombone};
+use synthie_trombone::{Gesture, Tier};
 
 struct Counting;
 
@@ -81,9 +82,24 @@ fn the_player_never_allocates() {
                 let now = stream.now();
                 let _ = stream.push_at(now + 500, Event::Pitch(90.0 + (k % 20) as f32));
                 let _ = stream.push(Event::Articulate(Phoneme::ALL[k % Phoneme::ALL.len()]));
-                let tier = Tier::ALL[k % Tier::ALL.len()];
+                let x = (k % 5) as f32 / 4.0;
+                let g = match k % 3 {
+                    0 => Gesture::new(Tier::Velum, Target::NONE.with(var::velum::PORT, x)),
+                    1 => Gesture::new(
+                        Tier::TongueTip,
+                        Target::NONE
+                            .with(var::tip::LOCATION, 36.0)
+                            .with(var::tip::DEGREE, 2.0 * x),
+                    ),
+                    _ => Gesture::new(
+                        Tier::LipsAndJaw,
+                        Target::NONE
+                            .with(var::lips::CLOSURE_LOCATION, 41.0)
+                            .with(var::lips::CLOSURE_DEGREE, 2.0 * x),
+                    ),
+                };
                 let _ = stream.push_gesture(
-                    Gesture::new(tier, (k % 5) as f32 / 4.0),
+                    g.window(Window::between(0.0, 0.05).ramps(0.01, 0.01)),
                     When::At(now + 100),
                 );
                 if k == 50 {

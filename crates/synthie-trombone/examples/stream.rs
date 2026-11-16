@@ -24,9 +24,10 @@ mod wav;
 
 use std::io::BufRead;
 use std::time::{Duration, Instant};
-use synthie_trombone::stream::standin::{Gesture, Tier};
+use synthie_trombone::gesture::{Target, Window, var};
 use synthie_trombone::stream::{Event, Granularity, VoiceStream, voice_stream};
 use synthie_trombone::{Engine, Phoneme, Preset, Trombone};
+use synthie_trombone::{Gesture, Tier};
 
 const RATE: f32 = 48_000.0;
 
@@ -38,11 +39,27 @@ fn script() -> Vec<(f32, Event)> {
         (0.35, Event::Articulate(Phoneme::Aa)),
         (0.50, Event::Note(47.0)),
         (0.70, Event::Note(49.0)),
-        // The velum opens (a nasal /a/), then the lips close for a hum.
-        (0.90, Event::Gesture(Gesture::new(Tier::Velum, 0.8))),
-        (1.20, Event::Gesture(Gesture::new(Tier::LipsAndJaw, 1.0))),
-        (1.50, Event::Gesture(Gesture::new(Tier::LipsAndJaw, 0.0))),
-        (1.50, Event::Gesture(Gesture::new(Tier::Velum, 0.0))),
+        // The velum opens (a nasal /a/) for 0.6 s, and within it the lips
+        // close for 0.3 s: a hum.
+        (
+            0.90,
+            Event::Gesture(
+                Gesture::new(Tier::Velum, Target::NONE.with(var::velum::PORT, 0.8))
+                    .window(Window::between(0.0, 0.6).ramps(0.05, 0.05)),
+            ),
+        ),
+        (
+            1.20,
+            Event::Gesture(
+                Gesture::new(
+                    Tier::LipsAndJaw,
+                    Target::NONE
+                        .with(var::lips::CLOSURE_LOCATION, 41.0)
+                        .with(var::lips::CLOSURE_DEGREE, 0.0),
+                )
+                .window(Window::between(0.0, 0.3).ramps(0.02, 0.03)),
+            ),
+        ),
         (1.50, Event::Note(45.0)),
         (1.90, Event::NoteOff),
     ]

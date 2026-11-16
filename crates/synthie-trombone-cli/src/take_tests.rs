@@ -351,6 +351,73 @@ fn a_take_replays_to_the_same_samples() {
     clean(&dir);
 }
 
+/// With the gesture score on (F6), the lip pop is a gesture on the score
+/// and speech is compiled for it: the take logs both and replays to the
+/// same samples, and the instrument panel shows the lips' tier driven by
+/// the score.
+#[test]
+fn gestures_played_by_hand_replay_too() {
+    use crate::app::SCORE_KEY;
+    let dir = scratch("score");
+    let mut rig = Rig::new(&dir, false);
+    rig.press(KeyCode::Char('\\'));
+    rig.press(SCORE_KEY);
+    assert!(rig.app.gesture_score());
+    rig.play(0.2);
+    rig.press(RECORD_KEY);
+    rig.press(KeyCode::Char('5'));
+    rig.press(KeyCode::Char('h'));
+    rig.play(0.3);
+    rig.press(KeyCode::Char('b'));
+    rig.play(0.06);
+    let lips = synthie_trombone::Tier::LipsAndJaw.index();
+    assert!(rig.app.snap.scored[lips], "{:?}", rig.app.snap.tiers);
+    assert!(
+        rig.app.snap.tiers[lips].target > 0.9,
+        "{:?}",
+        rig.app.snap.tiers
+    );
+    rig.app.key(Key {
+        code: KeyCode::Char('b'),
+        kind: KeyKind::Release,
+        ctrl: false,
+        shift: false,
+    });
+    rig.play(0.2);
+    rig.app.key(Key {
+        code: KeyCode::Char('h'),
+        kind: KeyKind::Release,
+        ctrl: false,
+        shift: false,
+    });
+    rig.type_text("a big red cat");
+    rig.play(1.5);
+    rig.stop_and_save();
+
+    let (take, sound) = read_take(&dir, "take-001");
+    let pushed = take
+        .commands
+        .iter()
+        .filter(|c| matches!(c.cmd, Logged::Push(..) | Logged::EndGesture(..)))
+        .count();
+    assert_eq!(pushed, 2, "{:?}", take.commands);
+    let score = take
+        .controls
+        .voice
+        .expect("the voice was set")
+        .tuning
+        .articulation
+        .gesture_score;
+    assert!((score - 1.0).abs() < 1e-6);
+    let (diff, peak) = compare(&replay(&take), &sound);
+    assert!(peak > 0.05, "the take is not silent");
+    assert!(diff == 0.0, "replay differs by up to {diff}");
+    // Off again, the pop is a constriction as before.
+    rig.press(SCORE_KEY);
+    assert!(!rig.app.gesture_score());
+    clean(&dir);
+}
+
 #[test]
 fn mimic_gestures_replay_too() {
     let dir = scratch("mimic");
