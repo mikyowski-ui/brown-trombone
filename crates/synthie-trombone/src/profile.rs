@@ -349,7 +349,15 @@ mod tests {
         let flat: Tuning = serde_json::from_str(r#"{"voice_tilt": 14}"#).unwrap();
         let nested: Tuning = serde_json::from_str(r#"{"anatomy": {"voice_tilt": 14}}"#).unwrap();
         assert_eq!(flat, nested);
-        assert!(serde_json::from_str::<Tuning>(r#"{"voise_tilt": 14}"#).is_err());
+        // A field since removed (in a saved take) is skipped there, as
+        // before the split; a profile refuses it (above).
+        let old: Tuning =
+            serde_json::from_str(r#"{"voice_tilt": 14, "follow_voiced_closure": 0.03}"#).unwrap();
+        assert_eq!(old, flat);
+        assert!(
+            serde_json::from_str::<Tuning>(r#"{"anatomy": {"lead": 0.04}}"#)
+                .is_ok_and(|t| t == Tuning::DEFAULT)
+        );
         assert!(
             serde_json::from_str::<Tuning>(r#"{"voice_tilt": 1, "anatomy": {"voice_tilt": 2}}"#)
                 .is_err()

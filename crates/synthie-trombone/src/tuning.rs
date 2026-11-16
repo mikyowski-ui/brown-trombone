@@ -1135,9 +1135,12 @@ impl Default for Tuning {
 /// per part (`{"anatomy": {"lung_pressure": 8, ..}, "articulation": {..},
 /// "prosody": {..}}`, every field of [`Tuning::FIELDS`] under its name);
 /// read in that form, flat (`{"lung_pressure": 8}`) or both mixed, onto
-/// [`Tuning::DEFAULT`]. An unknown name is an error, and so is a field
-/// given twice (flat and in its part), so the result never depends on the
-/// order of the keys.
+/// [`Tuning::DEFAULT`]. A field given twice (flat and in its part) is an
+/// error, so the result never depends on the order of the keys. An unknown
+/// name is skipped, as before the split, so that a voice saved with a field
+/// since removed (a take of the terminal app) still loads; a profile
+/// ([`VoiceSettings::with_profile`](crate::VoiceSettings::with_profile))
+/// refuses it.
 #[cfg(feature = "serde")]
 mod form {
     use super::{Part, Tuning};
@@ -1176,6 +1179,7 @@ mod form {
     enum Key {
         Part(Part),
         Field(usize),
+        Unknown,
     }
 
     /// Reads a key at the top (`None`: a part or any field) or inside a
@@ -1203,14 +1207,7 @@ mod form {
             let found = Tuning::FIELDS
                 .iter()
                 .position(|f| f.name == v && self.0.is_none_or(|p| f.part == p));
-            match (found, self.0) {
-                (Some(i), _) => Ok(Key::Field(i)),
-                (None, Some(part)) => Err(E::custom(format_args!(
-                    "unknown tuning field `{v}` in `{}`",
-                    part.name()
-                ))),
-                (None, None) => Err(E::custom(format_args!("unknown tuning field `{v}`"))),
-            }
+            Ok(found.map_or(Key::Unknown, Key::Field))
         }
     }
 
@@ -1251,6 +1248,9 @@ mod form {
                         }
                         let value: f32 = map.next_value()?;
                         self.tuning.set(name, value);
+                    }
+                    Key::Unknown => {
+                        map.next_value::<de::IgnoredAny>()?;
                     }
                 }
             }
