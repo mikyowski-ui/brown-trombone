@@ -236,7 +236,7 @@ range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
 physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-63) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+65) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.

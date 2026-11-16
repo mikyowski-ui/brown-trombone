@@ -14,7 +14,7 @@
 //! and glide, a lax vowel's glide to schwa) in the proportions they gave
 //! them; the closure of a voiceless stop keeps its floor
 //! ([`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor)); the pitch
-//! kick after a voiceless consonant ([`Gesture::kick`](super::Gesture)),
+//! kick after a voiceless consonant ([`Controls::kick`](super::Controls)),
 //! which is the folds' physics and is added on top of the speaker's
 //! contour; the voice quality of each sound and the breath's swell and
 //! fade over a phrase. Replaced: every duration, the declination, the

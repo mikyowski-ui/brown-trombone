@@ -50,7 +50,7 @@ pub struct Prosody {
     /// next one (the timing fields of the voice's [`Tuning`]).
     pub tuning: Tuning,
     /// The sound model the speech is for. The physical engine gets the
-    /// laryngeal and wall gestures of [`Gesture`] and the timing that goes
+    /// laryngeal and wall gestures of [`Controls`] and the timing that goes
     /// with them (voice onset times, longer voiceless closures, vowels
     /// clipped before voiceless codas), and each vowel has a length of its
     /// own and glides as people's do (pass C of the [`Tuning`]); the
@@ -88,15 +88,17 @@ pub struct Segment {
     /// Whether the folds vibrate.
     pub voiced: bool,
     /// What the larynx and the walls do besides (physical engine).
-    pub gesture: Gesture,
+    pub gesture: Controls,
 }
 
 /// What the larynx and the walls of the tract do through a [`Segment`], on
 /// top of the voicing gate: the second channel of a consonant, timed with
 /// the tract's closure and release. The physical engine plays it; the
-/// classic engine has nothing to play it on. All zero by default.
+/// classic engine has nothing to play it on. All zero by default. (Called
+/// `Gesture` until Wave 1; the name is now [`crate::gesture::Gesture`]'s,
+/// a target on one of the tract's tiers.)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Gesture {
+pub struct Controls {
     /// Glottal opening held behind the folds, cm² at native size (see
     /// [`Trombone::set_glottal_spread`]).
     pub spread: f32,
@@ -199,6 +201,9 @@ pub struct Utterance {
     /// What following a speaker's schedule asks of the [`Speaker`] beyond
     /// the segments (see [`Utterance::follow_with`]).
     followed: follow::Followed,
+    /// Whether the [`Speaker`] plays it as gestures on the voice's score
+    /// ([`ArticulationConfig::gesture_score`](crate::ArticulationConfig::gesture_score); physical engine).
+    gestures: bool,
 }
 
 /// The phone of a pause, in [`Utterance`]'s record of which phone each
@@ -263,6 +268,7 @@ impl Utterance {
             pitch_track: Vec::new(),
             pitch_hop: 0.0,
             followed: follow::Followed::default(),
+            gestures: Tuning::DEFAULT.articulation.gesture_score >= 0.5,
         }
     }
 
@@ -300,7 +306,7 @@ impl Utterance {
 
     /// Give the utterance a pitch track, Hz every `hop` seconds from its
     /// start, which the [`Speaker`] follows in place of each segment's own
-    /// `pitch` (a segment's [`Gesture::kick`] still adds to it). Time on
+    /// `pitch` (a segment's [`Controls::kick`] still adds to it). Time on
     /// the track is the time the segments' durations add up to, so a
     /// closure held past its segment's end (see [`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor))
     /// does not shift it. Past its end the last value holds. An empty track
@@ -363,7 +369,7 @@ pub struct Speaker {
     readied: bool,
     /// Seconds into the pause being spoken.
     pause_time: f32,
-    /// How far a fricative's gap has got (see [`Gesture::gap_opening`]):
+    /// How far a fricative's gap has got (see [`Controls::gap_opening`]):
     /// `0` still forming, `1` made, `2` opening again.
     gap_stage: u8,
     /// Seconds since the utterance began.
@@ -488,6 +494,10 @@ impl Speaker {
 
     /// Stop speaking (the voice fades out). Returns the utterance.
     pub fn stop(&mut self, voice: &mut Trombone) -> Utterance {
+        // The speech's own gestures let go first: the setters below are
+        // then the voice's again.
+        voice.end_gesture_layer(crate::gesture::LAYER_SEGMENT);
+        voice.end_gesture_layer(crate::gesture::LAYER_SCORE);
         voice.set_voiced(false);
         voice.set_breath(1.0);
         voice.set_glottal_spread(0.0);
@@ -537,6 +547,7 @@ impl Speaker {
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
         if let Some(&seg) = self.utterance.segments.get(self.index) {
             let physical = voice.engine() == Engine::Physical;
+            let g = self.gesture_path(voice);
             if !self.started {
                 self.started = true;
                 let pause = physical && seg.phoneme == Phoneme::Sil;
@@ -553,7 +564,7 @@ impl Speaker {
                 self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
                 self.closure_made = false;
                 if !self.ahead && !pause {
-                    articulate_segment(voice, &self.utterance, self.index, &entry_shape(&seg));
+                    articulate_segment(voice, g, &self.utterance, self.index, &entry_shape(&seg));
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -582,24 +593,24 @@ impl Speaker {
                     && self.tail_until.is_none();
                 if closed_already {
                     self.tail_until = Some(self.clock + self.utterance.voicing_tail);
-                    voice.set_glottal_spread(seg.gesture.spread);
+                    plant::spread(voice, g, seg.gesture.spread);
                 }
                 let dying = physical && self.tail_until.is_some() && !seg.voiced;
                 if !dying {
                     self.tail_until = None;
                 }
                 if !defer && !dying {
-                    voice.set_voiced(seg.voiced && !held);
-                    voice.set_tenseness(seg.tenseness);
+                    plant::voiced(voice, g, seg.voiced && !held);
+                    plant::tenseness(voice, g, seg.tenseness);
                 }
                 if voice.engine() == Engine::Physical {
-                    let g = &seg.gesture;
+                    let c = &seg.gesture;
                     if (!held || !seg.voiced) && !defer && !dying {
-                        voice.set_glottal_spread(g.spread);
+                        plant::spread(voice, g, c.spread);
                     }
-                    voice.set_fold_slack(g.slack);
-                    voice.set_fold_softness(g.softness);
-                    voice.set_cavity_expansion(g.expansion);
+                    plant::slack(voice, g, c.slack);
+                    plant::softness(voice, g, c.softness);
+                    voice.set_cavity_expansion(c.expansion);
                 }
             }
             let t = (self.elapsed / seg.duration).min(1.0);
@@ -630,7 +641,7 @@ impl Speaker {
                 hz += seg.gesture.kick
                     * exp(-(self.clock - self.kick_from) / self.utterance.kick_time);
             }
-            voice.set_frequency(hz);
+            plant::pitch(voice, g, hz);
             if physical {
                 self.time_larynx(voice, &seg);
             }
@@ -648,7 +659,13 @@ impl Speaker {
                 let segments = &self.utterance.segments[self.index..];
                 if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
                     let next = &segments[k];
-                    articulate_segment(voice, &self.utterance, self.index + k, &entry_shape(next));
+                    articulate_segment(
+                        voice,
+                        g,
+                        &self.utterance,
+                        self.index + k,
+                        &entry_shape(next),
+                    );
                     voice.settle();
                     // What little still rings in the tract belongs to the
                     // old shape; let it go with it.
@@ -715,7 +732,13 @@ impl Speaker {
                             .is_none_or(|l| self.clock - l.since >= self.utterance.sibilant_exit)
                 };
                 if send {
-                    articulate_segment(voice, &self.utterance, self.index + 1, &entry_shape(&next));
+                    articulate_segment(
+                        voice,
+                        g,
+                        &self.utterance,
+                        self.index + 1,
+                        &entry_shape(&next),
+                    );
                     self.ahead = true;
                 }
             }
@@ -729,7 +752,7 @@ impl Speaker {
                 && is_obstruent(next.phoneme)
                 && self.elapsed >= seg.duration - self.utterance.velum_lead.min(0.5 * seg.duration)
             {
-                voice.set_velum(next.articulation.velum);
+                plant::velum(voice, g, next.articulation.velum);
             }
             // Out of /n ŋ/ into a close vowel the velum shuts quickly from the
             // release on (`Tuning::velum_release`).
@@ -739,13 +762,13 @@ impl Speaker {
                 } else {
                     1.0
                 };
-                voice.set_velum_haste(haste);
+                plant::haste(voice, g, haste);
             }
             // A fricative's gap forming and opening again.
             let (into, out_of) = seg.gesture.gap_opening;
             let lead = self.utterance.lead;
             if physical && self.gap_stage == 0 && self.elapsed >= into - lead.min(0.5 * into) {
-                articulate_segment(voice, &self.utterance, self.index, &seg.articulation);
+                articulate_segment(voice, g, &self.utterance, self.index, &seg.articulation);
                 self.gap_stage = 1;
             }
             if physical
@@ -755,7 +778,7 @@ impl Speaker {
                 && self.elapsed >= seg.duration - out_of - lead.min(0.5 * out_of)
             {
                 let a = widened(&seg.articulation, 2.0 * seg.gesture.gap_widening);
-                articulate_segment(voice, &self.utterance, self.index, &a);
+                articulate_segment(voice, g, &self.utterance, self.index, &a);
                 self.gap_stage = 2;
             }
             // Into a voiceless fricative the larynx moves a little ahead
@@ -773,8 +796,8 @@ impl Speaker {
                 && self.elapsed
                     >= seg.duration - self.utterance.devoicing_lead.min(0.5 * seg.duration)
             {
-                voice.set_voiced(false);
-                voice.set_glottal_spread(next.gesture.spread);
+                plant::voiced(voice, g, false);
+                plant::spread(voice, g, next.gesture.spread);
                 self.larynx_ahead = true;
             }
             if physical {
@@ -792,10 +815,10 @@ impl Speaker {
                 self.index += 1;
                 self.started = false;
                 if self.index == self.utterance.segments.len() {
-                    voice.set_voiced(false);
-                    voice.set_glottal_spread(0.0);
-                    voice.set_fold_slack(0.0);
-                    voice.set_fold_softness(0.0);
+                    plant::voiced(voice, g, false);
+                    plant::spread(voice, g, 0.0);
+                    plant::slack(voice, g, 0.0);
+                    plant::softness(voice, g, 0.0);
                     voice.set_cavity_expansion(0.0);
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
@@ -872,6 +895,7 @@ impl Speaker {
     /// closure and the release against the segment boundaries, and with
     /// them the voice onset time and the voicing left in a closure.
     fn time_larynx(&mut self, voice: &mut Trombone, seg: &Segment) {
+        let g = self.gesture_path(voice);
         let shut = voice.mouth_shut();
         let next = self.utterance.segments.get(self.index + 1).copied();
         let closing = !matches!(
@@ -889,7 +913,7 @@ impl Speaker {
         {
             // The arytenoids part at once and the folds, still vibrating,
             // die away as they go (see `Tuning::voicing_tail`).
-            voice.set_glottal_spread(n.gesture.spread);
+            plant::spread(voice, g, n.gesture.spread);
             self.tail_until = Some(self.clock + self.utterance.voicing_tail);
             self.larynx_ahead = true;
         }
@@ -911,7 +935,7 @@ impl Speaker {
         {
             self.devoice_at = None;
             // Shut in time: the voice dies away in the closure.
-            voice.set_glottal_spread(seg.gesture.spread);
+            plant::spread(voice, g, seg.gesture.spread);
             self.tail_until = Some(if shut {
                 self.clock + self.utterance.voicing_tail
             } else {
@@ -928,11 +952,11 @@ impl Speaker {
             } else {
                 *seg
             };
-            voice.set_voiced(false);
+            plant::voiced(voice, g, false);
             if !seg.voiced {
-                voice.set_tenseness(seg.tenseness);
+                plant::tenseness(voice, g, seg.tenseness);
             }
-            voice.set_glottal_spread(stop.gesture.spread);
+            plant::spread(voice, g, stop.gesture.spread);
         }
         if !shut && self.was_shut {
             self.opened_at = self.clock;
@@ -943,16 +967,16 @@ impl Speaker {
         {
             self.voice_at = None;
             if seg.voiced {
-                voice.set_voiced(true);
-                voice.set_glottal_spread(seg.gesture.spread);
+                plant::voiced(voice, g, true);
+                plant::spread(voice, g, seg.gesture.spread);
                 self.kick_from = self.clock;
             } else if seg.gesture.hold > 0.0
                 && let Some(n) = next.filter(|n| n.voiced)
             {
                 // Released early: the voice comes during the breath.
-                voice.set_tenseness(n.tenseness);
-                voice.set_voiced(true);
-                voice.set_glottal_spread(n.gesture.spread);
+                plant::tenseness(voice, g, n.tenseness);
+                plant::voiced(voice, g, true);
+                plant::spread(voice, g, n.gesture.spread);
             }
         }
     }
@@ -969,13 +993,15 @@ impl Speaker {
     /// a faint hiss, the pattern of /p/ ("makes fine" as "makes pine").
     /// The target is moved from the lip's opening to its gap over
     /// `labial_closing`, starting `labial_lead` before the tongue lets go.
+    #[allow(clippy::many_single_char_names)]
     fn move_lip(&mut self, voice: &mut Trombone, under_sibilant: bool) {
         let Some(l) = self.labial else {
             return;
         };
+        let g = self.gesture_path(voice);
         if !under_sibilant {
             // The tongue has let go: the lip is the /f v/ now.
-            voice.set_constriction(LABIAL_SLOT, None);
+            plant::lip(voice, g, None);
             self.labial = None;
             return;
         }
@@ -983,14 +1009,17 @@ impl Speaker {
         let t = (since / self.utterance.labial_closing.max(1e-6)).min(1.0);
         let eased = t * t * (3.0 - 2.0 * t);
         let lip = l.open + (l.lip.diameter - l.open) * eased;
-        voice.set_constriction(
-            LABIAL_SLOT,
-            Some(crate::Constriction::new(l.lip.index, lip)),
-        );
+        plant::lip(voice, g, Some(crate::Constriction::new(l.lip.index, lip)));
         let s = l.sibilant;
         let t = (since / self.utterance.sibilant_exit.max(1e-6)).min(1.0);
         let d = s.diameter + (SIBILANT_LET_GO - s.diameter).max(0.0) * t;
-        voice.set_constriction(SLOT_MAIN, Some(crate::Constriction::new(s.index, d)));
+        plant::main(voice, g, crate::Constriction::new(s.index, d));
+    }
+
+    /// Whether the utterance is played as gestures on the voice's score
+    /// (see [`ArticulationConfig::gesture_score`](crate::ArticulationConfig::gesture_score); physical engine only).
+    fn gesture_path(&self, voice: &Trombone) -> bool {
+        self.utterance.gestures && voice.engine() == Engine::Physical
     }
 
     /// Render a block.
@@ -1005,11 +1034,20 @@ impl Speaker {
 /// the vowel shape a followed utterance gives it (see
 /// [`Utterance::follow_with`]); an utterance that follows nothing has the
 /// voice's own; and with as much of the tongue's drop behind a nasal
-/// closure held back as the segment's gesture says
-/// ([`Gesture::cavity_held`]).
-fn articulate_segment(voice: &mut Trombone, utterance: &Utterance, k: usize, a: &Articulation) {
+/// closure held back as the segment's controls say
+/// ([`Controls::cavity_held`]).
+///
+/// On the gesture path (`gestures`) the articulation is played as gestures
+/// on the tiers that make it, the followed speed as the tongue body's
+/// stiffness.
+fn articulate_segment(
+    voice: &mut Trombone,
+    gestures: bool,
+    utterance: &Utterance,
+    k: usize,
+    a: &Articulation,
+) {
     let followed = &utterance.followed;
-    voice.set_articulation_boost(followed.speed_of(k));
     match followed.shape_of(k) {
         Some((key, shape)) => voice.hold_speech_vowel(Some((key, &shape))),
         None => voice.hold_speech_vowel(None),
@@ -1020,11 +1058,118 @@ fn articulate_segment(voice: &mut Trombone, utterance: &Utterance, k: usize, a: 
             .get(k)
             .map_or(0.0, |s| s.gesture.cavity_held),
     );
-    voice.articulate(a);
+    if gestures {
+        voice.articulate_as_gestures(a, followed.speed_of(k));
+    } else {
+        voice.set_articulation_boost(followed.speed_of(k));
+        voice.articulate(a);
+    }
+}
+
+/// What the [`Speaker`] tells the larynx, the velum and a constriction
+/// besides each segment's articulation: on the old path the voice's
+/// setters, on the gesture path (`g`) the voice's segment gestures on the
+/// tier that does it.
+mod plant {
+    use crate::gesture::{Tier, var};
+    use crate::{Constriction, Trombone};
+
+    pub(super) fn voiced(voice: &mut Trombone, g: bool, on: bool) {
+        if g {
+            voice.drive(
+                Tier::GlottalAdduction,
+                var::glottis::VOICING,
+                f32::from(u8::from(on)),
+            );
+        } else {
+            voice.set_voiced(on);
+        }
+    }
+
+    pub(super) fn spread(voice: &mut Trombone, g: bool, cm2: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::SPREAD, cm2);
+        } else {
+            voice.set_glottal_spread(cm2);
+        }
+    }
+
+    pub(super) fn tenseness(voice: &mut Trombone, g: bool, x: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::TENSENESS, x);
+        } else {
+            voice.set_tenseness(x);
+        }
+    }
+
+    pub(super) fn slack(voice: &mut Trombone, g: bool, x: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::SLACK, x);
+        } else {
+            voice.set_fold_slack(x);
+        }
+    }
+
+    pub(super) fn softness(voice: &mut Trombone, g: bool, x: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::SOFTNESS, x);
+        } else {
+            voice.set_fold_softness(x);
+        }
+    }
+
+    pub(super) fn pitch(voice: &mut Trombone, g: bool, hz: f32) {
+        if g {
+            voice.drive(Tier::LarynxAndPitch, var::larynx::PITCH, hz);
+        } else {
+            voice.set_frequency(hz);
+        }
+    }
+
+    pub(super) fn haste(voice: &mut Trombone, g: bool, x: f32) {
+        if g {
+            voice.drive(Tier::Velum, var::velum::HASTE, x);
+        } else {
+            voice.set_velum_haste(x);
+        }
+    }
+
+    /// The port of the segment's own velum gesture.
+    pub(super) fn velum(voice: &mut Trombone, g: bool, x: f32) {
+        if g {
+            voice.retarget_segment(Tier::Velum, &[(var::velum::PORT, x)]);
+        } else {
+            voice.set_velum(x);
+        }
+    }
+
+    /// The segment's own constriction, moved to `c`.
+    pub(super) fn main(voice: &mut Trombone, g: bool, c: Constriction) {
+        if g {
+            let tier = crate::voice::tier_of_place(c.index);
+            let (at, d) = match tier {
+                Tier::TongueBody => (var::body::DORSAL_LOCATION, var::body::DORSAL_DEGREE),
+                Tier::LipsAndJaw => (var::lips::CLOSURE_LOCATION, var::lips::CLOSURE_DEGREE),
+                _ => (var::tip::LOCATION, var::tip::DEGREE),
+            };
+            voice.retarget_segment(tier, &[(at, c.index), (d, c.diameter)]);
+        } else {
+            voice.set_constriction(crate::SLOT_MAIN, Some(c));
+        }
+    }
+
+    /// The lower lip under a sibilant (see `Speaker::move_lip`).
+    pub(super) fn lip(voice: &mut Trombone, g: bool, c: Option<Constriction>) {
+        if g {
+            voice.hold_secondary_lip(c);
+        } else {
+            voice.set_constriction(super::LABIAL_SLOT, c);
+        }
+    }
 }
 
 /// The shape a segment begins with: a fricative's gap still forming (see
-/// [`Gesture::gap_opening`]), anything else its own.
+/// [`Controls::gap_opening`]), anything else its own.
 fn entry_shape(seg: &Segment) -> Articulation {
     if seg.gesture.gap_opening.0 > 0.0 {
         widened(&seg.articulation, seg.gesture.gap_widening)
@@ -1628,7 +1773,7 @@ struct Draft {
     vowel: bool,
     part: Part,
     /// Laryngeal and wall gesture (physical engine).
-    gesture: Gesture,
+    gesture: Controls,
     /// The breath after a voiceless stop's release: takes the shape of
     /// the sound that follows (physical engine).
     aspiration: bool,
@@ -1924,6 +2069,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         } else {
             0.0
         },
+        gestures: physical && timing.articulation.gesture_score >= 0.5,
         phones,
         roles,
         stretches,
@@ -2257,7 +2403,7 @@ const HELD_TIP: f32 = 1.0;
 /// tongue free), and its release goes into that body with the liquid's tip
 /// still on its way ([`HELD_TIP`]; /r/'s lips stay rounded). The Speaker sends the liquid itself
 /// [`ArticulationConfig::liquid_transition`](crate::ArticulationConfig::liquid_transition) after the mouth actually opens
-/// ([`Gesture::transition`]): after a voiced stop in a release segment of
+/// ([`Controls::transition`]): after a voiced stop in a release segment of
 /// its own, taken out of the liquid's time; after a voiceless one in its
 /// breath, the rest of which is the liquid made voiceless.
 fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
@@ -2323,7 +2469,7 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
                 mid_accent: 0.0,
                 vowel: false,
                 part: Part::Head,
-                gesture: Gesture {
+                gesture: Controls {
                     pressure_drop: (from, between),
                     transition: d,
                     ..liquid.gesture
@@ -2391,7 +2537,7 @@ fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
                 ..l.articulation
             },
             duration: d,
-            gesture: Gesture {
+            gesture: Controls {
                 pressure_drop: (between, to),
                 ..l.gesture
             },
@@ -2500,7 +2646,7 @@ fn silence(duration: f32) -> Draft {
         accent: 1.0,
         vowel: false,
         part: Part::Head,
-        gesture: Gesture::default(),
+        gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,
@@ -2542,7 +2688,7 @@ fn expand(
         accent,
         vowel: is_vowel(phoneme),
         part: Part::Head,
-        gesture: Gesture::default(),
+        gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,
@@ -2587,29 +2733,29 @@ fn expand(
     // tract. Voiceless obstruents spread the glottis, voiced stops slacken
     // the folds and widen the pharynx, voiced fricatives leave a little
     // opening behind the vibrating folds.
-    let voiceless = Gesture {
+    let voiceless = Controls {
         spread: timing.articulation.voiceless_spread,
-        ..Gesture::default()
+        ..Controls::default()
     };
-    let voiced_stop = Gesture {
+    let voiced_stop = Controls {
         slack: timing.anatomy.voiced_stop_slack,
         expansion: timing.anatomy.cavity_expansion,
-        ..Gesture::default()
+        ..Controls::default()
     };
-    let voiced_fricative = Gesture {
+    let voiced_fricative = Controls {
         spread: timing.articulation.voiced_fricative_spread,
-        ..Gesture::default()
+        ..Controls::default()
     };
     // Inside a word /ʒ/ (and /z/, with less air) is a long, loud hiss with
     // the voice under it all the way: air behind the folds, and the
     // pharynx widened a little, as for a voiced stop, so the mouth does not
     // fill and stop the voice before the hiss is over.
-    let medial_zh = Gesture {
+    let medial_zh = Controls {
         spread: timing.articulation.voiced_sibilant_spread,
         expansion: SIBILANT_EXPANSION * timing.anatomy.cavity_expansion,
-        ..Gesture::default()
+        ..Controls::default()
     };
-    let with = |mut d: Draft, g: Gesture| {
+    let with = |mut d: Draft, g: Controls| {
         d.gesture = g;
         d
     };
@@ -2720,7 +2866,7 @@ fn expand(
             // The frication of /dʒ/ comes straight out of the closure, with
             // the folds still pressed for its voice.
             let fg = if a.voiced {
-                Gesture::default()
+                Controls::default()
             } else {
                 voiceless
             };
@@ -2740,14 +2886,14 @@ fn expand(
             let g = if matches!(p, Phoneme::Z | Phoneme::Zh) && word_final {
                 // At the end of a word English lets /z/ go partly
                 // voiceless: more air behind the folds, a plainer hiss.
-                Gesture {
+                Controls {
                     spread: timing.articulation.voiced_sibilant_spread,
-                    ..Gesture::default()
+                    ..Controls::default()
                 }
             } else if p == Phoneme::Zh {
                 medial_zh
             } else if p == Phoneme::Z {
-                Gesture {
+                Controls {
                     spread: f32::midpoint(
                         timing.articulation.voiced_fricative_spread,
                         timing.articulation.voiced_sibilant_spread,
@@ -2800,7 +2946,7 @@ fn expand(
                 } else {
                     ramp
                 };
-                Gesture {
+                Controls {
                     gap_opening: (into, out_of),
                     gap_widening: timing.articulation.frication_widening,
                     ..g
@@ -3149,7 +3295,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         accent: 0.0,
         vowel: false,
         part: Part::Head,
-        gesture: Gesture::default(),
+        gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
         phone: NO_PHONE,

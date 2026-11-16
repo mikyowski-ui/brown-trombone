@@ -93,6 +93,26 @@ pub fn midi_to_hz(note: f32) -> f32 {
     440.0 * powf(2.0, (note - 69.0) / 12.0)
 }
 
+/// One exact step of `dt` seconds of a spring of natural frequency `w`
+/// (rad/s) and damping ratio `zeta` (`1` critical; below it a little
+/// overshoot and a shorter tail) from displacement `e0` and velocity `v0`:
+/// the displacement and velocity after it. Exact for any `dt`, so a move
+/// does not depend on how the control blocks fall.
+pub(crate) fn spring_step(e0: f32, v0: f32, w: f32, zeta: f32, dt: f32) -> (f32, f32) {
+    if zeta >= 0.999 {
+        let decay = exp(-w * dt);
+        let c = v0 + w * e0;
+        return ((e0 + c * dt) * decay, (v0 - w * c * dt) * decay);
+    }
+    let wd = w * sqrt(1.0 - zeta * zeta);
+    let decay = exp(-zeta * w * dt);
+    let (sine, cosine) = (sin(wd * dt), cos(wd * dt));
+    (
+        decay * (e0 * cosine + (v0 + zeta * w * e0) / wd * sine),
+        decay * (v0 * cosine - (w * w * e0 + zeta * w * v0) / wd * sine),
+    )
+}
+
 /// Share of the way to its target that a first-order lag of time constant
 /// `time` covers in a block of `dt` seconds, when a block is `share` of the
 /// long block these lags were set at (512 internal samples). At `share` 1
