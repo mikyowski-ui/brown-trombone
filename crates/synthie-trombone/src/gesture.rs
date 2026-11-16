@@ -583,10 +583,14 @@ pub struct Blend {
     pub activation: f32,
     /// Active gestures.
     pub gestures: u8,
-    /// The flags of the strongest active gesture.
+    /// The flags of the active gestures at least half as strong as the
+    /// strongest.
     pub flags: u8,
     /// When the strongest active gesture started, on the score's clock.
     pub since: f64,
+    /// For each variable, the flags of the strongest gesture setting it
+    /// and when it started.
+    pub setter: [(u8, f64); VARIABLES],
 }
 
 impl Blend {
@@ -807,6 +811,53 @@ impl Score {
         self.prune();
     }
 
+    /// Set variables of the latest acting gesture on `layer` and `tier` that
+    /// is neither [driven](flag::DRIVEN) nor [secondary](flag::SECONDARY):
+    /// `sets` as `(variable, value)`. Returns whether there was one.
+    pub fn retarget_layer(&mut self, layer: u8, tier: Tier, sets: &[(usize, f32)]) -> bool {
+        self.retarget_where(
+            layer,
+            tier,
+            |g| g.flags & (flag::DRIVEN | flag::SECONDARY) == 0,
+            sets,
+        )
+    }
+
+    /// Set variables of the latest acting gesture on `layer` and `tier` that
+    /// `which` picks (see [`retarget_layer`](Self::retarget_layer)).
+    pub fn retarget_where(
+        &mut self,
+        layer: u8,
+        tier: Tier,
+        which: impl Fn(&Gesture) -> bool,
+        sets: &[(usize, f32)],
+    ) -> bool {
+        let now = self.clock;
+        let found = self.entries[..self.len]
+            .iter_mut()
+            .flatten()
+            .rev()
+            .find(|e| {
+                e.gesture.layer == layer
+                    && e.gesture.tier == tier
+                    && e.end > now
+                    && which(&e.gesture)
+            });
+        let Some(e) = found else {
+            return false;
+        };
+        for &(v, x) in sets {
+            e.gesture.target.set(v, x);
+        }
+        true
+    }
+
+    /// Let go, at once, of the gestures on `layer` and `tier` that `which`
+    /// picks.
+    pub fn end_layer_where(&mut self, layer: u8, tier: Tier, which: impl Fn(&Gesture) -> bool) {
+        self.end_where(|g| g.layer == layer && g.tier == tier && which(g));
+    }
+
     /// Whether gesture `id` is held and has not been let go.
     #[must_use]
     pub fn is_acting(&self, id: GestureId) -> bool {
@@ -855,6 +906,7 @@ impl Score {
             gestures: 0,
             flags: 0,
             since: f64::NEG_INFINITY,
+            setter: [(0, f64::NEG_INFINITY); VARIABLES],
         };
         // The strongest gesture is the reference the means are taken
         // about, so that a single gesture's numbers come out exactly.
@@ -913,17 +965,17 @@ impl Score {
         out.stiffness = w0 + dw / total;
         out.damping = z0 + dz / total;
         for v in 0..VARIABLES {
-            out.values[v] = self.blend_variable(tier, v);
+            (out.values[v], out.setter[v]) = self.blend_variable(tier, v);
         }
         out
     }
 
     /// The blended target of `tier`'s variable `v` now (see
     /// [`blend`](Self::blend)).
-    fn blend_variable(&self, tier: Tier, v: usize) -> f32 {
+    fn blend_variable(&self, tier: Tier, v: usize) -> (f32, (u8, f64)) {
         let now = self.clock;
         // The reference: the strongest gesture setting it.
-        let mut reference: Option<(f32, f32)> = None;
+        let mut reference: Option<(f32, f32, u8, f64)> = None;
         let mut set_a = 0.0f32;
         let mut set_w = 0.0f32;
         for e in self.entries().filter(|e| e.gesture.tier == tier) {
@@ -937,17 +989,18 @@ impl Score {
             let w = a * e.gesture.dominance;
             set_a += a;
             set_w += w;
-            if reference.is_none_or(|(_, s)| w > s) {
-                reference = Some((x, w));
+            if reference.is_none_or(|(_, s, _, _)| w > s) {
+                reference = Some((x, w, e.gesture.flags, e.start));
             }
         }
-        let Some((x0, _)) = reference else {
+        let Some((x0, _, flags, since)) = reference else {
             // Nothing sets it: its neutral, if it has one that is not a
             // constriction let go.
-            return match tier.neutral(v) {
+            let x = match tier.neutral(v) {
                 Some(n) if n != OPEN => n,
                 _ => f32::NAN,
             };
+            return (x, (0, f64::NEG_INFINITY));
         };
         let mut dx = 0.0f32;
         for e in self.entries().filter(|e| e.gesture.tier == tier) {
@@ -965,7 +1018,7 @@ impl Score {
             dx += nw * (n - x0);
             total += nw;
         }
-        x0 + dx / total
+        (x0 + dx / total, (flags, since))
     }
 
     /// Whether `tier` has had a gesture since the score last let go of all

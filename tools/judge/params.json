@@ -125,5 +125,7 @@
   "schwa_length": {"lo": 0.65, "hi": 1, "default": 1, "pass": "c"},
   "diphthong_hold": {"lo": 0.6, "hi": 1, "default": 1, "pass": "c"},
   "rhythm_pace": {"lo": 0.95, "hi": 1.1, "default": 1, "pass": "b"},
-  "follow_shortest_light": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"}
+  "follow_shortest_light": {"lo": 0, "hi": 1, "default": 0.7, "pass": "b"},
+  "gesture_score": {"lo": 0, "hi": 2, "default": 0, "pass": "b"},
+  "gesture_overlap": {"lo": 0, "hi": 1, "default": 1, "pass": "b"}
 }

@@ -156,7 +156,7 @@ faster articulators through phones shorter than the rules make them
 than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
-Both engines read their numbers from `Tuning` (127 fields with defaults
+Both engines read their numbers from `Tuning` (129 fields with defaults
 and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
 of them), which a JSON profile can set (`profile` feature,
 `VoiceSettings::with_profile`). The repository README has the details,

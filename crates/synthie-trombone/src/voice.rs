@@ -61,7 +61,7 @@ const fn tier_bit(tier: Tier) -> u8 {
 /// The tier whose articulator makes a constriction at tract index `index`:
 /// the back of the tongue behind the palate, the lips from the upper teeth
 /// on, the tongue tip between them (as the tract's own movers have it).
-#[allow(clippy::cast_precision_loss, dead_code)] // (the speech path's, next)
+#[allow(clippy::cast_precision_loss)]
 pub(crate) fn tier_of_place(index: f32) -> Tier {
     if index >= 40.0 {
         Tier::LipsAndJaw
@@ -70,6 +70,33 @@ pub(crate) fn tier_of_place(index: f32) -> Tier {
     } else {
         Tier::TongueBody
     }
+}
+
+/// A constriction degree (touch diameter) from which the gesture score's
+/// blend is a constriction let go (see [`gesture::OPEN`]): no slot.
+const LET_GO: f32 = gesture::OPEN - 0.05;
+
+/// The dominance of a consonant's own lips over the vowel's lips spanning
+/// it (see [`Trombone::articulate_as_gestures`]): they win outright.
+const OWN_DOMINANCE: f32 = 1000.0;
+
+/// The tongue body gesture's target for `r`: its body, its root and, if
+/// `narrowing`, the vowel shape's own narrowing along the tongue.
+fn body_target(r: &Resolved, narrowing: bool) -> Target {
+    use gesture::var::body;
+    let mut t = Target::NONE;
+    if let Some((index, diameter)) = r.tongue {
+        t = t.with(body::LOCATION, index).with(body::DEGREE, diameter);
+    }
+    if let Some(root) = r.root {
+        t = t.with(body::ROOT, root);
+    }
+    if let Some(n) = r.narrowing.filter(|_| narrowing) {
+        t = t
+            .with(body::NARROWING_LOCATION, n.index)
+            .with(body::NARROWING_DEGREE, n.diameter);
+    }
+    t
 }
 
 /// What [`Trombone::articulate`] sets the tract to: the articulation made
@@ -220,8 +247,10 @@ pub struct Trombone {
     /// the tract and the larynx.
     score: Score,
     /// Each tier's driven segment gesture (see [`Trombone::drive`]).
-    #[allow(dead_code)] // (the speech path's, next)
     driven: [Option<GestureId>; Tier::COUNT],
+    /// The vowel whose body and lips span the consonants leaning on it, and
+    /// its tongue body gesture (see [`Trombone::articulate_as_gestures`]).
+    span: Option<(crate::vowel_targets::VowelKey, GestureId)>,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -292,6 +321,7 @@ impl Trombone {
             speech_vowel: None,
             score: Score::new(),
             driven: [None; Tier::COUNT],
+            span: None,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -1023,7 +1053,6 @@ impl Trombone {
     }
 
     /// Let go, at once, of every gesture on `layer` (all tiers).
-    #[allow(dead_code)] // (the speech path's, next)
     pub(crate) fn end_gesture_layer(&mut self, layer: u8) {
         self.score.clear_layer(layer);
         if layer == gesture::LAYER_SEGMENT {
@@ -1052,17 +1081,45 @@ impl Trombone {
     /// [`Tier::LipsAndJaw`], the port on [`Tier::Velum`]), from now until
     /// the next one, the tongue body moving `boost` times as fast as tuned.
     /// The segment gestures before them on those tiers let go.
-    #[allow(dead_code)] // (the speech path's, next)
+    ///
+    /// With [`Tuning::gesture_overlap`] a consonant made on a vowel's body
+    /// and lips (by the tip or the lips, or /h/) brings only its own
+    /// gestures: the body and the lips are that vowel's, a gesture on
+    /// [`gesture::LAYER_SCORE`] that spans every consonant leaning on it
+    /// and lets go when a sound with a body of its own comes. The
+    /// consonant's tip pulls the body towards its own as a weak tongue body
+    /// gesture of its own (dominance `w / (1 − w)` for a pull of `w`); its
+    /// own lips, or, under a gap meant to hiss, lips held unrounded, are a
+    /// dominant lip gesture.
     pub(crate) fn articulate_as_gestures(&mut self, a: &Articulation, boost: f32) {
         use gesture::{LAYER_SEGMENT, flag, var};
-        let r = self.resolve(a);
+        let lean = if self.engine == Engine::Physical && self.tuning.gesture_overlap >= 0.5 {
+            a.leans_on()
+        } else {
+            None
+        };
+        let r = match lean {
+            Some(_) => self.resolve(&Articulation {
+                tongue: None,
+                vowel: None,
+                ..*a
+            }),
+            None => self.resolve(a),
+        };
+        let w_body = self.nominal_stiffness(Tier::TongueBody) * boost;
+        let w_tip = self.nominal_stiffness(Tier::TongueTip);
+        self.hold_span(lean, w_body, w_tip);
         for tier in [
             Tier::TongueBody,
             Tier::TongueTip,
             Tier::LipsAndJaw,
             Tier::Velum,
         ] {
-            self.score.end_layer(LAYER_SEGMENT, Some(tier));
+            // The driven ones (the port's haste) and the lower lip under a
+            // sibilant carry on.
+            self.score.end_layer_where(LAYER_SEGMENT, tier, |g| {
+                g.flags & (flag::DRIVEN | flag::SECONDARY) == 0
+            });
         }
         let segment = |tier: Tier, target: Target, w: f32, flags: u8| {
             Gesture::new(tier, target)
@@ -1070,19 +1127,16 @@ impl Trombone {
                 .flags(flags)
                 .layer(LAYER_SEGMENT)
         };
-        let mut body = Target::NONE;
-        if let Some((index, diameter)) = r.tongue {
+        let mut body = body_target(&r, true);
+        // A leaning consonant's pull on the vowel's body.
+        let mut body_dominance = 1.0;
+        if lean.is_some()
+            && let Some(((index, diameter), w)) = a.body_pull()
+        {
             body = body
                 .with(var::body::LOCATION, index)
                 .with(var::body::DEGREE, diameter);
-        }
-        if let Some(root) = r.root {
-            body = body.with(var::body::ROOT, root);
-        }
-        if let Some(n) = r.narrowing {
-            body = body
-                .with(var::body::NARROWING_LOCATION, n.index)
-                .with(var::body::NARROWING_DEGREE, n.diameter);
+            body_dominance = w / (1.0 - w);
         }
         let (mut tip, mut lips) = (Target::NONE, Target::NONE);
         if let Some(c) = r.main {
@@ -1104,18 +1158,23 @@ impl Trombone {
                 }
             }
         }
+        // Over a vowel's span, the consonant's own lips (or lips kept
+        // unrounded under a hiss) win.
+        let mut lip_dominance = 1.0;
         if let Some(c) = r.lips {
             lips = lips
                 .with(var::lips::APERTURE_LOCATION, c.index)
                 .with(var::lips::APERTURE, c.diameter);
+            lip_dominance = OWN_DOMINANCE;
+        } else if lean.is_some() && a.hisses() {
+            lips = lips.with(var::lips::APERTURE, gesture::OPEN);
+            lip_dominance = OWN_DOMINANCE;
         }
         let quick = if r.quick_body { flag::OWN_BODY } else { 0 };
-        let w_body = self.nominal_stiffness(Tier::TongueBody) * boost;
-        let w_tip = self.nominal_stiffness(Tier::TongueTip);
         // Each is pushed even with nothing to set (the body and the port):
         // its flags say what the sound is.
         self.score
-            .push(segment(Tier::TongueBody, body, w_body, quick));
+            .push(segment(Tier::TongueBody, body, w_body, quick).dominance(body_dominance));
         if !tip.is_empty() {
             let lateral = if r.lateral { flag::LATERAL } else { 0 };
             self.score
@@ -1123,7 +1182,8 @@ impl Trombone {
         }
         if !lips.is_empty() {
             let own = if r.own_lips { flag::OWN_LIPS } else { 0 };
-            self.score.push(segment(Tier::LipsAndJaw, lips, w_tip, own));
+            self.score
+                .push(segment(Tier::LipsAndJaw, lips, w_tip, own).dominance(lip_dominance));
         }
         let nasal = if r.nasal { flag::NASAL } else { 0 };
         let port = Target::NONE.with(var::velum::PORT, r.velum);
@@ -1136,11 +1196,89 @@ impl Trombone {
         self.apply_score(TRACT_TIERS);
     }
 
+    /// The vowel's span (see [`articulate_as_gestures`](Self::articulate_as_gestures)):
+    /// kept while the consonants lean on the same vowel, let go for anything
+    /// else.
+    fn hold_span(&mut self, lean: Option<crate::vowel_targets::VowelKey>, w_body: f32, w_tip: f32) {
+        use gesture::{LAYER_SCORE, var};
+        let span_key = lean.filter(|&k| {
+            self.span
+                .is_some_and(|(key, id)| key == k && self.score.is_acting(id))
+        });
+        if span_key.is_none() {
+            self.score.end_layer(LAYER_SCORE, Some(Tier::TongueBody));
+            self.score.end_layer(LAYER_SCORE, Some(Tier::LipsAndJaw));
+            self.span = None;
+            if let Some(key) = lean
+                && let Some(vowel) = key.articulation()
+            {
+                let v = self.resolve(&vowel);
+                let span = |tier: Tier, target: Target, w: f32| {
+                    Gesture::new(tier, target).stiffness(w).layer(LAYER_SCORE)
+                };
+                let id = self
+                    .score
+                    .push(span(Tier::TongueBody, body_target(&v, false), w_body));
+                if let Some(c) = v.lips {
+                    let round = Target::NONE
+                        .with(var::lips::APERTURE_LOCATION, c.index)
+                        .with(var::lips::APERTURE, c.diameter);
+                    self.score.push(span(Tier::LipsAndJaw, round, w_tip));
+                }
+                self.span = id.map(|id| (key, id));
+            }
+        }
+    }
+
+    /// Set variables of `tier`'s own segment gesture (the latest; not a
+    /// driven or a secondary one) and write the tier at once (the speech
+    /// front end's gesture path: the velum shut ahead of the mouth's
+    /// opening, a sibilant's gap let go under the lip).
+    pub(crate) fn retarget_segment(&mut self, tier: Tier, sets: &[(usize, f32)]) {
+        if self
+            .score
+            .retarget_layer(gesture::LAYER_SEGMENT, tier, sets)
+        {
+            self.apply_score(tier_bit(tier));
+        }
+    }
+
+    /// Hold the lower lip at `c` under the sibilant before an /f v/, as a
+    /// [secondary](gesture::flag::SECONDARY) segment gesture on
+    /// [`Tier::LipsAndJaw`], or let it go (`None`).
+    pub(crate) fn hold_secondary_lip(&mut self, c: Option<Constriction>) {
+        use gesture::{LAYER_SEGMENT, flag, var};
+        let secondary = |g: &Gesture| g.flags & flag::SECONDARY != 0;
+        let Some(c) = c else {
+            self.score
+                .end_layer_where(LAYER_SEGMENT, Tier::LipsAndJaw, secondary);
+            self.apply_score(tier_bit(Tier::LipsAndJaw));
+            return;
+        };
+        let sets = [
+            (var::lips::CLOSURE_LOCATION, c.index),
+            (var::lips::CLOSURE_DEGREE, c.diameter),
+        ];
+        if !self
+            .score
+            .retarget_where(LAYER_SEGMENT, Tier::LipsAndJaw, secondary, &sets)
+        {
+            let target = Target::NONE
+                .with(var::lips::CLOSURE_LOCATION, c.index)
+                .with(var::lips::CLOSURE_DEGREE, c.diameter);
+            let g = Gesture::new(Tier::LipsAndJaw, target)
+                .stiffness(self.nominal_stiffness(Tier::LipsAndJaw))
+                .flags(flag::SECONDARY)
+                .layer(LAYER_SEGMENT);
+            self.score.push(g);
+        }
+        self.apply_score(tier_bit(Tier::LipsAndJaw));
+    }
+
     /// Set variable `v` of `tier`'s driven segment gesture (the speech
     /// front end's gesture path: the larynx's settings, the port's haste)
     /// to `x`, and write the tier at once. The driven gesture lasts until
     /// its layer is let go; it is started if there is none.
-    #[allow(dead_code)] // (the speech path's, next)
     pub(crate) fn drive(&mut self, tier: Tier, v: usize, x: f32) {
         let k = tier.index();
         let held = self.driven[k]
@@ -1201,9 +1339,27 @@ impl Trombone {
         if tiers & TRACT_TIERS & !tier_bit(Tier::Velum) == 0 {
             return;
         }
-        let body = self.score.blend(Tier::TongueBody);
-        let tip = self.score.blend(Tier::TongueTip);
-        let lips = self.score.blend(Tier::LipsAndJaw);
+        let mut body = self.score.blend(Tier::TongueBody);
+        let mut tip = self.score.blend(Tier::TongueTip);
+        let mut lips = self.score.blend(Tier::LipsAndJaw);
+        if self.tuning.gesture_score >= 1.5 {
+            // The series plant (a measurement, see `Tuning::gesture_score`):
+            // the tiers' own task-space state, not their targets, sent to
+            // the tract, whose articulators then follow it.
+            for (tier, b) in [
+                (Tier::TongueBody, &mut body),
+                (Tier::TongueTip, &mut tip),
+                (Tier::LipsAndJaw, &mut lips),
+            ] {
+                for v in 0..gesture::VARIABLES {
+                    if !b.values[v].is_nan()
+                        && let Some(x) = self.score.state(tier, v)
+                    {
+                        b.values[v] = x;
+                    }
+                }
+            }
+        }
         let ratio = |b: &Blend, nominal: f32| {
             if b.gestures > 0 && nominal > 0.0 {
                 b.stiffness / nominal
@@ -1240,6 +1396,7 @@ impl Trombone {
             let rounding = lips
                 .get(var::lips::APERTURE_LOCATION)
                 .zip(lips.get(var::lips::APERTURE))
+                .filter(|&(_, d)| d < LET_GO)
                 .map(|(at, d)| Constriction::new(at, d));
             self.tract.set_constriction(SLOT_LIPS, rounding);
             self.tract.own_lips = lips.flags & flag::OWN_LIPS != 0;
@@ -1251,7 +1408,8 @@ impl Trombone {
         let made = |b: &Blend, at: usize, d: usize| {
             b.get(at)
                 .zip(b.get(d))
-                .map(|(i, d)| (Constriction::new(i, d), b.since, b.flags))
+                .filter(|&(_, d)| d < LET_GO)
+                .map(|(i, deg)| (Constriction::new(i, deg), b.setter[d].1, b.setter[d].0))
         };
         let mut primary: [Option<(Constriction, f64)>; 2] = [None; 2];
         let mut secondary = None;

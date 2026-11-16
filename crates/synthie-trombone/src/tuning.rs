@@ -1,4 +1,4 @@
-//! [`Tuning`]: the one hundred and twenty-seven numbers that decide how a voice turns sounds into
+//! [`Tuning`]: the one hundred and twenty-nine numbers that decide how a voice turns sounds into
 //! speech, in one place.
 //!
 //! They used to be constants scattered through the speech rules, the
@@ -59,7 +59,7 @@ fn within(x: f32, lo: f32, hi: f32, default: f32) -> f32 {
 
 macro_rules! tuning {
     ($( $(#[$doc:meta])* $name:ident = $default:literal, $lo:literal ..= $hi:literal, $pass:ident; )*) => {
-        /// How a voice turns sounds into speech: one hundred and twenty-seven numbers in three
+        /// How a voice turns sounds into speech: one hundred and twenty-nine numbers in three
         /// passes (A: how sounds are made, B: how they follow one another,
         /// C: vowels), each with a range a real speaker could plausibly
         /// occupy ([`Tuning::FIELDS`]).
@@ -917,6 +917,30 @@ tuning! {
     /// `0`) the phoneme error was 27.6 % and Whisper 74.6 %, at 0.6 23.5
     /// and 80.9 %, at 0.5 25.1 and 75.6 % (round 10's rules).
     follow_shortest_light = 0.7, 0.0..=1.0, B;
+
+    // ----- the gesture score (Wave 1, w1-gesture) ------------------------
+
+    /// Whether the physical engine's speech is played as a gesture score
+    /// (`1`; see `crate::gesture`): each segment's articulation becomes
+    /// gestures on the tiers that make it (the tongue body, the tip, the
+    /// lips and jaw, the velum), the larynx's settings and the pitch
+    /// gestures on the glottal and laryngeal tiers, and the tract follows
+    /// the tiers' blend. `0` sends each segment's shape to the tract as
+    /// before. A profile with this at `1` runs the gates and the judge on
+    /// the gesture path. `2` is the gesture path with the series plant, a
+    /// measurement: the tiers' own task-space state, integrated at their
+    /// stiffness, is what the tract is sent, so the tract's articulators
+    /// lag behind a second spring.
+    gesture_score = 0.0, 0.0..=2.0, B;
+    /// On the gesture path, which of the rules about neighbouring sounds
+    /// are left to the overlap of gestures instead (counted in order, `0`
+    /// none): `1` the tongue body and the lips under a consonant made by
+    /// the tip or the lips (and /h/) are the gestures of the vowel the
+    /// consonant leans on, spanning it, and the consonant adds only its
+    /// own (its constriction, a weak pull of the body towards the tip's,
+    /// lips of its own or, under a gap meant to hiss, lips held as they
+    /// are).
+    gesture_overlap = 1.0, 0.0..=1.0, B;
 }
 
 impl Default for Tuning {
@@ -939,10 +963,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_fifty_eight() {
+    fn two_passes_of_fifty_eight_and_sixty() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 58));
+        assert_eq!((a, b), (58, 60));
     }
 
     #[test]
