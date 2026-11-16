@@ -457,7 +457,37 @@ pub(crate) struct Tract {
     transient_life: u32,
     damping: f32,
     last_obstruction: Option<usize>,
+    /// The tract's length (wave 2A; physical engine, read by the sound only
+    /// with `AnatomyConfig::lip_horn` or `larynx_travel` on). How far the
+    /// lips are pushed forward, cm at native size, and how fast that is
+    /// changing, cm/s: moved by the lips' spring towards what they are told
+    /// (see [`Tract::protrusion_goal`]).
+    protrusion: f32,
+    protrusion_speed: f32,
+    /// Protrusion set by the [`LipsAndJaw`](crate::Tier::LipsAndJaw)
+    /// tier's protrusion variable, and by
+    /// [`Trombone::set_lip_protrusion`](crate::Trombone::set_lip_protrusion),
+    /// cm; `None` follows the rounding slot.
+    pub(crate) protrusion_tier: Option<f32>,
+    pub(crate) protrusion_set: Option<f32>,
+    /// How far a lowered larynx lengthens the tract (negative: a raised
+    /// one shortens it), cm at native size, and how fast, cm/s; where it is
+    /// going (the [`LarynxAndPitch`](crate::Tier::LarynxAndPitch) tier's
+    /// height, or [`Trombone::set_larynx_height`](crate::Trombone::set_larynx_height),
+    /// as lengthening); and how much faster than tuned it moves, as the
+    /// tier's stiffness asks.
+    larynx: f32,
+    larynx_speed: f32,
+    pub(crate) larynx_target: f32,
+    pub(crate) larynx_tier: Option<f32>,
+    pub(crate) larynx_speed_ratio: f32,
 }
+
+/// Furthest the lips can be pushed forward, cm at native size.
+pub(crate) const PROTRUSION_MOST: f32 = 2.0;
+/// How far a lowered larynx can lengthen the tract and a raised one shorten
+/// it, cm at native size.
+pub(crate) const LARYNX_RANGE: core::ops::RangeInclusive<f32> = -1.0..=0.8;
 
 impl Tract {
     pub(crate) fn new() -> Self {
@@ -520,6 +550,15 @@ impl Tract {
             transient_life: (0.2 * TRACT_RATE) as u32,
             damping: DAMPING,
             last_obstruction: None,
+            protrusion: 0.0,
+            protrusion_speed: 0.0,
+            protrusion_tier: None,
+            protrusion_set: None,
+            larynx: 0.0,
+            larynx_speed: 0.0,
+            larynx_target: 0.0,
+            larynx_tier: None,
+            larynx_speed_ratio: 1.0,
         };
 
         // Nasal cavity shape. Its reflections are computed once, with the
@@ -1326,6 +1365,7 @@ impl Tract {
             self.target[i] = self.target[i].max(0.0);
         }
         self.last_obstruction = None;
+        self.move_lengths(speed, lips_k, dt);
 
         let amount = dt * self.movement_speed;
         // The velum shuts as fast as it opens (the original's took two
@@ -1339,6 +1379,63 @@ impl Tract {
             amount * VELUM_SHUTTING * self.velum_haste,
         );
         self.calculate_reflections();
+    }
+
+    /// Where the lips' protrusion is going, cm at native size: what the
+    /// [`LipsAndJaw`](crate::Tier::LipsAndJaw) tier or
+    /// [`Trombone::set_lip_protrusion`](crate::Trombone::set_lip_protrusion)
+    /// sets, or else the rounding the lips are told to make, through the
+    /// curve that sets the lumped lip tube's length
+    /// ([`crate::phys::protrusion`]) times the fully protruded tube
+    /// (`AnatomyConfig::lip_horn`). It comes from the opening the rounding
+    /// slot commands, not from the lips' opening now: a /b/ closing over an
+    /// /u/ keeps the lips forward, and lips passing through a rounded-sized
+    /// opening on their way to a closure do not protrude. The consonants
+    /// with lips of their own (/ʃ ʒ tʃ dʒ r w/) set the rounding slot too.
+    fn protrusion_goal(&self) -> f32 {
+        if let Some(cm) = self.protrusion_tier.or(self.protrusion_set) {
+            return cm.clamp(0.0, PROTRUSION_MOST);
+        }
+        match self.slots.get(ROUNDING_SLOT).copied().flatten() {
+            Some(s) if s.alive => {
+                let opening = (s.c.diameter - 0.3).max(0.0);
+                self.motion.anatomy.lip_horn * crate::phys::protrusion(opening)
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Move the lips' protrusion and the larynx's height over `dt` seconds
+    /// (physical engine): the protrusion on the lips' spring (their tier's
+    /// stiffness, `lips_rate`, at the articulation speed `speed` and the
+    /// tier's speed `lips_k`; critically damped as the lip cells are), the
+    /// larynx on its own (`larynx_rate`, `larynx_damping`).
+    fn move_lengths(&mut self, speed: f32, lips_k: f32, dt: f32) {
+        let a = &self.motion.articulation;
+        let w = speed * lips_k * a.lips_and_jaw.stiffness;
+        let goal = self.protrusion_goal();
+        let (e, v) = spring_step(self.protrusion - goal, self.protrusion_speed, w, 1.0, dt);
+        self.protrusion = (goal + e).max(0.0);
+        self.protrusion_speed = v;
+        let w = speed * self.larynx_speed_ratio * a.larynx_and_pitch.stiffness;
+        let goal = self
+            .larynx_tier
+            .unwrap_or(self.larynx_target)
+            .clamp(*LARYNX_RANGE.start(), *LARYNX_RANGE.end());
+        let zeta = a.larynx_and_pitch.damping;
+        let (e, v) = spring_step(self.larynx - goal, self.larynx_speed, w, zeta, dt);
+        self.larynx = goal + e;
+        self.larynx_speed = v;
+    }
+
+    /// The lips' protrusion and the larynx's lengthening of the tract now,
+    /// cm at native size, and how fast each is changing, cm/s (see
+    /// `Phys::set_lengths`).
+    pub(crate) fn lengths(&self) -> ([f32; 2], [f32; 2]) {
+        (
+            [self.protrusion, self.larynx],
+            [self.protrusion_speed, self.larynx_speed],
+        )
     }
 
     fn add_transient(&mut self, position: usize) {

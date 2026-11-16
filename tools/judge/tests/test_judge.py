@@ -40,15 +40,15 @@ def test_params_file_matches_brief():
     # Every field of the engine's `Tuning`, in its three parts (the body,
     # how sounds are made and joined, the rhythm and melody of a phrase)...
     assert list(json.loads((HERE / "params.json").read_text())) == list(T.PARTS)
-    assert sum(p["part"] == "anatomy" for p in params.values()) == 25
-    assert sum(p["part"] == "articulation" for p in params.values()) == 67
+    assert sum(p["part"] == "anatomy" for p in params.values()) == 27
+    assert sum(p["part"] == "articulation" for p in params.values()) == 71
     assert sum(p["part"] == "prosody" for p in params.values()) == 43
     # ...and in its passes (a: how sounds are made, b: how they follow one
     # another, c: vowel lengths).
-    assert sum(p["pass"] == "a" for p in params.values()) == 58
-    assert sum(p["pass"] == "b" for p in params.values()) == 63
-    assert sum(p["pass"] == "c" for p in params.values()) == 14
-    assert len(params) == 135
+    assert sum(p["pass"] == "a" for p in params.values()) == 61
+    assert sum(p["pass"] == "b" for p in params.values()) == 65
+    assert sum(p["pass"] == "c" for p in params.values()) == 15
+    assert len(params) == 141
     # The twelve the classic engine reads as well are not tuned by default.
     shared = {n for n, p in params.items() if p.get("classic")}
     assert len(shared) == 12 and {"vowel_length", "stop_length", "aspiration"} <= shared

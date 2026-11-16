@@ -28,6 +28,7 @@ pub(crate) mod folds;
 pub(crate) mod junction;
 pub(crate) mod noise;
 pub(crate) mod radiation;
+pub(crate) mod slide;
 pub(crate) mod source;
 pub(crate) mod tilt;
 
@@ -38,6 +39,7 @@ use core::f32::consts::PI;
 use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
 use noise::{JET_HEADROOM, Turbulence, V_MAX, full_jet, glottal_noise, jet_noise, reynolds};
 use radiation::Radiation;
+use slide::Slide;
 
 /// Seconds over which the share of the glottal jet's breath noise follows
 /// the voicing (see `Phys::voiced_target`).
@@ -263,6 +265,28 @@ const PIRIFORM: [[f32; PIRIFORM_LEN]; 2] = [
     [0.7, 0.7, 0.7, 0.65, 0.55, 0.45],
 ];
 
+/// Length of one cell at the native size, cm: a tick of travel at the
+/// native tick rate. Lengths given in centimetres at the native size are
+/// this many cells at every size (the cells grow with the speaker).
+pub(crate) const CELL_CM: f32 = C / (2.0 * crate::INTERNAL_RATE);
+
+/// The cell the lip horn lengthens when it is on (`AnatomyConfig::lip_horn`):
+/// the lips' narrowest, where rounding is centred. It becomes a slide one
+/// tick long plus the protrusion, of the cell's own area, so the horn grows
+/// out of the lip opening from nothing. (Between the last cell and the
+/// radiation load, where the lumped lip tube sits, a slide would have to be
+/// shorter than a tick while the lips start to protrude, which a tract
+/// whose joints are all solved at once from the last tick's waves cannot
+/// do.)
+const HORN_CELL: usize = LIP_OPENING;
+/// The cells the larynx slide replaces when it is on
+/// (`AnatomyConfig::larynx_travel`): the uniform stretch just above the
+/// laryngeal tube, three ticks at rest. Its lower end is joint 7, where the
+/// piriform sinuses then open; its upper end joint 10.
+pub(crate) const LARYNX_CELLS: core::ops::Range<usize> = 7..10;
+#[allow(clippy::cast_precision_loss)]
+const LARYNX_REST: f32 = (LARYNX_CELLS.end - LARYNX_CELLS.start) as f32;
+
 /// Attenuation of a wave crossing one cell.
 #[inline]
 pub(crate) fn cell_loss(area: f32, dx: f32, scale: f32) -> f32 {
@@ -337,6 +361,11 @@ pub(crate) struct Gauge {
     /// Speed of that jet, cm/s, and the cell it leaves.
     pub jet_speed: f32,
     pub jet_cell: usize,
+    /// Power the air gives up to the slides' moving ends (the piston of a
+    /// moving larynx and of lips pushed forward), erg/s: the pressure at
+    /// each moving end times the flow its sweep takes up. Negative while
+    /// the walls do work on the air.
+    pub piston: f32,
 }
 
 /// The physical tract.
@@ -473,6 +502,34 @@ pub(crate) struct Phys {
     pub(crate) voiced_target: f32,
     voiced: f32,
 
+    /// The tract's length (wave 2A): the fully protruded lip tube, cm at
+    /// native size (`AnatomyConfig::lip_horn`; `0` keeps the lumped lip
+    /// tube), and the share of the larynx's travel the slide in the lower
+    /// pharynx follows (`AnatomyConfig::larynx_travel`; `0` keeps cells
+    /// 7..9 as cells).
+    lip_horn: f32,
+    larynx_travel: f32,
+    /// Where the lips' protrusion and the larynx's lengthening of the
+    /// tract are going (cm at native size) and how fast (cm/s), at the end
+    /// of the coming block (see [`Phys::set_lengths`]).
+    length_target: [f32; 2],
+    length_speed: [f32; 2],
+    /// The two slides' lengths, ticks, at the start and end of the block,
+    /// and their change per block there: they move on the same cubic as
+    /// the areas.
+    slide0: [f32; 2],
+    slide1: [f32; 2],
+    slide_m0: [f32; 2],
+    slide_m1: [f32; 2],
+    horn: Slide,
+    larynx: Slide,
+    /// Pressure at the lower and upper ends of the larynx slide and of the
+    /// horn this tick, dyn/cm².
+    slide_ends: [f32; 4],
+    /// Whether the slides' moving ends take up the air they sweep (off only
+    /// to measure the delay lines alone).
+    pistons: bool,
+
     pub(crate) gauge: Gauge,
 }
 
@@ -556,6 +613,18 @@ impl Phys {
             radiated: tilt::Tilt::default(),
             voiced_target: 0.0,
             voiced: 0.0,
+            lip_horn: crate::Tuning::DEFAULT.anatomy.lip_horn,
+            larynx_travel: crate::Tuning::DEFAULT.anatomy.larynx_travel,
+            length_target: [0.0; 2],
+            length_speed: [0.0; 2],
+            slide0: [1.0, LARYNX_REST],
+            slide1: [1.0, LARYNX_REST],
+            slide_m0: [0.0; 2],
+            slide_m1: [0.0; 2],
+            horn: Slide::new(),
+            larynx: Slide::new(),
+            slide_ends: [0.0; 4],
+            pistons: true,
             gauge: Gauge::default(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
@@ -612,6 +681,20 @@ impl Phys {
         self.teeth_gap = tuning.articulation.sibilant_teeth;
         self.dental_edge = tuning.anatomy.dental_edge;
         self.labial_edge = tuning.anatomy.labial_edge;
+        let horn = tuning.anatomy.lip_horn.max(0.0);
+        let larynx = tuning.anatomy.larynx_travel.max(0.0);
+        if (horn > 0.0) != (self.lip_horn > 0.0) {
+            // The lips' cell becomes a slide or a cell again: it starts
+            // silent (a tuning is set before the voice speaks).
+            self.horn.reset();
+            self.horn.snap_length(1.0);
+        }
+        if (larynx > 0.0) != (self.larynx_travel > 0.0) {
+            self.larynx.reset();
+            self.larynx.snap_length(LARYNX_REST);
+        }
+        self.lip_horn = horn;
+        self.larynx_travel = larynx;
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
         self.tilt = self.turbulence.tilt(self.dt, self.len);
@@ -701,6 +784,13 @@ impl Phys {
         self.noisy = !ideal;
     }
 
+    /// Switch the slides' pistons on or off (to measure the delay lines
+    /// alone).
+    #[cfg(test)]
+    pub(crate) fn set_pistons(&mut self, on: bool) {
+        self.pistons = on;
+    }
+
     /// Switch the piriform sinuses on or off (to measure what they do).
     #[cfg(test)]
     pub(crate) fn set_side_cavities(&mut self, on: bool) {
@@ -754,6 +844,9 @@ impl Phys {
             b.reset();
         }
         self.lips.reset();
+        self.horn.reset();
+        self.larynx.reset();
+        self.slide_ends = [0.0; 4];
         self.flow = [0.0; N + 1];
         self.flow_sum = [0.0; N + 1];
         self.jet_sum = [0.0; N + 1];
@@ -851,6 +944,27 @@ impl Phys {
         self.speed = *speed;
     }
 
+    /// How far the lips are pushed forward and the larynx lengthens the
+    /// tract at the end of the coming block, `(protrusion, lengthening)`, cm
+    /// at native size, and how fast each is changing there, cm/s (see
+    /// `Tract::lengths`). Read only while the lip horn or the larynx slide
+    /// is on. Call before [`begin_block`](Self::begin_block).
+    pub(crate) fn set_lengths(&mut self, (at, speed): ([f32; 2], [f32; 2])) {
+        self.length_target = at;
+        self.length_speed = speed;
+    }
+
+    /// The slides' lengths, ticks, for lengths `cm` (protrusion and
+    /// lengthening, cm at native size): the horn is the lips' cell and the
+    /// protrusion, the larynx slide its three cells and the share
+    /// `larynx_travel` of the lengthening.
+    fn slide_lengths(&self, cm: [f32; 2]) -> [f32; 2] {
+        [
+            1.0 + cm[0].max(0.0) / CELL_CM,
+            LARYNX_REST + self.larynx_travel * cm[1] / CELL_CM,
+        ]
+    }
+
     /// Take the articulation model's shape for the coming block. `velum` is
     /// how far the velar port is open (`0‥1`), `block_dt` the block length,
     /// `voiced` whether the voice is wanted (see `BLEED_TIME`).
@@ -875,6 +989,14 @@ impl Phys {
             self.d1[i] = d;
             self.m1[i] = self.speed[i] * block_dt;
         }
+        if self.lip_horn > 0.0 || self.larynx_travel > 0.0 {
+            self.slide0 = self.slide1;
+            self.slide_m0 = self.slide_m1;
+            self.slide1 = self.slide_lengths(self.length_target);
+            let speed = self.slide_lengths(self.length_speed);
+            // Speeds through the same map, without its rest lengths.
+            self.slide_m1 = [speed[0] - 1.0, speed[1] - LARYNX_REST].map(|v| v * block_dt);
+        }
         if voiced && self.primed && (0..N).any(|i| self.a0[i] < A_MIN && self.a1[i] >= A_MIN) {
             self.bleed = BLEED_TIME;
         }
@@ -897,6 +1019,13 @@ impl Phys {
             for (nose, &(factor, _)) in self.nose.iter_mut().zip(&NASAL_SIDES) {
                 nose.set_port(port * factor);
             }
+            if self.lip_horn > 0.0 || self.larynx_travel > 0.0 {
+                self.slide0 = self.slide1;
+                self.slide_m0 = [0.0; 2];
+                self.slide_m1 = [0.0; 2];
+                self.horn.snap_length(self.slide1[0]);
+                self.larynx.snap_length(self.slide1[1]);
+            }
             self.primed = true;
         }
         self.refresh(block_dt);
@@ -916,6 +1045,11 @@ impl Phys {
         self.wall_s0 = self.wall_s1;
         self.adot = [0.0; N];
         self.adot_target = [0.0; N];
+        self.slide0 = self.slide1;
+        self.slide_m0 = [0.0; 2];
+        self.slide_m1 = [0.0; 2];
+        self.horn.snap_length(self.slide1[0]);
+        self.larynx.snap_length(self.slide1[1]);
     }
 
     /// Jump straight to a shape, with no motion (for measurements).
@@ -977,18 +1111,44 @@ impl Phys {
 
     /// Pressure in cell `i`, dyn/cm².
     pub(crate) fn pressure(&self, i: usize) -> f32 {
+        #[allow(clippy::cast_precision_loss)]
+        if self.larynx_travel > 0.0 && LARYNX_CELLS.contains(&i) {
+            // Within the larynx slide: where the cell's middle would be.
+            let x = (i - LARYNX_CELLS.start) as f32 + 0.5;
+            return self.larynx.pressure_at(x / LARYNX_REST);
+        }
+        if self.lip_horn > 0.0 && i == HORN_CELL {
+            return self.horn.pressure_at(0.5);
+        }
         self.r[i] + self.l[i]
     }
 
-    /// Acoustic energy stored in the main tube (arbitrary units).
+    /// The slides' lengths this tick, ticks: `(horn, larynx)` (the lips'
+    /// cell and the protrusion; the three cells of the lower pharynx and
+    /// the lengthening).
+    #[cfg(test)]
+    pub(crate) fn slide_ticks(&self) -> (f32, f32) {
+        (self.horn.length(), self.larynx.length())
+    }
+
+    /// Acoustic energy stored in the main tube and its slides (arbitrary
+    /// units: area times squared pressure waves, summed over the ticks of
+    /// travel they hold).
     #[cfg(test)]
     pub(crate) fn energy(&self, lambda: f32) -> f32 {
-        (0..N)
-            .map(|i| {
-                let a = self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
-                a * (self.r[i] * self.r[i] + self.l[i] * self.l[i])
-            })
-            .sum()
+        let area = |i: usize| self.a0[i] + (self.a1[i] - self.a0[i]) * lambda;
+        let mut e: f32 = (0..N)
+            .map(|i| area(i) * (self.r[i] * self.r[i] + self.l[i] * self.l[i]))
+            .sum();
+        if self.lip_horn > 0.0 {
+            e += self.horn.energy(area(HORN_CELL));
+        }
+        if self.larynx_travel > 0.0 {
+            #[allow(clippy::cast_precision_loss)]
+            let mean = LARYNX_CELLS.map(area).sum::<f32>() / LARYNX_REST;
+            e += self.larynx.energy(mean);
+        }
+        e
     }
 
     /// The wall of cell `i` (lumen `area`, cm²) as a shunt on the node at
@@ -1001,11 +1161,18 @@ impl Phys {
         }
         let rest = self.wall_cv
             * (self.wall_v[i] - self.wall_ck * self.wall_y[i] + self.wall_cw * self.wall_w[i]);
-        let squeeze = (area / (SQUEEZE_AREA * self.len * self.len)).min(1.0);
         Shunt {
             g: s * self.wall_cg,
-            h: s * rest + self.dx * self.adot[i] * squeeze,
+            h: s * rest + self.displaced(i, area),
         }
+    }
+
+    /// The air the moving articulators displace out of cell `i` (lumen
+    /// `area`, cm²), cm³/s.
+    #[inline]
+    fn displaced(&self, i: usize, area: f32) -> f32 {
+        let squeeze = (area / (SQUEEZE_AREA * self.len * self.len)).min(1.0);
+        self.dx * self.adot[i] * squeeze
     }
 
     /// Move the wall of cell `i` under pressure `p`; returns the flow its
@@ -1077,6 +1244,53 @@ impl Phys {
             self.adot[i] += (self.adot_target[i] - self.adot[i]) * self.adot_smooth;
         }
         self.gauge.shut = sealed;
+        // The slides (see `slide`): their lengths on the same cubic as the
+        // areas, the horn of its cell's area, the larynx slide of the mean
+        // of its three cells'. Their walls are their cells' walls, as long
+        // as they are; the air their moving ends sweep is the piston.
+        let (horn_on, larynx_on) = (self.lip_horn > 0.0, self.larynx_travel > 0.0);
+        let mut lar = (0.0f32, 0.0f32);
+        let mut piston = [0.0f32; 2];
+        if horn_on || larynx_on {
+            let at = |k: usize| {
+                h00 * self.slide0[k]
+                    + h10 * self.slide_m0[k]
+                    + h01 * self.slide1[k]
+                    + h11 * self.slide_m1[k]
+            };
+            let sweep = if self.pistons { self.dx / self.dt } else { 0.0 };
+            if horn_on {
+                self.horn.set_length(at(0));
+                self.wall_s[HORN_CELL] *= self.horn.length();
+                piston[0] = y[HORN_CELL] * RHO_C * self.horn.growth() * sweep;
+            }
+            if larynx_on {
+                self.larynx.set_length(at(1));
+                let mean = (y[7] + y[8] + y[9]) / LARYNX_REST;
+                lar = (mean, 1.0 / (mean * RHO_C).max(A_MIN));
+                let walls = self.wall_s[7] + self.wall_s[8] + self.wall_s[9];
+                self.wall_s[7] = 0.0;
+                self.wall_s[8] = 0.0;
+                self.wall_s[9] = walls * self.larynx.length() / LARYNX_REST;
+                piston[1] = mean * RHO_C * self.larynx.growth() * sweep;
+            }
+        }
+        let (horn_up, horn_down) = if horn_on {
+            self.horn.arrivals()
+        } else {
+            (0.0, 0.0)
+        };
+        let (lar_up, lar_down) = if larynx_on {
+            self.larynx.arrivals()
+        } else {
+            (0.0, 0.0)
+        };
+        // Waves sent into the slides: the horn's up and down, the larynx
+        // slide's up and down.
+        let mut sent = [0.0f32; 4];
+        let mut piston_power = 0.0f32;
+        let (lar_low, lar_high) = (LARYNX_CELLS.start, LARYNX_CELLS.end);
+        let piriform_at = if larynx_on { lar_low } else { PIRIFORM_AT };
         let mut nr = [0.0f32; N];
         let mut nl = [0.0f32; N];
         let widen = self.widening();
@@ -1113,9 +1327,47 @@ impl Phys {
         };
         for j in 1..N {
             let i = j - 1;
+            if larynx_on && j > lar_low && j < lar_high {
+                // Inside the larynx slide: no joint.
+                continue;
+            }
+            // Each side of the joint is a cell or a slide's end.
+            let (y1, inv1, from_left) = if larynx_on && j == lar_high {
+                (lar.0, lar.1, lar_up)
+            } else if horn_on && j == HORN_CELL + 1 {
+                (y[i], inv[i], horn_up)
+            } else {
+                (y[i], inv[i], self.r[i])
+            };
+            let (y2, inv2, from_right) = if larynx_on && j == lar_low {
+                (lar.0, lar.1, lar_down)
+            } else if horn_on && j == HORN_CELL {
+                (y[j], inv[j], horn_down)
+            } else {
+                (y[j], inv[j], self.l[j])
+            };
             let mut shunt = self.wall_shunt(i, y[i] * RHO_C);
             if EXPANDING.contains(&i) {
-                shunt.add(0.0, widen);
+                if larynx_on && j == lar_high {
+                    // The shares of the cells inside the slide too.
+                    shunt.add(0.0, widen * LARYNX_REST);
+                } else {
+                    shunt.add(0.0, widen);
+                }
+            }
+            if larynx_on && j == lar_high {
+                // The air displaced out of the whole slide, as long as it is.
+                let all: f32 = LARYNX_CELLS.map(|k| self.displaced(k, y[k] * RHO_C)).sum();
+                let ticks = self.larynx.length() / LARYNX_REST;
+                shunt.add(0.0, all * ticks - self.displaced(i, y[i] * RHO_C));
+            }
+            if horn_on && j == HORN_CELL + 1 {
+                let ticks = self.horn.length();
+                shunt.add(0.0, self.displaced(i, y[i] * RHO_C) * (ticks - 1.0));
+                shunt.add(0.0, piston[0]);
+            }
+            if larynx_on && j == lar_low {
+                shunt.add(0.0, piston[1]);
             }
             let nose_here = j == NOSE_START;
             if nose_here {
@@ -1124,22 +1376,22 @@ impl Phys {
                     shunt.add(s.g, s.h);
                 }
             }
-            let piriform_here = j == PIRIFORM_AT && self.side_cavities;
+            let piriform_here = j == piriform_at && self.side_cavities;
             if piriform_here {
                 for b in &self.piriform {
                     let s = b.shunt(lambda);
                     shunt.add(s.g, s.h);
                 }
             }
-            let (k_fwd, k_rev) = expansion_loss(inv[i], inv[j]);
+            let (k_fwd, k_rev) = expansion_loss(inv1, inv2);
             // A stream leaving a narrow cell breaks into turbulence; one
             // that strikes the teeth does so far more efficiently.
             let mut pn = 0.0;
             if self.noisy {
                 let free = jet_noise(
                     self.flow[j],
-                    inv[i],
-                    inv[j],
+                    inv1,
+                    inv2,
                     self.turbulence.jet_eff,
                     self.jet_cap(i),
                 );
@@ -1176,23 +1428,49 @@ impl Phys {
             }
             let s = solve(
                 &Joint {
-                    y1: y[i],
-                    y2: y[j],
+                    y1,
+                    y2,
                     shunt,
                     k_fwd,
                     k_rev,
-                    r: self.visc * inv[j] * inv[j],
+                    r: self.visc * inv2 * inv2,
                     pn,
                     sealed: false,
                 },
-                self.r[i],
-                self.l[j],
+                from_left,
+                from_right,
             );
-            nl[i] = s.out_left;
-            nr[j] = s.out_right;
+            if larynx_on && j == lar_high {
+                sent[3] = s.out_left;
+                self.slide_ends[1] = s.p1;
+            } else if horn_on && j == HORN_CELL + 1 {
+                sent[1] = s.out_left;
+                self.slide_ends[3] = s.p1;
+                piston_power += s.p1 * piston[0];
+            } else {
+                nl[i] = s.out_left;
+            }
+            if larynx_on && j == lar_low {
+                sent[2] = s.out_right;
+                self.slide_ends[0] = s.p1;
+                piston_power += s.p1 * piston[1];
+            } else if horn_on && j == HORN_CELL {
+                sent[0] = s.out_right;
+                self.slide_ends[2] = s.p1;
+            } else {
+                nr[j] = s.out_right;
+            }
             self.flow[j] += (s.u - self.flow[j]) * self.flow_smooth;
             self.press[j] += (s.p1 - self.press[j]) * self.press_smooth;
             self.flow_sum[j] += s.u;
+            if larynx_on && j == lar_high {
+                // The stream through the slide is the stream at its ends.
+                for k in lar_low + 1..lar_high {
+                    self.flow[k] = self.flow[j];
+                    self.press[k] = self.press[j];
+                    self.flow_sum[k] += s.u;
+                }
+            }
             u_skin += self.wall_commit(i, s.p1);
             if nose_here {
                 for b in &mut self.nose {
@@ -1206,11 +1484,16 @@ impl Phys {
             }
         }
 
-        // Lips, protruding as far as their opening says.
+        // Lips, protruding as far as their opening says (with the lip
+        // horn on, the protrusion is the horn's).
         let i = N - 1;
         let shunt = self.wall_shunt(i, y[i] * RHO_C);
         let lip_area = y[i] * RHO_C;
-        let series = self.lip_tube(lip_opening);
+        let series = if horn_on {
+            0.0
+        } else {
+            self.lip_tube(lip_opening)
+        };
         let mut u_lips = 0.0;
         let mut joint = Joint {
             y1: y[i],
@@ -1283,6 +1566,19 @@ impl Phys {
             self.r[i] = nr[i] * att;
             self.l[i] = nl[i] * att;
         }
+        if horn_on {
+            let k = HORN_CELL;
+            let att = self.att0[k] + (self.att[k] - self.att0[k]) * lambda;
+            self.horn.push(sent[0], sent[1], att);
+        }
+        if larynx_on {
+            let mean = LARYNX_CELLS
+                .map(|k| self.att0[k] + (self.att[k] - self.att0[k]) * lambda)
+                .sum::<f32>()
+                / LARYNX_REST;
+            self.larynx.push(sent[2], sent[3], mean);
+        }
+        self.gauge.piston = piston_power;
         self.gauge.u_lips = u_lips;
         self.gauge.u_nose = u_nose;
         self.gauge.u_skin = u_skin;
