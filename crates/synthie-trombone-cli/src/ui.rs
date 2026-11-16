@@ -930,13 +930,13 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
     let g = app.snap.glottis;
 
     let formants = Line::from(formant_spans(app, w >= 30));
-    let age = app.formants.map(|f| {
+    let age = app.formants.map(|_| {
         #[allow(clippy::cast_precision_loss)]
-        let ms = app.snap.at.saturating_sub(f.at) as f32 / app.sample_rate() * 1000.0;
+        let ms = app.formants_late as f32 / app.sample_rate() * 1000.0;
         let text = if w >= 30 {
-            format!("tract resonances, {ms:.0} ms ago")
+            format!("tract resonances, {ms:.0} ms late")
         } else {
-            format!("resonances, {ms:.0} ms ago")
+            format!("resonances, {ms:.0} ms late")
         };
         Line::from(Span::styled(text, fg(DIM)))
     });
@@ -1793,17 +1793,23 @@ mod tests {
         live.play(0.2);
         // Keep the shape moving: the tongue goes back and forth.
         let mut worst = 0.0f32;
+        let mut seen = Vec::new();
         for k in 0..40 {
             live.press(if k % 2 == 0 { '1' } else { '9' });
             live.play(0.05);
             std::thread::sleep(std::time::Duration::from_millis(8));
-            if let Some(f) = live.app.formants {
+            if live.app.formants.is_some() {
                 #[allow(clippy::cast_precision_loss)]
-                let ms = (live.app.snap.at - f.at) as f32 / 48.0;
+                let ms = live.app.formants_late as f32 / 48.0;
                 worst = worst.max(ms);
+                seen.push(ms);
             }
         }
-        println!("formants at most {worst:.0} ms behind the latest snapshot");
+        seen.sort_by(f32::total_cmp);
+        println!(
+            "formants {:.0} ms late (median), at most {worst:.0} ms",
+            seen[seen.len() / 2]
+        );
         assert!(live.app.formants.is_some());
         assert!(worst < 250.0, "{worst} ms");
     }

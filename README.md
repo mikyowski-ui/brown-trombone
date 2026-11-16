@@ -101,18 +101,18 @@ what the voice is doing inside:
 
 ```
 ╭ ◇ instrument ────────────────────╮
-│ F1  348 F2  837 F3 1212 Hz       │  the tract's own resonances
-│ tract resonances, 50 ms ago      │
-│ ΔP 10.0 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
-│ shut █████▉···········  35% folds│  closed quotient, and what is sounding
+│ F1  348 F2  837 F3 1212 Hz       │  the tract's own resonances (a nasal /a/)
+│ tract resonances, 17 ms late     │
+│ ΔP 10.1 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
+│ shut ██████···········  35% folds│  closed quotient, and what is sounding
 │ gap  0.005‥0.191 cm²             │  smallest and largest glottal area
-│                                  │
+│ tiers: score · controls          │  cyan names: the score; white: controls
 │ glottis ██████████████████████┃ 1│  one row per tier of the gesture score:
-│ larynx  ████████████┃·········· 1│  the bar is where it is now, ┃ its
+│ larynx  ████████████████┃······ 1│  the bar is where it is now, ┃ its
 │ velum   ██████████████████████┃ 1│  target, the number its gestures;
-│ body    ███████████████┃······· 1│  a tier no gesture drives is dimmed
-│ tip     █▉┃···················· ·│
-│ lips    ██▉┃··················· ·│
+│ body    █████┃················· 1│  a tier nothing drives is dimmed
+│ tip     ┃······················ ·│
+│ lips    ┃······················ ·│
 ╰──────────────────────────────────╯
 ```
 
@@ -120,10 +120,13 @@ what the voice is doing inside:
   at that moment (nose included), measured as `examples/replay.rs --trace`
   measures them: the resonances of the shape, not an analysis of the
   sound; `—` where it shows fewer than three peaks below 4.2 kHz (a closed
-  mouth, and the classic engine's /u/). A measurement takes about 3 ms, so it is made on a thread of its
-  own from a copy of the voice the audio thread sends at most 30 times a
-  second, and only when the shape has changed; the panel says how old the
-  shape is (one to three frames, 30 to 60 ms, while the voice moves). With
+  mouth, and the classic engine's /u/). A measurement takes about 3 ms, so
+  it is made on a thread of its own from a copy of the voice the audio
+  thread sends at most 30 times a second, and only when the shape has
+  changed (a reading holds while the shape stays). The panel says how late
+  the reading came: from the moment the shape was taken to the frame that
+  showed it, typically 15 to 35 ms (at most a probe interval, 33 ms, more
+  while the tract keeps moving). With
   Formant Lock on, `●` marks the same F1 and F2 on the vowel chart, beside
   the `◆` the lock steers.
 - **ΔP** is the pressure below the folds less the pressure just above them,

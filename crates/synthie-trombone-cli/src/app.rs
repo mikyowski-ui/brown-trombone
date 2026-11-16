@@ -265,6 +265,10 @@ pub struct App {
     meter: FormantMeter,
     /// The tract's formants as last measured.
     pub formants: Option<Formants>,
+    /// How late they came: samples from the moment the shape was taken to
+    /// the snapshot the reading arrived with. The reading holds until the
+    /// shape changes (none is sent while it stays the same).
+    pub formants_late: u64,
 }
 
 /// Lowercase name of a sound model.
@@ -321,6 +325,7 @@ impl App {
             chart_area: Rect::default(),
             meter: FormantMeter::new(),
             formants: None,
+            formants_late: 0,
         };
         app.status = if keyboard_release {
             "hold a piano key to sing · Space stops · Tab to type or paste text".into()
@@ -521,6 +526,7 @@ impl App {
         }
         if let Some(f) = self.meter.poll() {
             self.formants = Some(f);
+            self.formants_late = self.snap.at.saturating_sub(f.at);
         }
         if let Some(saved) = self.link.recorder.as_ref().and_then(Recorder::poll) {
             self.status = saved_status(&saved);
