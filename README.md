@@ -1040,6 +1040,19 @@ deterministic):
 | physical engine, end of round 6 | 24 % | 66 % | 31 % | 98.5 % | 90.5 % |
 | physical engine now (round 7) | 23 % | 70 % | – | 98.5 % | – |
 
+Wave 1, all of it together (single scoring runs): speech is played as a
+gesture score by default, with round 10's phone lengths and the four-part
+"canoe" fix. The ten `sentence_heldout` sentences 22.0 % and 81.2 %, the
+30 held-out sentences 26.3 % and 74.3 %, the 30 tuning sentences 22.2 %
+and 74.1 %, vowels in the LibriSpeech texts heard wrong 23.8 %,
+consonants right 88.7 %; the rule path (`gesture_score` 0) scores the same
+on every one of these. The four-sentence clip: "The birch can easily run
+the smooth planks. Glue the sheet to the dark blue background. She sells
+seashells by the seashore. The juice of lemons makes fine punch." (24 of
+31 words); sentence 1 alone "The birch can use it on the smooth planks.";
+following the first reference recording "The birch can use slit on the
+smooth planks.". No build yet is heard to say "canoe slid on".
+
 After round 11 the owner's ears chose round 10's phone lengths: the six
 rhythm numbers (`stressed_onset_length`, `cluster_length`,
 `function_consonant_length`, `schwa_length`, `diphthong_hold`,
