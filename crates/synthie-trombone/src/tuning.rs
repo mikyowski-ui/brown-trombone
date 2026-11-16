@@ -815,6 +815,49 @@ tuning! {
         /// lips of its own or, under a gap meant to hiss, lips held as they
         /// are).
         gesture_overlap = 1.0, 0.0..=1.0, B;
+
+        // ----- "canoe": an /n/ into a fronted vowel (wave 1, w1-canoe) -------
+
+        /// How many times faster the tongue tip lets go of a closure while the
+        /// velum is open (physical engine; out of /n/; `1` is off): the
+        /// closure and the tip's shoulder around it, until each cell is back
+        /// with the tongue body or closing again. At the tip's own speed
+        /// (`articulation_rate`, starting at `release_speed`) the gap out of
+        /// an /n/ was at 20 % of its opening after 10 ms and 37 % after 20 (2
+        /// to 8 cm²/s, where Stevens gives 50 to 100 for an alveolar release);
+        /// over a fronted body the second formant overshot to 1900 to 2134 Hz
+        /// and fell back by 250 over 25 ms, F3 and F4 11 dB over F2: a /j/,
+        /// "canoe" heard as "can use". At 3 it still overshot (1968 Hz); at 6
+        /// the narrowest cell is at 0.22 cm² 9 ms after the release (some 25
+        /// cm²/s) and the second formant rises onto the vowel. A stop's
+        /// release is not hastened: its burst and breath cover it, and its
+        /// transitions are already quicker than a speaker's.
+        nasal_tip_release = 6.0, 1.0..=8.0, B;
+        /// Whether the /u/ after /n/ is the fronted one (`1`) or the plain back
+        /// one (`0`, as until wave 1; physical engine; see `speech::fronts_u`):
+        /// the owner's "canoe" holds F2 1860 to 1910 Hz from the release on,
+        /// the LibriSpeech reader's "the new" starts near 1790 and rises.
+        /// Fronted with the slow tip release, it was heard as /ju/. On by the
+        /// owner's ear; the phoneme recognizer hears the fronted /u/ after /n/
+        /// less often than the back one (see the README).
+        fronted_after_n = 1.0, 0.0..=1.0, C;
+        /// Share of the tongue's drop behind an /n/'s closure
+        /// ([`nasal_cavity`](Self::nasal_cavity)) held back when the /n/ leads
+        /// into the fronted /u/ (physical engine; `0` is off; see
+        /// `speech::keeps_tongue_up`): dropped, the tongue sprang back after
+        /// the release at the cavity's speed into the vowel's first 15 ms. Kept
+        /// up, the mouth behind the /n/ is the fronted vowel's: its
+        /// antiresonance stands at 2.1 to 2.3 kHz (1.45 to 1.55 dropped). Not
+        /// before /i ɪ j/: kept up there it rose from 1.4 to 1.8 kHz, where
+        /// round 6's recognizer heard /ŋ/ in a fifth of the /n/.
+        nasal_cavity_held = 1.0, 0.0..=1.0, B;
+        /// Whether an unstressed /ə/ takes the colour of a high front or
+        /// fronted vowel after it (`1`) or stays the one central schwa (`0`,
+        /// as until wave 1; physical engine; see `speech::schwa_colour`): its
+        /// shape is `VowelKey::Fronted` of /ə/ (F1 400, F2 1750 Hz), where the
+        /// LibriSpeech reader's /ə/ before a front vowel stands at 372 and
+        /// 1604 and the owner's in "canoe" near 300 and 1800.
+        schwa_colour = 1.0, 0.0..=1.0, C;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1310,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_twenty_five_sixty_one_and_forty_three() {
+    fn three_parts_of_twenty_five_sixty_five_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1318,9 +1361,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (25, 61, 43)
+            (25, 65, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 129);
+        assert_eq!(Tuning::FIELDS.len(), 133);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1335,10 +1378,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_sixty() {
+    fn two_passes_of_fifty_eight_and_sixty_two() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 60));
+        assert_eq!((a, b), (58, 62));
     }
 
     #[test]
@@ -1346,7 +1389,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 11);
+        assert_eq!(c, 13);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

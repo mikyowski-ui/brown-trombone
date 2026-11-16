@@ -236,7 +236,7 @@ range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
 physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-61) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+65) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
@@ -256,6 +256,7 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | vowels gliding into their neighbours | `lax_nucleus`, `ae_nucleus`, `fronted_nucleus`, `dark_l_share` |
 | articulation | following a speaker's schedule | `follow_breath_low`, `follow_breath_high`, `follow_tenseness_low`, `follow_tenseness_high`, `follow_speed_max`, `follow_shortest`, `follow_shortest_light`, `follow_formant_range` |
 | articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`) |
+| articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -471,7 +472,13 @@ as the model goes:
   consonant. Out of /n ŋ/ into a close vowel the velum shuts three times
   as fast as elsewhere (`velum_release`, round 11), so the nose is shut
   15 ms into the vowel: left open longer, it took over the /u/ of
-  "canoe".
+  "canoe". Out of /n/ the tip lets go six times as fast as its own
+  spring (`nasal_tip_release`, wave 1), closure and shoulder together:
+  at its own speed the gap out of /n/ opened at 2 to 8 cm²/s (Stevens:
+  50 to 100) and the second formant overshot onto a fronted vowel and
+  fell back, a /j/. Before the fronted /u/ the tongue is not dropped
+  behind the /n/ (`nasal_cavity_held`): the antiresonance there stands
+  at 2.1 to 2.3 kHz.
 - **Two speeds of articulator.** The tongue body and the jaw are heavy and
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
@@ -507,9 +514,15 @@ as the model goes:
   385 / 1747, his /eɪ/ 422 / 1892). An /u/ after /t d s z/ is made further
   front (F2 1600 Hz, the plain /u/ 1000) and glides part of the way back
   over its second half (`fronted_nucleus`), as the reader's does ("two"
-  1690 to 1300 Hz); after /n/, the postalveolars and /j/, fronted the same
-  way, it was heard as /ju/ ("canoe" as "can use", "the juice" as "the
-  use"), so there it is the plain /u/. A stressed /æ/
+  1690 to 1300 Hz), and after /n/ too since wave 1 (`fronted_after_n`;
+  the owner's "canoe" holds 1860 to 1910 Hz); after the postalveolars
+  and /j/, fronted the same way, it was heard as /ju/ ("the juice" as
+  "the use"), so there it is the plain /u/. An unstressed /ə/ before a
+  single consonant of the lips or the tip and then /i ɪ/ or a fronted
+  /u/, or before /j/, is made higher and further front (F1 400, F2 1750
+  Hz against 510 and 1530; `schwa_colour`, wave 1): the reader's /ə/
+  before a front vowel stands at 372 and 1604 Hz, the owner's in "canoe"
+  near 300 and 1800. A stressed /æ/
   can be made to glide a fifth of the way to schwa (`ae_nucleus` 0.55);
   it reaches its formants without, and with the glide the recognizer
   hears more /æ/ as /ɛ/, so that is off. A vowel shape may also set the tongue root, which widens or narrows
@@ -1270,6 +1283,34 @@ average sentence).
   tip release before it can use it. A fronted /u/ with tight lips is out
   of this tract's reach (the tongue body stops at cell 29; with lips
   rounded F2 falls to 1270 and F3 stays at 2700).
+- **"canoe" (wave 1): the owner's three-part fix is on; the recognizers
+  do not hear the word.** By ear (round 11's experiment clip: "much
+  smoother, no fake 'you' glide") the owner chose: the tip quick out of
+  /n/ (`nasal_tip_release` 6, onto a vowel's shape only), the fronted /u/
+  after /n/ (`fronted_after_n`), the tongue kept up behind an /n/ before
+  it (`nasal_cavity_held`), and a higher, fronter schwa before it
+  (`schwa_colour`). In the tract (its own formants): the schwa of
+  "canoe" stands at F1 320 to 400, F2 1750 to 1790 Hz (before 380 to
+  510 and 1645 to 1570; the owner's near 300 and 1800); out of the /n/
+  F2 rises from 1580 to 1590 and glides back to 1480 (before: the back
+  /u/, 1350 falling to 1000; with the fronted /u/ and the tip at its own
+  speed, 1896 falling to 1644 over 25 ms, the /j/). Each part can be
+  switched off (`0`, the tip release `1`); all four off is the earlier
+  engine sample for sample. Whisper writes sentence 1 "The birch can use
+  it on the smooth planks." (as before), the four-sentence clip "...can
+  easily run the smooth planks..." (24 of 31 words, 25 before), "canoe"
+  in 0 of 10 carrier phrases (1 before). The phoneme recognizer hears
+  the fronted /u/ after /n/ less often than the back one ("the new king",
+  "I knew him" lose their /u/; "a new car", "noon" gain it), and one /n/
+  before it as /ŋ/: kept up, the tongue puts the /n/'s antiresonance at
+  2.1 to 2.3 kHz (1.45 to 1.55 dropped). The same fronted /u/ after /d/
+  is heard as /u/. Over the 30 held-out sentences 26.3 % phoneme error,
+  74.3 % of Whisper's words (26.1, 74.3 before), the 30 tuning ones 22.2
+  and 74.1 % (22.3, 72.8), vowels heard wrong in the LibriSpeech texts
+  23.8 % (24.8), consonants right 88.7 % (88.2). Hastened into /ð s l/
+  as well (the tip moving on to its next place, not letting go), the
+  quick tip cost "in the", "on the", "at once": 74.3 to 72.2 % of the
+  held-out words; it no longer does.
 - **Taps after /ɑ/** are heard as /r/ in 7 of 12 short phrases (other
   vowels 1 of 8). Not their third formant (2700 to 3100 Hz at the tap, the
   reader's 2500 to 2800) nor their length (12, 20 or 30 ms, approach 8 to
