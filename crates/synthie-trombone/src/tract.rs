@@ -167,6 +167,11 @@ const CONSONANT_WIDEST: f32 = 1.3;
 const RETURNED: f32 = 0.08;
 /// ...and how slowly it must be moving there, diameter units per second.
 const RETURNED_SPEED: f32 = 1.0;
+/// A tongue-tip closure let go with the velum at least this open is a
+/// nasal's (see [`ArticulationConfig::nasal_tip_release`](crate::ArticulationConfig::nasal_tip_release)): out of /n/ into a vowel it
+/// is still some two-thirds open at the release; a /d/ after /n/ is
+/// released with it shut (`Tuning::velum_lead`).
+const NASAL_RELEASE_VELUM: f32 = 0.2;
 
 /// Which articulator moves a cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -408,6 +413,14 @@ pub(crate) struct Tract {
     mover: [Mover; N],
     /// Lip cells let go of a closure and still on their way out of it.
     parting: [bool; N],
+    /// Tongue-tip cells that let go of a closure while the velum was open
+    /// (out of an /n/), still on their way out of it: they move
+    /// [`ArticulationConfig::nasal_tip_release`](crate::ArticulationConfig::nasal_tip_release) times as fast.
+    nasal_release: [bool; N],
+    /// Share of the tongue's drop behind a nasal closure held back (see
+    /// [`Tract::open_nasal_cavity`]; the speaker sets it for an /n/ that
+    /// leads into a fronted vowel, [`ArticulationConfig::nasal_cavity_held`](crate::ArticulationConfig::nasal_cavity_held)).
+    pub(crate) cavity_held: f32,
     /// The tongue body is being held by a consonant of its own (/k g ŋ l
     /// r/): it moves at the back of the tongue's speed, until it is back
     /// with the vowels.
@@ -488,6 +501,8 @@ impl Tract {
             body: [0.0; N],
             mover: [Mover::Body; N],
             parting: [false; N],
+            nasal_release: [false; N],
+            cavity_held: 0.0,
             quick_body: false,
             nasal: false,
             own_lips: false,
@@ -965,7 +980,10 @@ impl Tract {
         // Up to the closure: the tip's or the lips' shoulder is carved into
         // the lowered tongue afterwards.
         let cavity_end = (index.max(0.0) as usize).min(LIP_START).min(N);
-        let floor = self.motion.articulation.nasal_cavity;
+        // Before a fronted vowel the tongue is kept up, all or part of the
+        // way (`ArticulationConfig::nasal_cavity_held`).
+        let floor =
+            self.motion.articulation.nasal_cavity * (1.0 - self.cavity_held.clamp(0.0, 1.0));
         for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
             .iter_mut()
             .zip(&mut moved[NOSE_START..])
@@ -1226,6 +1244,34 @@ impl Tract {
         let dorsum = speed * self.boost * body_k * self.motion.articulation.dorsum_rate;
         let body = speed * self.boost * body_k * self.motion.articulation.tongue_body.stiffness;
         let cavity = speed * self.motion.articulation.nasal_cavity_rate;
+        // The tongue tip letting go of an /n/ (the velum open) moves quickly
+        // (`ArticulationConfig::nasal_tip_release`), as a speaker's alveolar release
+        // does (50 to 100 cm²/s, Stevens): the closure and the tip's
+        // shoulder around it, which had narrowed with it, until each cell
+        // is back with the vowel or closing again. The shoulder left at
+        // the tip's own speed kept a gap of 0.01 cm² for 10 ms after the
+        // closure had opened. Only cells let go onto the vowel's shape:
+        // out of /n/ into /ð s l/ the tip moves on to its next place, and
+        // hastened there too the /ð/ of "in the", "on the" and the /s/ of
+        // "at once" were lost (Whisper's words over the 30 held-out
+        // sentences 74.3 to 72.2 %, every one of the losses at such an /n/).
+        let tip_lets_go = self.velum_openness() > NASAL_RELEASE_VELUM
+            && (0..LIP_START).any(|i| {
+                self.mover[i] == Mover::Tip
+                    && self.diameter[i] <= 0.0
+                    && self.diameter[i] < self.target[i]
+                    && self.velocity[i] <= 0.0
+            });
+        if tip_lets_go {
+            for i in 0..LIP_START {
+                if self.mover[i] == Mover::Tip
+                    && self.diameter[i] < self.target[i]
+                    && self.target[i] >= self.body[i] - CARVED
+                {
+                    self.nasal_release[i] = true;
+                }
+            }
+        }
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];
             // Consonants close twice as fast as they open, as in the
@@ -1243,7 +1289,20 @@ impl Tract {
                 Mover::Cavity => cavity * closing,
             };
             let mut v0 = self.velocity[i];
-            if self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0 {
+            let letting_go = self.diameter[i] <= 0.0 && e0 < 0.0 && v0 <= 0.0;
+            if self.nasal_release[i] && (e0 > 0.0 || self.mover[i] != Mover::Tip) {
+                // Closing again, or handed back to the tongue body once at
+                // rest where the vowel wants it (cleared on the way there,
+                // part of the way slow again, it got there by more or less
+                // as the control blocks happened to fall).
+                self.nasal_release[i] = false;
+            }
+            let w = if self.nasal_release[i] {
+                w * self.motion.articulation.nasal_tip_release
+            } else {
+                w
+            };
+            if letting_go {
                 // Letting go of a closure: surfaces pressed together spring
                 // apart (and the air behind them pushes), so the release
                 // starts at speed instead of from rest.
