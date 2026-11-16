@@ -34,7 +34,7 @@ const PHYSICAL_GAIN: f32 = 2.5e-7;
 pub(crate) const FRICATIVE_WIDEST: f32 = HISS_WIDEST;
 
 /// Places of the tongue (tract index) behind the alveolar ridge whose
-/// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`Tuning::postalveolar_lips`]);
+/// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`ArticulationConfig::postalveolar_lips`](crate::ArticulationConfig::postalveolar_lips));
 /// /r/, further back, keeps its rounding.
 const POSTALVEOLAR_PLACE: core::ops::RangeInclusive<f32> = 32.5..=34.5;
 /// Where the tongue tip closes for /n/ (the alveolar ridge, and the teeth
@@ -441,7 +441,7 @@ impl Trombone {
     fn sync_wander(&mut self) {
         self.glottis.flutter = match self.engine {
             Engine::Classic => 0.0,
-            Engine::Physical => self.tuning.pitch_flutter,
+            Engine::Physical => self.tuning.anatomy.pitch_flutter,
         };
         self.glottis.own_clock = self.engine == Engine::Physical;
     }
@@ -593,7 +593,7 @@ impl Trombone {
     /// Hold the glottis open behind the folds by `cm2` (cm² at native size,
     /// `0‥1`), as a speaker spreads it for a voiceless consonant: on top of
     /// whatever the voicing gate does, and moving at the arytenoids' pace
-    /// ([`Tuning::abduction_time`]). With the gate on, a small opening
+    /// ([`ArticulationConfig::abduction_time`](crate::ArticulationConfig::abduction_time)). With the gate on, a small opening
     /// leaves the folds vibrating beside a stream of breath (a voiced
     /// fricative); a large one with the gate off is the wide glottis of an
     /// aspirated stop. Physical engine only; `0` (the default) leaves the
@@ -629,7 +629,7 @@ impl Trombone {
     /// Soften the voice, `0` (firm, the default) to `1`, as a speaker's
     /// voice is softer on nasals, liquids and unaccented syllables than on
     /// an accented vowel: the voice passes a one-pole low-pass whose corner
-    /// is [`Tuning::soft_corner`] at `1` and moves up out of hearing
+    /// is [`AnatomyConfig::soft_corner`](crate::AnatomyConfig::soft_corner) at `1` and moves up out of hearing
     /// towards `0`, so the spectrum above 2 kHz falls faster. The folds
     /// themselves are left alone: how far apart they are held, the
     /// pressure they need to start and every note they can sing stay as
@@ -830,7 +830,7 @@ impl Trombone {
     /// How many times faster than usual the velum shuts from now on
     /// (physical engine; `1` is its usual speed, some 45 ms from open to
     /// shut). The speaker hastens it out of a nasal into a vowel once the
-    /// mouth has opened ([`Tuning::velum_release`]).
+    /// mouth has opened ([`ArticulationConfig::velum_release`](crate::ArticulationConfig::velum_release)).
     pub(crate) fn set_velum_haste(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
             self.tract.velum_haste = factor;
@@ -928,11 +928,14 @@ impl Trombone {
         let gap = |c: Constriction| {
             let d = c.diameter;
             if d > 0.3 && d <= FRICATIVE_WIDEST {
-                Constriction::new(c.index, (d + self.tuning.fricative_gap).max(0.32))
+                Constriction::new(
+                    c.index,
+                    (d + self.tuning.articulation.fricative_gap).max(0.32),
+                )
             } else if d > FRICATIVE_WIDEST && d < 1.3 {
                 Constriction::new(
                     c.index,
-                    (d + self.tuning.approximant_gap).max(FRICATIVE_WIDEST + 0.01),
+                    (d + self.tuning.articulation.approximant_gap).max(FRICATIVE_WIDEST + 0.01),
                 )
             } else {
                 c
@@ -951,7 +954,9 @@ impl Trombone {
             && POSTALVEOLAR_PLACE.contains(&c.index)
             && c.diameter <= FRICATIVE_WIDEST
         {
-            lips.diameter = lips.diameter.max(self.tuning.postalveolar_lips);
+            lips.diameter = lips
+                .diameter
+                .max(self.tuning.articulation.postalveolar_lips);
         }
         // The physical /n/ lowers the velum less than /m ŋ/.
         let velum = match a.constriction {
@@ -961,7 +966,7 @@ impl Trombone {
                     && c.diameter <= 0.3
                     && ALVEOLAR_NASAL_PLACE.contains(&c.index) =>
             {
-                a.velum * self.tuning.alveolar_velum
+                a.velum * self.tuning.articulation.alveolar_velum
             }
             _ => a.velum,
         };
@@ -1067,8 +1072,10 @@ impl Trombone {
     pub(crate) fn nominal_stiffness(&self, tier: Tier) -> f32 {
         let speed = self.tract.movement_speed / MOVEMENT_SPEED;
         match tier {
-            Tier::TongueBody => speed * self.tuning.body_rate,
-            Tier::TongueTip | Tier::LipsAndJaw => speed * self.tuning.articulation_rate,
+            Tier::TongueBody => speed * self.tuning.articulation.tongue_body.stiffness,
+            Tier::TongueTip | Tier::LipsAndJaw => {
+                speed * self.tuning.articulation.tongue_tip.stiffness
+            }
             t => t.default_stiffness(),
         }
     }
@@ -1082,7 +1089,7 @@ impl Trombone {
     /// the next one, the tongue body moving `boost` times as fast as tuned.
     /// The segment gestures before them on those tiers let go.
     ///
-    /// With [`Tuning::gesture_overlap`] a consonant made on a vowel's body
+    /// With [`ArticulationConfig::gesture_overlap`](crate::ArticulationConfig::gesture_overlap) a consonant made on a vowel's body
     /// and lips (by the tip or the lips, or /h/) brings only its own
     /// gestures: the body and the lips are that vowel's, a gesture on
     /// [`gesture::LAYER_SCORE`] that spans every consonant leaning on it
@@ -1093,11 +1100,12 @@ impl Trombone {
     /// dominant lip gesture.
     pub(crate) fn articulate_as_gestures(&mut self, a: &Articulation, boost: f32) {
         use gesture::{LAYER_SEGMENT, flag, var};
-        let lean = if self.engine == Engine::Physical && self.tuning.gesture_overlap >= 0.5 {
-            a.leans_on()
-        } else {
-            None
-        };
+        let lean =
+            if self.engine == Engine::Physical && self.tuning.articulation.gesture_overlap >= 0.5 {
+                a.leans_on()
+            } else {
+                None
+            };
         let r = match lean {
             Some(_) => self.resolve(&Articulation {
                 tongue: None,
@@ -1342,8 +1350,8 @@ impl Trombone {
         let mut body = self.score.blend(Tier::TongueBody);
         let mut tip = self.score.blend(Tier::TongueTip);
         let mut lips = self.score.blend(Tier::LipsAndJaw);
-        if self.tuning.gesture_score >= 1.5 {
-            // The series plant (a measurement, see `Tuning::gesture_score`):
+        if self.tuning.articulation.gesture_score >= 1.5 {
+            // The series plant (a measurement, see `ArticulationConfig::gesture_score`):
             // the tiers' own task-space state, not their targets, sent to
             // the tract, whose articulators then follow it.
             for (tier, b) in [

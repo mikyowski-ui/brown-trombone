@@ -374,7 +374,7 @@ pub(crate) struct Tract {
     pub(crate) velum_target: f32,
     /// How many times faster than [`VELUM_SHUTTING`] the velum shuts now
     /// (physical engine; `1` but out of a nasal into a vowel, see
-    /// [`Tuning::velum_release`]).
+    /// [`ArticulationConfig::velum_release`](crate::ArticulationConfig::velum_release)).
     pub(crate) velum_haste: f32,
     pub(crate) movement_speed: f32,
     /// How much faster than `movement_speed` the tongue body and its back
@@ -768,7 +768,7 @@ impl Tract {
         }
         let floor = match self.dynamics {
             Dynamics::Linear => 0.0,
-            Dynamics::Damped => -self.motion.closure_overshoot,
+            Dynamics::Damped => -self.motion.articulation.closure_overshoot,
         };
         if self.dynamics == Dynamics::Damped {
             self.compute_shaped_targets(floor);
@@ -921,7 +921,7 @@ impl Tract {
     /// at the cavity's open end, pulled /n/'s antiresonance down to 700 to
     /// 1000 Hz before /ʌ ə ɔ oʊ/ and /m/'s to 450 Hz, where /m/ and nothing
     /// are heard. So the tongue drops behind a nasal closure, to at least
-    /// [`Tuning::nasal_cavity`] all the way from the velum to the closure,
+    /// [`ArticulationConfig::nasal_cavity`](crate::ArticulationConfig::nasal_cavity) all the way from the velum to the closure,
     /// before the tip's or the lips' shoulder is carved into it: lowered
     /// only as far as the shoulder, the high front of /i ɪ æ/ stayed under
     /// the closed end of the branch, /n/'s antiresonance rose to 1.75 to
@@ -961,7 +961,7 @@ impl Tract {
         // Up to the closure: the tip's or the lips' shoulder is carved into
         // the lowered tongue afterwards.
         let cavity_end = (index.max(0.0) as usize).min(LIP_START).min(N);
-        let floor = self.motion.nasal_cavity;
+        let floor = self.motion.articulation.nasal_cavity;
         for (target, moved) in self.target[NOSE_START..cavity_end.max(NOSE_START)]
             .iter_mut()
             .zip(&mut moved[NOSE_START..])
@@ -1216,17 +1216,18 @@ impl Tract {
         // The gesture score's tiers scale each articulator's speed by the
         // stiffness of what they are doing (`1` otherwise).
         let [body_k, tip_k, lips_k] = self.tier_speed;
-        let tip = speed * tip_k * self.motion.articulation_rate;
-        let lips = speed * lips_k * self.motion.articulation_rate;
-        let dorsum = speed * self.boost * body_k * self.motion.dorsum_rate;
-        let body = speed * self.boost * body_k * self.motion.body_rate;
-        let cavity = speed * self.motion.nasal_cavity_rate;
+        let tip_rate = self.motion.articulation.tongue_tip.stiffness;
+        let tip = speed * tip_k * tip_rate;
+        let lips = speed * lips_k * tip_rate;
+        let dorsum = speed * self.boost * body_k * self.motion.articulation.dorsum_rate;
+        let body = speed * self.boost * body_k * self.motion.articulation.tongue_body.stiffness;
+        let cavity = speed * self.motion.articulation.nasal_cavity_rate;
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];
             // Consonants close twice as fast as they open, as in the
             // original; the vowel shape moves alike either way.
             let closing = if e0 > 0.0 {
-                self.motion.closing_ratio
+                self.motion.articulation.closing_ratio
             } else {
                 1.0
             };
@@ -1242,10 +1243,10 @@ impl Tract {
                 // Letting go of a closure: surfaces pressed together spring
                 // apart (and the air behind them pushes), so the release
                 // starts at speed instead of from rest.
-                v0 = self.motion.release_speed * w * -e0;
+                v0 = self.motion.articulation.release_speed * w * -e0;
             }
             let zeta = if self.mover[i] == Mover::Body {
-                self.motion.body_damping
+                self.motion.articulation.tongue_body.damping
             } else {
                 1.0
             };
@@ -1469,7 +1470,7 @@ fn carve(target: &mut [f32; N], c: Constriction, floor: f32) {
 /// Carve a lateral (/l/) into a target shape (physical engine). The tip
 /// touches the ridge in the middle and the air leaves round the sides of
 /// the tongue, between them and the teeth: in the tube a narrow channel of
-/// their area from the place [`Tuning::lateral_channel`] cells forward, with
+/// their area from the place [`ArticulationConfig::lateral_channel`](crate::ArticulationConfig::lateral_channel) cells forward, with
 /// short shoulders at its ends ([`LATERAL_SHOULDER_BACK`] behind it, the
 /// tip's in front), the mouth behind it the tongue body's.
 ///
@@ -1494,7 +1495,7 @@ fn carve_lateral(target: &mut [f32; N], c: Constriction, floor: f32, motion: &Tu
         return;
     }
     let mut at = c.index;
-    while at <= c.index + motion.lateral_channel.max(0.0) {
+    while at <= c.index + motion.articulation.lateral_channel.max(0.0) {
         shoulder(target, at, d, LATERAL_SHOULDER_BACK, TIP_SHOULDER_FRONT);
         at += 1.0;
     }

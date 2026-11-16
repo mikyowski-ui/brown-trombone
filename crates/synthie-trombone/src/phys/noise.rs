@@ -250,17 +250,17 @@ impl Turbulence {
             r_teeth: 1.0,
             k_teeth: 1.0,
             gain_teeth: 1.0,
-            teeth_floor: Tuning::DEFAULT.hiss_floor,
-            teeth_corner: Tuning::DEFAULT.teeth_corner,
-            corner: Tuning::DEFAULT.hiss_corner,
-            jet_eff: Tuning::DEFAULT.jet_efficiency,
-            teeth_eff: Tuning::DEFAULT.jet_efficiency * Tuning::DEFAULT.teeth_gain,
-            glottal_eff: Tuning::DEFAULT.glottal_efficiency,
-            tilt_depth: Tuning::DEFAULT.voice_tilt,
-            tilt_corner: Tuning::DEFAULT.tilt_corner,
-            tilt_top: Tuning::DEFAULT.tilt_top,
-            tilt_top_corner: Tuning::DEFAULT.tilt_top_corner,
-            slit_corner: Tuning::DEFAULT.voiced_breath_corner,
+            teeth_floor: Tuning::DEFAULT.anatomy.hiss_floor,
+            teeth_corner: Tuning::DEFAULT.anatomy.teeth_corner,
+            corner: Tuning::DEFAULT.anatomy.hiss_corner,
+            jet_eff: Tuning::DEFAULT.anatomy.jet_efficiency,
+            teeth_eff: Tuning::DEFAULT.anatomy.jet_efficiency * Tuning::DEFAULT.anatomy.teeth_gain,
+            glottal_eff: Tuning::DEFAULT.anatomy.glottal_efficiency,
+            tilt_depth: Tuning::DEFAULT.anatomy.voice_tilt,
+            tilt_corner: Tuning::DEFAULT.anatomy.tilt_corner,
+            tilt_top: Tuning::DEFAULT.anatomy.tilt_top,
+            tilt_top_corner: Tuning::DEFAULT.anatomy.tilt_top_corner,
+            slit_corner: Tuning::DEFAULT.anatomy.voiced_breath_corner,
             slit_r: 1.0,
             slit_gain: 1.0,
             slit: [HighPass::default(); 2],
@@ -271,18 +271,18 @@ impl Turbulence {
 
     /// Take the noise settings of a voice. Call `set_rate` afterwards.
     pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
-        self.corner = tuning.hiss_corner;
-        self.teeth_floor = tuning.hiss_floor;
-        self.teeth_corner = tuning.teeth_corner;
-        self.jet_eff = tuning.jet_efficiency;
-        self.teeth_eff = tuning.jet_efficiency * tuning.teeth_gain;
-        self.glottal_eff = tuning.glottal_efficiency;
-        self.tilt_depth = tuning.voice_tilt;
-        self.tilt_corner = tuning.tilt_corner;
-        self.tilt_top = tuning.tilt_top;
-        self.tilt_top_corner = tuning.tilt_top_corner;
-        self.slit_corner = tuning.voiced_breath_corner;
-        self.slit_gain = powf(10.0, tuning.voiced_breath_gain / 20.0);
+        self.corner = tuning.anatomy.hiss_corner;
+        self.teeth_floor = tuning.anatomy.hiss_floor;
+        self.teeth_corner = tuning.anatomy.teeth_corner;
+        self.jet_eff = tuning.anatomy.jet_efficiency;
+        self.teeth_eff = tuning.anatomy.jet_efficiency * tuning.anatomy.teeth_gain;
+        self.glottal_eff = tuning.anatomy.glottal_efficiency;
+        self.tilt_depth = tuning.anatomy.voice_tilt;
+        self.tilt_corner = tuning.anatomy.tilt_corner;
+        self.tilt_top = tuning.anatomy.tilt_top;
+        self.tilt_top_corner = tuning.anatomy.tilt_top_corner;
+        self.slit_corner = tuning.anatomy.voiced_breath_corner;
+        self.slit_gain = powf(10.0, tuning.anatomy.voiced_breath_gain / 20.0);
     }
 
     /// Set the tick length and the speaker's relative size. A jet's hiss is

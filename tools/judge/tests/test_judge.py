@@ -37,8 +37,14 @@ def test_fast_material_is_the_four_listening_sentences():
 
 def test_params_file_matches_brief():
     params = T.load_params(HERE / "params.json")
-    # Every field of the engine's `Tuning`, in its passes (a: how sounds are
-    # made, b: how they follow one another, c: vowel lengths).
+    # Every field of the engine's `Tuning`, in its three parts (the body,
+    # how sounds are made and joined, the rhythm and melody of a phrase)...
+    assert list(json.loads((HERE / "params.json").read_text())) == list(T.PARTS)
+    assert sum(p["part"] == "anatomy" for p in params.values()) == 25
+    assert sum(p["part"] == "articulation" for p in params.values()) == 61
+    assert sum(p["part"] == "prosody" for p in params.values()) == 43
+    # ...and in its passes (a: how sounds are made, b: how they follow one
+    # another, c: vowel lengths).
     assert sum(p["pass"] == "a" for p in params.values()) == 58
     assert sum(p["pass"] == "b" for p in params.values()) == 60
     assert sum(p["pass"] == "c" for p in params.values()) == 11
@@ -61,11 +67,14 @@ def test_params_file_agrees_with_the_engine():
     eng = json.loads(subprocess.run([str(render.say_bin()), "--dump-parameters"], capture_output=True,
                                     text=True, check=True).stdout)  # fmt: skip
     params = T.load_params(HERE / "params.json")
+    assert list(eng) == list(T.PARTS)
+    eng = {n: {**e, "part": part} for part, fields in eng.items() for n, e in fields.items()}
     assert list(params) == list(eng)
     for n, p in params.items():
         e = eng[n]
         assert abs(p["default"] - e["default"]) <= 1e-6 * max(1.0, abs(e["default"])), n
         assert p["pass"] == e["pass"], n
+        assert p["part"] == e["part"], n
         assert e["lo"] - 1e-9 <= p["lo"] and p["hi"] <= e["hi"] + 1e-9, n
 
 
@@ -202,6 +211,22 @@ def test_profile_shape(tmp_path):
     p = tmp_path / "x.json"
     T.write_profile(p, {"lead": 0.0351234567, "jet_efficiency": 0.05})
     assert json.loads(p.read_text()) == {"tuning": {"lead": 0.0351235, "jet_efficiency": 0.05}}
+
+
+def test_tuning_flat_or_by_part(tmp_path):
+    import pytest
+
+    # As the engine reads it: flat, by part (as it writes it), or mixed.
+    want = {"lead": 0.04, "voice_tilt": 14.0}
+    assert T.flat_tuning(want) == want
+    assert T.flat_tuning({"anatomy": {"voice_tilt": 14.0}, "articulation": {"lead": 0.04}}) == want
+    assert T.flat_tuning({"anatomy": {"voice_tilt": 14.0}, "lead": 0.04}) == want
+    with pytest.raises(ValueError):
+        T.flat_tuning({"anatomy": {"voice_tilt": 14.0}, "voice_tilt": 12.0})
+    params = T.load_params(HERE / "params.json")
+    p = tmp_path / "lock.json"
+    p.write_text(json.dumps({"tuning": {"articulation": {"lead": 0.04}}}))
+    assert T.load_lock(p, params) == {"lead": 0.04}
 
 
 def test_inserted_segments_count_only_what_was_not_asked_for():

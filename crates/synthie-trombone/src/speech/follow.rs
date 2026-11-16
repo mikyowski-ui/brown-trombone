@@ -13,7 +13,7 @@
 //! segments (a stop's closure, release and breath, a diphthong's nucleus
 //! and glide, a lax vowel's glide to schwa) in the proportions they gave
 //! them; the closure of a voiceless stop keeps its floor
-//! ([`Tuning::closure_floor`](crate::Tuning::closure_floor)); the pitch
+//! ([`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor)); the pitch
 //! kick after a voiceless consonant ([`Controls::kick`](super::Controls)),
 //! which is the folds' physics and is added on top of the speaker's
 //! contour; the voice quality of each sound and the breath's swell and
@@ -116,7 +116,7 @@ pub struct FollowOptions {
     /// unstressed syllables and function words, and the consonants of
     /// function words and the single nasals, liquids, glides and weak
     /// fricatives of content words, stops and sibilants excepted (see
-    /// [`Tuning::follow_shortest_light`]).
+    /// [`ArticulationConfig::follow_shortest_light`](crate::ArticulationConfig::follow_shortest_light)).
     pub shortest_light: f32,
 }
 
@@ -128,13 +128,19 @@ impl FollowOptions {
         let t = tuning.clamped();
         Self {
             pitch,
-            breath_range: (t.follow_breath_low, t.follow_breath_high),
-            tenseness_range: (t.follow_tenseness_low, t.follow_tenseness_high),
-            formant_range: t.follow_formant_range,
+            breath_range: (
+                t.articulation.follow_breath_low,
+                t.articulation.follow_breath_high,
+            ),
+            tenseness_range: (
+                t.articulation.follow_tenseness_low,
+                t.articulation.follow_tenseness_high,
+            ),
+            formant_range: t.articulation.follow_formant_range,
             tract_length,
-            max_speed: t.follow_speed_max,
-            shortest: t.follow_shortest,
-            shortest_light: t.follow_shortest_light,
+            max_speed: t.articulation.follow_speed_max,
+            shortest: t.articulation.follow_shortest,
+            shortest_light: t.articulation.follow_shortest_light,
         }
     }
 
@@ -988,7 +994,7 @@ mod tests {
         let mut u = Utterance::from_tokens(&phonemize(text), &physical());
         let report = u.follow(&s, PitchMode::Speaker).unwrap();
         assert!(report.too_short > 0);
-        let floor = physical().tuning.closure_floor;
+        let floor = physical().tuning.articulation.closure_floor;
         assert!(
             u.segments()
                 .iter()
@@ -1097,9 +1103,9 @@ mod tests {
         assert_eq!(r.tenseness_limited, 2);
         let t = Tuning::DEFAULT;
         for (k, want) in [
-            (1, t.follow_tenseness_high),
+            (1, t.articulation.follow_tenseness_high),
             (3, 0.95),
-            (4, t.follow_tenseness_low),
+            (4, t.articulation.follow_tenseness_low),
             (5, 1.0),
         ] {
             for (i, (a, b)) in plain.segments.iter().zip(&u.segments).enumerate() {
@@ -1141,7 +1147,7 @@ mod tests {
         let mut options = everything(1.0);
         options.shortest = 0.0;
         let r = u.follow_with(&s, &options).unwrap();
-        let max = Tuning::DEFAULT.follow_speed_max;
+        let max = Tuning::DEFAULT.articulation.follow_speed_max;
         for i in 0..u.segments.len() {
             let want = match u.phone_of(i) {
                 Some(3) => 1.25,

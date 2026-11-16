@@ -273,10 +273,34 @@ def gpu_lock():
 # --------------------------------------------------------------------------
 
 
+#: The three parts of the engine's ``Tuning``, as ``params.json``, ``say
+#: --dump-parameters`` and ``say --dump-profile`` group its fields.
+PARTS = ("anatomy", "articulation", "prosody")
+
+
+def flat_tuning(tuning: dict) -> dict:
+    """A tuning object flat, ``{name: value}``: the nested form (``{"anatomy":
+    {name: value}, ...}``, as the engine writes it) or the flat one, or both
+    mixed, as the engine reads them. Each field's name is unique across the
+    parts."""
+    flat = {k: v for k, v in tuning.items() if k not in PARTS}
+    for part in PARTS:
+        for k, v in tuning.get(part, {}).items():
+            if k in flat:
+                raise ValueError(f"tuning field {k!r} given twice")
+            flat[k] = v
+    return flat
+
+
 def load_params(path: Path) -> dict[str, dict]:
+    """``{name: {"lo", "hi", "default", "pass", "part", ...}}`` in the engine's
+    order, from ``params.json`` (grouped by part, as ``say --dump-parameters``
+    prints them; a flat file is read too, its parts left out)."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(data, list):  # also accept [{"name": ..., ...}, ...]
         data = {d["name"]: d for d in data}
+    if set(data) <= set(PARTS):
+        data = {n: {**p, "part": part} for part in PARTS for n, p in data.get(part, {}).items()}
     for name, p in data.items():
         for k in ("lo", "hi", "default", "pass"):
             if k not in p:
@@ -302,7 +326,7 @@ def load_lock(path: Path | None, params: dict[str, dict]) -> dict[str, float]:
     if path is None:
         return {}
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    tuning = data.get("tuning", data)
+    tuning = flat_tuning(data.get("tuning", data))
     unknown = [k for k in tuning if k not in params]
     if unknown:
         raise ValueError(f"{path}: unknown parameters {unknown}")
@@ -934,7 +958,7 @@ def self_test(args) -> int:
         text=True,
     )
     assert res.returncode == 0, res.stderr
-    dumped = json.loads(res.stdout)["tuning"]
+    dumped = flat_tuning(json.loads(res.stdout)["tuning"])
     for k, v in prof["tuning"].items():
         assert abs(dumped[k] - v) <= 1e-5 * max(1.0, abs(v)), (k, v, dumped[k])
 

@@ -57,8 +57,8 @@ fn physical() -> VoiceSettings {
 /// it; see `Tuning::lax_length`).
 fn short_lax() -> VoiceSettings {
     let mut v = physical();
-    v.tuning.lax_length = 0.62;
-    v.tuning.unstressed_lax_length = 0.62;
+    v.tuning.prosody.lax_length = 0.62;
+    v.tuning.prosody.unstressed_lax_length = 0.62;
     v
 }
 
@@ -188,7 +188,7 @@ fn formants(voice: &Trombone) -> (f32, f32) {
 /// `nucleus` of a lax vowel held on its own shape.
 fn trajectory_with(p: Phoneme, nucleus: f32) -> ((f32, f32), (f32, f32)) {
     let mut settings = physical();
-    settings.tuning.lax_nucleus = nucleus;
+    settings.tuning.articulation.lax_nucleus = nucleus;
     trajectory_of(p, &settings)
 }
 
@@ -223,7 +223,7 @@ fn trajectory_of(p: Phoneme, settings: &VoiceSettings) -> ((f32, f32), (f32, f32
 
 /// [`trajectory_with`] the voice's own nucleus.
 fn trajectory(p: Phoneme) -> ((f32, f32), (f32, f32)) {
-    trajectory_with(p, physical().tuning.lax_nucleus)
+    trajectory_with(p, physical().tuning.articulation.lax_nucleus)
 }
 
 /// [`trajectory_with`] for a voice of its own.
@@ -294,7 +294,7 @@ fn lax_vowels_glide_towards_schwa_and_tense_ones_hold() {
         1
     );
     let mut gliding = physical();
-    gliding.tuning.ae_nucleus = 0.55;
+    gliding.tuning.articulation.ae_nucleus = 0.55;
     let (mid, glided) = trajectory_in(Phoneme::Ae, &gliding);
     let (_, still) = trajectory_in(Phoneme::Ae, &held);
     let s = share(mid, still, glided, schwa);
@@ -334,7 +334,7 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
     let mut v = physical();
     let (stressed, unstressed) = (ratio(Phoneme::Eh, "1", &v), ratio(Phoneme::Eh, "0", &v));
     let ih = ratio(Phoneme::Ih, "1", &v);
-    v.tuning.lax_length = 0.62;
+    v.tuning.prosody.lax_length = 0.62;
     let as_short = ratio(Phoneme::Eh, "1", &v);
     println!(
         "EH/IY stressed {stressed:.3} (at 0.62: {as_short:.3}), unstressed {unstressed:.3}; IH/IY stressed {ih:.3}"
@@ -362,7 +362,9 @@ fn stressed_lax_vowels_have_their_own_length_and_are_never_too_short() {
         println!("rate x{rate}: nuclei {heads:.3?} s");
         assert_eq!(heads.len(), 3);
         assert!(
-            heads.iter().all(|&d| d >= fast.tuning.lax_floor - 1e-6),
+            heads
+                .iter()
+                .all(|&d| d >= fast.tuning.prosody.lax_floor - 1e-6),
             "{heads:?}"
         );
     }

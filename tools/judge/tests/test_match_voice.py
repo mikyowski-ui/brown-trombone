@@ -83,7 +83,11 @@ def test_profile_keys_and_ranges():
     assert 0.5 <= prof["tract_length"] <= 1.6
     assert 0.0 <= prof["tenseness"] <= 1.0
     assert 4.0 <= prof["tuning"]["lung_pressure"] <= 16.0
-    assert set(prof["tuning"]) <= set(json.loads((HERE / "params.json").read_text()))
+    parts = json.loads((HERE / "params.json").read_text())
+    assert set(prof["tuning"]) <= {n for fields in parts.values() for n in fields}
+    # A profile the engine wrote, its tuning by part, reads back the same.
+    nested = {**prof, "tuning": {"anatomy": prof["tuning"]}}
+    assert M.values_of_profile(nested) == M.values_of_profile(prof)
 
 
 def test_unit_mapping_round_trip():

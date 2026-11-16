@@ -410,7 +410,7 @@ fn header_and_commands_round_trip() {
         pharynx: -0.25,
     };
     let mut voice = Preset::Critter.settings();
-    voice.tuning.lung_pressure = 9.37;
+    voice.tuning.anatomy.lung_pressure = 9.37;
     let controls = Controls {
         model: SoundModel::Physical,
         voice: Some(voice),
