@@ -298,7 +298,7 @@ range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
 physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-65) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+67) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
@@ -767,6 +767,57 @@ as the model goes:
   the four-sentence clip went from 25 to 27 of 31 words ("The birch can
   use lid on the smooth planks. ... by the sea shore."). The naturalness
   distance to the reader is 1.013 (1.008), its timing part 0.26 (0.31).
+- **The gesture score (Wave 1).** Speech on the physical engine is played
+  as a task-dynamic gesture score (Saltzman & Munhall 1989; `gesture.rs`)
+  on six tiers: `GlottalAdduction`, `LarynxAndPitch`, `Velum`,
+  `TongueBody`, `TongueTip`, `LipsAndJaw`. Each segment's articulation
+  becomes gestures on the tiers that make it (a /t/ is a tip gesture and
+  a port gesture, an /m/ a lip and a port gesture); the larynx's
+  settings and the pitch are driven gestures on the two laryngeal tiers;
+  the velum's lead out of a nasal, a sibilant let go under the lower lip
+  and the lip itself retarget or overlap gestures. Each tier blends the
+  gestures active on it, weighted by activation and dominance, with a
+  neutral attractor (a constriction let go opens, the velum shuts), and
+  the tract's articulators move towards the blend as they always did:
+  critically damped, each at the speed of its tier's stiffness
+  (`ArticulationConfig`'s `TierDynamics`: `body_rate`, `articulation_rate`
+  and now `lips_rate` are read through it). `gesture_score` 0 is the old
+  segment path, kept for listening side by side (F6 in the app); with
+  `gesture_overlap` 0 the gesture path renders bit for bit as it.
+  The first family of rules is left to overlap by default
+  (`gesture_overlap` 1): a consonant made by the tip or the lips, or /h/,
+  brings only its own gestures, and the tongue body and the lips under it
+  are those of the vowel it leans on, a gesture of the score spanning
+  every consonant before that vowel; the tip's pull on the body is a weak
+  tongue body gesture of the consonant's (dominance `w / (1 − w)` for the
+  pull `w`), its own lips, or lips held unrounded under a hiss, a dominant
+  lip gesture. The /u/'s rounding under the /n/ of "canoe" is that span:
+  the /n/ has no lip gesture at all. Its gate (F2 into the /u/ after /n/)
+  and every sentence set score as on the rule path (on the merged engine
+  of Wave 1: the ten `sentence_heldout` sentences 22.0 % phoneme error and
+  81.2 % of Whisper's words, the 30 held-out 26.3 % / 74.3 %, the 30
+  tuning 22.2 % / 74.1 %, vowels in the LibriSpeech texts heard wrong
+  23.8 %, consonants right 88.7 %, on both paths). Measured and left
+  selectable: the liquid's tip on its way through the closure of the stop
+  before it ("dark blue", `gesture_overlap` 2; the tip stood at 0.62 10 ms
+  after the release where the rule's stands at 1.0 to 1.3, the stop's own
+  transition mostly gone, and "glue" in sentence 2 alone lost its /g l/:
+  the rule's phasing of the tip 20 ms after the release stays, as the
+  liquid gesture's window); and the schwa as a weak body gesture
+  (`schwa_dominance` 2) under the next vowel's span in place of the
+  `schwa_colour` rule (`gesture_overlap` 4): its F2 before an /l/ falls
+  from 1590 to 1398 Hz (the reader's 880), before a front vowel it stands
+  as the rule's (1737 against 1746; the reader's 1604) but its F1 rises
+  (489 against 420, the reader's 372; elsewhere 528 against 492, the
+  reader's 460), and while the phoneme recognizer hears it better (the 30
+  held-out 25.7 %, vowels wrong 22.7 %, consonants right 88.9 %), Whisper
+  hears less (`sentence_heldout` 80.0 %, the four listening sentences
+  71.0 % against 80.6 %). A series plant, the tiers' own task-space state
+  sent to the articulators (`gesture_score` 2), only adds a lag: the
+  stops of the LibriSpeech texts shut 21 ms into their phone instead of
+  2 ms and 43 of 193 never do, and the speech falls apart (62 % phoneme
+  error on `sentence_heldout`); the cells' contact, their aim past it and
+  their quicker closing are the plant's own physics, not the tiers'.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 

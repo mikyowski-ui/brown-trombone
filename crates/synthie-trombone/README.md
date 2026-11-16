@@ -152,7 +152,12 @@ assert_eq!(tip.gestures, 1);
 ```
 
 The score holds `gesture::Score::CAPACITY` gestures at once and never
-allocates; a gesture is any target on any tier, not a phoneme.
+allocates; a gesture is any target on any tier, not a phoneme. Speech on
+the physical engine plays through it: each segment becomes gestures on the
+tiers that make it, and a consonant made by the tip or the lips leaves the
+tongue body and the lips to the vowel it leans on, whose gestures span it
+(`ArticulationConfig::gesture_score`, on by default; `0` is the segment
+path of earlier rounds, `gesture_overlap` which rules are left to overlap).
 
 ## Two engines
 
@@ -191,7 +196,7 @@ than 70 % of their own rule length (by class since round 11, see
 
 Both engines read their numbers from `Tuning`, in three parts:
 `AnatomyConfig` (the body, its tissues and sources: 25 numbers),
-`ArticulationConfig` (how sounds are made and joined: 65, with a
+`ArticulationConfig` (how sounds are made and joined: 67, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine

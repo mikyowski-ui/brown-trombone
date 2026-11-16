@@ -201,9 +201,23 @@ pub struct Utterance {
     /// What following a speaker's schedule asks of the [`Speaker`] beyond
     /// the segments (see [`Utterance::follow_with`]).
     followed: follow::Followed,
+    /// The gestures of its score beyond those of its segments (gesture
+    /// path), in the order they start.
+    overlaps: Vec<Overlap>,
     /// Whether the [`Speaker`] plays it as gestures on the voice's score
     /// ([`ArticulationConfig::gesture_score`](crate::ArticulationConfig::gesture_score); physical engine).
     gestures: bool,
+}
+
+/// A gesture of an utterance's score that is not one of its segments' own
+/// (gesture path): `articulation`'s tongue tip, from the moment segment
+/// `from`'s shape is sent until segment `until`'s is (the tip of the liquid a
+/// stop is released into, on its way through the stop's closure).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Overlap {
+    from: u32,
+    until: u32,
+    articulation: Articulation,
 }
 
 /// The phone of a pause, in [`Utterance`]'s record of which phone each
@@ -269,6 +283,7 @@ impl Utterance {
             pitch_hop: 0.0,
             followed: follow::Followed::default(),
             gestures: Tuning::DEFAULT.articulation.gesture_score >= 0.5,
+            overlaps: Vec::new(),
         }
     }
 
@@ -402,6 +417,10 @@ pub struct Speaker {
     /// Where the segment being spoken starts by the durations of those
     /// before it, seconds: the clock of a pitch track.
     nominal: f32,
+    /// The next of the utterance's overlaps to start, and those playing
+    /// with the segment whose shape ends each (gesture path).
+    overlap_next: usize,
+    overlaps_on: [Option<(u32, crate::gesture::GestureId)>; 4],
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -489,6 +508,8 @@ impl Speaker {
         self.opened_at = 0.0;
         self.labial = None;
         self.nominal = 0.0;
+        self.overlap_next = 0;
+        self.overlaps_on = [None; 4];
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -565,6 +586,7 @@ impl Speaker {
                 self.closure_made = false;
                 if !self.ahead && !pause {
                     articulate_segment(voice, g, &self.utterance, self.index, &entry_shape(&seg));
+                    self.play_overlaps(voice, self.index);
                 }
                 self.ahead = false;
                 self.larynx_ahead = false;
@@ -666,6 +688,7 @@ impl Speaker {
                         self.index + k,
                         &entry_shape(next),
                     );
+                    self.play_overlaps(voice, self.index + k);
                     voice.settle();
                     // What little still rings in the tract belongs to the
                     // old shape; let it go with it.
@@ -739,6 +762,7 @@ impl Speaker {
                         self.index + 1,
                         &entry_shape(&next),
                     );
+                    self.play_overlaps(voice, self.index + 1);
                     self.ahead = true;
                 }
             }
@@ -1016,6 +1040,37 @@ impl Speaker {
         plant::main(voice, g, crate::Constriction::new(s.index, d));
     }
 
+    /// The overlaps of the utterance's score as segment `k`'s shape is
+    /// sent (gesture path): those it ends let go, those it starts begin.
+    fn play_overlaps(&mut self, voice: &mut Trombone, k: usize) {
+        if !self.gesture_path(voice) {
+            return;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let k = k as u32;
+        for slot in &mut self.overlaps_on {
+            if let Some((until, id)) = *slot
+                && until <= k
+            {
+                voice.end_gesture(id, 0.0);
+                *slot = None;
+            }
+        }
+        while let Some(o) = self.utterance.overlaps.get(self.overlap_next).copied()
+            && o.from <= k
+        {
+            self.overlap_next += 1;
+            if o.from < k {
+                continue;
+            }
+            if let Some(id) = voice.push_tip_ahead(&o.articulation)
+                && let Some(slot) = self.overlaps_on.iter_mut().find(|s| s.is_none())
+            {
+                *slot = Some((o.until, id));
+            }
+        }
+    }
+
     /// Whether the utterance is played as gestures on the voice's score
     /// (see [`ArticulationConfig::gesture_score`](crate::ArticulationConfig::gesture_score); physical engine only).
     fn gesture_path(&self, voice: &Trombone) -> bool {
@@ -1059,7 +1114,19 @@ fn articulate_segment(
             .map_or(0.0, |s| s.gesture.cavity_held),
     );
     if gestures {
-        voice.articulate_as_gestures(a, followed.speed_of(k));
+        // An unstressed /ə/ under the vowel after it (`gesture_overlap` 4).
+        let colour = utterance
+            .segments
+            .get(k)
+            .filter(|s| s.phoneme == Phoneme::Ax && a.vowel.is_some() && a.leans_on().is_none())
+            .and_then(|_| {
+                utterance.segments[k + 1..]
+                    .iter()
+                    .take_while(|s| s.phoneme != Phoneme::Sil)
+                    .find(|s| is_vowel(s.phoneme) && s.phoneme != Phoneme::Ax)
+            })
+            .and_then(|s| s.articulation.vowel);
+        voice.articulate_as_gestures(a, followed.speed_of(k), colour);
     } else {
         voice.set_articulation_boost(followed.speed_of(k));
         voice.articulate(a);
@@ -1780,6 +1847,11 @@ struct Draft {
     /// A /b p g k/ released into an /l r/ of its own word (physical
     /// engine; see `release_into_liquids`).
     into_liquid: bool,
+    /// The liquid a stop is released into, whose tongue tip is on its way
+    /// during the stop's closure (gesture path, `gesture_overlap` 2): a
+    /// gesture of the score that overlaps the closure (see
+    /// `release_into_liquids`).
+    ahead: Option<Articulation>,
     /// Which phone of the text this draft realises ([`NO_PHONE`]: a pause).
     phone: u32,
 }
@@ -2010,7 +2082,17 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let mut segments = Vec::with_capacity(drafts.len() + 1);
     let phones = drafts.iter().map(|d| d.phone).collect();
     let mut last = prosody.pitch;
+    let mut overlaps = Vec::new();
     for mut d in drafts {
+        if let Some(a) = d.ahead {
+            #[allow(clippy::cast_possible_truncation)]
+            let from = segments.len() as u32;
+            overlaps.push(Overlap {
+                from,
+                until: from + 1,
+                articulation: a,
+            });
+        }
         if d.vowel || d.phoneme.manner() == Manner::Approximant {
             d.articulation.velum = d.articulation.velum.max(nasality);
         }
@@ -2070,6 +2152,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             0.0
         },
         gestures: physical && timing.articulation.gesture_score >= 0.5,
+        overlaps,
         phones,
         roles,
         stretches,
@@ -2445,6 +2528,11 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
             closure.tongue = held.tongue;
             closure.vowel = None;
         }
+        // On the gesture path the liquid's tip is on its way through the
+        // stop's closure: the two gestures overlap, on two tiers.
+        if timing.articulation.gesture_score >= 0.5 && timing.articulation.overlaps(2) {
+            drafts[k].ahead = Some(held);
+        }
         let window = timing.articulation.liquid_transition / rate;
         if last > k {
             let breath = &mut drafts[last];
@@ -2649,6 +2737,7 @@ fn silence(duration: f32) -> Draft {
         gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
+        ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
     }
@@ -2691,6 +2780,7 @@ fn expand(
         gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
+        ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
     };
@@ -2978,6 +3068,8 @@ fn expand(
             if p == Phoneme::Ax
                 && !stressed
                 && timing.articulation.schwa_colour > 0.0
+                && !(timing.articulation.gesture_score >= 0.5
+                    && timing.articulation.overlaps(4))
                 && schwa_colour(context, timing) =>
         {
             // Coloured by the high front vowel after it.
@@ -3298,6 +3390,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         gesture: Controls::default(),
         aspiration: false,
         into_liquid: false,
+        ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
     }
