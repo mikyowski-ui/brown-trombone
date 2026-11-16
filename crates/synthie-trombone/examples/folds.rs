@@ -322,7 +322,7 @@ fn softness(args: &[String]) {
             assert!(tuning.set(name, v), "no tuning field {name}");
         }
     }
-    println!("soft_corner {} Hz", tuning.soft_corner);
+    println!("soft_corner {} Hz", tuning.anatomy.soft_corner);
     println!("  sound      hz  len  soft   pitch  H1-H2   tilt   OQ    CQ   MFDR   level");
     for (ph, hz, len) in [
         (Phoneme::Aa, 110.0, 1.0),

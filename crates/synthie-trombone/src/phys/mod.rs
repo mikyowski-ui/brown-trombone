@@ -517,7 +517,7 @@ impl Phys {
             expansion: 0.0,
             expanded: 0.0,
             pharynx_pressure: 0.0,
-            nasal_port: crate::Tuning::DEFAULT.nasal_port,
+            nasal_port: crate::Tuning::DEFAULT.anatomy.nasal_port,
             sub_r: [0.0; NS],
             sub_l: [0.0; NS],
             sub_y: [0.0; NS],
@@ -544,13 +544,13 @@ impl Phys {
             teeth0: 0.0,
             teeth1: 0.0,
             teeth_target: 0.0,
-            teeth_gap: crate::Tuning::DEFAULT.sibilant_teeth,
+            teeth_gap: crate::Tuning::DEFAULT.articulation.sibilant_teeth,
             edge0: 0.0,
             edge1: 0.0,
             block_share: 1.0,
             edge_target: 0.0,
-            dental_edge: crate::Tuning::DEFAULT.dental_edge,
-            labial_edge: crate::Tuning::DEFAULT.labial_edge,
+            dental_edge: crate::Tuning::DEFAULT.anatomy.dental_edge,
+            labial_edge: crate::Tuning::DEFAULT.anatomy.labial_edge,
             probe: (0, 0.0),
             tilt: tilt::Shelf::FLAT,
             radiated: tilt::Tilt::default(),
@@ -608,10 +608,10 @@ impl Phys {
 
     /// Take the noise and nasal settings of a voice.
     pub(crate) fn set_tuning(&mut self, tuning: &crate::Tuning) {
-        self.nasal_port = tuning.nasal_port;
-        self.teeth_gap = tuning.sibilant_teeth;
-        self.dental_edge = tuning.dental_edge;
-        self.labial_edge = tuning.labial_edge;
+        self.nasal_port = tuning.anatomy.nasal_port;
+        self.teeth_gap = tuning.articulation.sibilant_teeth;
+        self.dental_edge = tuning.anatomy.dental_edge;
+        self.labial_edge = tuning.anatomy.labial_edge;
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
         self.tilt = self.turbulence.tilt(self.dt, self.len);

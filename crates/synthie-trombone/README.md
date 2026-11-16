@@ -119,10 +119,14 @@ faster articulators through phones shorter than the rules make them
 than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
-Both engines read their numbers from `Tuning` (127 fields with defaults
-and plausible ranges, `Tuning::FIELDS`; the classic engine reads twelve
-of them), which a JSON profile can set (`profile` feature,
-`VoiceSettings::with_profile`). The repository README has the details,
+Both engines read their numbers from `Tuning`, in three parts:
+`AnatomyConfig` (the body, its tissues and sources: 25 numbers),
+`ArticulationConfig` (how sounds are made and joined: 59, with a
+`TierDynamics` spring for each of the six tiers of the gesture score) and
+`ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
+a default and a plausible range (`Tuning::FIELDS`; the classic engine
+reads twelve of them). A JSON profile can set them by name, flat or by
+part (`profile` feature, `VoiceSettings::with_profile`). The repository README has the details,
 the measurements the physical engine is held to and how a speech
 recognizer scores it.
 
