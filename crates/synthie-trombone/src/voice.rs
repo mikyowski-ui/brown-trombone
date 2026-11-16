@@ -837,6 +837,17 @@ impl Trombone {
         }
     }
 
+    /// Share of the tongue's drop behind a nasal closure held back in the
+    /// articulations sent from now on (physical engine; `0`, the default,
+    /// drops it to [`ArticulationConfig::nasal_cavity`](crate::ArticulationConfig::nasal_cavity)). The speaker keeps the tongue
+    /// up behind an /n/ that leads into a fronted vowel
+    /// ([`ArticulationConfig::nasal_cavity_held`](crate::ArticulationConfig::nasal_cavity_held)).
+    pub(crate) fn set_cavity_held(&mut self, share: f32) {
+        if share.is_finite() {
+            self.tract.cavity_held = share.clamp(0.0, 1.0);
+        }
+    }
+
     /// Current velum openness, `0‥1`.
     #[must_use]
     pub fn velum(&self) -> f32 {
@@ -1080,6 +1091,14 @@ impl Trombone {
         }
     }
 
+    /// The stiffness of the speech's lip gestures, rad/s: the lips' own
+    /// tuned speed (`lips_rate`) at the voice's articulation speed. The
+    /// tract's lip cells move at it (they ride the tip's spring,
+    /// `articulation_rate`, scaled by the one over the other).
+    fn lips_stiffness(&self) -> f32 {
+        self.tract.movement_speed / MOVEMENT_SPEED * self.tuning.articulation.lips_and_jaw.stiffness
+    }
+
     /// [`articulate`](Self::articulate) as gestures on layer
     /// [`gesture::LAYER_SEGMENT`] (the speech front end's gesture path): the
     /// same targets, each on the tier that makes it (the tongue body and a
@@ -1098,14 +1117,18 @@ impl Trombone {
     /// gesture of its own (dominance `w / (1 − w)` for a pull of `w`); its
     /// own lips, or, under a gap meant to hiss, lips held unrounded, are a
     /// dominant lip gesture.
-    pub(crate) fn articulate_as_gestures(&mut self, a: &Articulation, boost: f32) {
+    pub(crate) fn articulate_as_gestures(
+        &mut self,
+        a: &Articulation,
+        boost: f32,
+        colour: Option<crate::vowel_targets::VowelKey>,
+    ) {
         use gesture::{LAYER_SEGMENT, flag, var};
-        let lean =
-            if self.engine == Engine::Physical && self.tuning.articulation.gesture_overlap >= 0.5 {
-                a.leans_on()
-            } else {
-                None
-            };
+        let lean = if self.engine == Engine::Physical && self.tuning.articulation.overlaps(1) {
+            a.leans_on()
+        } else {
+            None
+        };
         let r = match lean {
             Some(_) => self.resolve(&Articulation {
                 tongue: None,
@@ -1116,7 +1139,10 @@ impl Trombone {
         };
         let w_body = self.nominal_stiffness(Tier::TongueBody) * boost;
         let w_tip = self.nominal_stiffness(Tier::TongueTip);
-        self.hold_span(lean, w_body, w_tip);
+        let w_lips = self.lips_stiffness();
+        let colour = colour
+            .filter(|_| self.engine == Engine::Physical && self.tuning.articulation.overlaps(4));
+        self.hold_span(lean.or(colour), w_body);
         for tier in [
             Tier::TongueBody,
             Tier::TongueTip,
@@ -1146,6 +1172,9 @@ impl Trombone {
                 .with(var::body::DEGREE, diameter);
             body_dominance = w / (1.0 - w);
         }
+        if colour.is_some() {
+            body_dominance = self.tuning.articulation.schwa_dominance;
+        }
         let (mut tip, mut lips) = (Target::NONE, Target::NONE);
         if let Some(c) = r.main {
             match tier_of_place(c.index) {
@@ -1174,6 +1203,13 @@ impl Trombone {
                 .with(var::lips::APERTURE_LOCATION, c.index)
                 .with(var::lips::APERTURE, c.diameter);
             lip_dominance = OWN_DOMINANCE;
+            if colour.is_some() {
+                lip_dominance = self.tuning.articulation.schwa_dominance;
+            }
+        } else if colour.is_some() {
+            // The schwa's own lips, weak, unrounded.
+            lips = lips.with(var::lips::APERTURE, gesture::OPEN);
+            lip_dominance = self.tuning.articulation.schwa_dominance;
         } else if lean.is_some() && a.hisses() {
             lips = lips.with(var::lips::APERTURE, gesture::OPEN);
             lip_dominance = OWN_DOMINANCE;
@@ -1191,7 +1227,7 @@ impl Trombone {
         if !lips.is_empty() {
             let own = if r.own_lips { flag::OWN_LIPS } else { 0 };
             self.score
-                .push(segment(Tier::LipsAndJaw, lips, w_tip, own).dominance(lip_dominance));
+                .push(segment(Tier::LipsAndJaw, lips, w_lips, own).dominance(lip_dominance));
         }
         let nasal = if r.nasal { flag::NASAL } else { 0 };
         let port = Target::NONE.with(var::velum::PORT, r.velum);
@@ -1207,7 +1243,7 @@ impl Trombone {
     /// The vowel's span (see [`articulate_as_gestures`](Self::articulate_as_gestures)):
     /// kept while the consonants lean on the same vowel, let go for anything
     /// else.
-    fn hold_span(&mut self, lean: Option<crate::vowel_targets::VowelKey>, w_body: f32, w_tip: f32) {
+    fn hold_span(&mut self, lean: Option<crate::vowel_targets::VowelKey>, w_body: f32) {
         use gesture::{LAYER_SCORE, var};
         let span_key = lean.filter(|&k| {
             self.span
@@ -1231,7 +1267,8 @@ impl Trombone {
                     let round = Target::NONE
                         .with(var::lips::APERTURE_LOCATION, c.index)
                         .with(var::lips::APERTURE, c.diameter);
-                    self.score.push(span(Tier::LipsAndJaw, round, w_tip));
+                    self.score
+                        .push(span(Tier::LipsAndJaw, round, self.lips_stiffness()));
                 }
                 self.span = id.map(|id| (key, id));
             }
@@ -1297,7 +1334,7 @@ impl Trombone {
                 .with(var::lips::CLOSURE_LOCATION, c.index)
                 .with(var::lips::CLOSURE_DEGREE, c.diameter);
             let g = Gesture::new(Tier::LipsAndJaw, target)
-                .stiffness(self.nominal_stiffness(Tier::LipsAndJaw))
+                .stiffness(self.lips_stiffness())
                 .flags(flag::SECONDARY)
                 .layer(LAYER_SEGMENT);
             self.score.push(g);

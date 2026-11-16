@@ -817,17 +817,72 @@ tuning! {
         /// spring).
         gesture_score = 1.0, 0.0..=2.0, B;
         /// On the gesture path, which of the rules about neighbouring sounds
-        /// are left to the overlap of gestures instead (counted in order, `0`
-        /// none): `1` the tongue body and the lips under a consonant made by
-        /// the tip or the lips (and /h/) are the gestures of the vowel the
-        /// consonant leans on, spanning it, and the consonant adds only its
-        /// own (its constriction, a weak pull of the body towards the tip's,
-        /// lips of its own or, under a gap meant to hiss, lips held as they
-        /// are). `2` also: a stop released into an /l r/ of its word has the
-        /// liquid's tongue tip on its way (`speech::HELD_TIP`) through its
-        /// closure, the lips' or the back of the tongue's closure and the
-        /// tip overlapping on their two tiers ("dark blue", "glue").
-        gesture_overlap = 1.0, 0.0..=2.0, B;
+        /// are left to the overlap of gestures instead: the sum of the
+        /// families' bits (`0` none). `1`: the tongue body and the lips under
+        /// a consonant made by the tip or the lips (and /h/) are the gestures
+        /// of the vowel the consonant leans on, spanning it, and the
+        /// consonant adds only its own (its constriction, a weak pull of the
+        /// body towards the tip's, lips of its own or, under a gap meant to
+        /// hiss, lips held as they are). `2`: a stop released into an /l r/
+        /// of its word has the liquid's tongue tip on its way
+        /// (`speech::HELD_TIP`) through its closure, the lips' or the back of
+        /// the tongue's closure and the tip overlapping on their two tiers
+        /// ("dark blue", "glue"); measured and left off (in sentence 2 alone
+        /// "glue" lost its /g l/; `sentence_heldout` words 81.2 to 80.0 %).
+        /// `4`: an unstressed /ə/ is a weak tongue body gesture
+        /// ([`schwa_dominance`](Self::schwa_dominance)) under the gesture of
+        /// the vowel after it, which spans it, in place of the rule of
+        /// [`schwa_colour`](Self::schwa_colour).
+        gesture_overlap = 1.0, 0.0..=7.0, B;
+
+        // ----- "canoe": an /n/ into a fronted vowel (wave 1, w1-canoe) -------
+
+        /// How many times faster the tongue tip lets go of a closure while the
+        /// velum is open (physical engine; out of /n/; `1` is off): the
+        /// closure and the tip's shoulder around it, until each cell is back
+        /// with the tongue body or closing again. At the tip's own speed
+        /// (`articulation_rate`, starting at `release_speed`) the gap out of
+        /// an /n/ was at 20 % of its opening after 10 ms and 37 % after 20 (2
+        /// to 8 cm²/s, where Stevens gives 50 to 100 for an alveolar release);
+        /// over a fronted body the second formant overshot to 1900 to 2134 Hz
+        /// and fell back by 250 over 25 ms, F3 and F4 11 dB over F2: a /j/,
+        /// "canoe" heard as "can use". At 3 it still overshot (1968 Hz); at 6
+        /// the narrowest cell is at 0.22 cm² 9 ms after the release (some 25
+        /// cm²/s) and the second formant rises onto the vowel. A stop's
+        /// release is not hastened: its burst and breath cover it, and its
+        /// transitions are already quicker than a speaker's.
+        nasal_tip_release = 6.0, 1.0..=8.0, B;
+        /// Whether the /u/ after /n/ is the fronted one (`1`) or the plain back
+        /// one (`0`, as until wave 1; physical engine; see `speech::fronts_u`):
+        /// the owner's "canoe" holds F2 1860 to 1910 Hz from the release on,
+        /// the LibriSpeech reader's "the new" starts near 1790 and rises.
+        /// Fronted with the slow tip release, it was heard as /ju/. On by the
+        /// owner's ear; the phoneme recognizer hears the fronted /u/ after /n/
+        /// less often than the back one (see the README).
+        fronted_after_n = 1.0, 0.0..=1.0, C;
+        /// Share of the tongue's drop behind an /n/'s closure
+        /// ([`nasal_cavity`](Self::nasal_cavity)) held back when the /n/ leads
+        /// into the fronted /u/ (physical engine; `0` is off; see
+        /// `speech::keeps_tongue_up`): dropped, the tongue sprang back after
+        /// the release at the cavity's speed into the vowel's first 15 ms. Kept
+        /// up, the mouth behind the /n/ is the fronted vowel's: its
+        /// antiresonance stands at 2.1 to 2.3 kHz (1.45 to 1.55 dropped). Not
+        /// before /i ɪ j/: kept up there it rose from 1.4 to 1.8 kHz, where
+        /// round 6's recognizer heard /ŋ/ in a fifth of the /n/.
+        nasal_cavity_held = 1.0, 0.0..=1.0, B;
+        /// Whether an unstressed /ə/ takes the colour of a high front or
+        /// fronted vowel after it (`1`) or stays the one central schwa (`0`,
+        /// as until wave 1; physical engine; see `speech::schwa_colour`): its
+        /// shape is `VowelKey::Fronted` of /ə/ (F1 400, F2 1750 Hz), where the
+        /// LibriSpeech reader's /ə/ before a front vowel stands at 372 and
+        /// 1604 and the owner's in "canoe" near 300 and 1800.
+        schwa_colour = 1.0, 0.0..=1.0, C;
+        /// Dominance of an unstressed /ə/'s tongue body and lips against the
+        /// next vowel's, which span it on the gesture path with
+        /// `gesture_overlap`'s bit 4 (see `Trombone::articulate_as_gestures`):
+        /// the schwa's body is the blend, `1 / (1 + this)` of the way to the
+        /// next vowel's. Vowels and consonants have dominance 1.
+        schwa_dominance = 2.0, 0.25..=8.0, C;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -867,6 +922,12 @@ tuning! {
         /// Natural frequency of the articulators, rad/s, at speed 1 (physical
         /// engine). Higher is nimbler.
         articulation_rate => tongue_tip.stiffness, 25.0..=70.0, B;
+        /// Natural frequency of the lips, rad/s at speed 1 (physical engine,
+        /// gesture path): the stiffness of the gestures on
+        /// [`Tier::LipsAndJaw`](crate::Tier::LipsAndJaw); the tract's lip
+        /// cells move at `articulation_rate` scaled by this over it (alike
+        /// at 40: on the segment path the lips ride the tip's spring).
+        lips_rate => lips_and_jaw.stiffness, 25.0..=70.0, B;
         /// Natural frequency of the tongue body and the jaw, rad/s at speed 1
         /// (physical engine). They are heavy and slow (a time constant of
         /// about 40 ms in speech), so the vowel shape glides from vowel to
@@ -1323,7 +1384,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_twenty_five_sixty_one_and_forty_three() {
+    fn three_parts_of_twenty_five_sixty_five_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1331,9 +1392,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (25, 61, 43)
+            (25, 67, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 129);
+        assert_eq!(Tuning::FIELDS.len(), 135);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1348,10 +1409,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_sixty() {
+    fn two_passes_of_fifty_eight_and_sixty_two() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 60));
+        assert_eq!((a, b), (58, 63));
     }
 
     #[test]
@@ -1359,7 +1420,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 11);
+        assert_eq!(c, 14);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);
@@ -1412,5 +1473,16 @@ mod tests {
         assert!((c.anatomy.lung_pressure - 8.0).abs() < f32::EPSILON);
         assert!((c.articulation.lead - 0.06).abs() < f32::EPSILON);
         assert!((c.anatomy.modal_gap - 0.004).abs() < f32::EPSILON);
+    }
+}
+
+impl ArticulationConfig {
+    /// Whether the gesture path leaves the family of rules with bit `bit`
+    /// to the overlap of gestures (see
+    /// [`gesture_overlap`](Self::gesture_overlap)).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn overlaps(&self, bit: u32) -> bool {
+        (self.gesture_overlap.clamp(0.0, 7.0) as u32) & bit != 0
     }
 }

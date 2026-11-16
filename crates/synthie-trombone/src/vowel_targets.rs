@@ -69,7 +69,9 @@ pub enum VowelKey {
     /// towards the plain one).
     End(Phoneme),
     /// A vowel made further front after a consonant of the tongue's front:
-    /// the /u/ of "two", "do", "soon" (see `speech::fronts_u`).
+    /// the /u/ of "two", "do", "soon", "canoe" (see `speech::fronts_u`);
+    /// or, for /ə/, coloured by the high front vowel after it (see
+    /// `speech::schwa_colour`).
     Fronted(Phoneme),
 }
 
@@ -229,6 +231,13 @@ pub const TARGETS: &[Target] = &[
     // 1330; gliding to the plain /u/ (997 Hz), the engine's "do" fell from
     // 1860 to 1140.
     end(Phoneme::Uw, [ 350.0, 1250.0, 2340.0], Lips::Rounded),
+    // An unstressed /ə/ before a high front or fronted vowel takes its
+    // colour, higher and further front than the plain one (see
+    // `speech::schwa_colour`): the LibriSpeech reader's /ə/ before a front
+    // vowel stands at F1 372, F2 1604 Hz (median of 20, LPC at its middle;
+    // his others 460 and 1614, the engine's 484 to 510 and 1516 to 1547
+    // everywhere), the owner's in "canoe" near 300 and 1800 to 1890.
+    fronted(Phoneme::Ax, [ 400.0, 1750.0, 2600.0], Lips::Spread),
 ];
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

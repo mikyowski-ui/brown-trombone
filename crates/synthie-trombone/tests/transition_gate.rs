@@ -5,7 +5,8 @@
 //! * Out of an /n t d/ into /u/ the second formant does not fall from a
 //!   palatal height onto the vowel: that fall is /ju/, and "canoe" was
 //!   heard as "can you" while the lips of /u/ only began to round as the
-//!   vowel did.
+//!   vowel did, and as "can use" while the tip let go of the /n/ slowly
+//!   onto a fronted body. The /u/ after them is the fronted one.
 //! * Out of an /n/ into a vowel the nose is shut within 15 ms: left
 //!   coupled, it gave the start of the /u/ of "canoe" a peak near 700 Hz,
 //!   heard as /ʌ oʊ l/.
@@ -84,54 +85,73 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         let s = place::speak(&voice(), text, true);
         let (_, v) = after(&s, c);
         assert_eq!(s.phonemes[v], Phoneme::Uw, "{text}: {:?}", s.phonemes);
-        // After /t d/ the /u/ is a fronted one (`speech::fronts_u`),
+        // After /t d n/ the /u/ is a fronted one (`speech::fronts_u`),
         // gliding back part of the way to the plain one over its second
-        // half (`Tuning::fronted_nucleus`); after /n/ it is the plain back
-        // /u/ (fronted there, it was heard as /ju/: "canoe" as "can use").
-        let fronted = matches!(c, Phoneme::T | Phoneme::D);
+        // half (`ArticulationConfig::fronted_nucleus`). Until wave 1 the /u/ after /n/
+        // was the plain back one: fronted, with the tip letting go of the
+        // /n/ slowly, it was heard as /ju/ ("canoe" as "can use").
         let glides_back = s.phonemes.get(v + 1) == Some(&Phoneme::Uw);
-        assert_eq!(glides_back, fronted, "{text}: {:?}", s.phonemes);
-        let (v0, v1) = s.ranges[v];
-        let end = if glides_back { s.ranges[v + 1].1 } else { v1 };
-        // The stop's own transition, its first 20 ms, falls from the
-        // alveolar locus as a speaker's does; what follows is the vowel.
-        let settled = v0 + (0.02 * place::SR) as usize;
-        if fronted {
-            // The LibriSpeech reader's /u/ after /t d/ starts at 1700 to
-            // 2200 Hz and ends some 400 Hz lower ("two" 1690 to 1300, "too"
-            // 1760 to 1340, "do" 1700 to 1810); the owner's "canoe" falls
-            // from 1900 to 1330. The engine's back /u/ stood at 1000 to
-            // 1100; gliding back to it, "do" fell from 1860 to 1140.
-            let frames = oral(&s, settled, end);
-            assert!(frames.len() >= 4, "{text}: {} oral frames", frames.len());
-            let onset = frames[0].1[1];
-            let last = frames.last().expect("frames").1[1];
-            println!("{text}: F2 {onset:.0} to {last:.0} Hz");
-            assert!(
-                onset >= 1550.0,
-                "{text}: the fronted /u/ starts at {onset:.0} Hz"
-            );
-            assert!(
-                (100.0..=600.0).contains(&(onset - last)),
-                "{text}: F2 {onset:.0} to {last:.0} Hz over the /u/"
-            );
-            continue;
-        }
-        let mid = usize::midpoint(v0, end);
-        let frames = oral(&s, settled, mid + 2 * place::FRAME);
+        assert!(glides_back, "{text}: {:?}", s.phonemes);
+        let (v0, _) = s.ranges[v];
+        let end = s.ranges[v + 1].1;
+        // The LibriSpeech reader's /u/ after /t d/ starts at 1700 to 2200
+        // Hz and ends some 400 Hz lower ("two" 1690 to 1300, "too" 1760 to
+        // 1340, "do" 1700 to 1810); the owner's "canoe" holds 1860 to 1910
+        // from the release on and falls to 1330, the reader's "the new"
+        // starts near 1790 and rises. The engine's back /u/ stood at 1000
+        // to 1100; gliding back to it, "do" fell from 1860 to 1140.
+        //
+        // A stop's own transition, its first 20 ms, falls from the alveolar
+        // locus as a speaker's does, and its burst and breath cover it.
+        // Out of /n/ the voice goes straight on: from the first frame with
+        // the nose shut on, the second formant may not fall from above the
+        // vowel onto it. With the tip letting go of the /n/ at its own
+        // speed it fell from 1896 to 1644 Hz over the first 25 ms of the
+        // fronted /u/ (from 2134 to 1870 with the tongue dropped behind the
+        // closure), heard as /j/; let go quickly (`ArticulationConfig::nasal_tip_release`)
+        // it rises from 1510 to 1580.
+        let nasal = c == Phoneme::N;
+        let settled = if nasal {
+            v0
+        } else {
+            v0 + (0.02 * place::SR) as usize
+        };
+        let frames = oral(&s, settled, end);
         assert!(frames.len() >= 4, "{text}: {} oral frames", frames.len());
-        let target = frames.last().expect("frames").1[1];
-        let highest = frames.iter().map(|f| f.1[1]).fold(0.0f32, f32::max);
-        println!("{text}: F2 falls from {highest:.0} to {target:.0} Hz into the /u/");
-        // Before round 8 the first oral frame of the /u/ of "canoe" stood
-        // at 1816 Hz and the vowel's middle near 1150: a fall of 650 Hz
-        // over 100 ms, while the lips rounded: /ju/.
+        let mut onset = frames[0].1[1];
+        let last = frames.last().expect("frames").1[1];
+        if nasal {
+            // Over the first 30 ms: no fall, and the fronted /u/ reached
+            // by its end (rising onto it, it starts some 60 Hz under).
+            let early = (0.03 * place::SR) as usize;
+            let first = frames
+                .iter()
+                .take_while(|f| place_sample(f.0) < settled + early);
+            let highest = first.clone().map(|f| f.1[1]).fold(0.0f32, f32::max);
+            let at = first.last().expect("frames").1[1];
+            println!("{text}: F2 {onset:.0} at first, at most {highest:.0} Hz, {at:.0} 30 ms on");
+            assert!(
+                highest - at <= 100.0,
+                "{text}: F2 falls from {highest:.0} to {at:.0} Hz into the /u/"
+            );
+            onset = at;
+        }
+        println!("{text}: F2 {onset:.0} to {last:.0} Hz");
         assert!(
-            highest - target <= 200.0,
-            "{text}: F2 falls from {highest:.0} to {target:.0} Hz into the /u/"
+            onset >= 1550.0,
+            "{text}: the fronted /u/ starts at {onset:.0} Hz"
         );
-        assert!(target <= 1300.0, "{text}: the /u/ holds {target:.0} Hz");
+        let highest = frames.iter().map(|f| f.1[1]).fold(0.0f32, f32::max);
+        assert!(
+            (100.0..=600.0).contains(&(highest - last)),
+            "{text}: F2 {highest:.0} to {last:.0} Hz over the /u/"
+        );
     }
+}
+
+/// The first sample of frame `k` (see [`Spoken::frame_of`]).
+fn place_sample(k: usize) -> usize {
+    k * place::FRAME
 }
 
 /// Level of `x` (at `place::SR`) between `lo` and `hi` Hz, dB.
