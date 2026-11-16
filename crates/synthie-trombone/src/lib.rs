@@ -60,6 +60,7 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+pub mod gesture;
 mod glottis;
 pub mod inverse;
 pub mod listen;
@@ -90,6 +91,7 @@ pub mod vowel_targets;
 #[path = "../examples/support/lpc.rs"]
 mod lpc;
 
+pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
 pub use phoneme::{Articulation, Manner, Phoneme};
 pub use preset::{Persona, Preset, VoiceSettings};
