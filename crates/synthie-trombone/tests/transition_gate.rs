@@ -87,7 +87,7 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         assert_eq!(s.phonemes[v], Phoneme::Uw, "{text}: {:?}", s.phonemes);
         // After /t d n/ the /u/ is a fronted one (`speech::fronts_u`),
         // gliding back part of the way to the plain one over its second
-        // half (`Tuning::fronted_nucleus`). Until wave 1 the /u/ after /n/
+        // half (`ArticulationConfig::fronted_nucleus`). Until wave 1 the /u/ after /n/
         // was the plain back one: fronted, with the tip letting go of the
         // /n/ slowly, it was heard as /ju/ ("canoe" as "can use").
         let glides_back = s.phonemes.get(v + 1) == Some(&Phoneme::Uw);
@@ -108,7 +108,7 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         // vowel onto it. With the tip letting go of the /n/ at its own
         // speed it fell from 1896 to 1644 Hz over the first 25 ms of the
         // fronted /u/ (from 2134 to 1870 with the tongue dropped behind the
-        // closure), heard as /j/; let go quickly (`Tuning::nasal_tip_release`)
+        // closure), heard as /j/; let go quickly (`ArticulationConfig::nasal_tip_release`)
         // it rises from 1510 to 1580.
         let nasal = c == Phoneme::N;
         let settled = if nasal {
@@ -495,7 +495,7 @@ fn a_vowel_before_a_dark_l_is_dark_already() {
     // into the /l/; until round 11 the engine's held their own shape up to
     // the /l/ (1460 to 1660 Hz by LPC) and fell some 500 Hz into it.
     let mut light = voice();
-    light.tuning.dark_l_share = 0.0;
+    light.tuning.articulation.dark_l_share = 0.0;
     let end_f2 = |settings: &VoiceSettings, text: &str, v: Phoneme| {
         let s = place::speak(settings, text, true);
         let k = s.find(v, 0).expect("the vowel");

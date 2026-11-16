@@ -439,10 +439,10 @@ fn stop(p: Phoneme, voiced: bool) -> Stop {
     t.articulate_phoneme(p);
     t.set_voiced(voiced);
     if voiced {
-        t.set_fold_slack(tuning.voiced_stop_slack);
-        t.set_cavity_expansion(tuning.cavity_expansion);
+        t.set_fold_slack(tuning.anatomy.voiced_stop_slack);
+        t.set_cavity_expansion(tuning.anatomy.cavity_expansion);
     } else {
-        t.set_glottal_spread(tuning.voiceless_spread);
+        t.set_glottal_spread(tuning.articulation.voiceless_spread);
     }
     let mut shut_at = None;
     let (mut voicing, mut pressure) = (0.0f32, 0.0f32);
@@ -750,7 +750,7 @@ fn sized_voice(size: f32, lung: f32) -> Trombone {
             size,
             ..Persona::NEUTRAL
         });
-    settings.tuning.lung_pressure = lung;
+    settings.tuning.anatomy.lung_pressure = lung;
     let mut t = fresh();
     settings.apply(&mut t);
     t.set_vibrato(0.0, 0.0);
@@ -1540,7 +1540,7 @@ fn voiceless_stops_shut_the_mouth_for_their_closure() {
     use synthie_trombone::speech::{Speaker, Utterance};
     let mut texts: Vec<String> = judge_sentences().into_iter().map(|(_, t)| t).collect();
     texts.extend(LISTENING.iter().map(|s| (*s).to_string()));
-    let floor = synthie_trombone::Tuning::DEFAULT.closure_floor;
+    let floor = synthie_trombone::Tuning::DEFAULT.articulation.closure_floor;
     std::thread::scope(|scope| {
         let jobs: Vec<_> = [1.0f32, 1.5, 2.0]
             .into_iter()
@@ -1933,7 +1933,7 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
     // at the open end of the branch, pulled /n/ down to 700 to 1000 Hz and
     // /m/ to 420 to 530 Hz, and the recognizer heard /n/ as /m/ (and /m/ as
     // /n/ or /ŋ/) in a third of the nasals in the LibriSpeech sentences.
-    // With the tongue lowered behind the closure (`Tuning::nasal_cavity`):
+    // With the tongue lowered behind the closure (`ArticulationConfig::nasal_cavity`):
     // /m/ 750 to 1060 Hz with a notch 23 to 40 dB deep, /n/ 1200 to 1550 Hz
     // (lowest before /ɔ/; with the tongue lowered at the back of the
     // tongue's speed, 1150 Hz there and 1190 Hz before /ʌ/), and in every
@@ -1970,14 +1970,14 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
         assert!((700.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
         assert!(m_notch >= 20.0, "in {v}: /m/ notch {m_notch:.1} dB");
         // Before the fronted /u/ of "[u n u]" the tongue is kept up behind
-        // the closure (`Tuning::nasal_cavity_held`, the owner's choice by
+        // the closure (`ArticulationConfig::nasal_cavity_held`, the owner's choice by
         // ear: dropped, it sprang back after the release into the vowel),
         // and the mouth behind the /n/ is the fronted /u/'s: 2278 Hz,
         // inside Fujimura's 1450 to 2200 Hz for /n/ give or take, and far
         // from /ŋ/'s 3 kHz. Everywhere else the tongue drops.
         let kept_up = v == Phoneme::Uw
-            && settings.tuning.fronted_after_n > 0.0
-            && settings.tuning.nasal_cavity_held > 0.0;
+            && settings.tuning.articulation.fronted_after_n > 0.0
+            && settings.tuning.articulation.nasal_cavity_held > 0.0;
         let highest = if kept_up { 2400.0 } else { 1700.0 };
         assert!((1100.0..=highest).contains(&n), "in {v}: /n/ at {n:.0} Hz");
         assert!(n >= m + 300.0, "in {v}: /n/ {n:.0} Hz, /m/ {m:.0} Hz");
@@ -2462,12 +2462,12 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
     // accented vowels jump out where it let go); the mechanism is tested
     // at round 8's setting.
     let mut soft = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
-    soft.tuning.sonorant_softness = 1.0;
-    soft.tuning.unstressed_softness = 0.5;
+    soft.tuning.prosody.sonorant_softness = 1.0;
+    soft.tuning.prosody.unstressed_softness = 0.5;
     let mut firm = soft;
-    firm.tuning.sonorant_softness = 0.0;
-    firm.tuning.unstressed_softness = 0.0;
-    firm.tuning.final_softness = 0.0;
+    firm.tuning.prosody.sonorant_softness = 0.0;
+    firm.tuning.prosody.unstressed_softness = 0.0;
+    firm.tuning.prosody.final_softness = 0.0;
     let measure = |settings: &VoiceSettings| {
         std::thread::scope(|scope| {
             let jobs: Vec<_> = sentences
@@ -2593,13 +2593,13 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
         .collect();
     let dark = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
     let mut bright = dark;
-    bright.tuning.voice_tilt = 0.0;
-    bright.tuning.voiced_breath_corner = 0.0;
-    bright.tuning.voiced_breath_gain = 0.0;
+    bright.tuning.anatomy.voice_tilt = 0.0;
+    bright.tuning.anatomy.voiced_breath_corner = 0.0;
+    bright.tuning.anatomy.voiced_breath_gain = 0.0;
     // The accented vowels are told apart as round 8's softening tells them.
     let mut labels = dark;
-    labels.tuning.sonorant_softness = 1.0;
-    labels.tuning.unstressed_softness = 0.5;
+    labels.tuning.prosody.sonorant_softness = 1.0;
+    labels.tuning.prosody.unstressed_softness = 0.5;
     let measure = |settings: &VoiceSettings| {
         std::thread::scope(|scope| {
             let jobs: Vec<_> = sentences

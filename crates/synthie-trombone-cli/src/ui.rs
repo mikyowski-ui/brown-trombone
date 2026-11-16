@@ -298,7 +298,10 @@ fn draw_persona(frame: &mut Frame, area: Rect, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled(" lungs ", fg(DIM)),
-            Span::styled(format!("{:.1} cmH2O", v.tuning.lung_pressure), fg(FG)),
+            Span::styled(
+                format!("{:.1} cmH2O", v.tuning.anatomy.lung_pressure),
+                fg(FG),
+            ),
             Span::styled("  tense ", fg(DIM)),
             Span::styled(format!("{:.2}", v.tenseness), fg(FG)),
         ]),

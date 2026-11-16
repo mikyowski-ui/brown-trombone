@@ -112,7 +112,11 @@ fn at_limits_of(
             // no shorter than the aligner makes a phone (`prosody.py`'s
             // `FLOOR`, 25 ms).
             let d = if parts.contains('s') {
-                ((b - a) * t.follow_shortest.min(t.follow_shortest_light)).max(ALIGNER_FLOOR)
+                ((b - a)
+                    * t.articulation
+                        .follow_shortest
+                        .min(t.articulation.follow_shortest_light))
+                .max(ALIGNER_FLOOR)
             } else {
                 b - a
             };
@@ -125,7 +129,7 @@ fn at_limits_of(
             if parts.contains('b') {
                 s.breath = if odd { 0.0 } else { 2.0 };
             }
-            let r = t.follow_formant_range + 0.1;
+            let r = t.articulation.follow_formant_range + 0.1;
             if parts.contains('f') {
                 s.formants = Some(if odd {
                     (1.0 + r, 1.0 - r)
@@ -243,12 +247,12 @@ fn a_followed_utterance_at_its_limits_keeps_the_gates() {
 fn the_limits_are_those_of_the_tuning() {
     let t = Tuning::DEFAULT;
     assert!(
-        t.follow_tenseness_low >= 0.88,
+        t.articulation.follow_tenseness_low >= 0.88,
         "round 8: 12 % less tenseness clicks"
     );
     assert!(
-        t.follow_breath_low >= 0.5,
+        t.articulation.follow_breath_low >= 0.5,
         "under half the breath the folds drop out"
     );
-    assert!(t.follow_speed_max <= 1.6 + 1e-6);
+    assert!(t.articulation.follow_speed_max <= 1.6 + 1e-6);
 }

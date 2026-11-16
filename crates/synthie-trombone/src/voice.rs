@@ -33,7 +33,7 @@ const PHYSICAL_GAIN: f32 = 2.5e-7;
 pub(crate) const FRICATIVE_WIDEST: f32 = HISS_WIDEST;
 
 /// Places of the tongue (tract index) behind the alveolar ridge whose
-/// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`Tuning::postalveolar_lips`]);
+/// rounded consonants are /ʃ ʒ tʃ dʒ/ (see [`ArticulationConfig::postalveolar_lips`](crate::ArticulationConfig::postalveolar_lips));
 /// /r/, further back, keeps its rounding.
 const POSTALVEOLAR_PLACE: core::ops::RangeInclusive<f32> = 32.5..=34.5;
 /// Where the tongue tip closes for /n/ (the alveolar ridge, and the teeth
@@ -353,7 +353,7 @@ impl Trombone {
     fn sync_wander(&mut self) {
         self.glottis.flutter = match self.engine {
             Engine::Classic => 0.0,
-            Engine::Physical => self.tuning.pitch_flutter,
+            Engine::Physical => self.tuning.anatomy.pitch_flutter,
         };
         self.glottis.own_clock = self.engine == Engine::Physical;
     }
@@ -505,7 +505,7 @@ impl Trombone {
     /// Hold the glottis open behind the folds by `cm2` (cm² at native size,
     /// `0‥1`), as a speaker spreads it for a voiceless consonant: on top of
     /// whatever the voicing gate does, and moving at the arytenoids' pace
-    /// ([`Tuning::abduction_time`]). With the gate on, a small opening
+    /// ([`ArticulationConfig::abduction_time`](crate::ArticulationConfig::abduction_time)). With the gate on, a small opening
     /// leaves the folds vibrating beside a stream of breath (a voiced
     /// fricative); a large one with the gate off is the wide glottis of an
     /// aspirated stop. Physical engine only; `0` (the default) leaves the
@@ -541,7 +541,7 @@ impl Trombone {
     /// Soften the voice, `0` (firm, the default) to `1`, as a speaker's
     /// voice is softer on nasals, liquids and unaccented syllables than on
     /// an accented vowel: the voice passes a one-pole low-pass whose corner
-    /// is [`Tuning::soft_corner`] at `1` and moves up out of hearing
+    /// is [`AnatomyConfig::soft_corner`](crate::AnatomyConfig::soft_corner) at `1` and moves up out of hearing
     /// towards `0`, so the spectrum above 2 kHz falls faster. The folds
     /// themselves are left alone: how far apart they are held, the
     /// pressure they need to start and every note they can sing stay as
@@ -742,7 +742,7 @@ impl Trombone {
     /// How many times faster than usual the velum shuts from now on
     /// (physical engine; `1` is its usual speed, some 45 ms from open to
     /// shut). The speaker hastens it out of a nasal into a vowel once the
-    /// mouth has opened ([`Tuning::velum_release`]).
+    /// mouth has opened ([`ArticulationConfig::velum_release`](crate::ArticulationConfig::velum_release)).
     pub(crate) fn set_velum_haste(&mut self, factor: f32) {
         if factor.is_finite() && factor > 0.0 {
             self.tract.velum_haste = factor;
@@ -751,9 +751,9 @@ impl Trombone {
 
     /// Share of the tongue's drop behind a nasal closure held back in the
     /// articulations sent from now on (physical engine; `0`, the default,
-    /// drops it to [`Tuning::nasal_cavity`]). The speaker keeps the tongue
+    /// drops it to [`ArticulationConfig::nasal_cavity`](crate::ArticulationConfig::nasal_cavity)). The speaker keeps the tongue
     /// up behind an /n/ that leads into a fronted vowel
-    /// ([`Tuning::nasal_cavity_held`]).
+    /// ([`ArticulationConfig::nasal_cavity_held`](crate::ArticulationConfig::nasal_cavity_held)).
     pub(crate) fn set_cavity_held(&mut self, share: f32) {
         if share.is_finite() {
             self.tract.cavity_held = share.clamp(0.0, 1.0);
@@ -836,11 +836,14 @@ impl Trombone {
         let gap = |c: Constriction| {
             let d = c.diameter;
             if d > 0.3 && d <= FRICATIVE_WIDEST {
-                Constriction::new(c.index, (d + self.tuning.fricative_gap).max(0.32))
+                Constriction::new(
+                    c.index,
+                    (d + self.tuning.articulation.fricative_gap).max(0.32),
+                )
             } else if d > FRICATIVE_WIDEST && d < 1.3 {
                 Constriction::new(
                     c.index,
-                    (d + self.tuning.approximant_gap).max(FRICATIVE_WIDEST + 0.01),
+                    (d + self.tuning.articulation.approximant_gap).max(FRICATIVE_WIDEST + 0.01),
                 )
             } else {
                 c
@@ -859,7 +862,9 @@ impl Trombone {
             && POSTALVEOLAR_PLACE.contains(&c.index)
             && c.diameter <= FRICATIVE_WIDEST
         {
-            lips.diameter = lips.diameter.max(self.tuning.postalveolar_lips);
+            lips.diameter = lips
+                .diameter
+                .max(self.tuning.articulation.postalveolar_lips);
         }
         // The physical /n/ lowers the velum less than /m ŋ/.
         let velum = match a.constriction {
@@ -869,7 +874,7 @@ impl Trombone {
                     && c.diameter <= 0.3
                     && ALVEOLAR_NASAL_PLACE.contains(&c.index) =>
             {
-                a.velum * self.tuning.alveolar_velum
+                a.velum * self.tuning.articulation.alveolar_velum
             }
             _ => a.velum,
         };
