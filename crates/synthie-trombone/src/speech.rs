@@ -110,7 +110,7 @@ pub struct Gesture {
     /// [`Trombone::set_cavity_expansion`]).
     pub expansion: f32,
     /// Pitch added at the start of the segment, Hz, decaying over the
-    /// voice's [`Tuning::kick_time`].
+    /// voice's [`ArticulationConfig::kick_time`](crate::ArticulationConfig::kick_time).
     pub kick: f32,
     /// Semitones the pitch stands off the straight line from the start of
     /// the segment to its end at its middle, falling away as a parabola
@@ -142,9 +142,9 @@ pub struct Gesture {
     /// head start before the segment ends.
     pub transition: f32,
     /// How long before this segment begins its shape is sent, seconds, in
-    /// place of the voice's [`Tuning::lead`] (or `release_lead` out of a
+    /// place of the voice's [`ArticulationConfig::lead`](crate::ArticulationConfig::lead) (or `release_lead` out of a
     /// closure): a quick gesture thrown late, as the tip of an alveolar
-    /// tap is (see [`Tuning::tap_lead`]). `0` keeps the voice's.
+    /// tap is (see [`ArticulationConfig::tap_lead`](crate::ArticulationConfig::tap_lead)). `0` keeps the voice's.
     pub approach: f32,
 }
 
@@ -171,7 +171,7 @@ pub struct Utterance {
     voicing_tail: f32,
     /// Out of a sibilant into /f v/: how long before the tongue lets go
     /// the lower lip starts, and how long it takes to reach the teeth,
-    /// seconds (see [`Tuning::labial_lead`]).
+    /// seconds (see [`ArticulationConfig::labial_lead`](crate::ArticulationConfig::labial_lead)).
     labial_lead: f32,
     labial_closing: f32,
     sibilant_exit: f32,
@@ -241,12 +241,12 @@ impl Utterance {
     pub fn from_segments(segments: Vec<Segment>) -> Self {
         Self {
             segments,
-            lead: Tuning::DEFAULT.lead,
-            release_lead: Tuning::DEFAULT.release_lead,
-            kick_time: Tuning::DEFAULT.kick_time,
-            devoicing_lead: Tuning::DEFAULT.devoicing_lead,
-            velum_lead: Tuning::DEFAULT.velum_lead,
-            velum_release: Tuning::DEFAULT.velum_release,
+            lead: Tuning::DEFAULT.articulation.lead,
+            release_lead: Tuning::DEFAULT.articulation.release_lead,
+            kick_time: Tuning::DEFAULT.articulation.kick_time,
+            devoicing_lead: Tuning::DEFAULT.articulation.devoicing_lead,
+            velum_lead: Tuning::DEFAULT.articulation.velum_lead,
+            velum_release: Tuning::DEFAULT.articulation.velum_release,
             closure_floor: 0.0,
             voicing_tail: 0.0,
             labial_lead: 0.0,
@@ -275,7 +275,7 @@ impl Utterance {
 
     /// The segments, to set their durations, pitch or breath by hand (see
     /// [`Utterance::follow`]). A voiceless stop's closure is still held for
-    /// [`Tuning::closure_floor`] however short it is made.
+    /// [`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor) however short it is made.
     pub fn segments_mut(&mut self) -> &mut [Segment] {
         &mut self.segments
     }
@@ -297,7 +297,7 @@ impl Utterance {
     /// start, which the [`Speaker`] follows in place of each segment's own
     /// `pitch` (a segment's [`Gesture::kick`] still adds to it). Time on
     /// the track is the time the segments' durations add up to, so a
-    /// closure held past its segment's end (see [`Tuning::closure_floor`])
+    /// closure held past its segment's end (see [`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor))
     /// does not shift it. Past its end the last value holds. An empty track
     /// (or a `hop` that is not positive) gives the segments their own pitch
     /// back.
@@ -378,7 +378,7 @@ pub struct Speaker {
     sealed_for: f32,
     /// A voiceless stop has shut the mouth with the voice still going: the
     /// voice is let go at this time on `clock` (see
-    /// [`Tuning::voicing_tail`]).
+    /// [`ArticulationConfig::voicing_tail`](crate::ArticulationConfig::voicing_tail)).
     tail_until: Option<f32>,
     /// The segment's closure has been held for its floor (see
     /// [`Speaker::holding_closure`]).
@@ -434,7 +434,7 @@ const QUIET_PRESSURE: f32 = 0.3;
 const DEVOICE_WAIT: f32 = 0.025;
 
 /// Longest a voiceless stop's closure segment is drawn out to give it its
-/// [`Tuning::closure_floor`], seconds: a closure that never forms is not
+/// [`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor), seconds: a closure that never forms is not
 /// waited for.
 const CLOSURE_OVERRUN: f32 = 0.03;
 
@@ -697,7 +697,7 @@ impl Speaker {
                 {
                     let lip = crate::Constriction::new(
                         c.index,
-                        (c.diameter + voice.tuning().fricative_gap).max(0.32),
+                        (c.diameter + voice.tuning().articulation.fricative_gap).max(0.32),
                     );
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     let cell = ((c.index + 0.5) as usize).min(crate::N - 1);
@@ -861,7 +861,7 @@ impl Speaker {
 
     /// Whether a voiceless stop's closure is still to be held: the mouth
     /// has not yet been sealed (shut, with the velum shut) for
-    /// [`Tuning::closure_floor`] in this segment, and the segment has not
+    /// [`ArticulationConfig::closure_floor`](crate::ArticulationConfig::closure_floor) in this segment, and the segment has not
     /// run over by more than [`CLOSURE_OVERRUN`]. Its release waits, and so does the next
     /// segment: in a fast voice the articulators sent on to the next sound
     /// as a closure barely formed let the mouth open again after a few
@@ -1412,7 +1412,7 @@ fn is_lax(p: Phoneme) -> bool {
 }
 
 /// Whether an /u/ in `context` is made further front (physical engine; see
-/// [`VowelKey::Fronted`] and [`Tuning::fronted_nucleus`]): after /t d s z/
+/// [`VowelKey::Fronted`] and [`ArticulationConfig::fronted_nucleus`](crate::ArticulationConfig::fronted_nucleus)): after /t d s z/
 /// in its own word ("two", "do", "tune", "soon", "zoo"), and not before
 /// the dark /l/ of its own syllable ("tool", "school"), which draws the
 /// tongue back again.
@@ -1455,13 +1455,13 @@ fn give_taps_time(drafts: &mut [Draft], timing: &Tuning, rate: f32) {
     for k in 0..drafts.len().saturating_sub(1) {
         let tap = drafts[k];
         if tap.gesture.approach > 0.0 && drafts[k + 1].vowel {
-            drafts[k + 1].duration += (timing.stop_length / rate - tap.duration).max(0.0);
+            drafts[k + 1].duration += (timing.prosody.stop_length / rate - tap.duration).max(0.0);
         }
     }
 }
 
 /// Whether the /t d/ `p` in `context` is said as an alveolar tap [ɾ]
-/// (physical engine; [`Tuning::tap_length`]), as American English says
+/// (physical engine; [`ArticulationConfig::tap_length`](crate::ArticulationConfig::tap_length)), as American English says
 /// it between vowels when the second is unstressed: at the end of a word
 /// before an unstressed vowel that starts the next one in the phrase
 /// ("slid on", "get it", "a lot of", "that it"), and inside a word after a
@@ -1509,12 +1509,12 @@ fn taps(p: Phoneme, context: Context) -> bool {
 fn own_length(p: Phoneme, stressed: bool, timing: &Tuning) -> f32 {
     use Phoneme as P;
     match p {
-        Phoneme::Ih if stressed => timing.ih_length * timing.vowel_hold,
-        _ if is_lax(p) && stressed => timing.lax_length * timing.vowel_hold,
-        _ if is_lax(p) => timing.unstressed_lax_length * timing.vowel_hold,
-        P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.vowel_hold,
-        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.vowel_hold,
-        _ => timing.vowel_hold,
+        Phoneme::Ih if stressed => timing.prosody.ih_length * timing.prosody.vowel_hold,
+        _ if is_lax(p) && stressed => timing.prosody.lax_length * timing.prosody.vowel_hold,
+        _ if is_lax(p) => timing.prosody.unstressed_lax_length * timing.prosody.vowel_hold,
+        P::Ae | P::Aa | P::Ao | P::Er => LONG_LENGTH * timing.prosody.vowel_hold,
+        P::Ay | P::Aw | P::Oy => WIDE_DIPHTHONG_LENGTH * timing.prosody.vowel_hold,
+        _ => timing.prosody.vowel_hold,
     }
 }
 
@@ -1529,25 +1529,25 @@ fn base_duration(p: Phoneme, stressed: bool, timing: &Tuning, physical: bool) ->
         }
     };
     let d = match p.manner() {
-        Manner::Vowel => own(timing.vowel_length),
-        Manner::Diphthong => own(timing.diphthong_length),
-        Manner::Stop | Manner::Affricate => timing.stop_length,
-        Manner::Nasal => timing.nasal_length,
+        Manner::Vowel => own(timing.prosody.vowel_length),
+        Manner::Diphthong => own(timing.prosody.diphthong_length),
+        Manner::Stop | Manner::Affricate => timing.prosody.stop_length,
+        Manner::Nasal => timing.prosody.nasal_length,
         Manner::Fricative => {
             if matches!(p, Phoneme::Z | Phoneme::Zh) && physical {
-                timing.voiced_sibilant_length
+                timing.prosody.voiced_sibilant_length
             } else if p.is_voiced() {
-                timing.voiced_fricative_length
+                timing.prosody.voiced_fricative_length
             } else {
-                timing.fricative_length
+                timing.prosody.fricative_length
             }
         }
-        Manner::Approximant => timing.approximant_length,
-        Manner::Aspirate => timing.aspirate_length,
+        Manner::Approximant => timing.prosody.approximant_length,
+        Manner::Aspirate => timing.prosody.aspirate_length,
         Manner::Pause => 0.1,
     };
     if stressed && is_vowel(p) {
-        d * timing.stress_stretch
+        d * timing.prosody.stress_stretch
     } else {
         d
     }
@@ -1729,7 +1729,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 phrases.push((phrase_start, drafts.len(), b));
                 let pause = match b {
                     Break::Comma => 0.18,
-                    _ if physical => timing.sentence_pause,
+                    _ if physical => timing.prosody.sentence_pause,
                     _ => 0.38,
                 } / rate;
                 drafts.push(silence(pause));
@@ -1770,7 +1770,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             // And the consonants that close it (see `Tuning::final_coda_stretch`).
             if physical && drafts[k - 1].phoneme != Phoneme::Sil {
                 for d in &mut drafts[v + 1..k] {
-                    d.duration *= timing.final_coda_stretch;
+                    d.duration *= timing.prosody.final_coda_stretch;
                 }
             }
         }
@@ -1860,17 +1860,33 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     }
     Utterance {
         segments,
-        lead: timing.lead,
-        release_lead: timing.release_lead,
-        kick_time: timing.kick_time,
-        devoicing_lead: timing.devoicing_lead,
-        velum_lead: timing.velum_lead,
-        velum_release: timing.velum_release,
-        closure_floor: if physical { timing.closure_floor } else { 0.0 },
-        voicing_tail: timing.voicing_tail,
-        labial_lead: if physical { timing.labial_lead } else { 0.0 },
-        labial_closing: if physical { timing.labial_closing } else { 0.0 },
-        sibilant_exit: if physical { timing.sibilant_exit } else { 0.0 },
+        lead: timing.articulation.lead,
+        release_lead: timing.articulation.release_lead,
+        kick_time: timing.articulation.kick_time,
+        devoicing_lead: timing.articulation.devoicing_lead,
+        velum_lead: timing.articulation.velum_lead,
+        velum_release: timing.articulation.velum_release,
+        closure_floor: if physical {
+            timing.articulation.closure_floor
+        } else {
+            0.0
+        },
+        voicing_tail: timing.articulation.voicing_tail,
+        labial_lead: if physical {
+            timing.articulation.labial_lead
+        } else {
+            0.0
+        },
+        labial_closing: if physical {
+            timing.articulation.labial_closing
+        } else {
+            0.0
+        },
+        sibilant_exit: if physical {
+            timing.articulation.sibilant_exit
+        } else {
+            0.0
+        },
         phones,
         roles,
         stretches,
@@ -1946,13 +1962,14 @@ fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
         if !d.voiced {
             continue;
         }
-        if d.tenseness.is_none() && (sonorant || unaccented) && timing.sonorant_slack > 0.0 {
-            d.tenseness = Some(tense * (1.0 - timing.sonorant_slack));
+        if d.tenseness.is_none() && (sonorant || unaccented) && timing.prosody.sonorant_slack > 0.0
+        {
+            d.tenseness = Some(tense * (1.0 - timing.prosody.sonorant_slack));
         }
         if d.phoneme.manner() == Manner::Nasal || liquid {
-            d.gesture.softness = d.gesture.softness.max(timing.sonorant_softness);
+            d.gesture.softness = d.gesture.softness.max(timing.prosody.sonorant_softness);
         } else if unaccented {
-            d.gesture.softness = d.gesture.softness.max(timing.unstressed_softness);
+            d.gesture.softness = d.gesture.softness.max(timing.prosody.unstressed_softness);
         }
     }
     let mut left = FINAL;
@@ -1967,11 +1984,14 @@ fn relax_the_folds(phrase: &mut [Draft], tense: f32, timing: &Tuning) {
             // Slackest and softest at the very end, as before 150 ms
             // before it.
             let share = (left - 0.5 * d.duration.min(left)).max(0.0) / FINAL;
-            if timing.final_slack > 0.0 {
+            if timing.prosody.final_slack > 0.0 {
                 let now = d.tenseness.unwrap_or(tense);
-                d.tenseness = Some(now * (1.0 - timing.final_slack * share));
+                d.tenseness = Some(now * (1.0 - timing.prosody.final_slack * share));
             }
-            d.gesture.softness = d.gesture.softness.max(timing.final_softness * share);
+            d.gesture.softness = d
+                .gesture
+                .softness
+                .max(timing.prosody.final_softness * share);
         }
         left -= d.duration;
     }
@@ -2002,8 +2022,8 @@ fn function_words(tokens: &[Token]) -> Vec<bool> {
 
 /// The voice quality of each syllable (physical engine): the folds are held
 /// more loosely through the vowel of a function word, by
-/// [`Tuning::light_laxness`] of the tenseness, within the range a followed
-/// schedule's tenseness keeps to ([`Tuning::follow_tenseness_low`]). The
+/// [`ProsodyConfig::light_laxness`](crate::ProsodyConfig::light_laxness) of the tenseness, within the range a followed
+/// schedule's tenseness keeps to ([`ArticulationConfig::follow_tenseness_low`](crate::ArticulationConfig::follow_tenseness_low)). The
 /// consonants keep theirs: a voiced closure needs folds held firmly enough
 /// to vibrate against the pressure in the mouth.
 ///
@@ -2020,7 +2040,7 @@ fn function_words(tokens: &[Token]) -> Vec<bool> {
 /// 2 to 8 % of its variance); the rest moves from phone to phone with
 /// nothing the text says.
 fn shade_syllables(phrase: &mut [Draft], light: &[bool], tense: f32, timing: &Tuning) {
-    let lo = timing.follow_tenseness_low;
+    let lo = timing.articulation.follow_tenseness_low;
     for k in 0..phrase.len() {
         let function_vowel = phrase[k].vowel
             && phrase[k].part == Part::Head
@@ -2031,7 +2051,7 @@ fn shade_syllables(phrase: &mut [Draft], light: &[bool], tense: f32, timing: &Tu
         if !function_vowel {
             continue;
         }
-        let share = (1.0 - timing.light_laxness).clamp(lo.min(1.0), 1.0);
+        let share = (1.0 - timing.prosody.light_laxness).clamp(lo.min(1.0), 1.0);
         if (share - 1.0).abs() < 1e-6 {
             continue;
         }
@@ -2113,7 +2133,7 @@ const DENTAL_ONSET: f32 = 0.025;
 /// the way to the first vowel.
 const PRE_POSITION: f32 = 0.1;
 
-/// Pitch, Hz, at which a [`Tuning::onset_kick`] is as given; a voice
+/// Pitch, Hz, at which a [`ArticulationConfig::onset_kick`](crate::ArticulationConfig::onset_kick) is as given; a voice
 /// pitched elsewhere gets it in proportion.
 const KICK_PITCH: f32 = 110.0;
 
@@ -2137,7 +2157,7 @@ fn voicing_gestures(drafts: &mut [Draft], pitch: f32, timing: &Tuning) {
         let after_voiceless = !before.voiced && is_obstruent(before.phoneme);
         let sonorant = drafts[k].vowel || drafts[k].phoneme.manner() == Manner::Approximant;
         if after_voiceless && sonorant && drafts[k].voiced {
-            drafts[k].gesture.kick = timing.onset_kick * pitch / KICK_PITCH;
+            drafts[k].gesture.kick = timing.articulation.onset_kick * pitch / KICK_PITCH;
         }
     }
 }
@@ -2173,12 +2193,12 @@ const HELD_TIP: f32 = 1.0;
 /// So the stop is made on the liquid's tongue body (a labial leaves the
 /// tongue free), and its release goes into that body with the liquid's tip
 /// still on its way ([`HELD_TIP`]; /r/'s lips stay rounded). The Speaker sends the liquid itself
-/// [`Tuning::liquid_transition`] after the mouth actually opens
+/// [`ArticulationConfig::liquid_transition`](crate::ArticulationConfig::liquid_transition) after the mouth actually opens
 /// ([`Gesture::transition`]): after a voiced stop in a release segment of
 /// its own, taken out of the liquid's time; after a voiceless one in its
 /// breath, the rest of which is the liquid made voiceless.
 fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
-    if timing.liquid_transition <= 0.0 {
+    if timing.articulation.liquid_transition <= 0.0 {
         return;
     }
     let mut k = 0;
@@ -2216,7 +2236,7 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
             closure.tongue = held.tongue;
             closure.vowel = None;
         }
-        let window = timing.liquid_transition / rate;
+        let window = timing.articulation.liquid_transition / rate;
         if last > k {
             let breath = &mut drafts[last];
             breath.articulation = Articulation {
@@ -2271,12 +2291,12 @@ fn release_into_liquids(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
 /// vowel (the LibriSpeech reader's "sleep": 311 to 328 Hz throughout) or
 /// rises some 60 Hz above both at most ("exactly").
 ///
-/// So the end of an /l/ before a vowel, [`Tuning::lateral_release`] of it,
+/// So the end of an /l/ before a vowel, [`ArticulationConfig::lateral_release`](crate::ArticulationConfig::lateral_release) of it,
 /// is made on the vowel's body: the tongue body sets off for the vowel
 /// while the tip still holds the /l/, and the tip lets go as the body
 /// arrives.
 fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
-    if timing.lateral_release <= 0.0 {
+    if timing.articulation.lateral_release <= 0.0 {
         return;
     }
     let mut k = 0;
@@ -2286,7 +2306,7 @@ fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
             k += 1;
             continue;
         }
-        let d = (timing.lateral_release / rate).min(0.6 * l.duration);
+        let d = (timing.articulation.lateral_release / rate).min(0.6 * l.duration);
         let share = d / l.duration;
         let (from, to) = l.gesture.pressure_drop;
         let between = from + (to - from) * (1.0 - share);
@@ -2338,7 +2358,7 @@ fn lateral_onto_vowels(drafts: &mut Vec<Draft>, timing: &Tuning, rate: f32) {
 /// fall larger), the recognizer's own choice among the vowels at a margin
 /// of -0.3 nats (his +3.0).
 ///
-/// So the last [`Tuning::dark_l_share`] of such a vowel, a lax vowel's
+/// So the last [`ArticulationConfig::dark_l_share`](crate::ArticulationConfig::dark_l_share) of such a vowel, a lax vowel's
 /// glide towards schwa included, glides towards /ʊ/, the vowel of the
 /// back of the tongue raised (the slow tongue body gets part of the way).
 /// Not a diphthong, which glides to its own end, and not /ʊ/ itself.
@@ -2348,7 +2368,7 @@ fn darken_before_coda_l(
     phrases: &mut [(usize, usize, Break)],
     timing: &Tuning,
 ) {
-    let share = timing.dark_l_share;
+    let share = timing.articulation.dark_l_share;
     if share <= 0.0 {
         return;
     }
@@ -2377,7 +2397,7 @@ fn darken_before_coda_l(
                 ..target
             };
             // A stressed lax vowel keeps its nucleus (`Tuning::lax_floor`).
-            let keep = drafts[head].duration.min(timing.lax_floor);
+            let keep = drafts[head].duration.min(timing.prosody.lax_floor);
             let tail = tail.min(total - keep);
             drafts[head].duration += drafts[k].duration - tail;
             drafts[k].duration = tail;
@@ -2444,7 +2464,7 @@ fn expand(
         && let Some(c) = &mut a.constriction
     {
         // The physical /l/ is made closer than the classic one.
-        c.diameter += timing.lateral_gap;
+        c.diameter += timing.articulation.lateral_gap;
     }
     let a = a;
     let mut dur = base_duration(p, stressed, timing, context.is_some()) / rate;
@@ -2484,7 +2504,7 @@ fn expand(
                     // Aspiration after the burst: open tract, breathy folds.
                     let mut asp = Phoneme::Hh.articulation();
                     asp.tongue = a.tongue;
-                    out.push(draft(p, asp, timing.aspiration / rate, true));
+                    out.push(draft(p, asp, timing.articulation.aspiration / rate, true));
                 }
             }
             Manner::Affricate => {
@@ -2505,16 +2525,16 @@ fn expand(
     // the folds and widen the pharynx, voiced fricatives leave a little
     // opening behind the vibrating folds.
     let voiceless = Gesture {
-        spread: timing.voiceless_spread,
+        spread: timing.articulation.voiceless_spread,
         ..Gesture::default()
     };
     let voiced_stop = Gesture {
-        slack: timing.voiced_stop_slack,
-        expansion: timing.cavity_expansion,
+        slack: timing.anatomy.voiced_stop_slack,
+        expansion: timing.anatomy.cavity_expansion,
         ..Gesture::default()
     };
     let voiced_fricative = Gesture {
-        spread: timing.voiced_fricative_spread,
+        spread: timing.articulation.voiced_fricative_spread,
         ..Gesture::default()
     };
     // Inside a word /ʒ/ (and /z/, with less air) is a long, loud hiss with
@@ -2522,8 +2542,8 @@ fn expand(
     // pharynx widened a little, as for a voiced stop, so the mouth does not
     // fill and stop the voice before the hiss is over.
     let medial_zh = Gesture {
-        spread: timing.voiced_sibilant_spread,
-        expansion: SIBILANT_EXPANSION * timing.cavity_expansion,
+        spread: timing.articulation.voiced_sibilant_spread,
+        expansion: SIBILANT_EXPANSION * timing.anatomy.cavity_expansion,
         ..Gesture::default()
     };
     let with = |mut d: Draft, g: Gesture| {
@@ -2550,9 +2570,9 @@ fn expand(
         // reference recordings and the owner hold it for 180 to 215, and
         // drawn out by the /b/ of "birch", "the" was longer than people's.
         dur *= if n.is_voiced() {
-            timing.prelenis_stretch
+            timing.prosody.prelenis_stretch
         } else {
-            timing.prefortis_clip
+            timing.prosody.prefortis_clip
         };
     }
     match p.manner() {
@@ -2565,13 +2585,13 @@ fn expand(
             tail.part = Part::Glide;
             out.push(tail);
         }
-        Manner::Stop if timing.tap_length > 0.0 && taps(p, context) => {
+        Manner::Stop if timing.articulation.tap_length > 0.0 && taps(p, context) => {
             // A touch of the tip on the way from vowel to vowel: voiced
             // throughout, no closure held, no pressure built behind it, no
             // burst and no breath.
             let touch = Articulation { voiced: true, ..a };
-            let mut tap = draft(p, touch, timing.tap_length / rate, true);
-            tap.gesture.approach = timing.tap_lead / rate;
+            let mut tap = draft(p, touch, timing.articulation.tap_length / rate, true);
+            tap.gesture.approach = timing.articulation.tap_lead / rate;
             out.push(tap);
         }
         Manner::Stop if a.voiced => {
@@ -2592,7 +2612,7 @@ fn expand(
             let closure = if after_s {
                 dur
             } else {
-                dur * timing.fortis_closure
+                dur * timing.articulation.fortis_closure
             };
             let released_into = context
                 .next
@@ -2617,10 +2637,14 @@ fn expand(
                     context.after_next.is_some_and(|(v, s, _)| is_vowel(v) && s)
                 };
                 let hold = match p {
-                    Phoneme::P => timing.vot_labial,
-                    Phoneme::K => timing.vot_velar,
-                    _ => timing.vot_alveolar,
-                } * if stressed { 1.0 } else { timing.unstressed_vot };
+                    Phoneme::P => timing.articulation.vot_labial,
+                    Phoneme::K => timing.articulation.vot_velar,
+                    _ => timing.articulation.vot_alveolar,
+                } * if stressed {
+                    1.0
+                } else {
+                    timing.articulation.unstressed_vot
+                };
                 let mut asp = with(draft(p, a, hold / rate, false), voiceless);
                 asp.aspiration = true;
                 asp.gesture.hold = hold / rate;
@@ -2644,7 +2668,7 @@ fn expand(
             let frication = if a.voiced {
                 dur
             } else {
-                (AFFRICATE_FRICATION * timing.fricative_length / rate).max(dur)
+                (AFFRICATE_FRICATION * timing.prosody.fricative_length / rate).max(dur)
             };
             out.push(with(draft(p, fric.articulation(), frication, a.voiced), fg));
         }
@@ -2654,7 +2678,7 @@ fn expand(
                 // At the end of a word English lets /z/ go partly
                 // voiceless: more air behind the folds, a plainer hiss.
                 Gesture {
-                    spread: timing.voiced_sibilant_spread,
+                    spread: timing.articulation.voiced_sibilant_spread,
                     ..Gesture::default()
                 }
             } else if p == Phoneme::Zh {
@@ -2662,8 +2686,8 @@ fn expand(
             } else if p == Phoneme::Z {
                 Gesture {
                     spread: f32::midpoint(
-                        timing.voiced_fricative_spread,
-                        timing.voiced_sibilant_spread,
+                        timing.articulation.voiced_fricative_spread,
+                        timing.articulation.voiced_sibilant_spread,
                     ),
                     ..medial_zh
                 }
@@ -2701,7 +2725,7 @@ fn expand(
                 // between them. Not /z ʒ/, whose hiss is weak enough beside
                 // their voice (any less and they are heard as /ð/), nor the
                 // faint /f θ v ð/.
-                let ramp = timing.frication_ramp * dur;
+                let ramp = timing.articulation.frication_ramp * dur;
                 let closes = |q: Phoneme| is_obstruent(q) || q.manner() == Manner::Nasal;
                 let into = if context.prev.is_some_and(closes) {
                     0.0
@@ -2715,7 +2739,7 @@ fn expand(
                 };
                 Gesture {
                     gap_opening: (into, out_of),
-                    gap_widening: timing.frication_widening,
+                    gap_widening: timing.articulation.frication_widening,
                     ..g
                 }
             } else {
@@ -2723,12 +2747,16 @@ fn expand(
             };
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
-        Manner::Vowel if p == Phoneme::Uw && timing.fronted_nucleus > 0.0 && fronts_u(context) => {
+        Manner::Vowel
+            if p == Phoneme::Uw
+                && timing.articulation.fronted_nucleus > 0.0
+                && fronts_u(context) =>
+        {
             // Made further front after the front of the tongue, and gliding
             // back towards the plain /u/ over the rest of a long vowel.
             let fronted = VowelKey::Fronted(p).articulation().unwrap_or(a);
             let back = VowelKey::End(p).articulation().unwrap_or(a);
-            let head = timing.fronted_nucleus;
+            let head = timing.articulation.fronted_nucleus;
             out.push(draft(p, fronted, dur * head, true));
             if head < 1.0 {
                 let mut tail = draft(p, back, dur * (1.0 - head), true);
@@ -2745,11 +2773,11 @@ fn expand(
             // for at least `lax_floor`, however fast the speech. A stressed
             // /æ/ glides too, over its last `1 - ae_nucleus`.
             let (head, floor) = if p == Phoneme::Ae {
-                (timing.ae_nucleus, 0.0)
+                (timing.articulation.ae_nucleus, 0.0)
             } else if stressed {
-                (timing.lax_nucleus, timing.lax_floor)
+                (timing.articulation.lax_nucleus, timing.prosody.lax_floor)
             } else {
-                (timing.lax_nucleus, 0.0)
+                (timing.articulation.lax_nucleus, 0.0)
             };
             let end = VowelKey::End(p).articulation().unwrap_or(a);
             out.push(draft(p, a, (dur * head).max(floor), true));
@@ -2770,20 +2798,20 @@ fn expand(
 /// People start a phrase by raising the pressure with the folds coming
 /// together and end it with the pressure falling and the folds parting: the
 /// level swells in and dies away instead of switching on and off. So the
-/// lungs build up from nothing over [`Tuning::phrase_onset`], lose
-/// [`Tuning::phrase_decline`] of their pressure by the end, and let go
-/// [`Tuning::final_drop`] of it over the last vowel, the consonants after
+/// lungs build up from nothing over [`ProsodyConfig::phrase_onset`](crate::ProsodyConfig::phrase_onset), lose
+/// [`ProsodyConfig::phrase_decline`](crate::ProsodyConfig::phrase_decline) of their pressure by the end, and let go
+/// [`ProsodyConfig::final_drop`](crate::ProsodyConfig::final_drop) of it over the last vowel, the consonants after
 /// it keeping what is left (half of that before a comma); in a pause they
 /// stop.
 ///
 /// A phrase that opens on a vowel or a sonorant starts from
-/// [`Tuning::onset_pressure`] of the pressure, about what the folds need
+/// [`ProsodyConfig::onset_pressure`](crate::ProsodyConfig::onset_pressure) of the pressure, about what the folds need
 /// to start, and the voice grows from there; one that opens on a nasal or
-/// a liquid starts that sound [`Tuning::sonorant_onset`] earlier, out of
+/// a liquid starts that sound [`ProsodyConfig::sonorant_onset`](crate::ProsodyConfig::sonorant_onset) earlier, out of
 /// the pause, so that it is voiced by the time it was due rather than
 /// silent for the 40 ms the lungs take to get there. Before a phrase that opens on
 /// an obstruent or /h/ the lungs start pushing in the pause, its last part
-/// split off for it, with all their pressure, for [`Tuning::lead`]: the
+/// split off for it, with all their pressure, for [`ArticulationConfig::lead`](crate::ArticulationConfig::lead): the
 /// voice starts as from a closure in the middle of speech, the release
 /// bursts and the first hiss is there from the start (built up from
 /// nothing, an opening /f/, /s/ or /h/ was mostly lost). `phrases` is kept
@@ -2817,14 +2845,18 @@ fn breathe(
         // heard only in its release (`Tuning::sonorant_onset`).
         let sonorant =
             !first.vowel && matches!(first.phoneme.manner(), Manner::Nasal | Manner::Approximant);
-        if let Some(k) = pause.filter(|_| sonorant && timing.sonorant_onset > 0.0) {
-            let early = timing.sonorant_onset.min(0.5 * drafts[k].duration);
+        if let Some(k) = pause.filter(|_| sonorant && timing.prosody.sonorant_onset > 0.0) {
+            let early = timing.prosody.sonorant_onset.min(0.5 * drafts[k].duration);
             drafts[k].duration -= early;
             drafts[a].duration += early;
         }
         let (ready, floor, swell_time) = match pause {
-            Some(k) if breathy => (drafts[k].duration.min(timing.lead), 1.0, 0.0),
-            _ => (0.0, timing.onset_pressure, timing.phrase_onset),
+            Some(k) if breathy => (drafts[k].duration.min(timing.articulation.lead), 1.0, 0.0),
+            _ => (
+                0.0,
+                timing.prosody.onset_pressure,
+                timing.prosody.phrase_onset,
+            ),
         };
         let phrase = &drafts[a..b];
         let total: f32 = phrase.iter().map(|d| d.duration).sum();
@@ -2836,8 +2868,8 @@ fn breathe(
         let final_end = phrase[..last_vowel].iter().map(|d| d.duration).sum::<f32>()
             + phrase.get(last_vowel).map_or(0.0, |d| d.duration);
         let final_drop = match brk {
-            Break::Comma => 0.5 * timing.final_drop,
-            _ => timing.final_drop,
+            Break::Comma => 0.5 * timing.prosody.final_drop,
+            _ => timing.prosody.final_drop,
         };
         let held = |t: f32| {
             let swell = if swell_time > 0.0 {
@@ -2845,7 +2877,8 @@ fn breathe(
             } else {
                 1.0
             };
-            let decline = 1.0 - timing.phrase_decline * (t / total.max(DECLINE_SPAN)).max(0.0);
+            let decline =
+                1.0 - timing.prosody.phrase_decline * (t / total.max(DECLINE_SPAN)).max(0.0);
             let fade = if t > final_start && final_end > final_start {
                 let x = ((t - final_start) / (final_end - final_start)).min(1.0);
                 1.0 - final_drop * x * x * (3.0 - 2.0 * x)
@@ -2889,7 +2922,7 @@ fn breathe(
     }
 }
 
-/// The shortest phrase that loses all of [`Tuning::phrase_decline`] of its
+/// The shortest phrase that loses all of [`ProsodyConfig::phrase_decline`](crate::ProsodyConfig::phrase_decline) of its
 /// breath, seconds; a shorter one loses as much as the lungs would in its
 /// time. The lungs run down with time, not with the share of a phrase
 /// said: at round 10's 0.3, a two-syllable "a pa" lost it all, and its
@@ -2906,14 +2939,17 @@ const LEVEL_EXPONENT: f32 = 1.64;
 /// vowel is loudest soon after it starts and falls by some 2 dB to its end
 /// (the LibriSpeech reader's stressed vowels: 2.1 dB from their peak to
 /// their end, median), where the engine's held its level or grew. So the
-/// lungs let go of [`Tuning::vowel_decline`] dB of level across each
+/// lungs let go of [`ProsodyConfig::vowel_decline`](crate::ProsodyConfig::vowel_decline) dB of level across each
 /// vowel (its glide or offglide included) and take it back in the sounds
 /// that follow; they follow within some 30 ms.
 fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
-    if timing.vowel_decline <= 0.0 {
+    if timing.prosody.vowel_decline <= 0.0 {
         return;
     }
-    let end = crate::math::powf(10.0, -timing.vowel_decline / (20.0 * LEVEL_EXPONENT));
+    let end = crate::math::powf(
+        10.0,
+        -timing.prosody.vowel_decline / (20.0 * LEVEL_EXPONENT),
+    );
     let mut k = 0;
     while k < phrase.len() {
         if !phrase[k].vowel {
@@ -2941,7 +2977,7 @@ fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
 
 /// The breath of each syllable against the accented ones (physical
 /// engine): the lungs push less through an unaccented vowel, by
-/// [`Tuning::unaccented_level`] dB of level, and the nasals and liquids
+/// [`ProsodyConfig::unaccented_level`](crate::ProsodyConfig::unaccented_level) dB of level, and the nasals and liquids
 /// between two vowels take the breath of the line from the middle of the
 /// one to the middle of the other (those before the first vowel and after
 /// the last take theirs), as a followed schedule's phones do. The
@@ -2959,10 +2995,13 @@ fn decline_through_vowels(phrase: &mut [Draft], timing: &Tuning) {
 /// the owner's 6.5.
 #[allow(clippy::many_single_char_names)]
 fn weigh_syllables(phrase: &mut [Draft], accented: &[bool], timing: &Tuning) {
-    if timing.unaccented_level <= 0.0 {
+    if timing.prosody.unaccented_level <= 0.0 {
         return;
     }
-    let low = crate::math::powf(10.0, -timing.unaccented_level / (20.0 * LEVEL_EXPONENT));
+    let low = crate::math::powf(
+        10.0,
+        -timing.prosody.unaccented_level / (20.0 * LEVEL_EXPONENT),
+    );
     // Each vowel's middle, seconds into the phrase, and its share.
     let mut mids: Vec<(f32, f32)> = Vec::new();
     let mut t = 0.0;
@@ -3047,12 +3086,12 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
 
 /// The physical engine's intonation for one phrase, in semitones at
 /// expressiveness 1 from the [`Tuning`]: the pitch declines by
-/// [`Tuning::declination`] over the phrase; on each stressed vowel it rises
-/// by [`Tuning::accent_size`] and sinks back over [`Tuning::accent_decay`]
+/// [`ProsodyConfig::declination`](crate::ProsodyConfig::declination) over the phrase; on each stressed vowel it rises
+/// by [`ProsodyConfig::accent_size`](crate::ProsodyConfig::accent_size) and sinks back over [`ProsodyConfig::accent_decay`](crate::ProsodyConfig::accent_decay)
 /// seconds through what follows (so it moves inside vowels and from
 /// syllable to syllable, as a speaker's does, rather than stepping up for
 /// each stress and down again at its consonant); a statement falls by
-/// [`Tuning::final_fall`] across its last vowel, after an accent on it that
+/// [`ProsodyConfig::final_fall`](crate::ProsodyConfig::final_fall) across its last vowel, after an accent on it that
 /// has risen on the way in; a question rises instead and a comma lifts a
 /// little.
 #[allow(clippy::cast_precision_loss)]
@@ -3096,14 +3135,14 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
                 .map_or(a - 0.05, |(&(s, _), _)| s);
             if falling && Some(k) == last_vowel {
                 (onset, a)
-            } else if timing.accent_peak < 1.0 {
-                (onset.min(a), a + timing.accent_peak * (b - a))
+            } else if timing.prosody.accent_peak < 1.0 {
+                (onset.min(a), a + timing.prosody.accent_peak * (b - a))
             } else {
                 (a, b)
             }
         })
         .collect();
-    let size = timing.accent_size * expr;
+    let size = timing.prosody.accent_size * expr;
     let accent = |t: f32| {
         accents
             .iter()
@@ -3113,7 +3152,7 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
                 } else if t <= b {
                     size * (t - a) / (b - a).max(1e-3)
                 } else {
-                    size * (1.0 - (t - b) / timing.accent_decay).max(0.0)
+                    size * (1.0 - (t - b) / timing.prosody.accent_decay).max(0.0)
                 }
             })
             .fold(0.0f32, f32::max)
@@ -3125,13 +3164,13 @@ fn intonation(drafts: &mut [Draft], brk: Break, expr: f32, timing: &Tuning) {
         let x = ((t - vowel_start) / (vowel_end - vowel_start).max(1e-3)).clamp(0.0, 1.0);
         let shape = x * x * (3.0 - 2.0 * x);
         match brk {
-            Break::Period => -timing.final_fall * expr * shape,
-            Break::Exclamation => -1.4 * timing.final_fall * expr * shape,
+            Break::Period => -timing.prosody.final_fall * expr * shape,
+            Break::Exclamation => -1.4 * timing.prosody.final_fall * expr * shape,
             Break::Question => QUESTION_RISE * expr * shape,
             Break::Comma => COMMA_RISE * expr * shape,
         }
     };
-    let declination = timing.declination * expr;
+    let declination = timing.prosody.declination * expr;
     let semitones = |t: f32| declination * (0.5 - t / total) + accent(t) + boundary(t);
     for (d, &(start, end)) in drafts.iter_mut().zip(&spans) {
         d.accent = crate::math::powf(2.0, semitones(end) / 12.0);

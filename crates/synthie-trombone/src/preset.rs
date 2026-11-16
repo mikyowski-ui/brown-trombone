@@ -114,10 +114,10 @@ impl VoiceSettings {
         // and a bit more; the folds press together, pitch rises and moves
         // more, the articulators hurry.
         let t = &mut self.tuning;
-        t.lung_pressure *= crate::math::powf(2.0, 1.6 * effort);
+        t.anatomy.lung_pressure *= crate::math::powf(2.0, 1.6 * effort);
         self.pitch *= 1.0 + 0.24 * effort;
         self.expressiveness *= 1.0 + 0.6 * effort;
-        t.articulation_rate *= 1.0 + 0.2 * effort;
+        t.articulation.tongue_tip.stiffness *= 1.0 + 0.2 * effort;
 
         // Breathiness and effort both act on how firmly the folds close.
         // A whisper has no voice to press or loosen and stays a whisper.
@@ -127,21 +127,21 @@ impl VoiceSettings {
         }
 
         // Clarity: earlier, faster, longer, firmer.
-        t.lead *= 1.0 + 0.8 * clarity;
-        t.articulation_rate *= 1.0 + 0.4 * clarity;
+        t.articulation.lead *= 1.0 + 0.8 * clarity;
+        t.articulation.tongue_tip.stiffness *= 1.0 + 0.4 * clarity;
         let consonants = 1.0 + 0.3 * clarity;
-        t.stop_length *= consonants;
-        t.nasal_length *= consonants;
-        t.fricative_length *= consonants;
-        t.voiced_fricative_length *= consonants;
-        t.approximant_length *= consonants;
-        t.aspirate_length *= consonants;
+        t.prosody.stop_length *= consonants;
+        t.prosody.nasal_length *= consonants;
+        t.prosody.fricative_length *= consonants;
+        t.prosody.voiced_fricative_length *= consonants;
+        t.prosody.approximant_length *= consonants;
+        t.prosody.aspirate_length *= consonants;
         let vowels = 1.0 + 0.2 * clarity;
-        t.vowel_length *= vowels;
-        t.diphthong_length *= vowels;
-        t.stress_stretch *= 1.0 + 0.2 * clarity;
-        t.closure_overshoot *= 1.0 + 0.4 * clarity;
-        t.fricative_gap -= 0.06 * clarity;
+        t.prosody.vowel_length *= vowels;
+        t.prosody.diphthong_length *= vowels;
+        t.prosody.stress_stretch *= 1.0 + 0.2 * clarity;
+        t.articulation.closure_overshoot *= 1.0 + 0.4 * clarity;
+        t.articulation.fricative_gap -= 0.06 * clarity;
 
         self.tuning = self.tuning.clamped();
         self
@@ -409,7 +409,9 @@ mod tests {
 
         let loud = with(Persona { effort: 1.0, ..n });
         let soft = with(Persona { effort: 0.0, ..n });
-        assert!(loud.tuning.lung_pressure > 13.0 && soft.tuning.lung_pressure < 5.0);
+        assert!(
+            loud.tuning.anatomy.lung_pressure > 13.0 && soft.tuning.anatomy.lung_pressure < 5.0
+        );
         assert!(loud.tenseness > base.tenseness && soft.tenseness < base.tenseness);
         assert!(loud.pitch > soft.pitch);
 
@@ -425,10 +427,13 @@ mod tests {
 
         let careful = with(Persona { clarity: 1.0, ..n });
         let casual = with(Persona { clarity: 0.0, ..n });
-        assert!(careful.tuning.lead > casual.tuning.lead);
-        assert!(careful.tuning.articulation_rate > casual.tuning.articulation_rate);
-        assert!(careful.tuning.stop_length > casual.tuning.stop_length);
-        assert!(careful.tuning.vowel_length > casual.tuning.vowel_length);
+        assert!(careful.tuning.articulation.lead > casual.tuning.articulation.lead);
+        assert!(
+            careful.tuning.articulation.tongue_tip.stiffness
+                > casual.tuning.articulation.tongue_tip.stiffness
+        );
+        assert!(careful.tuning.prosody.stop_length > casual.tuning.prosody.stop_length);
+        assert!(careful.tuning.prosody.vowel_length > casual.tuning.prosody.vowel_length);
     }
 
     #[test]

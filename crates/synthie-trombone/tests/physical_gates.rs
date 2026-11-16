@@ -439,10 +439,10 @@ fn stop(p: Phoneme, voiced: bool) -> Stop {
     t.articulate_phoneme(p);
     t.set_voiced(voiced);
     if voiced {
-        t.set_fold_slack(tuning.voiced_stop_slack);
-        t.set_cavity_expansion(tuning.cavity_expansion);
+        t.set_fold_slack(tuning.anatomy.voiced_stop_slack);
+        t.set_cavity_expansion(tuning.anatomy.cavity_expansion);
     } else {
-        t.set_glottal_spread(tuning.voiceless_spread);
+        t.set_glottal_spread(tuning.articulation.voiceless_spread);
     }
     let mut shut_at = None;
     let (mut voicing, mut pressure) = (0.0f32, 0.0f32);
@@ -750,7 +750,7 @@ fn sized_voice(size: f32, lung: f32) -> Trombone {
             size,
             ..Persona::NEUTRAL
         });
-    settings.tuning.lung_pressure = lung;
+    settings.tuning.anatomy.lung_pressure = lung;
     let mut t = fresh();
     settings.apply(&mut t);
     t.set_vibrato(0.0, 0.0);
@@ -1540,7 +1540,7 @@ fn voiceless_stops_shut_the_mouth_for_their_closure() {
     use synthie_trombone::speech::{Speaker, Utterance};
     let mut texts: Vec<String> = judge_sentences().into_iter().map(|(_, t)| t).collect();
     texts.extend(LISTENING.iter().map(|s| (*s).to_string()));
-    let floor = synthie_trombone::Tuning::DEFAULT.closure_floor;
+    let floor = synthie_trombone::Tuning::DEFAULT.articulation.closure_floor;
     std::thread::scope(|scope| {
         let jobs: Vec<_> = [1.0f32, 1.5, 2.0]
             .into_iter()
@@ -2452,12 +2452,12 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
     // accented vowels jump out where it let go); the mechanism is tested
     // at round 8's setting.
     let mut soft = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
-    soft.tuning.sonorant_softness = 1.0;
-    soft.tuning.unstressed_softness = 0.5;
+    soft.tuning.prosody.sonorant_softness = 1.0;
+    soft.tuning.prosody.unstressed_softness = 0.5;
     let mut firm = soft;
-    firm.tuning.sonorant_softness = 0.0;
-    firm.tuning.unstressed_softness = 0.0;
-    firm.tuning.final_softness = 0.0;
+    firm.tuning.prosody.sonorant_softness = 0.0;
+    firm.tuning.prosody.unstressed_softness = 0.0;
+    firm.tuning.prosody.final_softness = 0.0;
     let measure = |settings: &VoiceSettings| {
         std::thread::scope(|scope| {
             let jobs: Vec<_> = sentences
@@ -2583,13 +2583,13 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
         .collect();
     let dark = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
     let mut bright = dark;
-    bright.tuning.voice_tilt = 0.0;
-    bright.tuning.voiced_breath_corner = 0.0;
-    bright.tuning.voiced_breath_gain = 0.0;
+    bright.tuning.anatomy.voice_tilt = 0.0;
+    bright.tuning.anatomy.voiced_breath_corner = 0.0;
+    bright.tuning.anatomy.voiced_breath_gain = 0.0;
     // The accented vowels are told apart as round 8's softening tells them.
     let mut labels = dark;
-    labels.tuning.sonorant_softness = 1.0;
-    labels.tuning.unstressed_softness = 0.5;
+    labels.tuning.prosody.sonorant_softness = 1.0;
+    labels.tuning.prosody.unstressed_softness = 0.5;
     let measure = |settings: &VoiceSettings| {
         std::thread::scope(|scope| {
             let jobs: Vec<_> = sentences

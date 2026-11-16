@@ -214,12 +214,12 @@ pub(crate) fn stretch(p: Phoneme, role: Role, timing: &Tuning) -> f32 {
     if p == Phoneme::Sil || role.last || role.first {
         return 1.0;
     }
-    let pace = timing.rhythm_pace;
+    let pace = timing.prosody.rhythm_pace;
     if is_vowel(p) {
         return pace
             * match p {
-                Phoneme::Ax => timing.schwa_length,
-                _ if p.manner() == Manner::Diphthong => timing.diphthong_hold,
+                Phoneme::Ax => timing.prosody.schwa_length,
+                _ if p.manner() == Manner::Diphthong => timing.prosody.diphthong_hold,
                 _ => 1.0,
             };
     }
@@ -232,10 +232,10 @@ pub(crate) fn stretch(p: Phoneme, role: Role, timing: &Tuning) -> f32 {
         && !matches!(p, Phoneme::S | Phoneme::Z | Phoneme::Sh | Phoneme::Zh);
     let mut f = pace;
     if role.function && p.manner() != Manner::Stop {
-        f *= timing.function_consonant_length;
+        f *= timing.prosody.function_consonant_length;
     }
     if role.onset && role.stressed && !role.function && !weak {
-        f *= timing.stressed_onset_length;
+        f *= timing.prosody.stressed_onset_length;
     }
     // Not a sibilant closing a cluster ("sells", "planks"): the reader's
     // are 1.11 of the rules' (13 of them), where his other consonants in
@@ -245,14 +245,14 @@ pub(crate) fn stretch(p: Phoneme, role: Role, timing: &Tuning) -> f32 {
     let sibilant_coda =
         !role.onset && matches!(p, Phoneme::S | Phoneme::Z | Phoneme::Sh | Phoneme::Zh);
     if role.cluster && !sibilant_coda {
-        f *= timing.cluster_length;
+        f *= timing.prosody.cluster_length;
     }
     f
 }
 
 /// Whether phone `p` keeps the transfer's floor on its length
-/// ([`Tuning::follow_shortest`]) when a speaker's schedule makes it short,
-/// rather than the light floor of the rest ([`Tuning::follow_shortest_light`]):
+/// ([`ArticulationConfig::follow_shortest`](crate::ArticulationConfig::follow_shortest)) when a speaker's schedule makes it short,
+/// rather than the light floor of the rest ([`ArticulationConfig::follow_shortest_light`](crate::ArticulationConfig::follow_shortest_light)):
 /// the stressed vowels of content words, the stops (their closure and
 /// release, whatever the word), the sibilants and affricates, and the
 /// consonants of clusters in content words.
@@ -269,6 +269,7 @@ pub(crate) fn held_in_transfer(p: Phoneme, role: Role) -> bool {
 mod tests {
     use super::super::phonemize;
     use super::*;
+    use crate::ProsodyConfig;
 
     fn of(text: &str) -> Vec<Role> {
         roles(&phonemize(text))
@@ -292,12 +293,15 @@ mod tests {
     fn stressed_onsets_are_drawn_out_and_function_words_brisk() {
         // The measured setting (off by default since the end of round 11).
         let t = Tuning {
-            stressed_onset_length: 1.3,
-            cluster_length: 0.85,
-            function_consonant_length: 0.9,
-            schwa_length: 0.75,
-            diphthong_hold: 0.75,
-            rhythm_pace: 1.02,
+            prosody: ProsodyConfig {
+                stressed_onset_length: 1.3,
+                cluster_length: 0.85,
+                function_consonant_length: 0.9,
+                schwa_length: 0.75,
+                diphthong_hold: 0.75,
+                rhythm_pace: 1.02,
+                ..ProsodyConfig::DEFAULT
+            },
             ..Tuning::DEFAULT
         };
         let toks = phonemize("in the dark blue sea");
@@ -319,7 +323,7 @@ mod tests {
         assert!((f(11) - 1.0).abs() < 1e-6 && (f(12) - 1.0).abs() < 1e-6);
         assert!(f(2) < 1.0 && f(3) < 1.0, "the: {} {}", f(2), f(3));
         assert!(f(4) > 1.15, "the /d/ of dark: {}", f(4));
-        assert!((f(5) - t.rhythm_pace).abs() < 1e-6);
+        assert!((f(5) - t.prosody.rhythm_pace).abs() < 1e-6);
         assert!(f(8) > f(5) && f(8) < f(4), "the /b/ of blue: {}", f(8));
         assert!(held_in_transfer(p[4], r[4]) && held_in_transfer(p[5], r[5]));
         assert!(!held_in_transfer(p[2], r[2]) && !held_in_transfer(p[3], r[3]));
