@@ -361,6 +361,9 @@ fn gestures_played_by_hand_replay_too() {
     let dir = scratch("score");
     let mut rig = Rig::new(&dir, false);
     rig.press(KeyCode::Char('\\'));
+    // The score is on by default; F6 switches to the segment path and back.
+    rig.press(SCORE_KEY);
+    assert!(!rig.app.gesture_score());
     rig.press(SCORE_KEY);
     assert!(rig.app.gesture_score());
     rig.play(0.2);

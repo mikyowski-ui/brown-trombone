@@ -99,6 +99,19 @@ fn body_target(r: &Resolved, narrowing: bool) -> Target {
     t
 }
 
+/// Constriction `c` as the variables of the tier whose articulator makes it
+/// (see [`tier_of_place`]), set on that tier's target among `body`, `tip`
+/// and `lips`.
+fn on_its_tier(c: Constriction, body: &mut Target, tip: &mut Target, lips: &mut Target) {
+    use gesture::var;
+    let (t, at, d) = match tier_of_place(c.index) {
+        Tier::TongueBody => (body, var::body::DORSAL_LOCATION, var::body::DORSAL_DEGREE),
+        Tier::LipsAndJaw => (lips, var::lips::CLOSURE_LOCATION, var::lips::CLOSURE_DEGREE),
+        _ => (tip, var::tip::LOCATION, var::tip::DEGREE),
+    };
+    *t = t.with(at, c.index).with(d, c.diameter);
+}
+
 /// What [`Trombone::articulate`] sets the tract to: the articulation made
 /// for this voice's engine and size.
 #[derive(Clone, Copy, Debug)]
@@ -1191,23 +1204,7 @@ impl Trombone {
         }
         let (mut tip, mut lips) = (Target::NONE, Target::NONE);
         if let Some(c) = r.main {
-            match tier_of_place(c.index) {
-                Tier::TongueBody => {
-                    body = body
-                        .with(var::body::DORSAL_LOCATION, c.index)
-                        .with(var::body::DORSAL_DEGREE, c.diameter);
-                }
-                Tier::LipsAndJaw => {
-                    lips = lips
-                        .with(var::lips::CLOSURE_LOCATION, c.index)
-                        .with(var::lips::CLOSURE_DEGREE, c.diameter);
-                }
-                _ => {
-                    tip = tip
-                        .with(var::tip::LOCATION, c.index)
-                        .with(var::tip::DEGREE, c.diameter);
-                }
-            }
+            on_its_tier(c, &mut body, &mut tip, &mut lips);
         }
         // Over a vowel's span, the consonant's own lips (or lips kept
         // unrounded under a hiss) win.

@@ -152,7 +152,12 @@ assert_eq!(tip.gestures, 1);
 ```
 
 The score holds `gesture::Score::CAPACITY` gestures at once and never
-allocates; a gesture is any target on any tier, not a phoneme.
+allocates; a gesture is any target on any tier, not a phoneme. Speech on
+the physical engine plays through it: each segment becomes gestures on the
+tiers that make it, and a consonant made by the tip or the lips leaves the
+tongue body and the lips to the vowel it leans on, whose gestures span it
+(`ArticulationConfig::gesture_score`, on by default; `0` is the segment
+path of earlier rounds, `gesture_overlap` which rules are left to overlap).
 
 ## Two engines
 

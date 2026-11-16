@@ -1370,6 +1370,17 @@ mod form {
     }
 }
 
+impl ArticulationConfig {
+    /// Whether the gesture path leaves the family of rules with bit `bit`
+    /// to the overlap of gestures (see
+    /// [`gesture_overlap`](Self::gesture_overlap)).
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn overlaps(&self, bit: u32) -> bool {
+        (self.gesture_overlap.clamp(0.0, 7.0) as u32) & bit != 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1473,16 +1484,5 @@ mod tests {
         assert!((c.anatomy.lung_pressure - 8.0).abs() < f32::EPSILON);
         assert!((c.articulation.lead - 0.06).abs() < f32::EPSILON);
         assert!((c.anatomy.modal_gap - 0.004).abs() < f32::EPSILON);
-    }
-}
-
-impl ArticulationConfig {
-    /// Whether the gesture path leaves the family of rules with bit `bit`
-    /// to the overlap of gestures (see
-    /// [`gesture_overlap`](Self::gesture_overlap)).
-    #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub fn overlaps(&self, bit: u32) -> bool {
-        (self.gesture_overlap.clamp(0.0, 7.0) as u32) & bit != 0
     }
 }
