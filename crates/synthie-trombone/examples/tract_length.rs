@@ -28,7 +28,8 @@
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::many_single_char_names
 )]
 
 #[path = "support/spectrum.rs"]
@@ -429,6 +430,7 @@ fn cost() {
         for _ in 0..5 {
             let mut voice = Trombone::new(48_000.0);
             settings.apply(&mut voice);
+            voice.set_engine(Engine::Physical);
             Speaker::prepare(&mut voice);
             let mut speaker = Speaker::new();
             speaker.speak(Utterance::from_text(text, &settings.prosody()));
