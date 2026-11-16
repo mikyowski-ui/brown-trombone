@@ -631,6 +631,49 @@ impl Articulation {
         a
     }
 
+    /// The vowel whose tongue body and lips this consonant is made on (see
+    /// [`physical_shape_of`](Self::physical_shape_of)), if it is a
+    /// consonant made on one and has no body of its own (/k g ŋ l r/ have):
+    /// on the gesture path its body and lips are that vowel's gestures,
+    /// spanning it, and the consonant adds only its own.
+    pub(crate) fn leans_on(self) -> Option<VowelKey> {
+        let key = self.vowel?;
+        let own = key.articulation()?;
+        let itself = self.tongue == own.tongue
+            && self.constriction == own.constriction
+            && self.lips == own.lips;
+        (!itself && !self.own_body() && self.tongue != Some(VELAR_TONGUE)).then_some(key)
+    }
+
+    /// The tongue body a consonant's tip draws the vowel's body towards, and
+    /// how far, `0‥1` (see [`leaning_on`](Self::leaning_on)): the dentals,
+    /// alveolars and postalveolars but /n/.
+    pub(crate) fn body_pull(self) -> Option<((f32, f32), f32)> {
+        let c = self.constriction?;
+        if self.tongue == Some(VELAR_TONGUE) || self.own_body() {
+            return None;
+        }
+        let tip = (POSTALVEOLAR - 0.5..=ALVEOLAR + 1.5).contains(&c.index) && self.velum <= 0.0;
+        if !(tip || c.index == TEETH) {
+            return None;
+        }
+        let w = if c.index < ALVEOLAR - 1.0 {
+            POSTALVEOLAR_PULL
+        } else if c.index == TEETH {
+            DENTAL_PULL
+        } else {
+            ALVEOLAR_PULL
+        };
+        Some((TIP_BODY, w))
+    }
+
+    /// Whether this consonant's gap is meant to hiss: a speaker's lips stay
+    /// as they are under it, whatever the vowel's.
+    pub(crate) fn hisses(self) -> bool {
+        self.constriction
+            .is_some_and(|c| c.diameter > SHUT_WIDEST && c.diameter <= crate::tract::HISS_WIDEST)
+    }
+
     /// Whether this is a lateral, an /l/ (physical engine): its tip at the
     /// lateral's place and not shut, on its own body or the next vowel's
     /// (see `speech::lateral_onto_vowels`).

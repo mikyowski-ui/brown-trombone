@@ -6,7 +6,7 @@
 //! Everything here is fixed-size: no allocation, ever.
 
 use crate::INTERNAL_RATE;
-use crate::math::{cos, exp, lerp, move_towards, powf, sin};
+use crate::math::{cos, exp, lerp, move_towards, powf, spring_step};
 use crate::phys::Stream;
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
@@ -381,6 +381,13 @@ pub(crate) struct Tract {
     /// move (physical engine; see
     /// [`Trombone::set_articulation_boost`](crate::Trombone::set_articulation_boost)).
     pub(crate) boost: f32,
+    /// How much faster than the tuning's speeds the tongue body (and its
+    /// back), the tip and the lips move, as the stiffness of the gesture
+    /// score's [`TongueBody`](crate::Tier::TongueBody),
+    /// [`TongueTip`](crate::Tier::TongueTip) and
+    /// [`LipsAndJaw`](crate::Tier::LipsAndJaw) tiers asks (physical
+    /// engine; `1` when no score drives the tract).
+    pub(crate) tier_speed: [f32; 3],
     pub(crate) dynamics: Dynamics,
     /// Whether the lips part with the tongue's opening, as a jaw lowered
     /// with the tongue body parts them (physical engine; see
@@ -471,6 +478,7 @@ impl Tract {
             velum_haste: 1.0,
             movement_speed: MOVEMENT_SPEED,
             boost: 1.0,
+            tier_speed: [1.0; 3],
             dynamics: Dynamics::Linear,
             jaw: false,
             jaw_open: 0.0,
@@ -1205,9 +1213,14 @@ impl Tract {
     fn move_damped(&mut self, dt: f32) {
         // Natural frequencies of the three articulators at this speed.
         let speed = self.movement_speed / MOVEMENT_SPEED;
-        let tip = speed * self.motion.articulation.tongue_tip.stiffness;
-        let dorsum = speed * self.boost * self.motion.articulation.dorsum_rate;
-        let body = speed * self.boost * self.motion.articulation.tongue_body.stiffness;
+        // The gesture score's tiers scale each articulator's speed by the
+        // stiffness of what they are doing (`1` otherwise).
+        let [body_k, tip_k, lips_k] = self.tier_speed;
+        let tip_rate = self.motion.articulation.tongue_tip.stiffness;
+        let tip = speed * tip_k * tip_rate;
+        let lips = speed * lips_k * tip_rate;
+        let dorsum = speed * self.boost * body_k * self.motion.articulation.dorsum_rate;
+        let body = speed * self.boost * body_k * self.motion.articulation.tongue_body.stiffness;
         let cavity = speed * self.motion.articulation.nasal_cavity_rate;
         for i in 0..N {
             let e0 = self.diameter[i] - self.target[i];
@@ -1221,6 +1234,7 @@ impl Tract {
             let w = match self.mover[i] {
                 Mover::Body => body,
                 Mover::Dorsum => dorsum * closing,
+                Mover::Tip if i >= LIP_START => lips * closing,
                 Mover::Tip => tip * closing,
                 Mover::Cavity => cavity * closing,
             };
@@ -1566,26 +1580,6 @@ fn shoulder(target: &mut [f32; N], index: f32, d: f32, back: f32, front: f32) {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn place(index: f32) -> usize {
     ((index.max(0.0) as usize) / PLACE).min(N / PLACE - 1)
-}
-
-/// One exact step of `dt` seconds of a spring of natural frequency `w`
-/// (rad/s) and damping ratio `zeta` (`1` critical; below it a little
-/// overshoot and a shorter tail) from displacement `e0` and velocity `v0`:
-/// the displacement and velocity after it. Exact for any `dt`, so a move
-/// does not depend on how the control blocks fall.
-fn spring_step(e0: f32, v0: f32, w: f32, zeta: f32, dt: f32) -> (f32, f32) {
-    if zeta >= 0.999 {
-        let decay = exp(-w * dt);
-        let c = v0 + w * e0;
-        return ((e0 + c * dt) * decay, (v0 - w * c * dt) * decay);
-    }
-    let wd = w * crate::math::sqrt(1.0 - zeta * zeta);
-    let decay = exp(-zeta * w * dt);
-    let (sine, cosine) = (sin(wd * dt), cos(wd * dt));
-    (
-        decay * (e0 * cosine + (v0 + zeta * w * e0) / wd * sine),
-        decay * (v0 * cosine - (w * w * e0 + zeta * w * v0) / wd * sine),
-    )
 }
 
 fn sanitize(c: Constriction) -> Constriction {

@@ -84,6 +84,43 @@ for s in &mut buf {
 }
 ```
 
+## Gestures
+
+`gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six
+independent tiers, `Tier::ALL`: `GlottalAdduction`, `LarynxAndPitch`,
+`Velum`, `TongueBody`, `TongueTip` and `LipsAndJaw`. A `Gesture` is a
+target for its tier's variables (`gesture::var`: a constriction's place and
+degree, the lips' aperture, the port, the glottis's spread, the pitch),
+moved towards as a mass on a spring of its own stiffness and damping,
+weighted by its dominance against the other gestures active on the tier,
+inside an activation window with ramps. Push one into a playing voice and
+read what each tier is doing:
+
+```rust
+use synthie_trombone::gesture::{Target, Window, var};
+use synthie_trombone::{Engine, Gesture, Phoneme, Tier, Trombone};
+
+let mut voice = Trombone::new(48_000.0);
+voice.set_engine(Engine::Physical);
+voice.articulate_phoneme(Phoneme::Aa);
+voice.note_on();
+// A tongue-tip closure for 80 ms, from 10 ms from now, ramped in and out.
+let closure = Target::NONE
+    .with(var::tip::LOCATION, 36.0)
+    .with(var::tip::DEGREE, 0.0);
+let taken = voice.push_gesture(
+    Gesture::new(Tier::TongueTip, closure).window(Window::between(0.01, 0.09).ramps(0.01, 0.02)),
+);
+assert!(taken);
+let mut buf = [0.0f32; 1024]; // 21 ms
+voice.render(&mut buf);
+let tip = voice.tier_activity()[Tier::TongueTip.index()];
+assert_eq!(tip.gestures, 1);
+```
+
+The score holds `gesture::Score::CAPACITY` gestures at once and never
+allocates; a gesture is any target on any tier, not a phoneme.
+
 ## Two engines
 
 `Engine::Classic` (the default) is Pink Trombone's own model.
@@ -121,7 +158,7 @@ than 70 % of their own rule length (by class since round 11, see
 
 Both engines read their numbers from `Tuning`, in three parts:
 `AnatomyConfig` (the body, its tissues and sources: 25 numbers),
-`ArticulationConfig` (how sounds are made and joined: 59, with a
+`ArticulationConfig` (how sounds are made and joined: 61, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine
