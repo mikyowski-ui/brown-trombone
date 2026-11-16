@@ -769,7 +769,11 @@ def profile_of(values: dict) -> dict:
 
 def values_of_profile(profile: dict) -> dict:
     flat = {k: v for k, v in profile.items() if k in NAMES}
-    flat.update({k: v for k, v in profile.get("tuning", {}).items() if k in NAMES})
+    # The tuning flat, or by part as the engine writes it (--dump-profile).
+    tuning = dict(profile.get("tuning", {}))
+    for part in ("anatomy", "articulation", "prosody"):
+        tuning.update(tuning.pop(part, {}))
+    flat.update({k: v for k, v in tuning.items() if k in NAMES})
     return flat
 
 
