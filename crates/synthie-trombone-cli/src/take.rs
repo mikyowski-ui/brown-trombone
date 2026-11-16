@@ -22,6 +22,8 @@
 )]
 
 use serde_json::{Value, json};
+use synthie_trombone::Gesture as ScoreGesture;
+use synthie_trombone::gesture::{GestureId, Target, Window};
 use synthie_trombone::inverse::Shape;
 use synthie_trombone::mimic::Gesture;
 use synthie_trombone::speech::{Prosody, Speaker, Utterance};
@@ -70,7 +72,15 @@ pub enum Logged {
     Mimic(bool),
     Shape(Shape),
     Gesture(Gesture),
+    /// A gesture for the voice's gesture score, kept in a slot of the
+    /// performer's so that it can be ended.
+    Push(u8, ScoreGesture),
+    /// End the gesture in a slot, over this many seconds.
+    EndGesture(u8, f32),
 }
+
+/// Slots for gestures played by hand.
+pub const GESTURE_SLOTS: usize = 4;
 
 /// What last set the tract's vowel shape (the narrowing along the tongue,
 /// which the voice does not report back).
@@ -186,6 +196,8 @@ pub struct Performer {
     /// from it, see [`controls`](Self::controls)).
     controls: Controls,
     was_speaking: bool,
+    /// Gestures played by hand, by slot.
+    gestures: [Option<GestureId>; GESTURE_SLOTS],
 }
 
 impl Performer {
@@ -200,6 +212,7 @@ impl Performer {
             speaker: Speaker::new(),
             controls: Controls::initial(),
             was_speaking: false,
+            gestures: [None; GESTURE_SLOTS],
         }
     }
 
@@ -211,6 +224,7 @@ impl Performer {
             speaker: Speaker::new(),
             controls: *c,
             was_speaking: false,
+            gestures: [None; GESTURE_SLOTS],
         }
     }
 
@@ -341,6 +355,23 @@ impl Performer {
             }
             Logged::Gesture(g) => {
                 self.follow(&g);
+            }
+            Logged::Push(slot, g) => {
+                if let Some(at) = self.gestures.get_mut(usize::from(slot)) {
+                    if let Some(old) = at.take() {
+                        self.voice.end_gesture(old, 0.0);
+                    }
+                    *at = self.voice.push_gesture_tracked(g);
+                }
+            }
+            Logged::EndGesture(slot, ramp) => {
+                if let Some(id) = self
+                    .gestures
+                    .get_mut(usize::from(slot))
+                    .and_then(Option::take)
+                {
+                    self.voice.end_gesture(id, ramp);
+                }
             }
         }
         None
@@ -539,6 +570,72 @@ fn shape_from(v: &Value) -> Result<Shape, String> {
     })
 }
 
+/// A gesture of the score as JSON: its tier, the variables its target sets
+/// by name, its dynamics and its window (an end that never comes is
+/// `null`).
+pub fn score_gesture_json(g: &ScoreGesture) -> Value {
+    let mut target = serde_json::Map::new();
+    for (k, name) in g.tier.variables().iter().enumerate() {
+        if let Some(x) = g.target.get(k) {
+            target.insert((*name).to_string(), x.into());
+        }
+    }
+    let w = g.window;
+    json!({
+        "tier": g.tier.name(),
+        "target": target,
+        "stiffness": g.stiffness,
+        "damping": g.damping,
+        "dominance": g.dominance,
+        "window": [w.start, if w.end.is_finite() { Value::from(w.end) } else { Value::Null },
+                   w.ramp_in, w.ramp_out],
+        "flags": g.flags,
+        "layer": g.layer,
+    })
+}
+
+fn score_gesture_from(v: &Value) -> Result<ScoreGesture, String> {
+    let name = get(v, "tier")?.as_str().ok_or("\"tier\" is not text")?;
+    let tier = synthie_trombone::Tier::ALL
+        .into_iter()
+        .find(|t| t.name() == name)
+        .ok_or_else(|| format!("unknown tier {name:?}"))?;
+    let mut target = Target::NONE;
+    let set = get(v, "target")?
+        .as_object()
+        .ok_or("\"target\" is not an object")?;
+    for (name, x) in set {
+        let k = tier
+            .variables()
+            .iter()
+            .position(|n| n == name)
+            .ok_or_else(|| format!("{tier:?} has no variable {name:?}"))?;
+        target.set(k, x.as_f64().ok_or("a target is not a number")? as f32);
+    }
+    let window = get(v, "window")?
+        .as_array()
+        .ok_or("\"window\" is not a list")?;
+    let at = |k: usize| window.get(k).and_then(Value::as_f64).map(|x| x as f32);
+    let int = |key: &str| -> Result<u8, String> {
+        get(v, key)?
+            .as_u64()
+            .and_then(|x| u8::try_from(x).ok())
+            .ok_or_else(|| format!("{key:?} is not a small number"))
+    };
+    Ok(ScoreGesture::new(tier, target)
+        .stiffness(num(v, "stiffness")?)
+        .damping(num(v, "damping")?)
+        .dominance(num(v, "dominance")?)
+        .window(Window {
+            start: at(0).unwrap_or(0.0),
+            end: at(1).unwrap_or(f32::INFINITY),
+            ramp_in: at(2).unwrap_or(0.0),
+            ramp_out: at(3).unwrap_or(0.0),
+        })
+        .flags(int("flags")?)
+        .layer(int("layer")?))
+}
+
 fn phoneme_from(v: &Value) -> Result<Phoneme, String> {
     v.as_str()
         .and_then(Phoneme::from_symbol)
@@ -662,6 +759,16 @@ impl Logged {
             Logged::StopSpeaking => ("stop_speaking", json!({})),
             Logged::Mimic(on) => ("mimic", json!({"on": on})),
             Logged::Shape(s) => ("shape", json!({"shape": shape_json(&s)})),
+            Logged::Push(slot, g) => ("push_gesture", {
+                let mut v = score_gesture_json(&g);
+                if let Value::Object(o) = &mut v {
+                    o.insert("slot".into(), slot.into());
+                }
+                v
+            }),
+            Logged::EndGesture(slot, ramp) => {
+                ("end_gesture", json!({"slot": slot, "ramp_out": ramp}))
+            }
             Logged::Gesture(g) => (
                 "gesture",
                 json!({
@@ -727,6 +834,14 @@ impl Logged {
             "stop_speaking" => Logged::StopSpeaking,
             "mimic" => Logged::Mimic(flag(v, "on")?),
             "shape" => Logged::Shape(shape_from(get(v, "shape")?)?),
+            "push_gesture" => {
+                let slot = u8::try_from(slot()?).map_err(|e| e.to_string())?;
+                Logged::Push(slot, score_gesture_from(v)?)
+            }
+            "end_gesture" => {
+                let slot = u8::try_from(slot()?).map_err(|e| e.to_string())?;
+                Logged::EndGesture(slot, num(v, "ramp_out")?)
+            }
             "gesture" => {
                 let shape = get(v, "shape")?;
                 Logged::Gesture(Gesture {

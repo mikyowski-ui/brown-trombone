@@ -12,11 +12,12 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
+use ratatui::widgets::{Padding, Paragraph};
 use synthie_trombone::inverse;
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
+use synthie_trombone::{Tier, TierActivity};
 use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, RED, YELLOW, bold, fg};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
 
@@ -37,7 +38,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .areas(frame.area());
 
     draw_header(frame, header, app);
-    draw_tract(frame, tract, app);
+    // The instrument panel beside the tract where there is room; in a
+    // narrow terminal its first numbers go on the tract view's lower edge.
+    let side = instrument_width(tract.width);
+    if side > 0 {
+        let [tract, instrument] =
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(side)]).areas(tract);
+        draw_tract(frame, tract, app, false);
+        draw_instrument(frame, instrument, app);
+    } else {
+        draw_tract(frame, tract, app, true);
+    }
     let [glottis, persona, scope] = Layout::horizontal([
         Constraint::Length(54),
         Constraint::Length(38),
@@ -121,11 +132,14 @@ fn amp_color(a: f32) -> Color {
     clippy::too_many_lines,
     clippy::many_single_char_names
 )]
-fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = panel(
+fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App, summary: bool) {
+    let mut block = panel(
         "vocal tract  ·  drag: constrict  ·  drag ◆ or shift-drag: tongue  ·  click a vowel or the nose",
         true,
     );
+    if summary {
+        block = block.title_bottom(Line::from(Span::styled(summary_text(app), fg(DIM))));
+    }
     app.tract_area = block.inner(area);
     let s = app.snap;
     let marks: Vec<(f64, f64, &str)> = LANDMARKS
@@ -563,6 +577,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             }
             let settings = key_hints(&[
                 ("F5", "record"),
+                ("F6", "score"),
                 ("v V", "voice"),
                 ("- =", "vibrato"),
                 ("m", "wobble"),
@@ -591,6 +606,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("Ctrl Shift V", "paste"),
                 ("Shift middle-click", "paste the selection"),
                 ("F5", "record"),
+                ("F6", "gesture score"),
             ]),
         ],
     };
@@ -760,13 +776,254 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &mut App) {
     // them in.
     let marks = app.chart_marks();
     let cursor = now.and_then(|(f1, f2)| app.chart_cell(f1, f2));
+    // Where the tract's own resonances are (measured, a little late).
+    let live = app
+        .live_formants()
+        .and_then(|[f1, f2, _]| app.chart_cell(f1, f2));
     let buf = frame.buffer_mut();
     for (name, _, cell) in marks {
         buf[cell].set_symbol(name).set_style(bold(FG));
     }
+    if let Some(cell) = live {
+        buf[cell].set_symbol("●").set_style(bold(CYAN));
+    }
     if let Some(cell) = cursor {
         buf[cell].set_symbol("◆").set_style(bold(YELLOW));
     }
+}
+
+// ----- the instrument panel ------------------------------------------------
+
+/// Columns of the instrument panel beside the tract view in a terminal
+/// `width` wide; `0` where there is no room for it (the tract view then
+/// carries a summary on its lower edge).
+#[must_use]
+pub fn instrument_width(width: u16) -> u16 {
+    match width {
+        120.. => 36,
+        100.. => 32,
+        80.. => 26,
+        _ => 0,
+    }
+}
+
+/// `F1 540 F2 1710 F3 2490`, from the latest measurement of the tract.
+fn formant_spans(app: &App, unit: bool) -> Vec<Span<'static>> {
+    let f = app.live_formants();
+    let mut spans = Vec::new();
+    for k in 0..3 {
+        if k > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(format!("F{}", k + 1), fg(DIM)));
+        spans.push(Span::styled(
+            f.map_or_else(|| "    —".to_string(), |f| format!("{:5.0}", f[k])),
+            bold(FG),
+        ));
+    }
+    if unit {
+        spans.push(Span::styled(" Hz", fg(DIM)));
+    }
+    spans
+}
+
+/// What makes the voice, as the panel names it.
+fn source_name(app: &App) -> &'static str {
+    let g = &app.snap.glottis;
+    if !g.physical {
+        return if app.snap.intensity > 0.05 {
+            "LF pulse"
+        } else {
+            "—"
+        };
+    }
+    match g.sounding {
+        Some(synthie_trombone::GlottalSource::Folds) => "folds",
+        Some(synthie_trombone::GlottalSource::Pulse) => "pulse",
+        None => "—",
+    }
+}
+
+/// The text the tract view's lower edge carries where the instrument
+/// panel has no room.
+fn summary_text(app: &App) -> String {
+    let f = app.live_formants().map_or_else(
+        || "F1 — F2 — F3 —".to_string(),
+        |f| format!("F1 {:.0} F2 {:.0} F3 {:.0}", f[0], f[1], f[2]),
+    );
+    let g = &app.snap.glottis;
+    if g.physical {
+        let shut = g
+            .closed
+            .map_or_else(|| "—".to_string(), |c| format!("{:.0}%", c * 100.0));
+        format!(
+            " {f} · ΔP {:.1} · shut {shut} {} ",
+            g.transglottal,
+            source_name(app)
+        )
+    } else {
+        format!(" {f} · {} ", source_name(app))
+    }
+}
+
+/// A tier's name on its row.
+fn short_name(tier: Tier) -> &'static str {
+    match tier {
+        Tier::GlottalAdduction => "glottis",
+        Tier::LarynxAndPitch => "larynx",
+        Tier::Velum => "velum",
+        Tier::TongueBody => "body",
+        Tier::TongueTip => "tip",
+        Tier::LipsAndJaw => "lips",
+    }
+}
+
+/// One tier as a row: its name, a track with where it is now (the bar)
+/// and where its target is (`┃`), and how many gestures drive it. The name
+/// is cyan where the gesture score's gestures act on the tier (`scored`),
+/// white where the row is read off the controls, dim while nothing drives
+/// it.
+fn tier_line(name: &str, t: &TierActivity, width: usize, scored: bool) -> Line<'static> {
+    let active = t.activation >= 0.5;
+    let track = width.saturating_sub(8 + 2).max(4);
+    let style = match (active, scored) {
+        (true, true) => bold(CYAN),
+        (true, false) => bold(FG),
+        (false, _) => fg(DIM),
+    };
+    let mut spans = vec![Span::styled(format!("{name:<7} "), style)];
+    let mut bar = if active {
+        meter(t.value, track)
+    } else {
+        synthie_ui::widgets::bar(t.value, track, |_| DIM)
+    };
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let at = ((t.target.clamp(0.0, 1.0) * (track - 1) as f32).round() as usize).min(track - 1);
+    bar[at] = Span::styled("┃", if active { bold(YELLOW) } else { fg(DIM) });
+    spans.extend(bar);
+    spans.push(Span::styled(
+        match t.gestures {
+            0 => " ·".to_string(),
+            n => format!(" {n}"),
+        },
+        if active { fg(FG) } else { fg(FAINT) },
+    ));
+    Line::from(spans)
+}
+
+/// The instrument panel: the tract's formants, the glottis's pressures
+/// and closure, and the tiers of the gesture score.
+#[allow(clippy::too_many_lines)]
+fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
+    let title = if app.gesture_score() {
+        "instrument  ·  score"
+    } else {
+        "instrument"
+    };
+    let block = panel(title, false).padding(Padding::left(1));
+    let inner = block.inner(area);
+    let (w, h) = (usize::from(inner.width), usize::from(inner.height));
+    let g = app.snap.glottis;
+
+    let formants = Line::from(formant_spans(app, w >= 30));
+    let age = app.formants.map(|_| {
+        #[allow(clippy::cast_precision_loss)]
+        let ms = app.formants_late as f32 / app.sample_rate() * 1000.0;
+        let text = if w >= 30 {
+            format!("tract resonances, {ms:.0} ms late")
+        } else {
+            format!("resonances, {ms:.0} ms late")
+        };
+        Line::from(Span::styled(text, fg(DIM)))
+    });
+    // Across the folds; below them (the lungs push harder than asked for
+    // a high or pressed note); what the voice asks of the lungs.
+    let pressure = if g.physical {
+        let mut spans = vec![
+            Span::styled("ΔP", fg(DIM)),
+            Span::styled(format!("{:5.1}", g.transglottal), bold(FG)),
+        ];
+        if w >= 30 {
+            spans.push(Span::styled(" sub", fg(DIM)));
+            spans.push(Span::styled(format!("{:5.1}", g.subglottal), fg(FG)));
+        }
+        spans.push(Span::styled(" lungs", fg(DIM)));
+        spans.push(Span::styled(
+            if w >= 30 {
+                format!("{:5.1}", g.lung)
+            } else {
+                format!("{:4.1}", g.lung)
+            },
+            fg(FG),
+        ));
+        if !(30..33).contains(&w) {
+            spans.push(Span::styled(" cmH2O", fg(DIM)));
+        }
+        Line::from(spans)
+    } else {
+        Line::from(Span::styled("ΔP   — classic: no air", fg(DIM)))
+    };
+    let source = source_name(app);
+    let closure = {
+        let tail = format!(" {source}");
+        let bar_width = w.saturating_sub(5 + 5 + tail.chars().count()).max(3);
+        let mut spans = vec![Span::styled("shut ", fg(DIM))];
+        if let Some(c) = g.closed {
+            spans.extend(meter(c, bar_width));
+            spans.push(Span::styled(format!("{:4.0}%", c * 100.0), bold(FG)));
+        } else {
+            spans.extend(synthie_ui::widgets::bar(0.0, bar_width, |_| FAINT));
+            spans.push(Span::styled("    —", fg(DIM)));
+        }
+        spans.push(Span::styled(
+            tail,
+            if source == "—" { fg(DIM) } else { bold(CYAN) },
+        ));
+        Line::from(spans)
+    };
+    let gap = g.physical.then(|| {
+        Line::from(vec![
+            Span::styled("gap  ", fg(DIM)),
+            Span::styled(format!("{:.3}‥{:.3}", g.area.0, g.area.1), fg(FG)),
+            Span::styled(" cm²", fg(DIM)),
+        ])
+    });
+    let tiers: Vec<Line> = Tier::ALL
+        .iter()
+        .zip(app.snap.tiers.iter().zip(&app.snap.scored))
+        .map(|(tier, (t, &scored))| tier_line(short_name(*tier), t, w, scored))
+        .collect();
+
+    // What must be there, then what fits.
+    let required = 3 + tiers.len();
+    let mut room = h.saturating_sub(required);
+    let mut take = |line: Option<Line<'static>>| {
+        line.filter(|_| {
+            let fits = room > 0;
+            room = room.saturating_sub(1);
+            fits
+        })
+    };
+    let age = take(age);
+    let gap = take(gap);
+    let spacer = take(Some(Line::from(vec![
+        Span::styled("tiers: ", fg(DIM)),
+        Span::styled("score", bold(CYAN)),
+        Span::styled(" · ", fg(DIM)),
+        Span::styled("controls", bold(FG)),
+    ])));
+    let mut lines = vec![formants];
+    lines.extend(age);
+    lines.push(pressure);
+    lines.push(closure);
+    lines.extend(gap);
+    lines.extend(spacer);
+    lines.extend(tiers);
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 #[cfg(test)]
@@ -790,6 +1047,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
@@ -869,6 +1127,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
@@ -951,6 +1210,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
@@ -1008,6 +1268,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,
@@ -1260,6 +1521,7 @@ mod tests {
                 cmd,
                 snapshots,
                 trash,
+                probes: crossbeam_channel::bounded(1).1,
                 sample_rate: 48_000.0,
                 microphone: false,
                 microphone_name: None,
@@ -1297,5 +1559,258 @@ mod tests {
             }
         }
         println!("tongue handle checked in {checked} frames");
+    }
+
+    /// An app wired to a real audio engine (no device): the callback the
+    /// device would run, and the app's ticks in between.
+    type Callback = Box<dyn FnMut(&mut [f32]) + Send>;
+
+    struct Live {
+        app: App,
+        callback: Callback,
+    }
+
+    impl Live {
+        fn new(engine: synthie_trombone::Engine) -> Self {
+            let size = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
+            let (core, link) = crate::audio::wire(48_000.0, None, size, None);
+            Self {
+                app: App::new(link, true, engine),
+                callback: Box::new(crate::audio::output(core, 2)),
+            }
+        }
+
+        /// Run the audio for `seconds` in callbacks of 512 frames.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        fn play(&mut self, seconds: f32) {
+            let mut buf = vec![0.0f32; 1024];
+            for _ in 0..(seconds * 48_000.0 / 512.0) as usize {
+                (self.callback)(&mut buf);
+                self.app.tick();
+            }
+        }
+
+        /// Play on until the formant meter has measured the tract as it
+        /// is now.
+        fn until_measured(&mut self) {
+            let t0 = std::time::Instant::now();
+            while self.app.formants.is_none() || !self.app.formants_up_to_date() {
+                assert!(t0.elapsed().as_secs() < 10, "the formants never came");
+                self.play(0.02);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+
+        fn press(&mut self, c: char) {
+            self.app
+                .key(synthie_ui::Key::press(synthie_ui::KeyCode::Char(c)));
+        }
+    }
+
+    fn draw_at(app: &mut App, w: u16, h: u16) -> (Terminal<TestBackend>, String) {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let text = frame_text(&term);
+        (term, text)
+    }
+
+    /// The instrument panel beside the tract at every size the tests use:
+    /// formants, pressures, closure and the six tiers, from a real voice;
+    /// in a narrow terminal the summary on the tract view's edge. Every
+    /// cell has the app's own background, so a light terminal shows it as
+    /// a dark one does. Look at it with `cargo test renders_the_instrument
+    /// -- --nocapture`.
+    #[test]
+    fn renders_the_instrument_panel_at_every_size() {
+        let mut live = Live::new(synthie_trombone::Engine::Physical);
+        live.press('5');
+        live.press('n');
+        live.app.key(synthie_ui::Key {
+            kind: synthie_ui::KeyKind::Press,
+            ..synthie_ui::Key::press(synthie_ui::KeyCode::Char('h'))
+        });
+        live.play(0.5);
+        live.until_measured();
+        let snap = live.app.snap;
+        assert_eq!(
+            snap.glottis.sounding,
+            Some(synthie_trombone::GlottalSource::Folds)
+        );
+        assert!(snap.tiers[0].activation > 0.5 && snap.tiers[2].activation > 0.5);
+        for (w, h) in [(200, 60), (120, 34), (100, 30), (80, 24), (60, 20)] {
+            let (term, text) = draw_at(&mut live.app, w, h);
+            println!("{w}×{h}\n{text}");
+            if w >= 80 {
+                for want in [
+                    "instrument",
+                    "F1",
+                    "F3",
+                    "ΔP",
+                    "shut",
+                    "folds",
+                    "glottis",
+                    "larynx",
+                    "velum",
+                    "body",
+                    "tip",
+                    "lips",
+                ] {
+                    assert!(text.contains(want), "{w}×{h}: no {want:?}\n{text}");
+                }
+                // The rest of the screen is as it was.
+                assert!(
+                    text.contains("persona") && text.contains("speak"),
+                    "{w}×{h}"
+                );
+                assert!(app_tract_is_wide(&live.app, w), "{w}×{h}");
+            } else {
+                let edge = text
+                    .lines()
+                    .nth(usize::from(live.app.tract_area.bottom()))
+                    .unwrap();
+                assert!(
+                    edge.contains("F1") && edge.contains("shut"),
+                    "{w}×{h}: {edge}"
+                );
+            }
+            let buf = term.backend().buffer();
+            for y in 0..h {
+                for x in 0..w {
+                    let c = &buf[(x, y)];
+                    assert!(
+                        c.bg != Color::Reset,
+                        "{w}×{h}: ({x}, {y}) {:?} has the terminal's own background",
+                        c.symbol()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The tract view keeps most of the width.
+    fn app_tract_is_wide(app: &App, w: u16) -> bool {
+        app.tract_area.width + instrument_width(w) + 2 >= w
+    }
+
+    /// Playing by hand moves the tiers: the voice, the velum, the tip and
+    /// the lips each light up their row, with the target where it is set.
+    #[test]
+    fn the_tiers_follow_manual_play() {
+        let mut live = Live::new(synthie_trombone::Engine::Classic);
+        live.play(0.2);
+        let quiet = live.app.snap.tiers;
+        assert!(
+            quiet.iter().skip(2).filter(|t| t.activation > 0.5).count() <= 1,
+            "{quiet:?}"
+        );
+        // A note on a nasal vowel.
+        live.press('n');
+        live.press('h');
+        live.play(0.4);
+        let t = live.app.snap.tiers;
+        assert_eq!(t[0].target, 1.0);
+        assert!(t[0].value > 0.5 && t[1].activation > 0.5, "{t:?}");
+        assert!(t[2].target > 0.5 && t[2].value > 0.3, "{t:?}");
+        // The lip pop closes the lips.
+        live.press('b');
+        live.play(0.03);
+        let t = live.app.snap.tiers;
+        assert!(t[5].activation > 0.5 && t[5].target > 0.9, "{t:?}");
+        let (_, text) = draw_at(&mut live.app, 120, 34);
+        let row = text.lines().find(|l| l.contains("│ lips    ")).unwrap();
+        println!("{row}");
+        assert!(row.contains('┃'), "{row}");
+    }
+
+    #[test]
+    fn a_tier_row_shows_value_target_and_gestures() {
+        let t = TierActivity {
+            activation: 1.0,
+            target: 1.0,
+            value: 0.5,
+            gestures: 2,
+        };
+        let line = tier_line("velum", &t, 30, false);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        println!("{text}");
+        assert_eq!(text.chars().count(), 30);
+        assert!(text.starts_with("velum   "));
+        // The target at the right end, the count after it.
+        assert!(text.ends_with("┃ 2"), "{text}");
+        assert_eq!(line.spans[0].style, bold(FG));
+        let idle = tier_line("tip", &TierActivity::default(), 30, false);
+        let text: String = idle.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.starts_with("tip     ┃") && text.ends_with(" ·"),
+            "{text}"
+        );
+        assert_eq!(idle.spans[0].style, fg(DIM));
+    }
+
+    /// The classic engine has no air: its pressures are marked so, and
+    /// the formants are still measured.
+    #[test]
+    fn the_classic_engine_shows_what_it_has() {
+        let mut live = Live::new(synthie_trombone::Engine::Classic);
+        live.press('1');
+        live.press('h');
+        live.play(0.3);
+        live.until_measured();
+        let (_, text) = draw_at(&mut live.app, 120, 34);
+        assert!(text.contains("classic: no air"), "{text}");
+        assert!(text.contains("LF pulse"), "{text}");
+        let [f1, f2, _] = live.app.live_formants().unwrap();
+        // /i/: F1 low, F2 high.
+        assert!(f1 < 450.0 && f2 > 1800.0, "{f1} {f2}");
+    }
+
+    /// With Formant Lock on, the chart marks where the tract's own
+    /// resonances are, beside where the lock steers.
+    #[test]
+    fn the_vowel_chart_marks_the_live_formants() {
+        let mut live = Live::new(synthie_trombone::Engine::Physical);
+        live.press('1');
+        live.press('/');
+        live.play(0.6);
+        live.until_measured();
+        let (term, _) = draw_at(&mut live.app, 120, 34);
+        let [f1, f2, _] = live.app.live_formants().unwrap();
+        let cell = live.app.chart_cell(f1, f2).expect("the chart is drawn");
+        let shown = term.backend().buffer()[cell].symbol().to_string();
+        assert!(shown == "●" || shown == "◆", "{shown} at {cell:?}");
+        // The lock's /i/ and the tract's own /i/ are close.
+        let (l1, l2) = live.app.lock_formants().unwrap();
+        println!("lock {l1:.0}/{l2:.0}, tract {f1:.0}/{f2:.0}");
+        assert!((f1 / l1).ln().abs() < 0.25 && (f2 / l2).ln().abs() < 0.15);
+    }
+
+    /// The age of the formants on the panel is how long ago the shape was
+    /// taken, and stays short while the voice plays.
+    #[test]
+    fn the_formants_are_a_frame_or_two_late() {
+        let mut live = Live::new(synthie_trombone::Engine::Physical);
+        live.press('5');
+        live.play(0.2);
+        // Keep the shape moving: the tongue goes back and forth.
+        let mut worst = 0.0f32;
+        let mut seen = Vec::new();
+        for k in 0..40 {
+            live.press(if k % 2 == 0 { '1' } else { '9' });
+            live.play(0.05);
+            std::thread::sleep(std::time::Duration::from_millis(8));
+            if live.app.formants.is_some() {
+                #[allow(clippy::cast_precision_loss)]
+                let ms = live.app.formants_late as f32 / 48.0;
+                worst = worst.max(ms);
+                seen.push(ms);
+            }
+        }
+        seen.sort_by(f32::total_cmp);
+        println!(
+            "formants {:.0} ms late (median), at most {worst:.0} ms",
+            seen[seen.len() / 2]
+        );
+        assert!(live.app.formants.is_some());
+        assert!(worst < 250.0, "{worst} ms");
     }
 }

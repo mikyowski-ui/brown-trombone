@@ -28,6 +28,7 @@ fn app() -> (App, Receiver<Cmd>) {
         cmd,
         snapshots,
         trash,
+        probes: crossbeam_channel::bounded(1).1,
         sample_rate: SR,
         microphone: false,
         microphone_name: None,
