@@ -40,11 +40,14 @@
 //! profiles use it either flat, `{"tuning": {"voice_tilt": 14}}`, or within
 //! its part, `{"tuning": {"anatomy": {"voice_tilt": 14}}}` (see
 //! [`VoiceSettings::with_profile`](crate::VoiceSettings::with_profile)).
-//! Three fields live under another name in the struct than in profiles,
+//! Six fields live under another name in the struct than in profiles,
 //! as the springs of their tiers: `articulation_rate` is
-//! `articulation.tongue_tip.stiffness`, `body_rate`
-//! `articulation.tongue_body.stiffness` and `body_damping`
-//! `articulation.tongue_body.damping`.
+//! `articulation.tongue_tip.stiffness`, `lips_rate`
+//! `articulation.lips_and_jaw.stiffness`, `body_rate`
+//! `articulation.tongue_body.stiffness`, `body_damping`
+//! `articulation.tongue_body.damping`, `larynx_rate`
+//! `articulation.larynx_and_pitch.stiffness` and `larynx_damping`
+//! `articulation.larynx_and_pitch.damping`.
 
 /// Which tuning pass a field belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,9 +117,10 @@ pub struct Field {
 ///
 /// The six tiers of [`ArticulationConfig`] (`glottal_adduction`,
 /// `larynx_and_pitch`, `velum`, `tongue_body`, `tongue_tip`,
-/// `lips_and_jaw`) each have one. Today's engine reads three of their
-/// numbers, which are [`Tuning::FIELDS`] under their old names
-/// (`body_rate`, `body_damping`, `articulation_rate`); the others are
+/// `lips_and_jaw`) each have one. Today's engine reads six of their
+/// numbers, which are [`Tuning::FIELDS`] under names of their own
+/// (`body_rate`, `body_damping`, `articulation_rate`, `lips_rate`,
+/// `larynx_rate`, `larynx_damping`); the others are
 /// filled with what today's articulators do where that is a spring, and are
 /// kept for the gesture engine: they are not in [`Tuning::FIELDS`], so not
 /// in profiles, until something reads them.
@@ -216,11 +220,14 @@ macro_rules! tuning {
         /// `{"tuning": {"voice_tilt": 14}}`, or within its part,
         /// `{"tuning": {"anatomy": {"voice_tilt": 14}}}` (see
         /// [`VoiceSettings::with_profile`](crate::VoiceSettings::with_profile)).
-        /// Three fields live under another name in the struct than in
+        /// Six fields live under another name in the struct than in
         /// profiles, as the springs of their tiers: `articulation_rate` is
-        /// `articulation.tongue_tip.stiffness`, `body_rate`
-        /// `articulation.tongue_body.stiffness` and `body_damping`
-        /// `articulation.tongue_body.damping`.
+        /// `articulation.tongue_tip.stiffness`, `lips_rate`
+        /// `articulation.lips_and_jaw.stiffness`, `body_rate`
+        /// `articulation.tongue_body.stiffness`, `body_damping`
+        /// `articulation.tongue_body.damping`, `larynx_rate`
+        /// `articulation.larynx_and_pitch.stiffness` and `larynx_damping`
+        /// `articulation.larynx_and_pitch.damping`.
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct Tuning {
             $(
@@ -451,6 +458,27 @@ tuning! {
         /// voiced closure, cm³/s; the air the voice sends into the shut mouth
         /// goes there, so the voice lasts through the closure.
         cavity_expansion = 150.0, 0.0..=300.0, A;
+
+        // ----- the tract's length (wave 2A; each `0` off) ---------------------------
+
+        /// Length of the fully protruded lip tube, cm at native size (physical
+        /// engine; it scales with the tract): with it above `0` the lips' cell
+        /// where rounding is centred (41) is a slide one tick long plus the
+        /// protrusion, of the lip opening's area, and the lumped inertance of a
+        /// lip tube of up to two cells in front of the opening is not used. The
+        /// protrusion is a state of the tract moved by the lips' spring towards
+        /// this times the rounding slot's protrusion (see `Tract::lengths`).
+        /// `0` keeps the lumped lip tube exactly. The owner's value is 1.2.
+        lip_horn = 0.0, 0.0..=2.0, A;
+        /// Share of the larynx's height the lower pharynx follows (physical
+        /// engine): with it above `0` cells 8 and 9 are one slide, two ticks
+        /// long at rest, stretched by a lowered larynx (up to 0.8 cm) and
+        /// shortened by a raised one (at most by one tick, 0.36 cm at native
+        /// size), the piriform sinuses at its lower end where they are today;
+        /// the air the moving larynx sweeps is taken up there (the piston).
+        /// `0` leaves the two cells as cells; `1` gives the larynx its full
+        /// travel.
+        larynx_travel = 0.0, 0.0..=1.0, A;
 
         // ----- the tongue body from measured modes (wave 2, stage 2C) ----------------
 
@@ -894,6 +922,20 @@ tuning! {
         /// the schwa's body is the blend, `1 / (1 + this)` of the way to the
         /// next vowel's. Vowels and consonants have dominance 1.
         schwa_dominance = 2.0, 0.25..=8.0, C;
+
+        // ----- who lowers the larynx (wave 2A; each `0` off) ------------------------
+
+        /// How far the larynx is lowered through the closure of a voiced stop
+        /// or affricate, cm (physical engine; read by the tract only with
+        /// `larynx_travel` on): a gesture on the larynx tier on the gesture
+        /// path, `Trombone::set_larynx_height` on the rule path; it comes back
+        /// up after the release at the larynx's own speed (`larynx_rate`).
+        voiced_stop_larynx = 0.0, 0.0..=0.8, A;
+        /// How far the larynx is lowered in a rounded vowel (/u ʊ oʊ ɝ w/ and
+        /// the rounded glides), cm (physical engine; with `larynx_travel` on):
+        /// the measured speaker's /u/ tract is 2.7 cm longer than his /i/, lips
+        /// and larynx together (Story 2008).
+        rounded_larynx = 0.0, 0.0..=0.8, C;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -902,10 +944,12 @@ tuning! {
         /// [`spread_closing`](Self::spread_closing)), not a spring, so its
         /// stiffness is `0` (none).
         glottal_adduction = TierDynamics::new(0.0, 1.0, 1.0);
-        /// The larynx's height and the pitch it carries. Not read yet:
-        /// today the pitch follows the speech compiler's contour directly,
-        /// so its stiffness is `0` (none).
-        larynx_and_pitch = TierDynamics::new(0.0, 1.0, 1.0);
+        /// The larynx's height and the pitch it carries. The pitch follows
+        /// the speech compiler's contour directly; the height is a spring of
+        /// the tract (wave 2A): its `stiffness` is the field `larynx_rate`,
+        /// its `damping` `larynx_damping` (read only with `larynx_travel`
+        /// on).
+        larynx_and_pitch = TierDynamics::new(18.0, 1.0, 1.0);
         /// The velum. Not read yet: today it moves at a fixed slew rate
         /// (`tract::Tract::move_damped`: open at 0.25, shut at
         /// `VELUM_SHUTTING` times the articulation speed, faster out of a
@@ -966,6 +1010,13 @@ tuning! {
         /// block by 1.1 % of its travel (the gate's limit 1 %; 0.98 % at 1, and
         /// 1.07 % at 0.9); at 0.7 the sentences were heard worse.
         body_damping => tongue_body.damping, 0.6..=1.0, B;
+        /// Natural frequency of the larynx's height, rad/s at speed 1
+        /// (physical engine, with `larynx_travel` on; wave 2A): at the speech
+        /// speed (2.2) 40 rad/s, the larynx tier's own, so a critically damped
+        /// larynx covers seven tenths of its way in 60 ms, nine tenths in 97.
+        larynx_rate => larynx_and_pitch.stiffness, 8.0..=40.0, B;
+        /// Damping ratio of the larynx's height (`1` critically damped).
+        larynx_damping => larynx_and_pitch.damping, 0.6..=1.0, B;
     }
 
     /// The rhythm and melody of a phrase (see [`Tuning`]): the
@@ -1406,7 +1457,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_twenty_five_sixty_five_and_forty_three() {
+    fn three_parts_of_twenty_seven_seventy_one_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1414,9 +1465,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (26, 67, 43)
+            (28, 71, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 136);
+        assert_eq!(Tuning::FIELDS.len(), 142);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1431,10 +1482,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_fifty_eight_and_sixty_two() {
+    fn two_passes_of_sixty_two_and_sixty_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (58, 63));
+        assert_eq!((a, b), (62, 65));
     }
 
     #[test]
@@ -1442,7 +1493,7 @@ mod tests {
         let hold = Tuning::FIELDS.iter().find(|f| f.name == "vowel_hold");
         assert!(hold.is_some_and(|f| f.default > 1.0 && f.lo >= 1.0));
         let c = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::C).count();
-        assert_eq!(c, 14);
+        assert_eq!(c, 15);
         // Lax vowels are never longer than tense ones.
         for name in ["lax_length", "unstressed_lax_length"] {
             let f = Tuning::FIELDS.iter().find(|f| f.name == name);

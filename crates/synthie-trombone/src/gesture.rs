@@ -28,9 +28,10 @@
 //! playing voice; [`Trombone::tier_activity`](crate::Trombone::tier_activity)
 //! reads what each tier is doing.
 //!
-//! The variables of each tier are listed in [`var`]. Two of them are slots
-//! the present tract ignores (the height of the larynx, the protrusion of
-//! the lips): they wait for a tract whose length can change.
+//! The variables of each tier are listed in [`var`]. Two of them change
+//! the tract's length (the height of the larynx, the protrusion of the
+//! lips): the physical tract hears them with `AnatomyConfig::larynx_travel`
+//! and `AnatomyConfig::lip_horn` on.
 
 use crate::math::{ln, spring_step};
 
@@ -41,8 +42,8 @@ pub enum Tier {
     /// glottis of a voiceless consonant and its aspiration (voice onset
     /// time), breathiness.
     GlottalAdduction,
-    /// The pitch contour, and the height of the larynx (a slot, ignored
-    /// until the tract's length can change).
+    /// The pitch contour, and the height of the larynx (which lengthens or
+    /// shortens the lower pharynx).
     LarynxAndPitch,
     /// The velar port: how much the nose is coupled to the mouth.
     Velum,
@@ -52,8 +53,8 @@ pub enum Tier {
     /// The tongue tip and blade: dental, alveolar, postalveolar and
     /// retroflex constrictions, and the lateral.
     TongueTip,
-    /// The lips and the jaw: rounding, protrusion (a slot, ignored until the
-    /// tract's length can change), bilabial and labiodental constrictions.
+    /// The lips and the jaw: rounding, protrusion (which lengthens the lips'
+    /// tube), bilabial and labiodental constrictions.
     LipsAndJaw,
 }
 
@@ -206,8 +207,11 @@ pub mod var {
     pub mod larynx {
         /// Pitch, Hz.
         pub const PITCH: usize = 0;
-        /// Height of the larynx, cm from rest (a slot for a tract whose
-        /// length changes; the present tract ignores it).
+        /// Height of the larynx, cm above rest at native size (`−0.8‥1`):
+        /// negative lowered, which lengthens the lower pharynx (see
+        /// [`Trombone::set_larynx_height`](crate::Trombone::set_larynx_height);
+        /// heard with `AnatomyConfig::larynx_travel` on). Unset, the larynx
+        /// stays where the setter holds it.
         pub const HEIGHT: usize = 1;
     }
     /// [`Tier::Velum`](super::Tier::Velum).
@@ -257,8 +261,10 @@ pub mod var {
         pub const APERTURE_LOCATION: usize = 0;
         /// Lip aperture of rounding (touch diameter; not a closure).
         pub const APERTURE: usize = 1;
-        /// Lip protrusion, cm (a slot for a tract whose length changes; the
-        /// present tract ignores it).
+        /// Lip protrusion, cm at native size (`0‥2`; see
+        /// [`Trombone::set_lip_protrusion`](crate::Trombone::set_lip_protrusion);
+        /// heard with `AnatomyConfig::lip_horn` on). Unset (its neutral), the
+        /// lips protrude as far as their rounding says.
         pub const PROTRUSION: usize = 2;
         /// Jaw opening (a slot: the present jaw follows the tongue body).
         pub const JAW: usize = 3;

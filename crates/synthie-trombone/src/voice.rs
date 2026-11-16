@@ -686,6 +686,48 @@ impl Trombone {
         }
     }
 
+    /// Push the lips forward by `cm` (cm at native size, `0‥2`), or let
+    /// them follow the rounding they are told to make (`None`, the
+    /// default): rounded lips protrude by
+    /// [`AnatomyConfig::lip_horn`](crate::AnatomyConfig::lip_horn) times
+    /// how rounded they are. The lips move there on their own spring. A
+    /// gesture setting the [`LipsAndJaw`](crate::Tier::LipsAndJaw) tier's
+    /// protrusion overrides it while it acts. Physical engine, heard only
+    /// with `lip_horn` above `0`.
+    pub fn set_lip_protrusion(&mut self, cm: Option<f32>) {
+        self.tract.protrusion_set = cm.filter(|c| c.is_finite());
+    }
+
+    /// Hold the larynx `cm` above its rest (cm at native size, `−0.8‥1`:
+    /// negative lowered, which lengthens the tract), as a speaker lowers it
+    /// through a voiced closure or for a rounded vowel; `0` by default. It
+    /// moves there on its own spring
+    /// ([`ArticulationConfig::larynx_rate`](crate::ArticulationConfig::larynx_rate)).
+    /// A gesture setting the [`LarynxAndPitch`](crate::Tier::LarynxAndPitch)
+    /// tier's height overrides it while it acts. Physical engine, heard only
+    /// with [`AnatomyConfig::larynx_travel`](crate::AnatomyConfig::larynx_travel)
+    /// above `0`.
+    pub fn set_larynx_height(&mut self, cm: f32) {
+        if cm.is_finite() {
+            let (lo, hi) = (
+                *crate::tract::LARYNX_RANGE.start(),
+                *crate::tract::LARYNX_RANGE.end(),
+            );
+            self.tract.larynx_target = (-cm).clamp(lo, hi);
+        }
+    }
+
+    /// How far the lips are pushed forward now, and the larynx above its
+    /// rest, cm at native size: `(protrusion, height)` (see
+    /// [`set_lip_protrusion`](Self::set_lip_protrusion),
+    /// [`set_larynx_height`](Self::set_larynx_height)). The tract moves them
+    /// whether or not the sound reads them.
+    #[must_use]
+    pub fn tract_lengths(&self) -> (f32, f32) {
+        let ([protrusion, lengthening], _) = self.tract.lengths();
+        (protrusion, -lengthening)
+    }
+
     /// Phonate continuously, ignoring the gate, like the original web toy.
     pub fn set_always_voice(&mut self, on: bool) {
         self.glottis.always_voice = on;
@@ -962,7 +1004,7 @@ impl Trombone {
             // Physical vowel shapes also follow the speaker's size, and the
             // tongue root goes with the tongue body.
             Engine::Physical => {
-                let mut held = self.own_vowels.on(self.tract.modal());
+                let mut held = self.own_vowels.on(crate::vowel_size::Table::of(&self.tuning, self.tract.modal()));
                 if let Some((key, shape)) = &self.speech_vowel {
                     held.set(*key, Some(shape));
                 }
@@ -1427,13 +1469,20 @@ impl Trombone {
                 self.set_fold_softness(x);
             }
         }
-        if has(Tier::LarynxAndPitch)
-            && let Some(hz) = self
-                .score
-                .blend(Tier::LarynxAndPitch)
-                .get(var::larynx::PITCH)
-        {
-            self.set_frequency(hz);
+        if has(Tier::LarynxAndPitch) {
+            let b = self.score.blend(Tier::LarynxAndPitch);
+            if let Some(hz) = b.get(var::larynx::PITCH) {
+                self.set_frequency(hz);
+            }
+            // The height, while a gesture sets it (as lengthening of the
+            // tract), at the speed the tier's stiffness asks.
+            self.tract.larynx_tier = b.get(var::larynx::HEIGHT).map(|h| -h);
+            let nominal = self.nominal_stiffness(Tier::LarynxAndPitch);
+            self.tract.larynx_speed_ratio = if b.gestures > 0 && nominal > 0.0 {
+                b.stiffness / nominal
+            } else {
+                1.0
+            };
         }
         if has(Tier::Velum) {
             let b = self.score.blend(Tier::Velum);
@@ -1528,6 +1577,11 @@ impl Trombone {
                 .map(|(at, d)| Constriction::new(at, d));
             self.tract.set_constriction(SLOT_LIPS, rounding);
             self.tract.own_lips = lips.flags & flag::OWN_LIPS != 0;
+            // The protrusion, while a gesture sets it (its neutral, `0`,
+            // stands for "follow the rounding").
+            self.tract.protrusion_tier = lips
+                .get(var::lips::PROTRUSION)
+                .filter(|_| lips.setter[var::lips::PROTRUSION].1 > f64::NEG_INFINITY);
         }
         self.tract.lateral = physical && tip.flags & flag::LATERAL != 0;
         // The constrictions: the latest made takes the main slot, another
@@ -1709,6 +1763,7 @@ impl Trombone {
         }
         self.phys.set_teeth(self.tract.teeth());
         self.phys.set_edge(self.tract.edges());
+        self.phys.set_lengths(self.tract.lengths());
         self.phys
             .snap(&self.tract.diameter, self.tract.velum_openness());
     }
@@ -1905,6 +1960,7 @@ impl Trombone {
                 self.phys.set_motion(self.tract.velocity());
                 self.phys.set_teeth(self.tract.teeth());
                 self.phys.set_edge(self.tract.edges());
+                self.phys.set_lengths(self.tract.lengths());
                 self.phys.begin_block(
                     &self.tract.diameter,
                     self.tract.velum_openness(),

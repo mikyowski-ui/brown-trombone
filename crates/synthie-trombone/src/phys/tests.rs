@@ -339,3 +339,294 @@ fn nasal_murmur_is_low_and_has_an_antiresonance() {
     // Both nostrils carry flow, and not equally.
     assert!(p.gauge.u_lips.abs() < 1e-6);
 }
+
+// ----- the tract's length (wave 2A) ----------------------------------------
+
+/// A tract with the lip horn and the larynx slide as given
+/// (`AnatomyConfig::lip_horn`, `AnatomyConfig::larynx_travel`).
+fn with_slides(horn: f32, travel: f32) -> Phys {
+    let mut t = crate::Tuning::DEFAULT;
+    t.anatomy.lip_horn = horn;
+    t.anatomy.larynx_travel = travel;
+    let mut p = Phys::new();
+    p.set_tuning(&t);
+    p
+}
+
+/// Ticks in a control block of the physical engine (128 internal samples).
+const BLOCK_TICKS: usize = 256;
+
+/// Play `blocks` control blocks of shape `d` with the lengths `at(t)` (cm:
+/// protrusion, lengthening) and their speeds `speed(t)` (cm/s) at each
+/// block's end, `t` in seconds; `each` sees the tract after every tick.
+fn moving(
+    p: &mut Phys,
+    d: &[f32; N],
+    blocks: usize,
+    at: impl Fn(f32) -> [f32; 2],
+    speed: impl Fn(f32) -> [f32; 2],
+    mut each: impl FnMut(&Phys, usize),
+) {
+    #[allow(clippy::cast_precision_loss)]
+    let block_dt = BLOCK_TICKS as f32 * TICK;
+    let mut n = 0;
+    for b in 0..blocks {
+        #[allow(clippy::cast_precision_loss)]
+        let t = (b + 1) as f32 * block_dt;
+        p.set_lengths((at(t), speed(t)));
+        p.begin_block(d, 0.0, block_dt, false);
+        for k in 0..BLOCK_TICKS {
+            #[allow(clippy::cast_precision_loss)]
+            let lambda = k as f32 / BLOCK_TICKS as f32;
+            p.tick(lambda, Drive::Flow(0.0));
+            each(p, n);
+            n += 1;
+        }
+    }
+}
+
+#[test]
+fn slides_at_rest_change_nothing() {
+    // The lip horn with the lips not pushed forward is the lips' cell, bit
+    // for bit, in the whole tract (losses, walls, nose, sinuses, noise),
+    // for shapes whose lips are open wide enough not to protrude today.
+    let mut seed = 5u32;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        #[allow(clippy::cast_precision_loss)]
+        let x = (seed >> 8) as f32 / 16_777_216.0;
+        x
+    };
+    for case in 0..6 {
+        let mut d = [1.8f32; N];
+        if case > 0 {
+            for v in &mut d {
+                *v = 0.3 + 2.5 * rnd();
+            }
+            for v in &mut d[39..] {
+                *v = v.max(1.3);
+            }
+        }
+        let velum = if case % 2 == 0 { 0.0 } else { 0.6 };
+        let mut plain = Phys::new();
+        let mut horn = with_slides(1.2, 0.0);
+        plain.snap(&d, velum);
+        horn.set_lengths(([0.0; 2], [0.0; 2]));
+        horn.snap(&d, velum);
+        for n in 0..6000 {
+            let drive = if n < 3000 {
+                Drive::Flow(if n == 0 { 1.0 } else { 0.0 })
+            } else {
+                Drive::Glottis {
+                    area: if n % 400 < 200 { 0.12 } else { 0.02 },
+                    lung: 8.0 * CM_H2O,
+                }
+            };
+            let (a, b) = (plain.tick(1.0, drive), horn.tick(1.0, drive));
+            assert_eq!(a.to_bits(), b.to_bits(), "case {case}, tick {n}");
+        }
+    }
+}
+
+#[test]
+fn the_larynx_slide_at_rest_is_the_cells_it_replaces() {
+    // Uniform and lossless, two cells and a slide two ticks long are
+    // the same tube (but for the rounding at the joint inside).
+    let d = [1.8f32; N];
+    let mut cells = Phys::new();
+    cells.set_ideal(true);
+    cells.snap(&d, 0.0);
+    let mut slide = with_slides(0.0, 1.0);
+    slide.set_ideal(true);
+    slide.set_lengths(([0.0; 2], [0.0; 2]));
+    slide.snap(&d, 0.0);
+    let a = impulse(&mut cells, 20_000);
+    let b = impulse(&mut slide, 20_000);
+    let peak = a.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let worst = a
+        .iter()
+        .zip(&b)
+        .fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+    std::println!("largest difference {:.2e} of the peak", worst / peak);
+    assert!(worst <= 1e-4 * peak, "{worst} of {peak}");
+}
+
+#[test]
+fn lengthened_tubes_resonate_where_theory_says() {
+    // A closed-open uniform tube lengthened by ΔL at the lips (the horn) or
+    // at the larynx (the slide) resonates at (2n − 1)·c/4(L + ΔL), L with
+    // the end correction of a piston in a baffle: its resonances move from
+    // the tube's own by L/(L + ΔL) within 1 %, and are within 2 % of the
+    // formula as the tube's own are (`uniform_tube_resonates_where_theory_says`;
+    // the end correction shrinks a little at higher frequencies).
+    #[allow(clippy::cast_precision_loss)]
+    let length = N as f32 * C * TICK + 8.0 * sqrt(AREA_SCALE) / (3.0 * PI);
+    let mut own = with_slides(1.2, 1.0);
+    own.set_ideal(true);
+    own.set_lengths(([0.0; 2], [0.0; 2]));
+    own.snap(&[2.0; N], 0.0);
+    let own = peaks(&impulse(&mut own, 40_000), 4000.0);
+    for (name, horn, lengthening) in [
+        ("lips +1.2 cm", 1.2f32, 0.0f32),
+        ("lips +0.73 cm", 0.73, 0.0),
+        ("larynx +0.8 cm", 0.0, 0.8),
+        ("larynx -0.35 cm", 0.0, -0.35),
+        ("both", 1.2, 0.8),
+    ] {
+        let mut p = with_slides(1.2, 1.0);
+        p.set_ideal(true);
+        p.set_lengths(([horn, lengthening], [0.0; 2]));
+        p.snap(&[2.0; N], 0.0);
+        let x = impulse(&mut p, 40_000);
+        let found = peaks(&x, 4000.0);
+        let total = length + horn + lengthening;
+        for (k, &(hz, _)) in found.iter().take(3).enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let theory = (2 * k + 1) as f32 * C / (4.0 * total);
+            let err = (hz - theory) / theory;
+            let moved = hz / own[k].0;
+            let shift = moved / (length / total) - 1.0;
+            std::println!(
+                "{name}: mode {k} {hz:.0} Hz, theory {theory:.0} ({:+.2} %); moved by {moved:.4}, theory {:.4} ({:+.2} %)",
+                100.0 * err,
+                length / total,
+                100.0 * shift
+            );
+            assert!(shift.abs() < 0.01, "{name}, mode {k}: moved by {moved}");
+            assert!(err.abs() < 0.02, "{name}, mode {k}: {hz} vs {theory}");
+        }
+        assert!(found.len() >= 3);
+    }
+}
+
+/// The slides' lengths swept through their ranges and back over `period`
+/// seconds, cm, and their speeds, cm/s: the horn 0 to 1.2, the larynx −0.35
+/// to +0.8.
+fn sweep(period: f32) -> (impl Fn(f32) -> [f32; 2], impl Fn(f32) -> [f32; 2]) {
+    let w = core::f32::consts::TAU / period;
+    let at = move |t: f32| {
+        let c = (w * t).cos();
+        [0.6 - 0.6 * c, 0.225 - 0.575 * c]
+    };
+    let speed = move |t: f32| {
+        let s = (w * t).sin();
+        [0.6 * w * s, 0.575 * w * s]
+    };
+    (at, speed)
+}
+
+#[test]
+fn energy_never_grows_while_the_slides_move() {
+    // Lossless, the glottis and the lips shut, a sound ringing inside (a
+    // pulse of air in and out again, so no air is added): the slides swept
+    // through their whole ranges and back in 80, 40 and 10 ms (one way in
+    // 40, 20 and 5 ms; the quickest gesture takes 40). The delay lines
+    // alone never add energy. With the pistons the moving ends do work on
+    // the air (the pressure there pushes on the volume they sweep; in this
+    // rigid tract the larynx's sweep alone changes the pressure by tens of
+    // cmH2O, far more energy than the ringing sound), and the energy never
+    // exceeds what was put in plus the work done on it.
+    let mut d = [1.8f32; N];
+    d[N - 1] = 0.0;
+    for pistons in [false, true] {
+        for period in [0.08f32, 0.04, 0.01] {
+            let mut p = with_slides(1.2, 1.0);
+            p.set_ideal(true);
+            p.set_pistons(pistons);
+            p.set_lengths(([0.0, 0.225 - 0.575], [0.0; 2]));
+            p.snap(&d, 0.0);
+            p.reset();
+            p.tick(1.0, Drive::Flow(1000.0));
+            p.tick(1.0, Drive::Flow(-1000.0));
+            let start = f64::from(p.energy(1.0));
+            let (at, speed) = sweep(period);
+            // The work done on the air, in the units of `energy`.
+            let mut work = 0.0f64;
+            let mut most = 0.0f64;
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )]
+            let blocks = (2.0 * period / (BLOCK_TICKS as f32 * TICK)) as usize;
+            moving(&mut p, &d, blocks, at, speed, |p, _| {
+                work -= f64::from(p.gauge.piston * RHO_C);
+                let e = f64::from(p.energy(1.0));
+                let bound = start + work;
+                most = most.max(e / bound);
+                assert!(e <= bound * 1.000_1, "{e} > {start} + {work}");
+            });
+            std::println!(
+                "pistons {pistons}, period {:.0} ms: at most {most:.5} of what was put in and done (the work {:.1} times the sound's energy)",
+                1000.0 * period,
+                work / start
+            );
+        }
+    }
+}
+
+#[test]
+fn the_piston_drops_the_pressure_by_the_volume_it_sweeps() {
+    // A shut, rigid, lossless tract: lowering the larynx by 0.8 cm grows
+    // the air's volume by the slide's area times that, and its pressure
+    // falls by ρc² times the share of the volume added.
+    let mut d = [1.8f32; N];
+    d[N - 1] = 0.0;
+    let mut p = with_slides(0.0, 1.0);
+    p.set_ideal(true);
+    p.set_lengths(([0.0; 2], [0.0; 2]));
+    p.snap(&d, 0.0);
+    p.reset();
+    let lowering = 0.8f32;
+    let time = 0.1f32;
+    let at = move |t: f32| {
+        let x = (t / time).clamp(0.0, 1.0);
+        [0.0, lowering * x * x * (3.0 - 2.0 * x)]
+    };
+    let speed = move |t: f32| {
+        let x = (t / time).clamp(0.0, 1.0);
+        [0.0, lowering * 6.0 * x * (1.0 - x) / time]
+    };
+    let mut mean = 0.0f64;
+    let mut count = 0.0f64;
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let blocks = (0.2 / (BLOCK_TICKS as f32 * TICK)) as usize;
+    moving(&mut p, &d, blocks, at, speed, |p, n| {
+        #[allow(clippy::cast_precision_loss)]
+        if n as f32 * TICK > 0.15 {
+            // The pressure averaged over the air in the tract.
+            let (mut pv, mut v) = (0.0f32, 0.0f32);
+            for i in 0..N - 1 {
+                let a = p.a1[i];
+                let len = if LARYNX_CELLS.contains(&i) {
+                    p.slide_ticks().1 / LARYNX_REST
+                } else {
+                    1.0
+                };
+                pv += p.pressure(i) * a * len;
+                v += a * len;
+            }
+            mean += f64::from(pv / v);
+            count += 1.0;
+        }
+    });
+    #[allow(clippy::cast_possible_truncation)]
+    let drop = (mean / count) as f32;
+    let area = p.a1[8];
+    #[allow(clippy::cast_precision_loss)]
+    let volume = (N - 1) as f32 * area * C * TICK;
+    let added = area * lowering;
+    let theory = -RHO_C * C * added / (volume + added);
+    std::println!(
+        "{added:.2} cm³ added to {volume:.1}: {:.1} cmH2O, theory {:.1}",
+        drop / CM_H2O,
+        theory / CM_H2O
+    );
+    assert!((drop / theory - 1.0).abs() < 0.02, "{drop} vs {theory}");
+}

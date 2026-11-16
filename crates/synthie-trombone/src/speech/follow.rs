@@ -118,10 +118,12 @@ pub struct FollowOptions {
     /// fricatives of content words, stops and sibilants excepted (see
     /// [`ArticulationConfig::follow_shortest_light`](crate::ArticulationConfig::follow_shortest_light)).
     pub shortest_light: f32,
-    /// Whether the voice has the modal tongue body
-    /// ([`AnatomyConfig::tongue_model`](crate::AnatomyConfig::tongue_model) 1): its
-    /// vowels are then solved on the modal babble map.
-    pub modal: bool,
+    /// The voice's tuning, whose tongue model
+    /// ([`AnatomyConfig::tongue_model`](crate::AnatomyConfig::tongue_model)) and
+    /// tract ([`vowel_targets::lengthened`](crate::vowel_targets::lengthened))
+    /// choose the vowel shapes followed from (the modal body's solved on its
+    /// babble map).
+    pub tract: Tuning,
 }
 
 impl FollowOptions {
@@ -145,7 +147,7 @@ impl FollowOptions {
             max_speed: t.articulation.follow_speed_max,
             shortest: t.articulation.follow_shortest,
             shortest_light: t.articulation.follow_shortest_light,
-            modal: t.anatomy.tongue_model >= 0.5,
+            tract: t,
         }
     }
 
@@ -855,7 +857,7 @@ impl Utterance {
                 let first = solved[p as usize].is_none();
                 let Some(own) = key
                     .articulation()
-                    .and_then(|a| a.physical_shape_on(length, options.modal))
+                    .and_then(|a| a.physical_shape_with(length, &options.tract))
                 else {
                     continue;
                 };

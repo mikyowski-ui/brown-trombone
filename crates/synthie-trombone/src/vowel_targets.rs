@@ -240,6 +240,17 @@ pub const TARGETS: &[Target] = &[
     fronted(Phoneme::Ax, [ 400.0, 1750.0, 2600.0], Lips::Spread),
 ];
 
+/// Whether a voice of `tuning` speaks with the vowel shapes solved for the
+/// tract whose length changes (wave 2A: `AnatomyConfig::lip_horn` or
+/// `larynx_travel` above `0`; `src/vowel_size_wave_table.rs` and
+/// `src/vowel_modes_wave_table.rs`, solved for the values written in their
+/// headers) rather than for the default tract. A voice with only some of
+/// those numbers on, or other values, reads the same lengthened tables.
+#[must_use]
+pub fn lengthened(tuning: &crate::Tuning) -> bool {
+    tuning.anatomy.lip_horn > 0.0 || tuning.anatomy.larynx_travel > 0.0
+}
+
 /// How many vowel shapes there are (the length of [`TARGETS`]).
 pub const TARGET_COUNT: usize = TARGETS.len();
 

@@ -9,7 +9,24 @@
 //! ```
 //!
 //! then check with `cargo test -p synthie-trombone --release --test
-//! vowel_size_gate`. Uses every CPU thread; takes a minute or two. The babble
+//! vowel_size_gate`.
+//!
+//! There are four tables, by tongue body and tract
+//! (`vowel_targets::lengthened`), each one command:
+//!
+//! ```sh
+//! cargo run -p synthie-trombone --example vowel_size --release                  # cosine, default tract
+//! cargo run -p synthie-trombone --example vowel_size --release -- --modal       # modal body (tongue_model 1)
+//! cargo run -p synthie-trombone --example vowel_size --release -- --lengthened --both
+//! #   both bodies for the tract the wave is switched on with (lip_horn 1.2,
+//! #   larynx_travel 1, rounded_larynx 0.5); `--profile FILE` lays a voice
+//! #   profile's tuning on top (the epilarynx's numbers, say), and the table
+//! #   is written where a voice of that tuning reads it
+//! ```
+//!
+//! `--both` solves the cosine and the modal table in one run. Solve the
+//! modal babble map for the same tract first (`examples/babble.rs --modal`):
+//! the modal solver starts from its answers. Uses every CPU thread; takes a minute or two. The babble
 //! map (`examples/babble.rs`) only needs regenerating when the engine's
 //! acoustics change, not when a target does.
 //!
@@ -932,12 +949,24 @@ fn key_src(key: VowelKey) -> String {
 }
 
 fn main() {
-    let started = Instant::now();
-    let model = if std::env::args().any(|a| a == "--modal") {
-        Model::Modal
+    let args: Vec<String> = std::env::args().collect();
+    let base = survey::base_from_args();
+    let models: &[Model] = if args.iter().any(|a| a == "--both") {
+        &[Model::Cosine, Model::Modal]
+    } else if args.iter().any(|a| a == "--modal") {
+        &[Model::Modal]
     } else {
-        Model::Cosine
+        &[Model::Cosine]
     };
+    for &model in models {
+        run(model, &base);
+    }
+}
+
+/// Solve, verify and write the table of `model` for the tract `base`
+/// configures (see `survey::base_from_args`).
+fn run(model: Model, base: &synthie_trombone::Tuning) {
+    let started = Instant::now();
     let targets: Vec<Target> = TARGETS.to_vec();
     let first = |t: &Target| Kind::of(model, t);
 
@@ -1237,6 +1266,19 @@ fn main() {
     for line in summary.lines() {
         let _ = writeln!(src, "//! {line}");
     }
+    // The numbers of the tract it is solved for, where they are not the
+    // defaults (the default tract's table has none).
+    let changed: Vec<String> = synthie_trombone::Tuning::FIELDS
+        .iter()
+        .filter(|f| f.name != "tongue_model")
+        .filter_map(|f| {
+            let v = base.get(f.name)?;
+            (v.to_bits() != f.default.to_bits()).then(|| format!("{} {v}", f.name))
+        })
+        .collect();
+    if !changed.is_empty() {
+        let _ = writeln!(src, "//! Solved for: {}.", changed.join(", "));
+    }
     let _ = writeln!(
         src,
         "//! ```\n\n\
@@ -1279,9 +1321,15 @@ fn main() {
         let _ = writeln!(src, "    ]),");
     }
     let _ = writeln!(src, "];");
-    let path = match model {
-        Model::Cosine => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_size_table.rs"),
-        Model::Modal => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_modes_table.rs"),
+    let path = match (model, vowel_targets::lengthened(base)) {
+        (Model::Cosine, false) => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_size_table.rs"),
+        (Model::Cosine, true) => {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_size_wave_table.rs")
+        }
+        (Model::Modal, false) => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_modes_table.rs"),
+        (Model::Modal, true) => {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_modes_wave_table.rs")
+        }
     };
     std::fs::write(path, &src).expect("write the table");
     println!(

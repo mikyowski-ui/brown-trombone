@@ -530,7 +530,7 @@ impl Articulation {
         tract_length: f32,
         held: &vowel_size::OwnShapes,
     ) -> Option<[f32; 3]> {
-        if !held.1 || self.tongue == Some(VELAR_TONGUE) {
+        if !held.1.modal() || self.tongue == Some(VELAR_TONGUE) {
             return None;
         }
         if self.own_body() {
@@ -608,7 +608,7 @@ impl Articulation {
             a.lips = lips.map(|d| Constriction::new(LIPS, d));
             return (a, Some(Constriction::new(narrow.0, narrow.1)));
         }
-        let mut a = self.leaning_on(tongue, tract_length);
+        let mut a = self.leaning_on(tongue, tract_length, held);
         let hisses = a
             .constriction
             .is_some_and(|c| c.diameter > SHUT_WIDEST && c.diameter <= crate::tract::HISS_WIDEST);
@@ -631,7 +631,7 @@ impl Articulation {
     /// [`own_body`](Self::own_body)) keep it: the back of the tongue is
     /// their articulator. /k g ŋ/ close a little further forward before
     /// front vowels and further back before back ones ([`velar_place`]).
-    fn leaning_on(self, body: (f32, f32), tract_length: f32) -> Self {
+    fn leaning_on(self, body: (f32, f32), tract_length: f32, held: &vowel_size::OwnShapes) -> Self {
         let mut a = self;
         let (index, diameter) = body;
         // `w` of the way from the vowel's body to `(i0, d0)`.
@@ -650,7 +650,7 @@ impl Articulation {
             // engine gives both the same), as the physical engine shapes it.
             if self.tongue == Phoneme::R.classic().tongue
                 && let Some((er, _, _, _, _)) =
-                    vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
+                    vowel_size::shape_from(held.1, VowelKey::Vowel(Phoneme::Er), tract_length)
             {
                 a.tongue = Some(er);
             }
@@ -747,15 +747,21 @@ impl Articulation {
     /// `None` if it is not a vowel's.
     #[must_use]
     pub fn physical_shape(self, tract_length: f32) -> Option<crate::inverse::Shape> {
-        self.physical_shape_on(tract_length, false)
+        self.physical_shape_with(tract_length, &crate::Tuning::DEFAULT)
     }
 
-    /// [`physical_shape`](Self::physical_shape) on the modal tongue body
-    /// (`AnatomyConfig::tongue_model` 1) if `modal`: its three numbers, lips
-    /// and narrowing from the modal table.
+    /// [`physical_shape`](Self::physical_shape) for a voice of `tuning`: from
+    /// the vowel table its tongue model (`AnatomyConfig::tongue_model`; the
+    /// modal body's three numbers, lips and narrowing) and its tract
+    /// ([`vowel_targets::lengthened`](crate::vowel_targets::lengthened)) read.
     #[must_use]
-    pub fn physical_shape_on(self, tract_length: f32, modal: bool) -> Option<crate::inverse::Shape> {
-        let held = vowel_size::OwnShapes::NONE.on(modal);
+    pub fn physical_shape_with(
+        self,
+        tract_length: f32,
+        tuning: &crate::Tuning,
+    ) -> Option<crate::inverse::Shape> {
+        let table = vowel_size::Table::of(tuning, tuning.anatomy.tongue_model >= 0.5);
+        let held = vowel_size::OwnShapes::NONE.on(table);
         let (a, narrowing) = self.physical_in(tract_length, &held);
         let ((tongue_index, tongue_diameter), narrowing) = (a.tongue?, narrowing?);
         Some(crate::inverse::Shape {

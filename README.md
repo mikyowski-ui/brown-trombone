@@ -296,9 +296,9 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 26 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 28 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-67) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+71) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
@@ -311,6 +311,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | breath noise | `glottal_efficiency`, `voiced_breath_corner`, `voiced_breath_gain` |
 | anatomy | jets and hiss | `jet_efficiency`, `teeth_gain`, `hiss_corner`, `hiss_floor`, `teeth_corner`, `labial_edge`, `dental_edge` |
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
+| anatomy | the tract's length (wave 2A; each `0` off) | `lip_horn`, `larynx_travel` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
@@ -318,8 +319,9 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | closures and releases | `closure_floor`, `fortis_closure`, `voicing_tail`, `aspiration` (*classic*), `vot_labial`, `vot_alveolar`, `vot_velar`, `unstressed_vot`, `devoicing_lead`, `tap_length` |
 | articulation | vowels gliding into their neighbours | `lax_nucleus`, `ae_nucleus`, `fronted_nucleus`, `dark_l_share` |
 | articulation | following a speaker's schedule | `follow_breath_low`, `follow_breath_high`, `follow_tenseness_low`, `follow_tenseness_high`, `follow_speed_max`, `follow_shortest`, `follow_shortest_light`, `follow_formant_range` |
-| articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`) |
+| articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `lips_rate` (`lips_and_jaw.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`), `larynx_rate` (`larynx_and_pitch.stiffness`), `larynx_damping` (`larynx_and_pitch.damping`) |
 | articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
+| articulation | who lowers the larynx (wave 2A; each `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -330,9 +332,10 @@ breath after a burst); the physical engine reads the rest as well.
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score
 (`glottal_adduction`, `larynx_and_pitch`, `velum`, `tongue_body`,
-`tongue_tip`, `lips_and_jaw`). The tongue body's and the tip's springs are
-read today, under their old names above; the tiers' other numbers wait for
-the gesture engine and are not in profiles until it reads them.
+`tongue_tip`, `lips_and_jaw`). The tongue body's, the tip's, the lips'
+and the larynx's springs are read today, under the names above; the
+tiers' other numbers wait for the gesture engine and are not in profiles
+until it reads them.
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
 `profile`); every key is optional and a misspelt one is an error. The
@@ -820,6 +823,49 @@ as the model goes:
   2 ms and 43 of 193 never do, and the speech falls apart (62 % phoneme
   error on `sentence_heldout`); the cells' contact, their aim past it and
   their quicker closing are the plant's own physics, not the tiers'.
+- **A tract that changes length (Wave 2A, off).** `phys/slide.rs` is a
+  uniform tube of variable length: two delay lines read at a fractional
+  delay by linear interpolation (passive at every fraction: at the half
+  sample 0.04, 0.12 and 0.30 dB per pass at 3, 5 and 8 kHz; while it grows
+  its reads are scaled by one less its growth, so it never gives back more
+  than it took at any speed). Nothing can cross a slide in less than a
+  tick, so a slide is at least one tick long, and one tick long it is a
+  cell, bit for bit. With `lip_horn` above 0 (cm, the owner's 1.2) the
+  lips' cell where rounding is centred (41) is a slide one tick plus the
+  protrusion long, and the lumped lip tube is not used; the protrusion is
+  a state of the tract on the lips' spring, aimed at `lip_horn` times the
+  rounding the lips are told to make (a /b/ over an /u/ keeps them forward,
+  lips passing through a rounded opening to a closure do not protrude),
+  or at the `LipsAndJaw` tier's protrusion or `Trombone::set_lip_protrusion`.
+  With `larynx_travel` above 0 cells 8 and 9 are one slide above the
+  piriform sinuses, stretched up to 0.8 cm by a lowered larynx and
+  shortened by up to one tick (0.36 cm) by a raised one, the larynx a
+  spring of its own (`larynx_rate`, `larynx_damping`) aimed at the
+  `LarynxAndPitch` tier's height or `Trombone::set_larynx_height`; the air
+  the moving larynx sweeps is taken up at the slide's lower end (the
+  piston; in a shut rigid tract lowering it 0.8 cm drops the pressure by
+  69.1 cmH2O, as the 3.26 cm³ it adds to 63.8 says). Speech lowers it
+  through voiced closures (`voiced_stop_larynx`) and in rounded vowels
+  (`rounded_larynx`). Measured on the vowel shapes as solved for the old
+  tract: the horn at 0.73 cm, the lumped tube's own length as a real tube,
+  gives the same F1 to F3 within 0.1 % on /u ʊ oʊ w r ʃ/, so the lumped
+  inertance was already the rounded lips' loading (without any protrusion
+  /u/'s F2 stands 13 % higher, 1151 against 1018 Hz); 1.2 cm lowers /u/'s
+  F1 and F2 by 2.3 and 5.0 %, /w/'s F1 by 5.6 %, and for the same F1 and F2
+  the lips of /u/ can open from 0.24 to 0.30 cm² and those of the fronted
+  /u/ from 0.40 to 0.52 (or /u/'s tongue come down from 2.05 to 2.17). The
+  larynx lowered 0.8 cm lowers /u/'s F3 by 9 % and /ɑ/'s F1 to F3 by 3 to
+  5 %; the slide at rest changes no formant by more than 0.05 %. The
+  piston is small: 1.5 cm³ per cm lowered, 1.2 cm³ at 0.8 cm, where the
+  pharynx's widening takes 8.7 cm³ in a 58 ms closure: lowered 0.8 cm
+  through /b d g/ between vowels the voice bar rises 0.4 to 1.1 dB and the
+  share of the closure voiced by up to 9 points, and the pressure behind a
+  /g/ at its release falls a little further (the known limit: the widening
+  drains the small cavity behind a velar closure), while the widening
+  switched off costs 5 to 16 dB of voice bar. Every vowel moves off its
+  target until the tables are solved again on this tract
+  (`examples/vowel_size.rs`, then `examples/babble.rs`);
+  `examples/tract_length.rs` measures all of this.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
