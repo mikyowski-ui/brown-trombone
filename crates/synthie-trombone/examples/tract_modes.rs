@@ -61,8 +61,7 @@ const TO: usize = 39;
 /// First cell of the cosine tongue (`tract::BLADE_START`): a cosine shape
 /// is projected onto the modes over its own cells only.
 const COSINE_FROM: usize = 10;
-/// First cell of the mouth whose opening the jaw follows on the modal
-/// body: from the soft palate on.
+/// First cell of the mouth from the soft palate on (see `orals`).
 const ORAL_FROM: usize = 25;
 /// Modes kept.
 const MODES: usize = 3;
@@ -90,12 +89,15 @@ const CALCULATED: [(&str, [f64; 3]); 11] = [
 ];
 
 /// How the measured diameters become the engine's: the native tract's
-/// length over the speaker's mean unrounded length ([`SPEAKER_LENGTH`]),
-/// over `sqrt(AREA_SCALE)`. Measured on the engine with the eleven vowels at
-/// their measured coefficients: scaled so (a similar tube of the native
-/// size) their F1/F2 stood on average 1.5 percentage points nearer the
-/// vowel targets than with the speaker's own areas (which make the body
-/// some 8 % wider against the engine's lips, epilarynx and port).
+/// length over the speaker's mean unrounded length ([`speaker_length`]),
+/// over `sqrt(AREA_SCALE)`: a similar tube of the native size (`MODES_SCALE`
+/// overrides it). Measured on the engine with the eleven vowels at their
+/// measured coefficients against the speaker's own formants (each scaled by
+/// his tract's length over the native one), this (0.749), his own areas
+/// (0.79) and 0.86 gave mean F1 / F2 / F3 errors of 19.0 / 16.1 / 7.8,
+/// 18.8 / 16.7 / 7.8 and 18.9 / 17.5 / 7.9 %: the scale hardly matters
+/// (a lossless tube's formants depend on area ratios alone; only the lips,
+/// the epilarynx, the side branches and the walls do not scale with it).
 fn scale(speaker: f64) -> f64 {
     NATIVE_LENGTH / speaker / AREA_SCALE.sqrt()
 }
@@ -469,11 +471,11 @@ fn main() {
             range[k].1 = range[k].1.max(c[k]);
         }
     }
-    // The jaw: it lowers as the tongue does, so it follows how open the
-    // mouth is along the tongue, the narrowest diameter from the soft
-    // palate to the lips (three modes), between the closest and the most
-    // open of the measured vowels. Measured against the lips' own opening
-    // (mean over the last five sections): /æ ɑ/ open, /i ɪ/ closed.
+    // How open each vowel's mouth is along the tongue (the narrowest
+    // diameter from the soft palate to the lips, three modes) beside its
+    // lips' own opening (mean over the last five sections): what a jaw
+    // following the modal body would follow. (Measured, not used: the jaw
+    // follows the cosine tongue's height, see `Tract::jaw_opening`.)
     let oral = |c: &[f64]| {
         (ORAL_FROM..TO)
             .map(|i| {
@@ -486,8 +488,6 @@ fn main() {
             .fold(f64::INFINITY, f64::min)
     };
     let orals: Vec<f64> = p.coef.iter().map(|c| oral(c)).collect();
-    let closed = orals.iter().copied().fold(f64::INFINITY, f64::min);
-    let open = orals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     println!("Narrowest of the mouth (cells {ORAL_FROM}..{}) and the lips' opening, engine diameters:", TO - 1);
     for (i, v) in vowels.iter().enumerate() {
         println!(
@@ -650,15 +650,6 @@ fn main() {
             .map(|(a, b)| format!("({a:.4}, {b:.4})"))
             .collect::<Vec<_>>()
             .join(", ")
-    );
-    let _ = writeln!(
-        src,
-        "/// First cell of the mouth along the tongue whose narrowest diameter the\n\
-         /// jaw of the modal body follows (from the soft palate to the lips)...\n\
-         pub(crate) const ORAL_FROM: usize = {ORAL_FROM};\n\
-         /// ...and that diameter, three modes, of the closest and the most open\n\
-         /// of the measured vowels: the jaw shut and fully open.\n\
-         pub(crate) const ORAL_RANGE: (f32, f32) = ({closed:.4}, {open:.4});"
     );
     let _ = writeln!(
         src,

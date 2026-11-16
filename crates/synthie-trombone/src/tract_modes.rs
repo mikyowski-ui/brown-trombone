@@ -49,12 +49,6 @@ pub(crate) const MEASURED: [(&str, [f32; 3]); 11] = [
 ];
 /// Lowest and highest coefficient of each mode over the vowels.
 pub(crate) const RANGE: [(f32, f32); 3] = [(-1.6376, 1.4077), (-1.9237, 1.1868), (-1.1919, 1.8646)];
-/// First cell of the mouth along the tongue whose narrowest diameter the
-/// jaw of the modal body follows (from the soft palate to the lips)...
-pub(crate) const ORAL_FROM: usize = 25;
-/// ...and that diameter, three modes, of the closest and the most open
-/// of the measured vowels: the jaw shut and fully open.
-pub(crate) const ORAL_RANGE: (f32, f32) = (0.3762, 1.6441);
 /// Least-squares projection of a body shape onto the modes over cells
 /// `COSINE_FROM..TO`: coefficient `k` is `Σ PROJECTION[k][j]·(d − neutral)`
 /// over those cells (`j` from `COSINE_FROM`).

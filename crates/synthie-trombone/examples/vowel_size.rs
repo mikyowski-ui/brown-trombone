@@ -697,16 +697,29 @@ fn native_row(m: &mut Meter, kind: Kind, t: &Target) -> Solved {
     let model = kind.model;
     let home = prior(kind, t);
     let mut starts: Vec<([f32; D], bool)> = vec![(home, false)];
-    // The modal body starts from the speaker's own shape only: it is pulled
-    // towards it anyway, and the babble map's shapes of the cosine body are
-    // not of it.
-    for f3 in [Some(f[2]), None].into_iter().filter(|_| model == Model::Cosine) {
+    // The modal body starts from the speaker's own shape and from the
+    // modal babble map's answers (`inverse::modal`), its narrowing, if it
+    // has one, the cosine body's.
+    for f3 in [Some(f[2]), None] {
         let near = from_x(&home, kind);
-        starts.push((
-            start_from(&inverse::solve(f[0], f[1], f3, Some(&near)), t),
-            true,
-        ));
-        starts.push((start_from(&inverse::solve(f[0], f[1], f3, None), t), true));
+        let (a, b) = match model {
+            Model::Cosine => (
+                inverse::solve(f[0], f[1], f3, Some(&near)),
+                inverse::solve(f[0], f[1], f3, None),
+            ),
+            Model::Modal => (
+                inverse::modal::solve(f[0], f[1], f3, Some(&near)),
+                inverse::modal::solve(f[0], f[1], f3, None),
+            ),
+        };
+        for s in [a, b] {
+            let mut x = start_from(&s, t);
+            if model == Model::Modal {
+                x[3] = home[3];
+                x[4] = home[4];
+            }
+            starts.push((x, true));
+        }
     }
     let lo = lowest(model, t);
     let starts: Vec<([f32; D], bool)> = starts
@@ -809,13 +822,14 @@ fn chain(m: &mut Meter, kind: Kind, t: &Target, x0: [f32; D], up: bool) -> Vec<(
         };
         let mut best = goal.refine(m, ahead).map(|(x, r, c)| (x, r, c, false));
         let miss = |r: &[f32; 3]| r[0].abs().max(r[1].abs());
-        if model == Model::Cosine && best.is_none_or(|b| miss(&b.1) > TRY_MAP) {
+        if best.is_none_or(|b| miss(&b.1) > TRY_MAP) {
+            // (A modal `near` solves on the modal map.)
             let near = from_x(&last, kind);
             let guess =
                 inverse::solve_for(target[0], target[1], Some(target[2]), Some(&near), length);
             let mut g = start_from(&guess, t);
             for d in 0..D {
-                if !free[d] {
+                if !free[d] || (model == Model::Modal && (d == 3 || d == 4)) {
                     g[d] = last[d];
                 }
             }

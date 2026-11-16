@@ -296,7 +296,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 26 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 67) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
@@ -311,6 +311,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | breath noise | `glottal_efficiency`, `voiced_breath_corner`, `voiced_breath_gain` |
 | anatomy | jets and hiss | `jet_efficiency`, `teeth_gain`, `hiss_corner`, `hiss_floor`, `teeth_corner`, `labial_edge`, `dental_edge` |
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
+| anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |

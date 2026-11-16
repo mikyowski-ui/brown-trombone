@@ -203,18 +203,6 @@ fn cosine_tongue(i: usize, index: f32, diameter: f32) -> f32 {
     1.5 - curve
 }
 
-/// How open the jaw is for the modal body `q`, `0` (shut) to `1`: it
-/// lowers as the tongue does, so it follows the narrowest diameter of the
-/// mouth from the soft palate to the lips, between that of the closest and
-/// of the most open measured vowel.
-fn modal_openness(q: &[f32; 3]) -> f32 {
-    let narrowest = (modes::ORAL_FROM..modes::TO)
-        .map(|i| modal_cell(i, q))
-        .fold(f32::INFINITY, f32::min);
-    let (shut, open) = modes::ORAL_RANGE;
-    ((narrowest - shut) / (open - shut)).clamp(0.0, 1.0)
-}
-
 // ----- articulators of two speeds (physical engine) ----------------------
 //
 // The tongue body and the jaw are heavy; the tongue tip, the blade and the
@@ -880,13 +868,19 @@ impl Tract {
     /// behind the rounding, a lowered tongue would widen the mouth of a
     /// /u/ and give it a second way to its formants, one that a gliding
     /// voice would have to leave by a jump.
+    ///
+    /// On the modal body too the jaw follows the height of the cosine
+    /// tongue the vowel shape carries (the cosine table's, or what the
+    /// body's numbers project nearest to): the jaw is the LipsAndJaw tier's,
+    /// as before, and only the body under it changes. Following the modal
+    /// body's own opening instead (its narrowest cell from the soft palate
+    /// on, between that of the closest and of the most open measured vowel)
+    /// opened the jaw of /ʌ ɔ/ to 0.7 to 0.8 where the cosine's is under
+    /// 0.2, and in sentences /ʌ/ was heard as /ɑ/ 8 times in 18 (vowels
+    /// wrong in the LibriSpeech texts 31.1 % against 26.2 % with this jaw).
     fn jaw_opening(&self) -> f32 {
-        let open = if self.modal() {
-            modal_openness(&self.body_modes())
-        } else {
-            (self.tongue_diameter - *TONGUE_DIAMETER.start())
-                / (*TONGUE_DIAMETER.end() - *TONGUE_DIAMETER.start())
-        };
+        let open = (self.tongue_diameter - *TONGUE_DIAMETER.start())
+            / (*TONGUE_DIAMETER.end() - *TONGUE_DIAMETER.start());
         let smooth = |v: f32, lo: f32, hi: f32| {
             let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
