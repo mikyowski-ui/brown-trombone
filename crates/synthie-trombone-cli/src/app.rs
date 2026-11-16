@@ -3,6 +3,7 @@
 use crate::audio::{Cmd, Link, Snapshot};
 use crate::line::{self, MAX_CHARS, TextLine};
 use crate::record::Recorder;
+use crate::telemetry::{FormantMeter, Formants};
 use crossbeam_channel::Sender;
 use crossterm::event::{
     KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -77,6 +78,11 @@ const QUOTE_CHARS: usize = 40;
 
 /// The key that starts and stops recording a take, in either mode.
 pub const RECORD_KEY: KeyCode = KeyCode::F(5);
+/// The key that switches speech between the gesture score and the old
+/// path (`ArticulationConfig::gesture_score`), in either mode.
+pub const SCORE_KEY: KeyCode = KeyCode::F(6);
+/// The gesture slot of the lip pop while the gesture score is on.
+const POP_GESTURE: u8 = 0;
 /// How long a command that must arrive (to start or stop a take) may wait
 /// for room in the queue to the audio thread.
 const MUST_ARRIVE: Duration = Duration::from_millis(200);
@@ -255,6 +261,14 @@ pub struct App {
     /// Inner area of the vowel chart, for mouse mapping (empty when it is
     /// not drawn).
     pub chart_area: Rect,
+    /// Measures the tract's formants off the audio thread.
+    meter: FormantMeter,
+    /// The tract's formants as last measured.
+    pub formants: Option<Formants>,
+    /// How late they came: samples from the moment the shape was taken to
+    /// the snapshot the reading arrived with. The reading holds until the
+    /// shape changes (none is sent while it stays the same).
+    pub formants_late: u64,
 }
 
 /// Lowercase name of a sound model.
@@ -309,6 +323,9 @@ impl App {
             mimic: None,
             formant_lock: None,
             chart_area: Rect::default(),
+            meter: FormantMeter::new(),
+            formants: None,
+            formants_late: 0,
         };
         app.status = if keyboard_release {
             "hold a piano key to sing · Space stops · Tab to type or paste text".into()
@@ -325,6 +342,70 @@ impl App {
 
     pub fn sample_rate(&self) -> f32 {
         self.link.sample_rate
+    }
+
+    /// Whether speech goes through the gesture score
+    /// (`ArticulationConfig::gesture_score`).
+    #[must_use]
+    pub fn gesture_score(&self) -> bool {
+        self.settings.tuning.articulation.gesture_score >= 0.5
+    }
+
+    /// Switch speech between the gesture score and the old path, for
+    /// hearing the two side by side; the lip pop goes through the score
+    /// while it is on. The voice's other settings stay as they are.
+    fn toggle_score(&mut self) {
+        let on = if self.gesture_score() { 0.0 } else { 1.0 };
+        self.base.tuning.articulation.gesture_score = on;
+        self.settings.tuning.articulation.gesture_score = on;
+        self.send(Cmd::Voice(self.settings));
+        self.status = if on > 0.0 {
+            "gesture score on: speech plays as gestures (physical engine) · F6 back".into()
+        } else {
+            "gesture score off: speech plays as before · F6 to hear the score".into()
+        };
+    }
+
+    /// Shut the lips for the pop: a lip gesture on the score while it is
+    /// on, else a constriction.
+    fn pop_on(&mut self) {
+        if self.gesture_score() {
+            use synthie_trombone::gesture::{Target, var};
+            let shut = Target::NONE
+                .with(var::lips::CLOSURE_LOCATION, 41.0)
+                .with(var::lips::CLOSURE_DEGREE, 0.0);
+            self.send(Cmd::Push(
+                POP_GESTURE,
+                synthie_trombone::Gesture::new(synthie_trombone::Tier::LipsAndJaw, shut),
+            ));
+        } else {
+            self.send(Cmd::Constriction(
+                SLOT_POP,
+                Some(Constriction::new(41.0, 0.0)),
+            ));
+        }
+    }
+
+    /// Open the lips again after the pop.
+    fn pop_off(&mut self) {
+        if self.gesture_score() {
+            self.send(Cmd::EndGesture(POP_GESTURE, 0.0));
+        } else {
+            self.send(Cmd::Constriction(SLOT_POP, None));
+        }
+    }
+
+    /// F1, F2 and F3 of the tract as last measured, Hz.
+    #[must_use]
+    pub fn live_formants(&self) -> Option<[f32; 3]> {
+        self.formants.and_then(|f| f.hz)
+    }
+
+    /// Whether the formant meter has measured every shape it was sent.
+    #[cfg(test)]
+    #[must_use]
+    pub fn formants_up_to_date(&self) -> bool {
+        self.meter.is_idle() && self.link.probes.is_empty()
     }
 
     /// Start from a voice other than the first preset's, with the persona
@@ -440,6 +521,13 @@ impl App {
             self.snap = s;
         }
         while self.link.trash.try_recv().is_ok() {}
+        if let Some(probe) = self.link.probes.try_iter().last() {
+            self.meter.submit(probe);
+        }
+        if let Some(f) = self.meter.poll() {
+            self.formants = Some(f);
+            self.formants_late = self.snap.at.saturating_sub(f.at);
+        }
         if let Some(saved) = self.link.recorder.as_ref().and_then(Recorder::poll) {
             self.status = saved_status(&saved);
         }
@@ -459,7 +547,7 @@ impl App {
         }
         if self.pop_until.is_some_and(|t| now >= t) {
             self.pop_until = None;
-            self.send(Cmd::Constriction(SLOT_POP, None));
+            self.pop_off();
         }
         if self.preview_until.is_some_and(|t| now >= t) {
             self.end_preview();
@@ -516,6 +604,12 @@ impl App {
         if key.code == RECORD_KEY {
             if key.kind == KeyKind::Press {
                 self.toggle_recording();
+            }
+            return false;
+        }
+        if key.code == SCORE_KEY {
+            if key.kind == KeyKind::Press {
+                self.toggle_score();
             }
             return false;
         }
@@ -601,7 +695,7 @@ impl App {
 
         if key.kind == KeyKind::Release {
             if c == 'b' && self.pop_until.is_none() {
-                self.send(Cmd::Constriction(SLOT_POP, None));
+                self.pop_off();
             }
             return false;
         }
@@ -622,10 +716,7 @@ impl App {
             'b' => {
                 // Lips shut; open on release (or after 150 ms without
                 // release events) for a "b"/"p" burst.
-                self.send(Cmd::Constriction(
-                    SLOT_POP,
-                    Some(Constriction::new(41.0, 0.0)),
-                ));
+                self.pop_on();
                 if !self.keyboard_release {
                     self.pop_until = Some(Instant::now() + Duration::from_millis(150));
                 }
@@ -1810,6 +1901,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,

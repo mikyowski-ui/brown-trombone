@@ -58,6 +58,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
 | `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
 | `F5` | start or stop recording a take (see below) |
+| `F6` | speech through the gesture score or the old path (A/B them by ear; see the instrument panel below) |
 | `Tab` | type a line, or paste one; `Enter` speaks it at the current note's pitch |
 | `,` `.` | speech rate |
 | `q` | quit |
@@ -94,6 +95,67 @@ raises it, as on the chart) and F1 (up lowers it) by 2 %. Formant Lock
 belongs to the physical engine, so turning it on switches to it, and
 switching to the classic engine turns it off; turning it off brings the
 scope back and leaves the tract as it is.
+
+**The instrument panel**, beside the tract view from 80 columns on, shows
+what the voice is doing inside:
+
+```
+╭ ◇ instrument ────────────────────╮
+│ F1  348 F2  837 F3 1212 Hz       │  the tract's own resonances (a nasal /a/)
+│ tract resonances, 17 ms late     │
+│ ΔP 10.1 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
+│ shut ██████···········  35% folds│  closed quotient, and what is sounding
+│ gap  0.005‥0.191 cm²             │  smallest and largest glottal area
+│ tiers: score · controls          │  cyan names: the score; white: controls
+│ glottis ██████████████████████┃ 1│  one row per tier of the gesture score:
+│ larynx  ████████████████┃······ 1│  the bar is where it is now, ┃ its
+│ velum   ██████████████████████┃ 1│  target, the number its gestures;
+│ body    █████┃················· 1│  a tier nothing drives is dimmed
+│ tip     ┃······················ ·│
+│ lips    ┃······················ ·│
+╰──────────────────────────────────╯
+```
+
+- **F1 F2 F3** are the peaks of the transfer function of the tract's shape
+  at that moment (nose included), measured as `examples/replay.rs --trace`
+  measures them: the resonances of the shape, not an analysis of the
+  sound; `—` where it shows fewer than three peaks below 4.2 kHz (a closed
+  mouth, and the classic engine's /u/). A measurement takes about 3 ms, so
+  it is made on a thread of its own from a copy of the voice the audio
+  thread sends at most 30 times a second, and only when the shape has
+  changed (a reading holds while the shape stays). The panel says how late
+  the reading came: from the moment the shape was taken to the frame that
+  showed it, typically 15 to 35 ms (at most a probe interval, 33 ms, more
+  while the tract keeps moving). With
+  Formant Lock on, `●` marks the same F1 and F2 on the vowel chart, beside
+  the `◆` the lock steers.
+- **ΔP** is the pressure below the folds less the pressure just above them,
+  cmH2O, averaged over the last 50 ms; **sub** the pressure below them
+  (the lungs push harder than asked on a high or pressed note); **lungs**
+  the pressure the voice asks for. **shut** is the share of the time the
+  folds' vibrating edges are closed while the voice sounds, and whether the
+  folds, the pulse source or nothing is sounding. The classic engine has no
+  air: it shows `classic: no air` and its LF pulse.
+- **The tiers** are the gesture score's (glottal adduction, larynx and
+  pitch, velum, tongue body, tongue tip, lips and jaw), on the score's
+  scales (pitch 50 to 400 Hz, logarithmic; the tip's and the lips'
+  closeness, 1 shut). A tier whose name is cyan is driven by the score's
+  gestures and shows `Trombone::tier_activity`; a white one is read off the
+  controls the voice has (the voicing gate, the pitch, the velum, the
+  tongue body's height, the constrictions of the tip and the lips), which
+  is what drives it when it is played by hand or when speech takes the old
+  path.
+- **`F6`** switches speech between the gesture score and the old path
+  (`ArticulationConfig::gesture_score`, physical engine; the panel's title
+  says `score` while it is on), so the two can be heard side by side on the
+  same text: type it and press `Enter`, then `F6` and `↑` `Enter` (or, in
+  play mode, `Enter`, which says the last line again). While the score is on,
+  the lip pop (`b`) is played by hand as a gesture on the lips' tier (held
+  while the key is, ended on release) instead of as a constriction; a take
+  logs it and replays it to the sample.
+
+Below 80 columns the panel gives way to a summary on the tract view's lower
+edge (`F1 … F2 … F3 … · ΔP … · shut … folds`).
 
 **Typing and pasting text.** `Tab` opens the text line; `Enter` speaks it,
 however many sentences it holds: each gets a pause after it and its own

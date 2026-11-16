@@ -669,6 +669,13 @@ impl Trombone {
         self.glottis.always_voice = on;
     }
 
+    /// Whether the voice phonates continuously, ignoring the gate (see
+    /// [`set_always_voice`](Self::set_always_voice)).
+    #[must_use]
+    pub fn always_voice(&self) -> bool {
+        self.glottis.always_voice
+    }
+
     /// Target pitch in Hz (clamped to 20‥2000).
     pub fn set_frequency(&mut self, hz: f32) {
         if hz.is_finite() {
@@ -852,6 +859,13 @@ impl Trombone {
     #[must_use]
     pub fn velum(&self) -> f32 {
         self.tract.velum_openness()
+    }
+
+    /// The velum openness it is moving towards, `0‥1` (what
+    /// [`set_velum`](Self::set_velum) or the articulation last asked for).
+    #[must_use]
+    pub fn velum_target(&self) -> f32 {
+        self.tract.velum_target_openness()
     }
 
     /// Articulator speed multiplier (`1.0` is the original's).
