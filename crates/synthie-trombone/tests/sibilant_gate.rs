@@ -445,13 +445,10 @@ fn s_fades_into_f_without_a_gap_or_a_puff() {
     // slackened in "This" (round 8) its fall reads 7.5 ms instead of 15,
     // and the three average 11.7 ms; over eleven /s f/ hand-overs the
     // round 7 build averages 11.4 ms and this one 10.9 (7.5 to 15 ms
-    // each), so 11 ms rather than 12. Round 11's rhythm (longer onsets of
-    // stressed syllables, shorter function words) moved the words before
-    // two of them, which then read 7.5 ms (the third 17.5): 10.8 on
-    // average, with dips of 1.4 to 1.6 dB under the /f/ and lip flows of
-    // 380 to 430 cm³/s, well inside their bounds, so 10.5.
+    // each), so 11 ms rather than 12. (With round 11's rhythm, off by
+    // default, two of them read 7.5 ms and the average 10.8.)
     let mean = falls.iter().sum::<f32>() / falls.len() as f32;
-    assert!(mean >= 10.5, "/s/ falls 10 dB in {mean:.1} ms on average");
+    assert!(mean >= 11.0, "/s/ falls 10 dB in {mean:.1} ms on average");
 }
 
 #[test]

@@ -290,7 +290,16 @@ mod tests {
 
     #[test]
     fn stressed_onsets_are_drawn_out_and_function_words_brisk() {
-        let t = Tuning::DEFAULT;
+        // The measured setting (off by default since the end of round 11).
+        let t = Tuning {
+            stressed_onset_length: 1.3,
+            cluster_length: 0.85,
+            function_consonant_length: 0.9,
+            schwa_length: 0.75,
+            diphthong_hold: 0.75,
+            rhythm_pace: 1.02,
+            ..Tuning::DEFAULT
+        };
         let toks = phonemize("in the dark blue sea");
         let r = roles(&toks);
         let p: Vec<Phoneme> = toks
@@ -314,5 +323,7 @@ mod tests {
         assert!(f(8) > f(5) && f(8) < f(4), "the /b/ of blue: {}", f(8));
         assert!(held_in_transfer(p[4], r[4]) && held_in_transfer(p[5], r[5]));
         assert!(!held_in_transfer(p[2], r[2]) && !held_in_transfer(p[3], r[3]));
+        // By default every phone keeps the rules' own length.
+        assert!((0..p.len()).all(|k| (stretch(p[k], r[k], &Tuning::DEFAULT) - 1.0).abs() < 1e-6));
     }
 }

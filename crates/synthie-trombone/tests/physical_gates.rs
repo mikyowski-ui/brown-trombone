@@ -962,11 +962,10 @@ fn the_regulator_barely_touches_the_default_voice() {
         "gap nudge {nudge:.3}, vowel relief at most {relief:.3}, level {:+.2} dB",
         db(on / off)
     );
-    // Since round 11's rhythm draws out the onsets of "sells" and "sea", the
-    // /z/ that ends "shells;" comes later into the phrase's falling breath
-    // and is widened by 0.02 of the 0.15 the regulator may give, the level
-    // within 0.03 dB of the speech without it (0 until then).
-    assert!(nudge <= 0.025, "a fricative gap was moved by {nudge}");
+    // (With round 11's rhythm, off by default, the /z/ that ends "shells;"
+    // comes later into the phrase's falling breath and is widened by 0.02
+    // of the 0.15 the regulator may give.)
+    assert!(nudge == 0.0, "a fricative gap was moved by {nudge}");
     assert!(relief <= 0.03, "vowels were opened by {relief}");
     assert!(db(on / off).abs() < 0.3);
 }

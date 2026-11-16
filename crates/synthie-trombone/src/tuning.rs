@@ -859,29 +859,39 @@ tuning! {
     /// points over the two sets for 2 to 5 % more time. Whisper's words
     /// fell 2 to 5 points with any of them. `1` makes them as long as
     /// anywhere else.
-    stressed_onset_length = 1.3, 1.0..=1.6, B;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `1.3` is the measured setting.)
+    stressed_onset_length = 1.0, 1.0..=1.6, B;
     /// Length of each consonant of a cluster against a single one's
     /// (physical engine): the reader's are 0.81 of his single ones (the
     /// references' 0.94), where the rules made them alike. Not a sibilant
     /// that closes one, which the reader holds 1.11 times the rules'.
-    cluster_length = 0.85, 0.6..=1.2, B;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `0.85` is the measured setting.)
+    cluster_length = 1.0, 0.6..=1.2, B;
     /// Length of the consonants of a function word, its stops excepted
     /// (they keep their closure and release), against their own (physical
     /// engine): the reader's /ð v/ of "the", "of" are 0.78 of the rules'.
     /// At 0.85 (with `schwa_length` 0.75) Whisper's words over the 30
     /// held-out sentences fell 7.8 points and rose 3.7 over the tuning
     /// ones; at 0.9 (and 0.85) -2.6 and +5.5.
-    function_consonant_length = 0.9, 0.5..=1.0, B;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `0.9` is the measured setting.)
+    function_consonant_length = 1.0, 0.5..=1.0, B;
     /// Length of /ə/ against an unstressed vowel's (physical engine): the
     /// speakers' are 0.69 to 0.76 of the rules', in function and content
     /// words alike (the /ə/ of "canoe" was 100 ms, the reader's 65 and the
     /// references' 50 to 52; now 77).
-    schwa_length = 0.75, 0.5..=1.0, C;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `0.75` is the measured setting.)
+    schwa_length = 1.0, 0.5..=1.0, C;
     /// Length of a diphthong against what `diphthong_length`, `vowel_hold`
     /// and the stress give it (physical engine): the reader's are 0.67 of
     /// the rules' (a stressed /oʊ eɪ/ was 226 to 266 ms, his 70 to 250 at
     /// the rules' pace).
-    diphthong_hold = 0.75, 0.5..=1.0, C;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `0.75` is the measured setting.)
+    diphthong_hold = 1.0, 0.5..=1.0, C;
     /// How much longer every phone of the physical engine's rules is held,
     /// the first and last syllable of a phrase excepted, to give back what
     /// the fields above take from the rate of speech (the four listening
@@ -889,7 +899,9 @@ tuning! {
     /// longer before /ʃ/ darkened its hiss past the bound of
     /// `hisses_are_broad_and_s_is_brighter_than_sh` (centroid 4350 to 3840
     /// Hz, flatness 0.42 to 0.29; at 1.02 0.32).
-    rhythm_pace = 1.02, 0.8..=1.25, B;
+    /// (Off, `1`, since the end of round 11: the owner's ears chose round
+    /// 10's lengths; `1.02` is the measured setting.)
+    rhythm_pace = 1.0, 0.8..=1.25, B;
     /// Shortest a followed schedule may make a phone the floor of
     /// `follow_shortest` does not hold (physical engine; see
     /// `speech::rhythm::held_in_transfer`), a share of its own rule
