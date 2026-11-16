@@ -195,7 +195,7 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 25 numbers),
+`AnatomyConfig` (the body, its tissues and sources: 30 numbers),
 `ArticulationConfig` (how sounds are made and joined: 67, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with

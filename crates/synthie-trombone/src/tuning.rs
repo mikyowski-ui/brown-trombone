@@ -451,6 +451,42 @@ tuning! {
         /// voiced closure, cm³/s; the air the voice sends into the shut mouth
         /// goes there, so the voice lasts through the closure.
         cavity_expansion = 150.0, 0.0..=300.0, A;
+
+        // ----- the epilarynx (physical engine) ---------------------------------------
+
+        /// Length of the epilaryngeal tube, the narrow tube just above the
+        /// folds, in tract cells from the glottis (0.3645 cm each at the native
+        /// size: 4 are 1.46 cm, 7 are 2.55 cm, 8 are 2.92 cm; physical engine;
+        /// see `Tract::epilarynx`). The default is the original's seven cells.
+        /// Opening in a step into a tract of 6.1 cm², the tube rings at 5.9 kHz
+        /// at four cells, 4.8 at five, 3.85 at six, 3.5 at seven and 2.84 at
+        /// eight (the two-tube equation within 2 %; the quarter wave `c / 4L`
+        /// is 6.0, 4.8, 4.0, 3.43 and 3.0 kHz: in one dimension the step has
+        /// no end correction). A fraction makes the cell at the top part tube
+        /// and part flare, by area, which moves smoothly but is not a length:
+        /// at 7.5 cells the tube rang at 3.48 kHz, where a tube of 7.5 cells
+        /// rings at 3.34 (lengths between cells need a sliding joint).
+        epilarynx_cells = 7.0, 3.0..=9.0, A;
+        /// Width of that tube, articulation diameter units (physical engine;
+        /// the area is `1.257·d²` cm² at the native size: the default 0.6 is
+        /// 0.45 cm², 0.4 is 0.2 cm², 0.8 is 0.8 cm²).
+        epilarynx_diameter = 0.6, 0.35..=1.0, A;
+        /// Width of the lower pharynx the tube opens into, from its top to
+        /// where the tongue's shape begins (cell 10), diameter units (physical
+        /// engine; the default 1.1 is 1.52 cm², 3.4 times the tube's area;
+        /// 1.7 is 3.6 cm², eight times).
+        epilarynx_flare = 1.1, 0.6..=2.2, A;
+        /// Cells over which the tube widens into the flare (physical engine):
+        /// `0` a step, as the original's tube; more, a ramp linear in area
+        /// starting at the tube's top, cut off at cell 10.
+        epilarynx_flare_cells = 0.0, 0.0..=6.0, A;
+        /// How far the tube narrows as the folds press together and widens as
+        /// they slacken (physical engine): its area is multiplied by
+        /// `2^(−this · (tenseness − 0.65) / 0.3)`, kept within 0.5 to 2 times
+        /// and never wider than the flare. Tenseness carries a voice's effort
+        /// (`Persona::effort` adds 0.3 per unit of the dial) and the laxness of
+        /// its light syllables. `0` switches it off.
+        epilarynx_effort = 0.0, 0.0..=2.0, A;
     } tiers {
     } aliases {
     }
@@ -1396,7 +1432,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_twenty_five_sixty_five_and_forty_three() {
+    fn three_parts_of_thirty_sixty_seven_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1404,9 +1440,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (25, 67, 43)
+            (30, 67, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 135);
+        assert_eq!(Tuning::FIELDS.len(), 140);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.

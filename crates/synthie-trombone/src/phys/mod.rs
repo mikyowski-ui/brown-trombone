@@ -980,6 +980,12 @@ impl Phys {
         self.r[i] + self.l[i]
     }
 
+    /// Acoustic energy stored in cell `i` now (arbitrary units, those of
+    /// [`energy`](Self::energy)).
+    pub(crate) fn cell_energy(&self, i: usize) -> f32 {
+        self.a1[i] * (self.r[i] * self.r[i] + self.l[i] * self.l[i])
+    }
+
     /// Acoustic energy stored in the main tube (arbitrary units).
     #[cfg(test)]
     pub(crate) fn energy(&self, lambda: f32) -> f32 {

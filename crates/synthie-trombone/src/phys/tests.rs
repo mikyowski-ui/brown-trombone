@@ -339,3 +339,159 @@ fn nasal_murmur_is_low_and_has_an_antiresonance() {
     // Both nostrils carry flow, and not equally.
     assert!(p.gauge.u_lips.abs() < 1e-6);
 }
+
+// ----- the epilaryngeal tube (`AnatomyConfig::epilarynx_*`) -------------
+
+/// A physical-engine tract (no voice) with `tuning`.
+fn tract_with(tuning: crate::Tuning) -> crate::tract::Tract {
+    let mut t = crate::tract::Tract::new();
+    t.jaw = true;
+    t.motion = tuning;
+    t
+}
+
+#[test]
+fn epilarynx_defaults_are_the_original_cells() {
+    // Seven cells of 0.6 and three of 1.1, exactly, as the original's tube.
+    let t = tract_with(crate::Tuning::DEFAULT);
+    for i in 0..crate::tract::BLADE_START {
+        let want = if i < 7 { 0.6f32 } else { 1.1 };
+        let got = t.epilarynx(i).expect("a cell of the tube or its flare");
+        assert_eq!(got.to_bits(), want.to_bits(), "cell {i}: {got}");
+    }
+    assert!(t.epilarynx(crate::tract::BLADE_START).is_none());
+    // The classic engine keeps the original's whatever the anatomy says.
+    let mut odd = crate::Tuning::DEFAULT;
+    odd.anatomy.epilarynx_cells = 4.0;
+    odd.anatomy.epilarynx_diameter = 0.4;
+    let mut classic = tract_with(odd);
+    classic.jaw = false;
+    assert!(classic.epilarynx(0).is_none());
+}
+
+#[test]
+fn epilarynx_takes_its_length_area_and_flare() {
+    let mut tuning = crate::Tuning::DEFAULT;
+    tuning.anatomy.epilarynx_cells = 4.5;
+    tuning.anatomy.epilarynx_diameter = 0.5;
+    tuning.anatomy.epilarynx_flare = 1.5;
+    tuning.anatomy.epilarynx_flare_cells = 2.0;
+    let t = tract_with(tuning);
+    let d: Vec<f32> = (0..10).map(|i| t.epilarynx(i).unwrap()).collect();
+    std::println!("{d:?}");
+    for &v in &d[..4] {
+        assert!((v - 0.5).abs() < 1e-6);
+    }
+    // Cell 4: half tube, half the start of the ramp; then the ramp, then
+    // the flare.
+    assert!(
+        d[4] > 0.5 && d[4] < d[5] && d[5] < d[6] && d[6] < 1.5,
+        "{d:?}"
+    );
+    for &v in &d[7..] {
+        assert!((v - 1.5).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn epilarynx_narrows_with_pressed_folds() {
+    let mut tuning = crate::Tuning::DEFAULT;
+    tuning.anatomy.epilarynx_effort = 1.0;
+    let mut t = tract_with(tuning);
+    let area = |t: &crate::tract::Tract| t.epilarynx(0).unwrap().powi(2) / 0.36;
+    t.tenseness = 0.65;
+    assert!((area(&t) - 1.0).abs() < 1e-5);
+    t.tenseness = 0.95;
+    assert!((area(&t) - 0.5).abs() < 1e-4, "{}", area(&t));
+    t.tenseness = 0.35;
+    assert!((area(&t) - 2.0).abs() < 1e-4, "{}", area(&t));
+    // Never past twice, never wider than the flare.
+    t.tenseness = 0.0;
+    assert!(area(&t) <= 2.0 + 1e-4);
+    // Off, the folds change nothing.
+    let mut off = tract_with(crate::Tuning::DEFAULT);
+    off.tenseness = 0.95;
+    assert_eq!(off.epilarynx(0).unwrap().to_bits(), 0.6f32.to_bits());
+}
+
+/// The lowest root from `lo` Hz on of `A1·tan(kL1) = A2·cot(kL2)`: a tube
+/// of length `l1` (cm) and area `a1`, closed at the glottis, opening into
+/// one of `l2` and `a2` open at its far end, lossless (two tubes, Fant
+/// 1960).
+fn two_tube_root(a1: f32, l1: f32, a2: f32, l2: f32, lo: f32, hi: f32) -> f32 {
+    let g = |hz: f32| {
+        let k = 2.0 * PI * hz / C;
+        a1 * (k * l1).sin() * (k * l2).sin() - a2 * (k * l1).cos() * (k * l2).cos()
+    };
+    let step = 1.0;
+    let mut hz = lo;
+    while hz < hi {
+        if g(hz).signum() != g(hz + step).signum() {
+            let (mut a, mut b) = (hz, hz + step);
+            for _ in 0..30 {
+                let m = f32::midpoint(a, b);
+                if g(a).signum() == g(m).signum() {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            return f32::midpoint(a, b);
+        }
+        hz += step;
+    }
+    f32::NAN
+}
+
+#[test]
+fn epilarynx_tube_resonates_where_theory_says() {
+    // A tube of 4 to 8 cells and 0.45 cm² opening, in a step (no flare
+    // cells), into the rest of the tract at 6.1 cm² to the lips. Its own
+    // resonance is the root of the two-tube equation nearest its quarter
+    // wave c/4L (in one dimension the step has no end correction); the
+    // lips' end correction is 8r/3π, as for the uniform tube. The engine
+    // must put it within 3 %.
+    for cells in [4.0f32, 5.0, 6.0, 7.0, 8.0] {
+        let mut tuning = crate::Tuning::DEFAULT;
+        tuning.anatomy.epilarynx_cells = cells;
+        tuning.anatomy.epilarynx_flare = 2.2;
+        let t = tract_with(tuning);
+        let mut d = [2.2f32; N];
+        for (i, v) in d.iter_mut().enumerate().take(crate::tract::BLADE_START) {
+            *v = t.epilarynx(i).unwrap();
+        }
+        let mut p = Phys::new();
+        p.set_ideal(true);
+        p.snap(&d, 0.0);
+        let x = impulse(&mut p, 40_000);
+        let found = peaks(&x, 8000.0);
+        let dx = C * TICK;
+        let (a1, a2) = (p.area_of(0.6), p.area_of(2.2));
+        let l1 = cells * dx;
+        #[allow(clippy::cast_precision_loss)]
+        let l2 = (N as f32 - cells) * dx + 8.0 * sqrt(a2 / PI) / (3.0 * PI);
+        let quarter = C / (4.0 * l1);
+        let mut theory = f32::NAN;
+        let mut from = 100.0;
+        while from < 9000.0 {
+            let r = two_tube_root(a1, l1, a2, l2, from, 9000.0);
+            if !r.is_finite() {
+                break;
+            }
+            if theory.is_nan() || (r - quarter).abs() < (theory - quarter).abs() {
+                theory = r;
+            }
+            from = r + 2.0;
+        }
+        let (hz, bw) = found
+            .iter()
+            .copied()
+            .min_by(|a, b| (a.0 - theory).abs().total_cmp(&(b.0 - theory).abs()))
+            .expect("resonances");
+        std::println!(
+            "{cells} cells ({l1:.2} cm): c/4L {quarter:.0} Hz, two tubes {theory:.0} Hz, engine {hz:.0} Hz (bandwidth {bw:.0})"
+        );
+        let err = (hz - theory).abs() / theory;
+        assert!(err < 0.03, "{cells} cells: {hz} against {theory}");
+    }
+}

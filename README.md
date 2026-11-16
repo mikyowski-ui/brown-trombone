@@ -296,7 +296,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 30 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 67) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
