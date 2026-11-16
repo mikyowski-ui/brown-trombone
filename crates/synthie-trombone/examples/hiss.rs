@@ -11,7 +11,8 @@
 //! that setting's /s/. A fricative should keep its level against the vowel
 //! whatever the voice; a vowel should not hiss at all.
 //!
-//! `--manual` instead places a constriction by hand around each fricative's
+//! `--modal` measures the same with the tongue body made of the measured
+//! modes (`tongue_model` 1). `--manual` instead places a constriction by hand around each fricative's
 //! position (±2 cells, ±0.15 diameter) and reports how much hiss is left.
 
 #![allow(
@@ -25,6 +26,8 @@
 use synthie_trombone::{Constriction, Engine, Phoneme, SLOT_MAIN, Trombone, Tuning};
 
 const SR: f32 = 48_000.0;
+/// Whether the voices have the modal tongue body (`--modal`: `tongue_model` 1).
+static MODAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const SIZES: [f32; 5] = [0.6, 0.8, 1.0, 1.2, 1.4];
 const LUNGS: [f32; 4] = [5.0, 8.0, 11.0, 14.0];
 const FRICATIVES: [Phoneme; 4] = [Phoneme::S, Phoneme::Sh, Phoneme::F, Phoneme::Th];
@@ -59,6 +62,9 @@ fn voice(size: f32, lung: f32, tenseness: f32) -> Trombone {
     t.set_tract_length(size);
     let mut tuning = Tuning::DEFAULT;
     tuning.anatomy.lung_pressure = lung;
+    if MODAL.load(std::sync::atomic::Ordering::Relaxed) {
+        tuning.anatomy.tongue_model = 1.0;
+    }
     t.set_tuning(&tuning);
     t.set_vibrato(0.0, 0.0);
     t.set_jitter(0.0);
@@ -240,6 +246,10 @@ fn manual() {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    MODAL.store(
+        args.iter().any(|a| a == "--modal"),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     if args.iter().any(|a| a == "--manual") {
         manual();
         return;

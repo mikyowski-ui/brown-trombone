@@ -515,6 +515,48 @@ impl Articulation {
         vowel_size::shape_in(key, tract_length, held).map(|s| s.3)
     }
 
+    /// The modal body's three numbers the physical engine holds for this
+    /// articulation (`AnatomyConfig::tongue_model` 1, `held` on the modal
+    /// table), or `None`, which leaves the tract to project the cosine
+    /// tongue [`physical_in`](Self::physical_in) gives onto the modes: a
+    /// vowel's own; a consonant's that of the vowel it is made on, moved by
+    /// as much as the vowel's cosine tongue changes shape when the tip
+    /// draws it towards [`TIP_BODY`] ([`leaning_on`](Self::leaning_on);
+    /// `tract::drawn_modes`); /ɚ/'s for
+    /// /r/; `None` for the velars and /l/, whose own tongues are their
+    /// bodies, and for what has no vowel.
+    pub(crate) fn physical_modes(
+        self,
+        tract_length: f32,
+        held: &vowel_size::OwnShapes,
+    ) -> Option<[f32; 3]> {
+        if !held.1 || self.tongue == Some(VELAR_TONGUE) {
+            return None;
+        }
+        if self.own_body() {
+            return if self.tongue == Phoneme::R.classic().tongue {
+                vowel_size::shape_in(VowelKey::Vowel(Phoneme::Er), tract_length, held)
+                    .and_then(|s| s.4)
+            } else {
+                None
+            };
+        }
+        let key = self.vowel_shape_key()?;
+        let shape = vowel_size::shape_in(key, tract_length, held)?;
+        let q = shape.4?;
+        let own = key.articulation()?;
+        let itself = self.tongue == own.tongue
+            && self.constriction == own.constriction
+            && self.lips == own.lips;
+        if itself {
+            return Some(q);
+        }
+        Some(match self.body_pull() {
+            Some((tip, w)) => crate::tract::drawn_modes(q, shape.0, tip, w),
+            None => q,
+        })
+    }
+
     /// [`physical_in`](Self::physical_in) before the approximants are
     /// narrowed.
     ///
@@ -552,7 +594,7 @@ impl Articulation {
             }
             return (self, None);
         };
-        let Some((tongue, lips, narrow, _)) = vowel_size::shape_in(key, tract_length, held) else {
+        let Some((tongue, lips, narrow, _, _)) = vowel_size::shape_in(key, tract_length, held) else {
             return (self, None);
         };
         let mut a = self;
@@ -607,7 +649,7 @@ impl Articulation {
             // /l r/: their own body. /r/'s is that of /ɚ/ (the classic
             // engine gives both the same), as the physical engine shapes it.
             if self.tongue == Phoneme::R.classic().tongue
-                && let Some((er, _, _, _)) =
+                && let Some((er, _, _, _, _)) =
                     vowel_size::shape(VowelKey::Vowel(Phoneme::Er), tract_length)
             {
                 a.tongue = Some(er);
@@ -705,17 +747,24 @@ impl Articulation {
     /// `None` if it is not a vowel's.
     #[must_use]
     pub fn physical_shape(self, tract_length: f32) -> Option<crate::inverse::Shape> {
-        let (a, narrowing) = self.physical(tract_length);
+        self.physical_shape_on(tract_length, false)
+    }
+
+    /// [`physical_shape`](Self::physical_shape) on the modal tongue body
+    /// (`AnatomyConfig::tongue_model` 1) if `modal`: its three numbers, lips
+    /// and narrowing from the modal table.
+    #[must_use]
+    pub fn physical_shape_on(self, tract_length: f32, modal: bool) -> Option<crate::inverse::Shape> {
+        let held = vowel_size::OwnShapes::NONE.on(modal);
+        let (a, narrowing) = self.physical_in(tract_length, &held);
         let ((tongue_index, tongue_diameter), narrowing) = (a.tongue?, narrowing?);
         Some(crate::inverse::Shape {
             tongue_index,
             tongue_diameter,
             lips: a.lips.map(|c| c.diameter),
             narrowing: Some((narrowing.index, narrowing.diameter)),
-            pharynx: self
-                .physical_root(tract_length, &vowel_size::OwnShapes::NONE)
-                .unwrap_or(0.0),
-            modes: None,
+            pharynx: self.physical_root(tract_length, &held).unwrap_or(0.0),
+            modes: self.physical_modes(tract_length, &held),
         })
     }
 

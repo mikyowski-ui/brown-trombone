@@ -373,6 +373,10 @@ fn hat(row: &[f32; SIZE_BINS], x: f32, lo: f32, hi: f32) -> f32 {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--modal") {
+        modal_main();
+        return;
+    }
     let started = Instant::now();
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let mut src = String::new();
@@ -806,6 +810,415 @@ fn main() {
     let _ = writeln!(src, "];");
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/inverse_table.rs");
     std::fs::write(path, &src).expect("write src/inverse_table.rs");
+    println!(
+        "wrote {path}: {} bytes, {:.1} s in all",
+        src.len(),
+        started.elapsed().as_secs_f32()
+    );
+}
+
+// ----- the modal body ------------------------------------------------------
+
+/// Grid nodes along each coordinate of the modal map: the body's three
+/// numbers, the lips (the knee of the lips, coordinate 0.75, on a grid
+/// line).
+const MODAL_DIMS: [usize; 4] = [11, 11, 11, 9];
+/// Modal shapes in the size survey (the cosine map's correction is checked
+/// on them).
+const MODAL_SIZE_SHAPES: usize = 400;
+
+/// Node `i` of the modal grid in storage order.
+fn modal_index(i: [usize; 4]) -> usize {
+    let d = MODAL_DIMS;
+    ((i[0] * d[1] + i[1]) * d[2] + i[2]) * d[3] + i[3]
+}
+
+fn modal_cells() -> Vec<[usize; 4]> {
+    let d = MODAL_DIMS;
+    let mut out = Vec::new();
+    for a in 0..d[0] - 1 {
+        for b in 0..d[1] - 1 {
+            for c in 0..d[2] - 1 {
+                for e in 0..d[3] - 1 {
+                    out.push([a, b, c, e]);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn modal_corners(table: &[Option<[f32; 3]>], cell: [usize; 4]) -> Option<[[f32; 3]; 16]> {
+    let mut out = [[0.0; 3]; 16];
+    for (corner, o) in out.iter_mut().enumerate() {
+        let mut i = cell;
+        for (d, v) in i.iter_mut().enumerate() {
+            *v += (corner >> d) & 1;
+        }
+        *o = table[modal_index(i)]?;
+    }
+    Some(out)
+}
+
+fn modal_interpolate(c: &[[f32; 3]; 16], frac: [f32; 4]) -> [f32; 3] {
+    let mut out = [0.0; 3];
+    for (corner, v) in c.iter().enumerate() {
+        let mut w = 1.0;
+        for (d, f) in frac.iter().enumerate() {
+            w *= if (corner >> d) & 1 == 1 { *f } else { 1.0 - f };
+        }
+        for k in 0..3 {
+            out[k] += w * v[k];
+        }
+    }
+    out
+}
+
+fn modal_inside(cell: [usize; 4], frac: [f32; 4]) -> [f32; 4] {
+    [0, 1, 2, 3].map(|d| (cell[d] as f32 + frac[d]) / (MODAL_DIMS[d] - 1) as f32)
+}
+
+/// ln F1, F2, F3 of modal coordinates `x` at `length`.
+fn modal_ln_formants(meter: &mut Meter, x: &[f32; 4], length: f32) -> Option<[f32; 3]> {
+    meter
+        .measure(&synthie_trombone::inverse::modal::from_coordinates(*x), length)
+        .filter(|f| f.iter().all(|v| v.is_finite() && *v > 0.0))
+        .map(|f| f.map(f32::ln))
+}
+
+/// The babble map of the modal body, `src/inverse_modes_table.rs`: the same
+/// steps as the cosine map's over the modal grid, and instead of a size
+/// correction of its own, how well the cosine map's serves modal shapes.
+fn modal_main() {
+    use synthie_trombone::inverse;
+    let started = Instant::now();
+    let d = MODAL_DIMS;
+    let knee = inverse::modal::coordinates(&Shape {
+        lips: Some(1.8),
+        ..inverse::modal::from_coordinates([0.5; 4])
+    })[3] * (d[3] - 1) as f32;
+    assert!(
+        (knee - knee.round()).abs() < 1e-3,
+        "lip rounding 1.8 must fall on a grid line of the lip coordinate"
+    );
+    // 1. Nodes.
+    let c = |k: usize, i: usize| i as f32 / (d[k] - 1) as f32;
+    let mut coords = Vec::new();
+    for a in 0..d[0] {
+        for b in 0..d[1] {
+            for e in 0..d[2] {
+                for l in 0..d[3] {
+                    coords.push([c(0, a), c(1, b), c(2, e), c(3, l)]);
+                }
+            }
+        }
+    }
+    println!("measuring {} modal grid nodes...", coords.len());
+    let measured = par_map(&coords, FULL, |m, x| modal_ln_formants(m, x, 1.0));
+    let unmeasured = measured.iter().filter(|v| v.is_none()).count();
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for f in measured.iter().flatten() {
+        for k in 0..3 {
+            lo[k] = lo[k].min(f[k]);
+            hi[k] = hi[k].max(f[k]);
+        }
+    }
+    for k in 0..3 {
+        lo[k] = ((lo[k] - 0.005) * 1000.0).floor() / 1000.0;
+        hi[k] = ((hi[k] + 0.005) * 1000.0).ceil() / 1000.0;
+    }
+    let mut codes = Vec::with_capacity(coords.len() * 5);
+    let table: Vec<Option<[f32; 3]>> = measured
+        .iter()
+        .map(|f| {
+            let (v, back) = match f {
+                None => (1023u32, None),
+                Some(f) => {
+                    let mut v = 0u32;
+                    let mut back = [0.0f32; 3];
+                    for k in 0..3 {
+                        let q = ((f[k] - lo[k]) / (hi[k] - lo[k]) * TOP)
+                            .round()
+                            .clamp(0.0, TOP) as u32;
+                        v |= q << (10 * k);
+                        back[k] = lo[k] + (hi[k] - lo[k]) * q as f32 / TOP;
+                    }
+                    (v, Some(back))
+                }
+            };
+            for c in 0..5 {
+                codes.push(B64[((v >> (6 * c)) & 63) as usize]);
+            }
+            back
+        })
+        .collect();
+    println!(
+        "  {unmeasured} without three formants, {:.1} s",
+        started.elapsed().as_secs_f32()
+    );
+
+    // 2. Cell checks.
+    let all_cells = modal_cells();
+    let mut rng = Lcg(0x00ba_bb1e);
+    let mut probes: Vec<(usize, [f32; 4])> = Vec::new();
+    for (n, &cell) in all_cells.iter().enumerate() {
+        if modal_corners(&table, cell).is_none() {
+            continue;
+        }
+        for p in 0..CHECKS {
+            let frac = if p == 0 {
+                [0.5; 4]
+            } else {
+                [0; 4].map(|_| {
+                    let r = rng.unit();
+                    if r < 0.15 {
+                        0.0
+                    } else if r < 0.3 {
+                        1.0
+                    } else {
+                        rng.range(0.1, 0.9)
+                    }
+                })
+            };
+            probes.push((n, frac));
+        }
+    }
+    println!(
+        "checking {} cells at {} points...",
+        all_cells.len(),
+        probes.len()
+    );
+    let truth = par_map(&probes, QUICK, |m, &(n, frac)| {
+        modal_ln_formants(m, &modal_inside(all_cells[n], frac), 1.0)
+    });
+    let mut rough: Vec<bool> = all_cells
+        .iter()
+        .map(|&cell| {
+            let Some(c) = modal_corners(&table, cell) else {
+                return true;
+            };
+            let top = |k: usize| c.iter().fold(f32::MIN, |m, v| m.max(v[k]));
+            let bottom = |k: usize| c.iter().fold(f32::MAX, |m, v| m.min(v[k]));
+            top(0) > bottom(1) + LABEL_GAP || top(1) > bottom(2) + LABEL_GAP
+        })
+        .collect();
+    for (&(n, frac), t) in probes.iter().zip(&truth) {
+        if rough[n] {
+            continue;
+        }
+        let Some(t) = t else {
+            rough[n] = true;
+            continue;
+        };
+        let c = modal_corners(&table, all_cells[n]).expect("checked above");
+        let p = modal_interpolate(&c, frac);
+        if (p[0] - t[0]).abs().max((p[1] - t[1]).abs()) > ROUGH_F12 || (p[2] - t[2]).abs() > ROUGH_F3
+        {
+            rough[n] = true;
+        }
+    }
+    let n_rough = rough.iter().filter(|&&r| r).count();
+    println!(
+        "  {n_rough} of {} cells rough ({:.1} %); {:.1} s",
+        all_cells.len(),
+        100.0 * n_rough as f32 / all_cells.len() as f32,
+        started.elapsed().as_secs_f32()
+    );
+
+    // 3. Reachable region.
+    let mut lo12 = [f32::INFINITY; 2];
+    let mut hi12 = [f32::NEG_INFINITY; 2];
+    let hulls: Vec<Vec<(f32, f32)>> = all_cells
+        .iter()
+        .zip(&rough)
+        .filter(|(_, r)| !**r)
+        .map(|(&cell, _)| {
+            let c = modal_corners(&table, cell).expect("smooth cells are measured");
+            for v in &c {
+                for k in 0..2 {
+                    lo12[k] = lo12[k].min(v[k]);
+                    hi12[k] = hi12[k].max(v[k]);
+                }
+            }
+            hull(c.iter().map(|v| (v[0], v[1])).collect())
+        })
+        .collect();
+    let range_hz = |k: usize| {
+        (
+            ((lo12[k].exp() / 10.0).floor() * 10.0),
+            ((hi12[k].exp() / 10.0).ceil() * 10.0),
+        )
+    };
+    let (r1, r2) = (range_hz(0), range_hz(1));
+    let na = ((r1.1.ln() - r1.0.ln()) / REACH_STEP).ceil() as usize;
+    let nb = ((r2.1.ln() - r2.0.ln()) / REACH_STEP).ceil() as usize;
+    let centre = |i: usize, n: usize, r: (f32, f32)| {
+        r.0.ln() + (r.1.ln() - r.0.ln()) * (i as f32 + 0.5) / n as f32
+    };
+    let mut raw = vec![false; na * nb];
+    for h in &hulls {
+        let (mut a0, mut a1, mut b0, mut b1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for &(a, b) in h {
+            a0 = a0.min(a);
+            a1 = a1.max(a);
+            b0 = b0.min(b);
+            b1 = b1.max(b);
+        }
+        let cell_of = |v: f32, r: (f32, f32), n: usize| {
+            ((v - r.0.ln()) / (r.1.ln() - r.0.ln()) * n as f32).clamp(0.0, n as f32 - 1.0) as usize
+        };
+        for i in cell_of(a0, r1, na)..=cell_of(a1, r1, na) {
+            for j in cell_of(b0, r2, nb)..=cell_of(b1, r2, nb) {
+                if !raw[i * nb + j] && inside_hull(h, (centre(i, na, r1), centre(j, nb, r2))) {
+                    raw[i * nb + j] = true;
+                }
+            }
+        }
+    }
+    let at = |m: &[bool], i: isize, j: isize| {
+        i >= 0
+            && j >= 0
+            && (i as usize) < na
+            && (j as usize) < nb
+            && m[i as usize * nb + j as usize]
+    };
+    let mut reach = vec![false; na * nb];
+    for i in 0..na as isize {
+        for j in 0..nb as isize {
+            reach[i as usize * nb + j as usize] = at(&raw, i, j)
+                && at(&raw, i - 1, j)
+                && at(&raw, i + 1, j)
+                && at(&raw, i, j - 1)
+                && at(&raw, i, j + 1);
+        }
+    }
+    println!(
+        "  reachable: {} of {na}×{nb} cells over F1 {:.0}–{:.0} Hz, F2 {:.0}–{:.0} Hz",
+        reach.iter().filter(|&&r| r).count(),
+        r1.0,
+        r1.1,
+        r2.0,
+        r2.1
+    );
+    for i in (0..na).rev().step_by(2) {
+        let row: String = (0..nb)
+            .map(|j| if reach[i * nb + j] { '#' } else { '.' })
+            .collect();
+        println!("  {:5.0} {row}", centre(i, na, r1).exp());
+    }
+
+    // 4. Tract length: how far the cosine map's correction is off for
+    // modal shapes.
+    let smooth: Vec<usize> = (0..all_cells.len()).filter(|&n| !rough[n]).collect();
+    let mut size_probes: Vec<([f32; 4], f32)> = Vec::new();
+    for _ in 0..MODAL_SIZE_SHAPES {
+        let n = smooth[(rng.unit() * smooth.len() as f32) as usize % smooth.len()];
+        let x = modal_inside(all_cells[n], [0; 4].map(|_| rng.unit()));
+        for &l in &LENGTHS {
+            size_probes.push((x, l));
+        }
+    }
+    let sized = par_map(&size_probes, FULL, |m, (x, l)| modal_ln_formants(m, x, *l));
+    let native_at = LENGTHS
+        .iter()
+        .position(|&l| (l - 1.0).abs() < 1e-6)
+        .expect("1.0 is listed");
+    let mut report = String::new();
+    for (li, &l) in LENGTHS.iter().enumerate() {
+        let _ = write!(report, "length {l:.1}:");
+        for k in 0..3 {
+            let mut left = Vec::new();
+            for s in 0..MODAL_SIZE_SHAPES {
+                let row = &sized[s * LENGTHS.len()..(s + 1) * LENGTHS.len()];
+                if let (Some(n), Some(f)) = (row[native_at], row[li]) {
+                    let want = inverse::formants_at_length(
+                        [n[0].exp(), n[1].exp(), n[2].exp()],
+                        l,
+                    )[k];
+                    left.push((f[k] - want.ln()).abs());
+                }
+            }
+            let _ = write!(
+                report,
+                "  F{} p95 {:4.2} % max {:4.2} %",
+                k + 1,
+                100.0 * quantile(&mut left, 0.95),
+                100.0 * quantile(&mut left, 1.0)
+            );
+        }
+        report.push('\n');
+    }
+    println!("The cosine map's size correction on modal shapes, error:\n{report}");
+
+    let mut src = String::new();
+    let _ = writeln!(
+        src,
+        "//! Babble map table of the modal tongue body, generated by\n\
+         //! `examples/babble.rs`; do not edit. Regenerate with\n\
+         //! `cargo run -p synthie-trombone --example babble --release -- --modal`.\n\
+         //!\n\
+         //! Measured {} grid nodes, {unmeasured} without three formants; {n_rough} of {} cells\n\
+         //! rough. The cosine map's size correction, on modal shapes:\n//!\n//! ```text",
+        coords.len(),
+        all_cells.len(),
+    );
+    for line in report.lines() {
+        let _ = writeln!(src, "//! {}", line.trim_start());
+    }
+    let _ = writeln!(
+        src,
+        "//! ```\n\n#![allow(clippy::unreadable_literal, clippy::excessive_precision)]\n"
+    );
+    let _ = writeln!(
+        src,
+        "/// Grid nodes along each coordinate: the body's three numbers, the lips."
+    );
+    let _ = writeln!(src, "pub(super) const DIMS: [usize; 4] = {MODAL_DIMS:?};");
+    let _ = writeln!(src, "/// `ln` Hz of formant code 0, per formant.");
+    let _ = writeln!(src, "pub(super) const F_LO: [f32; 3] = {lo:?};");
+    let _ = writeln!(src, "/// `ln` Hz of formant code 1022, per formant.");
+    let _ = writeln!(src, "pub(super) const F_HI: [f32; 3] = {hi:?};");
+    let _ = writeln!(
+        src,
+        "/// Formants of every node: five base-64 characters, low bits first,\n\
+         /// holding three ten-bit codes (F1 lowest); F1 code 1023 = unmeasured."
+    );
+    let _ = writeln!(src, "pub(super) static NODES: &[u8] = {};", literal(&codes));
+    let _ = writeln!(src, "/// One bit per grid cell, six per character: rough.");
+    let _ = writeln!(
+        src,
+        "pub(super) static ROUGH: &[u8] = {};",
+        literal(&bits(&rough))
+    );
+    let _ = writeln!(src, "/// F1 range of the reachability grid, Hz.");
+    let _ = writeln!(
+        src,
+        "pub(super) const REACH_F1: (f32, f32) = ({:?}, {:?});",
+        r1.0, r1.1
+    );
+    let _ = writeln!(src, "/// F2 range of the reachability grid, Hz.");
+    let _ = writeln!(
+        src,
+        "pub(super) const REACH_F2: (f32, f32) = ({:?}, {:?});",
+        r2.0, r2.1
+    );
+    let _ = writeln!(src, "/// Reachability cells along F1 and F2.");
+    let _ = writeln!(
+        src,
+        "pub(super) const REACH_SIZE: [usize; 2] = [{na}, {nb}];"
+    );
+    let _ = writeln!(
+        src,
+        "/// One bit per reachability cell (F1 major), six per character."
+    );
+    let _ = writeln!(
+        src,
+        "pub(super) static REACH: &[u8] = {};",
+        literal(&bits(&reach))
+    );
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/inverse_modes_table.rs");
+    std::fs::write(path, &src).expect("write src/inverse_modes_table.rs");
     println!(
         "wrote {path}: {} bytes, {:.1} s in all",
         src.len(),

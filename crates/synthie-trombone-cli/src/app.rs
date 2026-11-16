@@ -1579,6 +1579,22 @@ fn predict_near(shape: &Shape) -> Option<[f32; 3]> {
     if let Some(f) = inverse::predict(shape) {
         return Some(f);
     }
+    if shape.modes.is_some() {
+        // The modal body: nudged on its own map's coordinates.
+        let x = inverse::modal::coordinates(shape);
+        for step in [0.01, 0.02, 0.04, 0.08] {
+            for k in 0..4 {
+                for sign in [-1.0, 1.0] {
+                    let mut y = x;
+                    y[k] = (y[k] + sign * step).clamp(0.0, 1.0);
+                    if let Some(f) = inverse::predict(&inverse::modal::from_coordinates(y)) {
+                        return Some(f);
+                    }
+                }
+            }
+        }
+        return None;
+    }
     let x = shape.coordinates();
     for step in [0.01, 0.02, 0.04, 0.08] {
         for k in 0..5 {
@@ -1641,6 +1657,12 @@ impl ChartRange {
 }
 
 impl App {
+    /// Whether the voice has the modal tongue body
+    /// (`AnatomyConfig::tongue_model` 1): Formant Lock then solves on its map.
+    fn modal_body(&self) -> bool {
+        self.settings.tuning.anatomy.tongue_model >= 0.5
+    }
+
     /// The vowel chart's extent for the voice in use.
     pub fn chart_range(&self) -> ChartRange {
         ChartRange::for_length(self.settings.tract_length)
@@ -1746,6 +1768,17 @@ impl App {
                 modes: None,
             },
         };
+        // On the modal tongue body the shape is its three numbers (the
+        // tongue projected onto them), solved on its own map.
+        let start = if self.modal_body() {
+            Shape {
+                modes: Some(inverse::project_tongue(start.tongue_index, start.tongue_diameter)),
+                narrowing: None,
+                ..start
+            }
+        } else {
+            start
+        };
         if self.shape_formants(&start).is_some() {
             self.hold_shape(start);
         } else {
@@ -1782,7 +1815,11 @@ impl App {
     /// to a fresh press.
     fn steer(&mut self, f1: f32, f2: f32, glide: bool) {
         let length = self.settings.tract_length;
-        let (a, b) = inverse::nearest_reachable_for(f1, f2, length);
+        let (a, b) = if self.modal_body() {
+            inverse::modal::nearest_reachable_for(f1, f2, length)
+        } else {
+            inverse::nearest_reachable_for(f1, f2, length)
+        };
         let near = self.formant_lock;
         let plain = || inverse::solve_for(a, b, None, near.as_ref(), length);
         // F1 and F2 leave the shape a degree of freedom, and the solver's

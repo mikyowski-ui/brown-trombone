@@ -26,14 +26,35 @@ const STEP: f32 = 4.0;
 /// Tick rate of the native tract, Hz.
 const NATIVE_RATE: f32 = 96_000.0;
 
-/// A physical-engine voice holding `shape` at `tract_length`, settled.
+/// A physical-engine voice holding `shape` at `tract_length`, settled; a
+/// shape with the modal body's numbers ([`Shape::modes`]) on the modal body
+/// (`tongue_model` 1), with [`base`] for the rest of its tuning.
 pub fn voice(shape: &Shape, tract_length: f32) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
+    if shape.modes.is_some() {
+        let mut tuning = base();
+        tuning.anatomy.tongue_model = 1.0;
+        t.set_tuning(&tuning);
+    }
     t.set_tract_length(tract_length);
     t.set_shape(shape);
     t.settle();
     t
+}
+
+/// The tuning a modal shape is measured with: the default, or the profile
+/// named by the environment variable `SURVEY_PROFILE` (so that the tables
+/// can be solved again for a tract whose other numbers are switched on, such
+/// as the lip horn or the epilarynx).
+pub fn base() -> synthie_trombone::Tuning {
+    std::env::var("SURVEY_PROFILE").map_or(synthie_trombone::Tuning::DEFAULT, |path| {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        synthie_trombone::VoiceSettings::default()
+            .with_profile(&text)
+            .unwrap_or_else(|e| panic!("{path}: {e}"))
+            .tuning
+    })
 }
 
 /// The first three peaks of a transfer function magnitude sampled every

@@ -22,9 +22,15 @@ use crate::vowel_targets::{TARGET_COUNT, VowelKey, position};
 #[path = "vowel_size_table.rs"]
 mod table;
 
+#[path = "vowel_modes_table.rs"]
+mod modal_table;
+
 /// A physical vowel shape: tongue body `(index, diameter)`, lip rounding,
-/// the narrowing along the tongue `(cell, diameter)` and the tongue root.
-pub(crate) type VowelShape = ((f32, f32), Option<f32>, (f32, f32), f32);
+/// the narrowing along the tongue `(cell, diameter)`, the tongue root and,
+/// for the modal body (`AnatomyConfig::tongue_model` 1), its three numbers.
+/// A modal shape keeps the cosine table's tongue for what reads a vowel's
+/// place (the velars' place before it); its root is at rest.
+pub(crate) type VowelShape = ((f32, f32), Option<f32>, (f32, f32), f32, Option<[f32; 3]>);
 
 /// Tightest lip rounding a vowel may have (that of /u/); tighter lips
 /// would hiss.
@@ -43,12 +49,21 @@ const NO_NARROWING: (f32, f32) = (24.0, 3.0);
 /// [target](crate::vowel_targets::TARGETS), `None` where the table's
 /// shape is used (see
 /// [`Trombone::set_vowel_shape`](crate::Trombone::set_vowel_shape)).
+///
+/// It also says which table the others come from: that of the cosine body
+/// or, with `modal`, that of the modal body.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct OwnShapes([Option<VowelShape>; TARGET_COUNT]);
+pub(crate) struct OwnShapes([Option<VowelShape>; TARGET_COUNT], pub(crate) bool);
 
 impl OwnShapes {
-    /// Every shape from the table.
-    pub(crate) const NONE: Self = Self([None; TARGET_COUNT]);
+    /// Every shape from the cosine body's table.
+    pub(crate) const NONE: Self = Self([None; TARGET_COUNT], false);
+
+    /// The same shapes, the others from the modal body's table if `modal`.
+    pub(crate) const fn on(mut self, modal: bool) -> Self {
+        self.1 = modal;
+        self
+    }
 
     /// Hold `shape` for `key` (or the table's again, with `None`); `false`
     /// if `key` has no target.
@@ -68,6 +83,7 @@ impl OwnShapes {
                 s.narrowing
                     .map_or(NO_NARROWING, |(at, d)| (at, d.max(MIN_NARROWING))),
                 root(s.pharynx),
+                s.modes.map(crate::tract::clamp_modes),
             )
         });
         true
@@ -94,9 +110,55 @@ fn root(pharynx: f32) -> f32 {
     }
 }
 
-/// [`shape`], unless `own` holds a shape of its own for `key`.
+/// [`shape`] (or [`modal_shape`] if `own` says the body is modal), unless
+/// `own` holds a shape of its own for `key`.
 pub(crate) fn shape_in(key: VowelKey, tract_length: f32, own: &OwnShapes) -> Option<VowelShape> {
-    own.get(key).or_else(|| shape(key, tract_length))
+    own.get(key).or_else(|| {
+        if own.1 {
+            modal_shape(key, tract_length)
+        } else {
+            shape(key, tract_length)
+        }
+    })
+}
+
+/// The shape of `key` at `tract_length` on the modal body: its three
+/// numbers, lips and (for the few that need one) narrowing from the modal
+/// table, interpolated between rows as [`shape`] does, the cosine table's
+/// tongue beside them, the root at rest.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+pub(crate) fn modal_shape(key: VowelKey, tract_length: f32) -> Option<VowelShape> {
+    let (tongue, ..) = shape(key, tract_length)?;
+    let (_, rows) = modal_table::SHAPES.iter().find(|(k, _)| *k == key)?;
+    let (row, frac) = if tract_length.to_bits() == 1.0f32.to_bits() || !tract_length.is_finite() {
+        (modal_table::NATIVE, 0.0)
+    } else {
+        let last = (rows.len() - 1) as f32;
+        let pos = ((tract_length - modal_table::FIRST) / modal_table::STEP).clamp(0.0, last);
+        let row = (pos as usize).min(rows.len() - 2);
+        (row, pos - row as f32)
+    };
+    let v = |k: usize| {
+        let lo = rows[row][k] as f32;
+        let hi = rows.get(row + 1).map_or(lo, |r| r[k] as f32);
+        (lo + (hi - lo) * frac) / PER_UNIT
+    };
+    let narrowing = if rows[row][5] < 3000 {
+        (v(4), v(5).max(MIN_NARROWING))
+    } else {
+        NO_NARROWING
+    };
+    Some((
+        tongue,
+        (rows[row][3] > 0).then(|| v(3).max(MIN_LIPS)),
+        narrowing,
+        0.0,
+        Some(crate::tract::clamp_modes([v(0), v(1), v(2)])),
+    ))
 }
 
 /// The shape of `key` at `tract_length`, or `None` for a key the table
@@ -136,6 +198,7 @@ pub(crate) fn shape(key: VowelKey, tract_length: f32) -> Option<VowelShape> {
         (rows[row][2] > 0).then(|| v(2).max(MIN_LIPS)),
         (v(3), v(4).max(MIN_NARROWING)),
         root(v(5)),
+        None,
     ))
 }
 

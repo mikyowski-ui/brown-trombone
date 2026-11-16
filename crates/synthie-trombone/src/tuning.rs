@@ -1414,9 +1414,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (25, 67, 43)
+            (26, 67, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 135);
+        assert_eq!(Tuning::FIELDS.len(), 136);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.

@@ -189,6 +189,47 @@ const PAIRS: [(Phoneme, Phoneme); 4] = [
     (Phoneme::Ah, Phoneme::Aa),
 ];
 
+/// Which tongue body the shapes are solved for (`AnatomyConfig::tongue_model`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Model {
+    /// The cosine tongue: `src/vowel_size_table.rs`.
+    Cosine,
+    /// The measured modes: `src/vowel_modes_table.rs`.
+    Modal,
+}
+
+/// What one target's shapes are made of.
+#[derive(Clone, Copy)]
+struct Kind {
+    model: Model,
+    /// Rounded lips (else spread).
+    rounded: bool,
+    /// A narrowing along the tongue of its own (the modal body: only /ɚ/,
+    /// whose third formant three modes cannot bring down to 1700 Hz).
+    narrowed: bool,
+}
+
+impl Kind {
+    fn of(model: Model, t: &Target) -> Self {
+        Self {
+            model,
+            rounded: t.lips == Lips::Rounded,
+            narrowed: model == Model::Cosine || t.key == VowelKey::Vowel(Phoneme::Er),
+        }
+    }
+}
+
+/// Pull of the modal body's three numbers towards those the speaker
+/// measured for the vowel (or the blend of them that stands for a target he
+/// did not say, see [`measured_prior`]), per squared coordinate, relative to
+/// [`STAY`] and [`BEND`] as [`NATURAL_PULL`] is: a step of `0.1` in a
+/// coordinate (a fifth of the measured range of that number) costs what a
+/// 0.6 % error of F1 or F2 does.
+const MEASURED_PULL: f32 = 1.0;
+/// F1 or F2 error (relative) of a native shape of the modal body beyond
+/// which it is solved again with a narrowing along the tongue of its own.
+const NEEDS_NARROWING: f32 = 0.01;
+
 /// Tract length of row `k`, computed as the library does.
 fn row_length(k: usize) -> f32 {
     FIRST + STEP * k as f32
@@ -199,9 +240,15 @@ fn articulation(key: VowelKey) -> Articulation {
     key.articulation().expect("a vowel shape")
 }
 
-/// The six raw numbers of a shape: tongue index, tongue diameter, lips
-/// (`0` when spread), narrowing cell, narrowing diameter and tongue root.
+/// The six raw numbers of a shape as the table stores them: for the cosine
+/// body tongue index, tongue diameter, lips (`0` when spread), narrowing
+/// cell, narrowing diameter and tongue root; for the modal body its three
+/// numbers, lips, narrowing cell and diameter (`0` and `3` for none).
 fn raw(s: &Shape) -> [f32; D] {
+    if let Some(q) = s.modes {
+        let (at, d) = s.narrowing.unwrap_or((0.0, NARROWING.1));
+        return [q[0], q[1], q[2], s.lips.unwrap_or(0.0), at, d];
+    }
     let n = s.narrowing.expect("physical vowels narrow the tongue");
     [
         s.tongue_index,
@@ -213,39 +260,68 @@ fn raw(s: &Shape) -> [f32; D] {
     ]
 }
 
-/// A shape as six coordinates, each `0‥1` over the ranges searched:
-/// tongue index, tongue diameter, lips, narrowing place, narrowing
-/// opening, tongue root; the openings on a logarithmic scale. Spread lips
-/// are `1`, no narrowing the widest one.
+/// Coordinate `k` of the modal body (`0‥1` over the range the tract takes)
+/// sits at position [`MODE_AT`]`[k]` of the six: the lips and the narrowing
+/// keep the places they have for the cosine body.
+const MODE_AT: [usize; 3] = [0, 1, 5];
+
+/// A shape as six coordinates, each `0‥1` over the ranges searched: for the
+/// cosine body tongue index, tongue diameter, lips, narrowing place,
+/// narrowing opening, tongue root; for the modal body its first two
+/// numbers, lips, narrowing place and opening, its third number (see
+/// [`MODE_AT`]). Openings are on a logarithmic scale. Spread lips are `1`,
+/// no narrowing the widest one.
 fn to_x(s: &Shape) -> [f32; D] {
     let lin = |v: f32, r: (f32, f32)| (v - r.0) / (r.1 - r.0);
     let log = |v: f32, r: (f32, f32)| {
         ((v - TOUCH).ln() - (r.0 - TOUCH).ln()) / ((r.1 - TOUCH).ln() - (r.0 - TOUCH).ln())
     };
     let (at, narrow) = s.narrowing.unwrap_or((23.0, NARROWING.1));
-    [
+    let mut x = [
         lin(s.tongue_index, TONGUE_INDEX),
         lin(s.tongue_diameter, TONGUE_DIAMETER),
         s.lips.map_or(1.0, |l| log(l, LIPS)),
         lin(at, NARROWING_AT),
         log(narrow, NARROWING),
         lin(s.pharynx, PHARYNX),
-    ]
-    .map(|v| v.clamp(0.0, 1.0))
+    ];
+    if let Some(q) = s.modes {
+        for k in 0..3 {
+            x[MODE_AT[k]] = lin(q[k], inverse::mode_range(k));
+        }
+    }
+    x.map(|v| v.clamp(0.0, 1.0))
 }
 
-/// The shape at coordinates `x` (see [`to_x`]); lips only if `rounded`.
-fn from_x(x: &[f32; D], rounded: bool) -> Shape {
+/// The shape at coordinates `x` (see [`to_x`]) of `kind`.
+fn from_x(x: &[f32; D], kind: Kind) -> Shape {
     let lin = |v: f32, r: (f32, f32)| r.0 + (r.1 - r.0) * v.clamp(0.0, 1.0);
     let log = |v: f32, r: (f32, f32)| {
         let (lo, hi) = ((r.0 - TOUCH).ln(), (r.1 - TOUCH).ln());
         (TOUCH + (lo + (hi - lo) * v.clamp(0.0, 1.0)).exp()).max(r.0)
     };
+    let lips = kind.rounded.then(|| log(x[2], LIPS));
+    let narrowing = kind
+        .narrowed
+        .then(|| (lin(x[3], NARROWING_AT), log(x[4], NARROWING)));
+    if kind.model == Model::Modal {
+        let q = [0, 1, 2].map(|k| lin(x[MODE_AT[k]], inverse::mode_range(k)));
+        // The cosine tongue is not used by a modal tract; the projection's
+        // inverse is not needed.
+        return Shape {
+            tongue_index: 20.0,
+            tongue_diameter: 2.5,
+            lips,
+            narrowing,
+            pharynx: 0.0,
+            modes: Some(q),
+        };
+    }
     Shape {
         tongue_index: lin(x[0], TONGUE_INDEX),
         tongue_diameter: lin(x[1], TONGUE_DIAMETER),
-        lips: rounded.then(|| log(x[2], LIPS)),
-        narrowing: Some((lin(x[3], NARROWING_AT), log(x[4], NARROWING))),
+        lips,
+        narrowing,
         pharynx: lin(x[5], PHARYNX),
         modes: None,
     }
@@ -284,7 +360,7 @@ struct Goal {
     lo: [f32; D],
     /// Highest value of each coordinate.
     hi: [f32; D],
-    rounded: bool,
+    kind: Kind,
     length: f32,
 }
 
@@ -308,7 +384,7 @@ impl Goal {
     }
 
     fn eval(&self, m: &mut Meter, x: &[f32; D]) -> Option<([f32; 3], f32)> {
-        let f = m.measure(&from_x(x, self.rounded), self.length)?;
+        let f = m.measure(&from_x(x, self.kind), self.length)?;
         let r = self.residuals(f);
         Some((r, self.cost(x, &r)))
     }
@@ -451,7 +527,89 @@ fn rel(r: &[f32; 3]) -> [f32; 3] {
 /// and does not make its formants with a pharynx pinched near the folds
 /// (which a real voice's folds would feel: such shapes sound different
 /// from their closed-glottis formants).
-fn prior(t: &Target) -> [f32; D] {
+///
+/// On the modal body the body is the speaker's measured one for the vowel
+/// (see [`measured_prior`]); lips and narrowing as on the cosine body.
+fn prior(kind: Kind, t: &Target) -> [f32; D] {
+    let mut x = cosine_prior(t);
+    if kind.model == Model::Modal {
+        let q = measured_prior(t);
+        for k in 0..3 {
+            let (lo, hi) = inverse::mode_range(k);
+            x[MODE_AT[k]] = ((q[k] - lo) / (hi - lo)).clamp(0.0, 1.0);
+        }
+        if !kind.narrowed {
+            x[3] = 0.5;
+            x[4] = 1.0;
+        } else if t.key != VowelKey::Vowel(Phoneme::Er) {
+            // A vowel that needs a narrowing on the modal body starts from
+            // the one the cosine body has.
+            let s = articulation(t.key)
+                .physical_shape(1.0)
+                .expect("a vowel shape");
+            let n = to_x(&s);
+            x[3] = n[3];
+            x[4] = n[4];
+        }
+    }
+    x
+}
+
+/// The measured vowel (IPA, as `inverse::measured_modes` names it) that
+/// stands for `key`, if the speaker said it.
+fn measured_vowel(key: VowelKey) -> Option<&'static str> {
+    use Phoneme as P;
+    Some(match key {
+        VowelKey::Vowel(P::Iy) => "i",
+        VowelKey::Vowel(P::Ih) => "ɪ",
+        VowelKey::Start(P::Ey) => "e",
+        VowelKey::Vowel(P::Eh) => "ɛ",
+        VowelKey::Vowel(P::Ae) => "æ",
+        VowelKey::Vowel(P::Ah) => "ʌ",
+        VowelKey::Vowel(P::Aa) => "ɑ",
+        VowelKey::Vowel(P::Ao) => "ɔ",
+        VowelKey::Start(P::Ow) => "o",
+        VowelKey::Vowel(P::Uh) => "ʊ",
+        VowelKey::Vowel(P::Uw) => "u",
+        _ => return None,
+    })
+}
+
+/// The modal body the solver starts target `t` from and pulls it towards:
+/// the speaker's measured one for the eleven vowels he said; for the other
+/// shapes (glides, the ends of diphthongs and lax glides, schwa, the
+/// fronted /u/ and schwa, /ɚ/) a blend of his, each weighted by how near
+/// its target's formants are to this one's (a Gaussian of 10 % in `ln` F1
+/// and F2, F3 at a third of their weight), so that they stay inside the
+/// shapes he makes.
+fn measured_prior(t: &Target) -> [f32; 3] {
+    if let Some(v) = measured_vowel(t.key) {
+        return inverse::measured_modes(v).expect("a measured vowel");
+    }
+    let mut sum = [0.0f32; 3];
+    let mut weight = 0.0f32;
+    for m in TARGETS {
+        let Some(v) = measured_vowel(m.key) else {
+            continue;
+        };
+        let d2: f32 = (0..3)
+            .map(|k| {
+                let w = if k == 2 { F3_WEIGHT } else { 1.0 };
+                w * (t.formants[k].ln() - m.formants[k].ln()).powi(2)
+            })
+            .sum();
+        let w = (-d2 / (2.0 * 0.1f32.powi(2))).exp();
+        let q = inverse::measured_modes(v).expect("a measured vowel");
+        for k in 0..3 {
+            sum[k] += w * q[k];
+        }
+        weight += w;
+    }
+    sum.map(|s| s / weight.max(1e-12))
+}
+
+/// [`prior`] on the cosine body.
+fn cosine_prior(t: &Target) -> [f32; D] {
     let a = articulation(t.key);
     let (index, diameter) = a.tongue.expect("a vowel tongue");
     let lips = match t.lips {
@@ -496,21 +654,33 @@ fn natural_root(key: VowelKey) -> f32 {
 /// above the tract's own, by 5 % for /e/ and /æ/ (as the listener hears
 /// them), where a narrowing along the tongue leaves it alone. Open vowels
 /// need it all the same, to reach their F1.
-fn lowest(t: &Target) -> [f32; D] {
+fn lowest(model: Model, t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
         lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
     }
-    lo[5] = root_x(root_range(t.key).0);
+    if model == Model::Cosine {
+        lo[5] = root_x(root_range(t.key).0);
+    }
     lo
 }
 
 /// Highest coordinates target `t` may take: the root no further forward
 /// than its class allows (see [`root_range`]).
-fn highest(t: &Target) -> [f32; D] {
+fn highest(model: Model, t: &Target) -> [f32; D] {
     let mut hi = [1.0; D];
-    hi[5] = root_x(root_range(t.key).1);
+    if model == Model::Cosine {
+        hi[5] = root_x(root_range(t.key).1);
+    }
     hi
+}
+
+/// Which coordinates of target `t` are solved.
+fn free(kind: Kind, key: VowelKey) -> [bool; D] {
+    match kind.model {
+        Model::Cosine => [true, true, kind.rounded, true, true, root_free(key)],
+        Model::Modal => [true, true, kind.rounded, kind.narrowed, kind.narrowed, true],
+    }
 }
 
 /// The coordinate of tongue root `r`.
@@ -522,39 +692,48 @@ fn root_x(r: f32) -> f32 {
 /// place for it and the babble map's answers, keep the best, measured by
 /// formants and nearness to that place. (Not from the shape the table held
 /// before: the table is then the same however often it is regenerated.)
-fn native_row(m: &mut Meter, t: &Target) -> Solved {
+fn native_row(m: &mut Meter, kind: Kind, t: &Target) -> Solved {
     let f = vowel_targets::formants(t.key, 1.0).expect("a target");
-    let rounded = t.lips == Lips::Rounded;
-    let home = prior(t);
+    let model = kind.model;
+    let home = prior(kind, t);
     let mut starts: Vec<([f32; D], bool)> = vec![(home, false)];
-    for f3 in [Some(f[2]), None] {
-        let near = from_x(&home, rounded);
+    // The modal body starts from the speaker's own shape only: it is pulled
+    // towards it anyway, and the babble map's shapes of the cosine body are
+    // not of it.
+    for f3 in [Some(f[2]), None].into_iter().filter(|_| model == Model::Cosine) {
+        let near = from_x(&home, kind);
         starts.push((
             start_from(&inverse::solve(f[0], f[1], f3, Some(&near)), t),
             true,
         ));
         starts.push((start_from(&inverse::solve(f[0], f[1], f3, None), t), true));
     }
-    let lo = lowest(t);
+    let lo = lowest(model, t);
     let starts: Vec<([f32; D], bool)> = starts
         .into_iter()
         .map(|(mut x, m)| {
-            let hi = highest(t);
+            let hi = highest(model, t);
             for d in 0..D {
                 x[d] = x[d].clamp(lo[d], hi[d]);
             }
             (x, m)
         })
         .collect();
+    let mut pull = NATURAL_PULL;
+    if model == Model::Modal {
+        for k in MODE_AT {
+            pull[k] = MEASURED_PULL;
+        }
+    }
     let goal = Goal {
         t: f.map(f32::ln),
         near: home,
         ahead: home,
-        free: [true, true, rounded, true, true, root_free(t.key)],
-        pull: NATURAL_PULL,
-        lo: lowest(t),
-        hi: highest(t),
-        rounded,
+        free: free(kind, t.key),
+        pull,
+        lo: lowest(model, t),
+        hi: highest(model, t),
+        kind,
         length: 1.0,
     };
     let mut best: Option<([f32; D], f32, bool)> = None;
@@ -585,15 +764,19 @@ fn native_row(m: &mut Meter, t: &Target) -> Solved {
 
 /// Solve the rows of target `t` outwards from the native one `x0`, `up`
 /// towards longer tracts or down towards shorter ones.
-fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solved)> {
-    let rounded = t.lips == Lips::Rounded;
+fn chain(m: &mut Meter, kind: Kind, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solved)> {
+    let model = kind.model;
     // /a/ in a small body keeps its throat: the narrowing that would lift
     // F1 the last 2 % sits deep in the pharynx, and tightening it there
     // makes the vowel louder, not only higher (by 0.4 dB at length 0.6,
     // which upsets the balance of /s/ against /a/ that the physical gates
     // hold). Its tongue still moves.
     let throat = t.key == VowelKey::Vowel(Phoneme::Aa) && !up;
-    let free = [true, true, rounded, !throat, !throat, root_free(t.key)];
+    let mut free = free(kind, t.key);
+    if throat {
+        free[3] = false;
+        free[4] = false;
+    }
     let rows: Vec<usize> = if up {
         (NATIVE_ROW + 1..ROWS).collect()
     } else {
@@ -608,7 +791,7 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solve
         let mut ahead = [0.0f32; D];
         for d in 0..D {
             ahead[d] = if free[d] {
-                (2.0 * last[d] - before[d]).clamp(0.0, highest(t)[d])
+                (2.0 * last[d] - before[d]).clamp(0.0, highest(model, t)[d])
             } else {
                 last[d]
             };
@@ -619,15 +802,15 @@ fn chain(m: &mut Meter, t: &Target, x0: [f32; D], up: bool) -> Vec<(usize, Solve
             ahead,
             free,
             pull: [1.0; D],
-            lo: lowest(t),
-            hi: highest(t),
-            rounded,
+            lo: lowest(model, t),
+            hi: highest(model, t),
+            kind,
             length,
         };
         let mut best = goal.refine(m, ahead).map(|(x, r, c)| (x, r, c, false));
         let miss = |r: &[f32; 3]| r[0].abs().max(r[1].abs());
-        if best.is_none_or(|b| miss(&b.1) > TRY_MAP) {
-            let near = from_x(&last, rounded);
+        if model == Model::Cosine && best.is_none_or(|b| miss(&b.1) > TRY_MAP) {
+            let near = from_x(&last, kind);
             let guess =
                 inverse::solve_for(target[0], target[1], Some(target[2]), Some(&near), length);
             let mut g = start_from(&guess, t);
@@ -684,7 +867,7 @@ fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&mut Meter, &T) -> R + Sync
 
 /// The shape the library makes of the table at `length`, with the same
 /// arithmetic as `vowel_size::shape`.
-fn interpolate(rows: &[[i32; D]; ROWS], length: f32) -> Shape {
+fn interpolate(model: Model, rows: &[[i32; D]; ROWS], length: f32) -> Shape {
     let (a, s) = if length.to_bits() == 1.0f32.to_bits() {
         (NATIVE_ROW, 0.0)
     } else {
@@ -697,6 +880,17 @@ fn interpolate(rows: &[[i32; D]; ROWS], length: f32) -> Shape {
         let hi = rows.get(a + 1).map_or(lo, |r| r[k] as f32);
         (lo + (hi - lo) * s) / 1000.0
     };
+    if model == Model::Modal {
+        // As `vowel_size::modal_shape` reads it.
+        return Shape {
+            tongue_index: 20.0,
+            tongue_diameter: 2.5,
+            lips: (rows[a][3] > 0).then(|| v(3).max(MIN_LIPS)),
+            narrowing: (rows[a][5] < 3000).then(|| (v(4), v(5).max(MIN_NARROWING))),
+            pharynx: 0.0,
+            modes: Some([v(0), v(1), v(2)]),
+        };
+    }
     Shape {
         tongue_index: v(0).clamp(TONGUE_INDEX.0, TONGUE_INDEX.1),
         tongue_diameter: v(1).clamp(TONGUE_DIAMETER.0, TONGUE_DIAMETER.1),
@@ -725,7 +919,13 @@ fn key_src(key: VowelKey) -> String {
 
 fn main() {
     let started = Instant::now();
+    let model = if std::env::args().any(|a| a == "--modal") {
+        Model::Modal
+    } else {
+        Model::Cosine
+    };
     let targets: Vec<Target> = TARGETS.to_vec();
+    let first = |t: &Target| Kind::of(model, t);
 
     // How far apart the lax and tense vowels are now, for the report.
     let pair_now = par_map(&PAIRS, |m, &(a, b)| {
@@ -734,8 +934,57 @@ fn main() {
         fa.zip(fb)
     });
 
+    // The speaker's own shapes on the engine, before anything is solved.
+    if model == Model::Modal {
+        let measured: Vec<&Target> = targets
+            .iter()
+            .filter(|t| measured_vowel(t.key).is_some())
+            .collect();
+        let at_measured = par_map(&measured, |m, t| {
+            m.measure(&from_x(&prior(first(t), t), first(t)), 1.0)
+        });
+        println!("The measured shapes on the engine (lips as the cosine body's), against the targets:");
+        for (t, f) in measured.iter().zip(&at_measured) {
+            let e = errors(*f, t.key, 1.0);
+            println!(
+                "  {:>4} ({}): F1 {:+5.1} % F2 {:+5.1} % F3 {:+5.1} %",
+                t.key.to_string(),
+                measured_vowel(t.key).unwrap_or("?"),
+                100.0 * e[0],
+                100.0 * e[1],
+                100.0 * e[2]
+            );
+        }
+    }
+
     // 1. The native rows.
-    let natives = par_map(&targets, native_row);
+    let mut natives = par_map(&targets, |m, t| native_row(m, first(t), t));
+    let mut kinds: Vec<Kind> = targets.iter().map(first).collect();
+    if model == Model::Modal {
+        // A vowel three modes and the lips leave short of its F1 or F2 takes
+        // a narrowing along the tongue as well, starting from the cosine
+        // body's.
+        let short: Vec<usize> = (0..targets.len())
+            .filter(|&v| !kinds[v].narrowed && natives[v].err[..2].iter().any(|e| e.abs() > NEEDS_NARROWING))
+            .collect();
+        let again = par_map(&short, |m, &v| {
+            native_row(m, Kind { narrowed: true, ..kinds[v] }, &targets[v])
+        });
+        for (&v, s) in short.iter().zip(again) {
+            let miss = |s: &Solved| s.err[0].abs().max(s.err[1].abs());
+            println!(
+                "{:>4} needs a narrowing: F1/F2 off by {:.2} % without, {:.2} % with",
+                targets[v].key.to_string(),
+                100.0 * miss(&natives[v]),
+                100.0 * miss(&s)
+            );
+            if miss(&s) < miss(&natives[v]) {
+                natives[v] = s;
+                kinds[v].narrowed = true;
+            }
+        }
+    }
+    let kind = |t: &Target| kinds[targets.iter().position(|u| u.key == t.key).expect("a target")];
     for (t, s) in targets.iter().zip(&natives) {
         println!(
             "{:>4} native: F1 {:+.2} % F2 {:+.2} % F3 {:+.2} %{}  {:?}",
@@ -744,15 +993,31 @@ fn main() {
             100.0 * s.err[1],
             100.0 * s.err[2],
             if s.from_map { " (map)" } else { "" },
-            from_x(&s.x, t.lips == Lips::Rounded)
+            from_x(&s.x, kind(t))
         );
+    }
+    if model == Model::Modal {
+        println!("How far each solved body ends from the speaker's (coefficients, unit RMS over his vowels):");
+        for (t, s) in targets.iter().zip(&natives) {
+            let q = from_x(&s.x, kind(t)).modes.expect("modal");
+            let p = measured_prior(t);
+            println!(
+                "  {:>4}{}: {:+.2} {:+.2} {:+.2} from {:+.2} {:+.2} {:+.2} (moved {:+.2} {:+.2} {:+.2})",
+                t.key.to_string(),
+                if measured_vowel(t.key).is_some() { " *" } else { "  " },
+                q[0], q[1], q[2], p[0], p[1], p[2],
+                q[0] - p[0], q[1] - p[1], q[2] - p[2]
+            );
+        }
     }
 
     // 2. Every other row, outwards from the native one.
     let jobs: Vec<(usize, bool)> = (0..targets.len())
         .flat_map(|v| [(v, false), (v, true)])
         .collect();
-    let chains = par_map(&jobs, |m, &(v, up)| chain(m, &targets[v], natives[v].x, up));
+    let chains = par_map(&jobs, |m, &(v, up)| {
+        chain(m, kinds[v], &targets[v], natives[v].x, up)
+    });
     let mut solved: Vec<[Option<Solved>; ROWS]> = vec![[None; ROWS]; targets.len()];
     for (v, s) in natives.iter().enumerate() {
         solved[v][NATIVE_ROW] = Some(*s);
@@ -769,7 +1034,7 @@ fn main() {
     for (v, t) in targets.iter().enumerate() {
         for k in 0..ROWS {
             let s = solved[v][k].expect("every row solved");
-            let r = raw(&from_x(&s.x, t.lips == Lips::Rounded));
+            let r = raw(&from_x(&s.x, kind(t)));
             for d in 0..D {
                 table[v][k][d] = (r[d] * 1000.0).round() as i32;
             }
@@ -786,7 +1051,7 @@ fn main() {
         .flat_map(|v| lengths.iter().map(move |&l| (v, l)))
         .collect();
     let measured = par_map(&checks, |m, &(v, l)| {
-        let f = m.measure(&interpolate(&table[v], l), l);
+        let f = m.measure(&interpolate(model, &table[v], l), l);
         (f, errors(f, targets[v].key, l))
     });
 
@@ -930,14 +1195,31 @@ fn main() {
 
     // Write the table.
     let mut src = String::new();
-    let _ = writeln!(
-        src,
-        "//! Vowel shapes by tract length, solved from `src/vowel_targets.rs` by\n\
-         //! `examples/vowel_size.rs`; do not edit. Regenerate with\n\
-         //! `cargo run -p synthie-trombone --example vowel_size --release`.\n\
-         //!\n\
-         //! ```text"
-    );
+    match model {
+        Model::Cosine => {
+            let _ = writeln!(
+                src,
+                "//! Vowel shapes by tract length, solved from `src/vowel_targets.rs` by\n\
+                 //! `examples/vowel_size.rs`; do not edit. Regenerate with\n\
+                 //! `cargo run -p synthie-trombone --example vowel_size --release`.\n\
+                 //!\n\
+                 //! ```text"
+            );
+        }
+        Model::Modal => {
+            let _ = writeln!(
+                src,
+                "//! Vowel shapes of the modal tongue body (`AnatomyConfig::tongue_model`\n\
+                 //! 1) by tract length, solved from `src/vowel_targets.rs` by\n\
+                 //! `examples/vowel_size.rs`, starting from and pulled towards the\n\
+                 //! measured vowels' own bodies (`src/tract_modes.rs`); do not edit.\n\
+                 //! Regenerate with\n\
+                 //! `cargo run -p synthie-trombone --example vowel_size --release -- --modal`.\n\
+                 //!\n\
+                 //! ```text"
+            );
+        }
+    }
     for line in summary.lines() {
         let _ = writeln!(src, "//! {line}");
     }
@@ -952,11 +1234,21 @@ fn main() {
          pub(super) const STEP: f32 = {STEP:?};\n\
          /// The row at the native length.\n\
          pub(super) const NATIVE: usize = {NATIVE_ROW};\n\
-         /// Per vowel shape and row: tongue index, tongue diameter, lips (`0`\n\
-         /// when spread), narrowing cell, narrowing diameter and tongue\n\
-         /// root, in thousandths.\n\
+         /// Per vowel shape and row: {columns}, in thousandths.\n\
          #[rustfmt::skip]\n\
-         pub(super) static SHAPES: &[(VowelKey, [[i32; {D}]; {ROWS}])] = &["
+         pub(super) static SHAPES: &[(VowelKey, [[i32; {D}]; {ROWS}])] = &[",
+        columns = match model {
+            Model::Cosine => {
+                "tongue index, tongue diameter, lips (`0`\n\
+                 /// when spread), narrowing cell, narrowing diameter and tongue\n\
+                 /// root"
+            }
+            Model::Modal => {
+                "the body's three numbers, lips (`0`\n\
+                 /// when spread), narrowing cell and narrowing diameter (`3000`\n\
+                 /// for none)"
+            }
+        }
     );
     for (v, t) in targets.iter().enumerate() {
         let _ = writeln!(src, "    ({}, [", key_src(t.key));
@@ -973,8 +1265,11 @@ fn main() {
         let _ = writeln!(src, "    ]),");
     }
     let _ = writeln!(src, "];");
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_size_table.rs");
-    std::fs::write(path, &src).expect("write src/vowel_size_table.rs");
+    let path = match model {
+        Model::Cosine => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_size_table.rs"),
+        Model::Modal => concat!(env!("CARGO_MANIFEST_DIR"), "/src/vowel_modes_table.rs"),
+    };
+    std::fs::write(path, &src).expect("write the table");
     println!(
         "wrote {path}: {} bytes, {:.1} s in all",
         src.len(),

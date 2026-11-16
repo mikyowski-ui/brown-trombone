@@ -47,8 +47,15 @@ use std::fmt::Write as _;
 
 /// Sections (and cells) of a tract.
 const N: usize = 44;
-/// First body cell: the first four sections are the epilarynx.
-const FROM: usize = 4;
+/// First body cell: the top of the tube above the folds as the engine has
+/// it (cells 0 to 6 at diameter 0.6, 2.55 cm at the native size). The
+/// speaker's own tube is his first four sections (1.5 cm), and with it as
+/// the epilarynx (the body from cell 4) the tract's fourth formant stood at
+/// 3.8 to 4.3 kHz instead of 3.3 to 3.6 and its 4 to 8 kHz band 5 to 12 dB
+/// louder against 0 to 1 kHz in every vowel but /ʌ ɑ ɔ/: the tube's length
+/// is the epilarynx's to set (`AnatomyConfig`'s, wave 2B), the body starts
+/// where it ends.
+const FROM: usize = 7;
 /// First lip cell (`tract::LIP_START`): the body ends before it.
 const TO: usize = 39;
 /// First cell of the cosine tongue (`tract::BLADE_START`): a cosine shape
@@ -441,7 +448,11 @@ fn main() {
 
     // 4. In engine units.
     let speaker = speaker_length(&rows);
-    let k = scale(speaker);
+    // `MODES_SCALE` overrides the scale, to measure what it does.
+    let k = std::env::var("MODES_SCALE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| scale(speaker));
     println!(
         "Speaker's mean unrounded tract {speaker:.2} cm; engine diameter = {k:.4} × equivalent diameter"
     );
@@ -509,6 +520,29 @@ fn main() {
         }
     }
     // What the projection does with the classic vowels' tongues.
+    // What three modes keep of each vowel's acoustics: the lossless tube of
+    // the measured row, of the row with its body made of three modes, and
+    // of that body in the native tract's 44 cells of 0.3645 cm with the
+    // speaker's epilarynx and lips scaled as the body is.
+    println!("Lossless F1/F2/F3, Hz: measured row | its body from three modes | that in the native tract:");
+    for (i, r) in rows.iter().enumerate() {
+        let mut three = r.area;
+        for j in FROM..TO {
+            let mut d = p.mean[j - FROM];
+            for kk in 0..MODES {
+                d += p.coef[i][kk] * p.modes[kk][j - FROM];
+            }
+            three[j] = std::f64::consts::PI / 4.0 * d.max(0.1).powi(2);
+        }
+        let a = lossless_formants(&r.area, r.section);
+        let b = lossless_formants(&three, r.section);
+        let native: Vec<f64> = three.iter().map(|v| v * (k * k * AREA_SCALE)).collect();
+        let c = lossless_formants(&native, NATIVE_LENGTH / N as f64);
+        println!(
+            "  {:2} {:4.0} {:4.0} {:4.0} | {:4.0} {:4.0} {:4.0} | {:4.0} {:4.0} {:4.0}",
+            r.vowel, a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]
+        );
+    }
     println!("Classic tongues projected (index, diameter → q1 q2 q3, RMS miss cm):");
     for (name, ti, td) in [
         ("i", 28.0, 2.15),

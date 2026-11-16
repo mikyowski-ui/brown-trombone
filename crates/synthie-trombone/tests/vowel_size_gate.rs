@@ -21,7 +21,7 @@ mod survey;
 
 use survey::Meter;
 use synthie_trombone::vowel_targets::{self, Lips, TARGETS, VowelKey};
-use synthie_trombone::{Articulation, Engine, Phoneme, SLOT_LIPS, Trombone};
+use synthie_trombone::{Articulation, Engine, Phoneme, SLOT_LIPS, Trombone, Tuning};
 
 /// Every vowel the physical engine shapes, glides included.
 const VOWELS: [Phoneme; 14] = [
@@ -52,8 +52,19 @@ fn articulation(key: VowelKey) -> Articulation {
 
 /// A physical voice of `length` holding `a`, settled.
 fn holding_articulation(a: &Articulation, length: f32) -> Trombone {
+    holding_on(a, length, false)
+}
+
+/// [`holding_articulation`] on the modal tongue body if `modal`
+/// (`AnatomyConfig::tongue_model` 1).
+fn holding_on(a: &Articulation, length: f32, modal: bool) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
+    if modal {
+        let mut tuning = Tuning::DEFAULT;
+        tuning.anatomy.tongue_model = 1.0;
+        t.set_tuning(&tuning);
+    }
     t.set_tract_length(length);
     t.articulate(a);
     t.settle();
@@ -67,6 +78,11 @@ fn holding(p: Phoneme, length: f32) -> Trombone {
 
 /// F1..F3 of every `(shape, length)`, measured on all threads.
 fn measure_all(jobs: &[(VowelKey, f32)]) -> Vec<[f32; 3]> {
+    measure_on(jobs, false)
+}
+
+/// [`measure_all`] on the modal tongue body if `modal`.
+fn measure_on(jobs: &[(VowelKey, f32)], modal: bool) -> Vec<[f32; 3]> {
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let chunk = jobs.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {
@@ -77,7 +93,7 @@ fn measure_all(jobs: &[(VowelKey, f32)]) -> Vec<[f32; 3]> {
                     let mut m = Meter::new();
                     part.iter()
                         .map(|&(k, l)| {
-                            m.formants(&holding_articulation(&articulation(k), l))
+                            m.formants(&holding_on(&articulation(k), l, modal))
                                 .unwrap_or_else(|| panic!("{k} at {l}: no three formants"))
                         })
                         .collect::<Vec<_>>()
@@ -94,11 +110,17 @@ fn measure_all(jobs: &[(VowelKey, f32)]) -> Vec<[f32; 3]> {
 /// Measure every vowel shape at `lengths` and hold F1 and F2 to [`LIMIT`]
 /// of its target for that size; report F3 too.
 fn gate(name: &str, lengths: &[f32]) {
+    gate_on(name, lengths, false);
+}
+
+/// [`gate`] on the modal tongue body if `modal` (its own table,
+/// `src/vowel_modes_table.rs`).
+fn gate_on(name: &str, lengths: &[f32], modal: bool) {
     let jobs: Vec<(VowelKey, f32)> = lengths
         .iter()
         .flat_map(|&l| TARGETS.iter().map(move |t| (t.key, l)))
         .collect();
-    let got = measure_all(&jobs);
+    let got = measure_on(&jobs, modal);
     let mut failures = Vec::new();
     println!("{name}: error against the target, F1 / F2 / F3 (worst shape)");
     for &l in lengths {
@@ -417,5 +439,88 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             Phoneme::R.tongue_for(Engine::Physical, l),
             Some((er.tongue_index, er.tongue_diameter))
         );
+    }
+}
+
+// ----- the modal tongue body (`AnatomyConfig::tongue_model` 1) -------------
+
+#[test]
+fn modal_vowels_meet_their_targets_at_every_size() {
+    gate_on(
+        "modal body, table lengths",
+        &[0.6, 0.7, 0.8, 0.85, 1.0, 1.15, 1.2, 1.3, 1.4],
+        true,
+    );
+}
+
+#[test]
+fn modal_lengths_between_table_rows_meet_it_too() {
+    gate_on(
+        "modal body, between rows",
+        &[0.55, 0.65, 0.75, 0.93, 0.97, 1.03, 1.25, 1.35],
+        true,
+    );
+}
+
+#[test]
+fn modal_lax_and_tense_vowels_stay_apart() {
+    let pairs = [
+        (Phoneme::Ih, Phoneme::Iy),
+        (Phoneme::Uh, Phoneme::Uw),
+        (Phoneme::Eh, Phoneme::Ae),
+        (Phoneme::Ah, Phoneme::Aa),
+    ];
+    for l in [0.6, 1.0, 1.4] {
+        let jobs: Vec<(VowelKey, f32)> = pairs
+            .iter()
+            .flat_map(|&(a, b)| [(VowelKey::Vowel(a), l), (VowelKey::Vowel(b), l)])
+            .collect();
+        let got = measure_on(&jobs, true);
+        for (n, pair) in got.chunks(2).enumerate() {
+            let (ka, kb) = (jobs[2 * n].0, jobs[2 * n + 1].0);
+            let d = |a: [f32; 3], b: [f32; 3]| {
+                ((b[0] / a[0]).ln().powi(2) + (b[1] / a[1]).ln().powi(2)).sqrt()
+            };
+            let want = d(
+                vowel_targets::formants(ka, l).expect("a target"),
+                vowel_targets::formants(kb, l).expect("a target"),
+            );
+            let have = d(pair[0], pair[1]);
+            assert!(have > want - LIMIT, "{ka}-{kb} at {l}: {have} vs {want}");
+        }
+    }
+}
+
+#[test]
+fn modal_shapes_stay_inside_the_body_and_do_not_hiss() {
+    // The body's numbers inside what the tract takes, lips and narrowing
+    // never tighter than the tightest vowels may be, rounded vowels
+    // rounded; and a held vowel is the shape the table gives.
+    for t in TARGETS {
+        for k in 0..=110 {
+            let l = 0.5 + 0.01 * k as f32;
+            let s = articulation(t.key)
+                .physical_shape_on(l, true)
+                .expect("a vowel shape");
+            let q = s.modes.expect("the modal body's numbers");
+            for (k, v) in q.iter().enumerate() {
+                let (lo, hi) = synthie_trombone::inverse::mode_range(k);
+                assert!((lo..=hi).contains(v), "{} at {l}: {s:?}", t.key);
+            }
+            assert!(s.lips.is_none_or(|d| d >= 0.65), "{} at {l}: {s:?}", t.key);
+            let (_, d) = s.narrowing.expect("a narrowing (none is wide open)");
+            assert!(d >= 0.7, "{} at {l}: {s:?}", t.key);
+            assert_eq!(s.lips.is_some(), t.lips == Lips::Rounded, "{} at {l}", t.key);
+        }
+        for l in [0.6, 1.0, 1.3] {
+            let a = articulation(t.key);
+            let s = a.physical_shape_on(l, true).expect("a vowel shape");
+            let held = holding_on(&a, l, true);
+            let mut c = holding_on(&Phoneme::Sil.articulation(), l, true);
+            c.set_shape(&s);
+            c.settle();
+            let bits = |t: &Trombone| t.target_diameters().map(f32::to_bits);
+            assert_eq!(bits(&held), bits(&c), "{} at {l}", t.key);
+        }
     }
 }

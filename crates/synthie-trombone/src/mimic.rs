@@ -87,6 +87,9 @@ pub struct Mimic {
     solved: [f32; 2],
     /// Loudest hiss heard lately.
     loudest_hiss: f32,
+    /// Whether the voice has the modal tongue body (shapes are solved on its
+    /// babble map, `inverse::modal`).
+    modal: bool,
 }
 
 impl Mimic {
@@ -100,6 +103,17 @@ impl Mimic {
             shape: None,
             solved: [0.0; 2],
             loudest_hiss: 0.0,
+            modal: false,
+        }
+    }
+
+    /// Solve shapes for a voice with the modal tongue body
+    /// ([`AnatomyConfig::tongue_model`](crate::AnatomyConfig::tongue_model) 1,
+    /// on the modal babble map) or the cosine one.
+    pub fn set_modal(&mut self, modal: bool) {
+        if modal != self.modal {
+            self.modal = modal;
+            self.shape = None;
         }
     }
 
@@ -160,7 +174,11 @@ impl Mimic {
             && (self.shape.is_none() || moved(f1, self.solved[0]) || moved(f2, self.solved[1]))
         {
             let f3 = (f3 > f2).then_some(f3);
-            let found = inverse::solve_for(f1, f2, f3, self.shape.as_ref(), self.tract_length);
+            let found = if self.modal {
+                inverse::modal::solve_for(f1, f2, f3, self.shape.as_ref(), self.tract_length)
+            } else {
+                inverse::solve_for(f1, f2, f3, self.shape.as_ref(), self.tract_length)
+            };
             self.shape = Some(found);
             self.solved = [f1, f2];
             shape = Some(found);

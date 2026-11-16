@@ -40,6 +40,9 @@ use crate::math::{exp, ln};
 #[path = "inverse_table.rs"]
 mod table;
 
+#[path = "inverse_modal.rs"]
+pub mod modal;
+
 /// Lip cell that [`Shape::lips`] narrows.
 pub const LIP_CELL: f32 = 41.0;
 
@@ -103,6 +106,37 @@ pub struct Shape {
     /// projects the cosine tongue `(tongue_index, tongue_diameter)` onto the
     /// modes. The cosine body ignores them.
     pub modes: Option<[f32; 3]>,
+}
+
+// ----- the modal body ----------------------------------------------------
+
+/// The range of each of the modal body's three numbers
+/// ([`Shape::modes`]) a tract takes: the measured vowels' range, widened by
+/// half its span either way.
+#[must_use]
+pub fn mode_range(k: usize) -> (f32, f32) {
+    crate::tract::mode_range(k.min(2))
+}
+
+/// The modal body's numbers of the eleven measured vowels (Story 2008, one
+/// man, MRI), by their IPA symbol: `i ɪ e ɛ æ ʌ ɑ ɔ o ʊ u`.
+#[must_use]
+pub fn measured_modes(ipa: &str) -> Option<[f32; 3]> {
+    crate::tract_modes::MEASURED
+        .iter()
+        .find(|(v, _)| *v == ipa)
+        .map(|&(_, q)| q)
+}
+
+/// The modal body's numbers nearest to the cosine tongue `(index,
+/// diameter)` (least squares over the cosine's cells): what a tract with the
+/// modal body makes of a tongue set by place and height.
+#[must_use]
+pub fn project_tongue(index: f32, diameter: f32) -> [f32; 3] {
+    crate::tract::project_tongue(
+        index.clamp(TONGUE_INDEX.0, TONGUE_INDEX.1),
+        diameter.clamp(TONGUE_DIAMETER.0, TONGUE_DIAMETER.1),
+    )
 }
 
 /// Position of `v` in `range`, `0‥1`.
@@ -321,6 +355,10 @@ fn eval(x: &[f32; 5]) -> Option<Eval> {
 /// with it at rest, and what the root does depends on the whole shape).
 #[must_use]
 pub fn predict(shape: &Shape) -> Option<[f32; 3]> {
+    if shape.modes.is_some() {
+        // A shape of the modal body: its own map.
+        return modal::predict(shape);
+    }
     if shape.pharynx.abs() > f32::EPSILON {
         return None;
     }
@@ -564,8 +602,14 @@ fn finite_or(v: f32, fallback: f32) -> f32 {
 /// rounding (1.8), least narrowing. With `near` (usually the shape it returned last
 /// time) it picks the one closest to `near`, so a target that moves slowly
 /// gives a shape that moves smoothly.
+///
+/// A `near` shape of the modal body ([`Shape::modes`]) solves on the modal
+/// body ([`modal::solve`]).
 #[must_use]
 pub fn solve(f1: f32, f2: f32, f3: Option<f32>, near: Option<&Shape>) -> Shape {
+    if near.is_some_and(|s| s.modes.is_some()) {
+        return modal::solve(f1, f2, f3, near);
+    }
     let (f1, f2) = nearest_reachable(finite_or(f1, 500.0), finite_or(f2, 1500.0));
     let f3 = f3.filter(|v| v.is_finite() && *v > 0.0);
     let goal = Goal {

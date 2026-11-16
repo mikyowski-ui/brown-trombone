@@ -24,7 +24,8 @@
     "labial_edge": {"lo": 1.5, "hi": 6, "default": 3, "pass": "a"},
     "dental_edge": {"lo": 0, "hi": 6, "default": 3, "pass": "a"},
     "nasal_port": {"lo": 0.3, "hi": 1.6, "default": 0.8, "pass": "a"},
-    "cavity_expansion": {"lo": 50, "hi": 250, "default": 150, "pass": "a"}
+    "cavity_expansion": {"lo": 50, "hi": 250, "default": 150, "pass": "a"},
+    "tongue_model": {"lo": 0, "hi": 1, "default": 0, "pass": "a"}
   },
   "articulation": {
     "adduction_time": {"lo": 0.003, "hi": 0.02, "default": 0.008, "pass": "a"},

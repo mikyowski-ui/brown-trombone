@@ -106,6 +106,9 @@ impl Tier {
                 "narrowing_degree",
                 "dorsal_location",
                 "dorsal_degree",
+                "mode_1",
+                "mode_2",
+                "mode_3",
             ],
             Tier::TongueTip => &["location", "degree"],
             Tier::LipsAndJaw => &[
@@ -176,7 +179,7 @@ impl Tier {
 pub const OPEN: f32 = 3.3;
 
 /// How many variables a tier has at most.
-pub const VARIABLES: usize = 8;
+pub const VARIABLES: usize = 10;
 
 /// The indices of each tier's variables in a [`Target`].
 ///
@@ -231,6 +234,15 @@ pub mod var {
         pub const DORSAL_LOCATION: usize = 5;
         /// ...and degree.
         pub const DORSAL_DEGREE: usize = 6;
+        /// The modal body's three numbers (see
+        /// [`Shape::modes`](crate::inverse::Shape::modes); a tract with
+        /// `AnatomyConfig::tongue_model` 1): the first...
+        pub const MODE_1: usize = 7;
+        /// ...the second...
+        pub const MODE_2: usize = 8;
+        /// ...and the third. A tract with the modal body takes them, when
+        /// all three are set, in place of the tongue's place and height.
+        pub const MODE_3: usize = 9;
     }
     /// [`Tier::TongueTip`](super::Tier::TongueTip).
     pub mod tip {

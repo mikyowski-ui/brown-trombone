@@ -120,7 +120,7 @@ fn pharynx_weight(i: usize) -> f32 {
 const MODAL_FLOOR: f32 = 0.3;
 /// How far each body number may go beyond the measured vowels' range, in
 /// spans of that range, either way.
-const MODAL_REACH: f32 = 0.5;
+const MODAL_REACH: f32 = 1.0;
 
 /// The body numbers a tract allows: the measured range widened by
 /// [`MODAL_REACH`] of its span either way.
@@ -158,6 +158,11 @@ fn modal_cell(i: usize, q: &[f32; 3]) -> f32 {
 /// cosine's own cells.
 #[must_use]
 pub(crate) fn project_tongue(index: f32, diameter: f32) -> [f32; 3] {
+    clamp_modes(projection(index, diameter))
+}
+
+/// [`project_tongue`] without the clamping.
+fn projection(index: f32, diameter: f32) -> [f32; 3] {
     let mut q = [0.0f32; 3];
     for i in modes::COSINE_FROM..modes::TO {
         let d = cosine_tongue(i, index, diameter) - modes::NEUTRAL[i - modes::FROM];
@@ -165,7 +170,22 @@ pub(crate) fn project_tongue(index: f32, diameter: f32) -> [f32; 3] {
             *qk += p[i - modes::COSINE_FROM] * d;
         }
     }
-    clamp_modes(q)
+    q
+}
+
+/// How the modal body's numbers move when a cosine tongue at `from` is
+/// drawn `w` of the way towards `to` (as a consonant's tip draws the
+/// vowel's body forward and up): the projection of that change of shape,
+/// added to whatever numbers the body has. Drawn towards the projection of
+/// `to` itself instead, the body moved much further than the cosine one
+/// does (the /ɔ/ of a body drawn 0.3 of the way to the tip's: F2 1030 to
+/// 1470 Hz on the modal body, 1030 to 1120 on the cosine one, heard as
+/// /ɑ/), since the tip's own tongue projects onto an /i/-like body.
+#[must_use]
+pub(crate) fn drawn_modes(q: [f32; 3], from: (f32, f32), to: (f32, f32), w: f32) -> [f32; 3] {
+    let a = projection(from.0, from.1);
+    let b = projection(from.0 + (to.0 - from.0) * w, from.1 + (to.1 - from.1) * w);
+    [0, 1, 2].map(|k| q[k] + b[k] - a[k])
 }
 
 /// The cosine tongue's diameter of cell `i` (`BLADE_START..LIP_START`).
