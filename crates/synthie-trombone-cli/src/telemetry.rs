@@ -183,6 +183,11 @@ pub struct Formants {
 pub struct FormantMeter {
     to: Sender<Probe>,
     from: Receiver<Formants>,
+    /// The newest probe, while the meter is busy with an older one.
+    pending: Option<Probe>,
+    /// Probes handed to the meter's thread, and readings back.
+    sent: u64,
+    got: u64,
 }
 
 impl Default for FormantMeter {
@@ -213,20 +218,43 @@ impl FormantMeter {
                 }
             })
             .expect("the formant meter's thread starts");
-        Self { to, from }
+        Self {
+            to,
+            from,
+            pending: None,
+            sent: 0,
+            got: 0,
+        }
     }
 
-    /// Measure `probe` once the meter is free; a probe arriving while it
-    /// is busy is dropped (the next one is newer anyway).
-    pub fn submit(&self, probe: Probe) {
-        match self.to.try_send(probe) {
-            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
+    /// Measure `probe` once the meter is free: it waits in place of any
+    /// older one still waiting, so the last shape is always measured.
+    pub fn submit(&mut self, probe: Probe) {
+        self.pending = Some(probe);
+        self.pump();
+    }
+
+    fn pump(&mut self) {
+        if let Some(p) = self.pending.take() {
+            match self.to.try_send(p) {
+                Ok(()) => self.sent += 1,
+                Err(TrySendError::Full(p)) => self.pending = Some(p),
+                Err(TrySendError::Disconnected(_)) => {}
+            }
         }
     }
 
     /// The newest reading since the last call.
-    pub fn poll(&self) -> Option<Formants> {
-        self.from.try_iter().last()
+    pub fn poll(&mut self) -> Option<Formants> {
+        let last = self.from.try_iter().inspect(|_| self.got += 1).last();
+        self.pump();
+        last
+    }
+
+    /// Whether every shape handed over has been measured and read.
+    #[cfg(test)]
+    pub fn is_idle(&self) -> bool {
+        self.pending.is_none() && self.sent == self.got
     }
 }
 
@@ -442,6 +470,9 @@ mod tests {
                 let t0 = Instant::now();
                 let b = short.formants(&v);
                 ts += t0.elapsed();
+                if a.is_none() {
+                    println!("{engine:?} {p:?}: fewer than three peaks");
+                }
                 if let (Some(a), Some(b)) = (a, b) {
                     for k in 0..3 {
                         worst = worst.max((a[k] / b[k]).ln().abs());
@@ -475,7 +506,7 @@ mod tests {
         v.articulate_phoneme(Phoneme::Iy);
         v.settle();
         let want = measure(&v).expect("an /i/ has three formants");
-        let meter = FormantMeter::new();
+        let mut meter = FormantMeter::new();
         meter.submit(Probe {
             voice: v.clone(),
             at: 1234,

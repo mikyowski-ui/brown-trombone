@@ -1590,11 +1590,11 @@ mod tests {
             }
         }
 
-        /// Play on until the formant meter has measured the tract.
+        /// Play on until the formant meter has measured the tract as it
+        /// is now.
         fn until_measured(&mut self) {
             let t0 = std::time::Instant::now();
-            self.app.formants = None;
-            while self.app.formants.is_none() {
+            while self.app.formants.is_none() || !self.app.formants_up_to_date() {
                 assert!(t0.elapsed().as_secs() < 10, "the formants never came");
                 self.play(0.02);
                 std::thread::sleep(std::time::Duration::from_millis(2));
@@ -1752,7 +1752,7 @@ mod tests {
     #[test]
     fn the_classic_engine_shows_what_it_has() {
         let mut live = Live::new(synthie_trombone::Engine::Classic);
-        live.press('9');
+        live.press('1');
         live.press('h');
         live.play(0.3);
         live.until_measured();
@@ -1760,8 +1760,8 @@ mod tests {
         assert!(text.contains("classic: no air"), "{text}");
         assert!(text.contains("LF pulse"), "{text}");
         let [f1, f2, _] = live.app.live_formants().unwrap();
-        // /u/: both low.
-        assert!(f1 < 500.0 && f2 < 1300.0, "{f1} {f2}");
+        // /i/: F1 low, F2 high.
+        assert!(f1 < 450.0 && f2 > 1800.0, "{f1} {f2}");
     }
 
     /// With Formant Lock on, the chart marks where the tract's own

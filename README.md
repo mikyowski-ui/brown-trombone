@@ -119,7 +119,8 @@ what the voice is doing inside:
 - **F1 F2 F3** are the peaks of the transfer function of the tract's shape
   at that moment (nose included), measured as `examples/replay.rs --trace`
   measures them: the resonances of the shape, not an analysis of the
-  sound. A measurement takes about 3 ms, so it is made on a thread of its
+  sound; `—` where it shows fewer than three peaks below 4.2 kHz (a closed
+  mouth, and the classic engine's /u/). A measurement takes about 3 ms, so it is made on a thread of its
   own from a copy of the voice the audio thread sends at most 30 times a
   second, and only when the shape has changed; the panel says how old the
   shape is (one to three frames, 30 to 60 ms, while the voice moves). With

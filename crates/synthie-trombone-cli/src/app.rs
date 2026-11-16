@@ -396,6 +396,13 @@ impl App {
         self.formants.and_then(|f| f.hz)
     }
 
+    /// Whether the formant meter has measured every shape it was sent.
+    #[cfg(test)]
+    #[must_use]
+    pub fn formants_up_to_date(&self) -> bool {
+        self.meter.is_idle() && self.link.probes.is_empty()
+    }
+
     /// Start from a voice other than the first preset's, with the persona
     /// dials set (as given on the command line).
     pub fn set_voice(&mut self, preset: Preset, base: &VoiceSettings, persona: Persona) {
