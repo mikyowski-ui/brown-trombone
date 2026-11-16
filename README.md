@@ -472,7 +472,13 @@ as the model goes:
   consonant. Out of /n ŋ/ into a close vowel the velum shuts three times
   as fast as elsewhere (`velum_release`, round 11), so the nose is shut
   15 ms into the vowel: left open longer, it took over the /u/ of
-  "canoe".
+  "canoe". Out of /n/ the tip lets go six times as fast as its own
+  spring (`nasal_tip_release`, wave 1), closure and shoulder together:
+  at its own speed the gap out of /n/ opened at 2 to 8 cm²/s (Stevens:
+  50 to 100) and the second formant overshot onto a fronted vowel and
+  fell back, a /j/. Before the fronted /u/ the tongue is not dropped
+  behind the /n/ (`nasal_cavity_held`): the antiresonance there stands
+  at 2.1 to 2.3 kHz.
 - **Two speeds of articulator.** The tongue body and the jaw are heavy and
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
@@ -508,9 +514,15 @@ as the model goes:
   385 / 1747, his /eɪ/ 422 / 1892). An /u/ after /t d s z/ is made further
   front (F2 1600 Hz, the plain /u/ 1000) and glides part of the way back
   over its second half (`fronted_nucleus`), as the reader's does ("two"
-  1690 to 1300 Hz); after /n/, the postalveolars and /j/, fronted the same
-  way, it was heard as /ju/ ("canoe" as "can use", "the juice" as "the
-  use"), so there it is the plain /u/. A stressed /æ/
+  1690 to 1300 Hz), and after /n/ too since wave 1 (`fronted_after_n`;
+  the owner's "canoe" holds 1860 to 1910 Hz); after the postalveolars
+  and /j/, fronted the same way, it was heard as /ju/ ("the juice" as
+  "the use"), so there it is the plain /u/. An unstressed /ə/ before a
+  single consonant of the lips or the tip and then /i ɪ/ or a fronted
+  /u/, or before /j/, is made higher and further front (F1 400, F2 1750
+  Hz against 510 and 1530; `schwa_colour`, wave 1): the reader's /ə/
+  before a front vowel stands at 372 and 1604 Hz, the owner's in "canoe"
+  near 300 and 1800. A stressed /æ/
   can be made to glide a fifth of the way to schwa (`ae_nucleus` 0.55);
   it reaches its formants without, and with the glide the recognizer
   hears more /æ/ as /ɛ/, so that is off. A vowel shape may also set the tongue root, which widens or narrows

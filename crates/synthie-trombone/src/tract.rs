@@ -1246,7 +1246,11 @@ impl Tract {
         // shoulder around it, which had narrowed with it, until each cell
         // is back with the vowel or closing again. The shoulder left at
         // the tip's own speed kept a gap of 0.01 cm² for 10 ms after the
-        // closure had opened.
+        // closure had opened. Only cells let go onto the vowel's shape:
+        // out of /n/ into /ð s l/ the tip moves on to its next place, and
+        // hastened there too the /ð/ of "in the", "on the" and the /s/ of
+        // "at once" were lost (Whisper's words over the 30 held-out
+        // sentences 74.3 to 72.2 %, every one of the losses at such an /n/).
         let tip_lets_go = self.velum_openness() > NASAL_RELEASE_VELUM
             && (0..LIP_START).any(|i| {
                 self.mover[i] == Mover::Tip
@@ -1256,7 +1260,10 @@ impl Tract {
             });
         if tip_lets_go {
             for i in 0..LIP_START {
-                if self.mover[i] == Mover::Tip && self.diameter[i] < self.target[i] {
+                if self.mover[i] == Mover::Tip
+                    && self.diameter[i] < self.target[i]
+                    && self.target[i] >= self.body[i] - CARVED
+                {
                     self.nasal_release[i] = true;
                 }
             }
