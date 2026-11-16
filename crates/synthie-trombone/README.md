@@ -84,6 +84,39 @@ for s in &mut buf {
 }
 ```
 
+To drive a running voice from another thread (a controller, a language
+model sending text a few words at a time), use a
+[`VoiceStream`](src/stream.rs): a single-producer single-consumer pair of
+fixed capacity. The controller pushes timed events, gestures, utterances and
+text; the audio callback renders with the `VoicePlayer`, which carries each
+event out before its sample and never allocates, locks or waits. A push
+that does not fit returns `Full` with what was pushed.
+
+```rust
+use synthie_trombone::stream::{Event, voice_stream};
+use synthie_trombone::{Phoneme, Trombone};
+
+let (mut stream, mut player) = voice_stream(1024);   // 1024 words of ring
+let mut voice = Trombone::new(48_000.0);
+stream.push(Event::Articulate(Phoneme::Aa)).unwrap(); // as soon as possible
+stream.push_at(0, Event::NoteOn(57.0)).unwrap();      // before sample 0
+stream.push_at(24_000, Event::NoteOff).unwrap();      // half a second later
+stream.push_text("Hello the");                        // held: the sentence
+stream.push_text("re, my friend. And so");            // ends here, so it goes
+let mut block = [0.0f32; 256];
+player.render(&mut voice, &mut block);                // in the audio callback
+```
+
+Text is cut at the ends of sentences (or of phrases), each piece compiled on
+the controller's thread once all of it has arrived and queued after what is
+being said, with the pause the compiler leaves between the two in one text:
+a text sent in chunks is spoken as the whole text would be (to within 2 ms
+over three sentences, in `tests/stream_tests.rs`). Its latency is the time
+the rest of the sentence takes to arrive, plus 20 to 50 µs of compiling. The
+ring and the events are `no_std` (`StreamBuffer::split`); utterances and text
+need `std`. `examples/stream.rs` feeds a voice from a script of timed events
+and from stdin.
+
 ## Two engines
 
 `Engine::Classic` (the default) is Pink Trombone's own model.
@@ -143,6 +176,7 @@ cargo run -p synthie-trombone --example say --release -- --engine physical \
     # (--prosody-voice / -tenseness / -speed off leave a part out; --prosody-formants on adds the speaker's vowels)
 cargo run -p synthie-trombone --example ab --release                           # both engines → report/
 cargo run -p synthie-trombone --example probe --release                        # measurements of both
+echo "Text to say." | cargo run -p synthie-trombone --example stream --release -- --engine physical  # → stream.wav
 ```
 
 ## License

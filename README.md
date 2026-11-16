@@ -95,6 +95,51 @@ belongs to the physical engine, so turning it on switches to it, and
 switching to the classic engine turns it off; turning it off brings the
 scope back and leaves the tract as it is.
 
+**The instrument panel**, beside the tract view from 80 columns on, shows
+what the voice is doing inside:
+
+```
+╭ ◇ instrument ────────────────────╮
+│ F1  348 F2  837 F3 1212 Hz       │  the tract's own resonances
+│ tract resonances, 50 ms ago      │
+│ ΔP 10.0 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
+│ shut █████▉···········  35% folds│  closed quotient, and what is sounding
+│ gap  0.005‥0.191 cm²             │  smallest and largest glottal area
+│                                  │
+│ glottis ██████████████████████┃ 1│  one row per tier of the gesture score:
+│ larynx  ████████████┃·········· 1│  the bar is where it is now, ┃ its
+│ velum   ██████████████████████┃ 1│  target, the number its gestures;
+│ body    ███████████████┃······· 1│  a tier no gesture drives is dimmed
+│ tip     █▉┃···················· ·│
+│ lips    ██▉┃··················· ·│
+╰──────────────────────────────────╯
+```
+
+- **F1 F2 F3** are the peaks of the transfer function of the tract's shape
+  at that moment (nose included), measured as `examples/replay.rs --trace`
+  measures them: the resonances of the shape, not an analysis of the
+  sound. A measurement takes about 3 ms, so it is made on a thread of its
+  own from a copy of the voice the audio thread sends at most 30 times a
+  second, and only when the shape has changed; the panel says how old the
+  shape is (one to three frames, 30 to 60 ms, while the voice moves). With
+  Formant Lock on, `●` marks the same F1 and F2 on the vowel chart, beside
+  the `◆` the lock steers.
+- **ΔP** is the pressure below the folds less the pressure just above them,
+  cmH2O, averaged over the last 50 ms; **sub** the pressure below them
+  (the lungs push harder than asked on a high or pressed note); **lungs**
+  the pressure the voice asks for. **shut** is the share of the time the
+  folds' vibrating edges are closed while the voice sounds, and whether the
+  folds, the pulse source or nothing is sounding. The classic engine has no
+  air: it shows `classic: no air` and its LF pulse.
+- **The tiers** are the gesture engine's (glottal adduction, larynx and
+  pitch, velum, tongue body, tongue tip, lips and jaw). Until that engine
+  lands they are read off the controls the voice has when played by hand:
+  the voicing gate, the pitch, the velum, and how far the tongue body, the
+  tip and the lips close the tract (0 open, 1 shut).
+
+Below 80 columns the panel gives way to a summary on the tract view's lower
+edge (`F1 … F2 … F3 … · ΔP … · shut … folds`).
+
 **Typing and pasting text.** `Tab` opens the text line; `Enter` speaks it,
 however many sentences it holds: each gets a pause after it and its own
 intonation, and `Esc` stops all of it at once (a second `Esc`, or `Tab`,

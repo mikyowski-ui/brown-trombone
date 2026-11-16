@@ -12,9 +12,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Padding, Paragraph};
 use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
+use ratatui::widgets::{Padding, Paragraph};
 use synthie_trombone::inverse;
 use synthie_trombone::stream::standin::{Tier, TierActivity};
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
@@ -936,7 +936,7 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
             },
             fg(FG),
         ));
-        if w >= 33 || w < 30 {
+        if !(30..33).contains(&w) {
             spans.push(Span::styled(" cmH2O", fg(DIM)));
         }
         Line::from(spans)
@@ -948,15 +948,12 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
         let tail = format!(" {source}");
         let bar_width = w.saturating_sub(5 + 5 + tail.chars().count()).max(3);
         let mut spans = vec![Span::styled("shut ", fg(DIM))];
-        match g.closed {
-            Some(c) => {
-                spans.extend(meter(c, bar_width));
-                spans.push(Span::styled(format!("{:4.0}%", c * 100.0), bold(FG)));
-            }
-            None => {
-                spans.extend(synthie_ui::widgets::bar(0.0, bar_width, |_| FAINT));
-                spans.push(Span::styled("    —", fg(DIM)));
-            }
+        if let Some(c) = g.closed {
+            spans.extend(meter(c, bar_width));
+            spans.push(Span::styled(format!("{:4.0}%", c * 100.0), bold(FG)));
+        } else {
+            spans.extend(synthie_ui::widgets::bar(0.0, bar_width, |_| FAINT));
+            spans.push(Span::styled("    —", fg(DIM)));
         }
         spans.push(Span::styled(
             tail,
@@ -1537,9 +1534,11 @@ mod tests {
 
     /// An app wired to a real audio engine (no device): the callback the
     /// device would run, and the app's ticks in between.
+    type Callback = Box<dyn FnMut(&mut [f32]) + Send>;
+
     struct Live {
         app: App,
-        callback: Box<dyn FnMut(&mut [f32]) + Send>,
+        callback: Callback,
     }
 
     impl Live {
@@ -1574,7 +1573,8 @@ mod tests {
         }
 
         fn press(&mut self, c: char) {
-            self.app.key(synthie_ui::Key::press(synthie_ui::KeyCode::Char(c)));
+            self.app
+                .key(synthie_ui::Key::press(synthie_ui::KeyCode::Char(c)));
         }
     }
 
@@ -1629,11 +1629,20 @@ mod tests {
                     assert!(text.contains(want), "{w}×{h}: no {want:?}\n{text}");
                 }
                 // The rest of the screen is as it was.
-                assert!(text.contains("persona") && text.contains("speak"), "{w}×{h}");
+                assert!(
+                    text.contains("persona") && text.contains("speak"),
+                    "{w}×{h}"
+                );
                 assert!(app_tract_is_wide(&live.app, w), "{w}×{h}");
             } else {
-                let edge = text.lines().nth(usize::from(live.app.tract_area.bottom())).unwrap();
-                assert!(edge.contains("F1") && edge.contains("shut"), "{w}×{h}: {edge}");
+                let edge = text
+                    .lines()
+                    .nth(usize::from(live.app.tract_area.bottom()))
+                    .unwrap();
+                assert!(
+                    edge.contains("F1") && edge.contains("shut"),
+                    "{w}×{h}: {edge}"
+                );
             }
             let buf = term.backend().buffer();
             for y in 0..h {
@@ -1661,7 +1670,10 @@ mod tests {
         let mut live = Live::new(synthie_trombone::Engine::Classic);
         live.play(0.2);
         let quiet = live.app.snap.tiers;
-        assert!(quiet.iter().skip(2).filter(|t| t.activation > 0.5).count() <= 1, "{quiet:?}");
+        assert!(
+            quiet.iter().skip(2).filter(|t| t.activation > 0.5).count() <= 1,
+            "{quiet:?}"
+        );
         // A note on a nasal vowel.
         live.press('n');
         live.press('h');
@@ -1699,7 +1711,10 @@ mod tests {
         assert_eq!(line.spans[0].style, bold(FG));
         let idle = tier_line("tip", &TierActivity::default(), 30);
         let text: String = idle.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.starts_with("tip     ┃") && text.ends_with(" ·"), "{text}");
+        assert!(
+            text.starts_with("tip     ┃") && text.ends_with(" ·"),
+            "{text}"
+        );
         assert_eq!(idle.spans[0].style, fg(DIM));
     }
 

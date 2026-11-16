@@ -154,7 +154,10 @@ impl ShapeKey {
 
     pub fn of(voice: &Trombone) -> Self {
         let mut k = [0u32; N + NOSE_LEN + 2];
-        for (o, d) in k.iter_mut().zip(voice.diameters().iter().chain(voice.nose_diameters())) {
+        for (o, d) in k
+            .iter_mut()
+            .zip(voice.diameters().iter().chain(voice.nose_diameters()))
+        {
             *o = d.to_bits();
         }
         k[N + NOSE_LEN] = voice.tract_length().to_bits();
@@ -283,7 +286,10 @@ mod tests {
         let cq = g.closed.expect("a closed quotient while sounding");
         assert!((0.1..0.9).contains(&cq), "{g:?}");
         // Most of the lungs' pressure drops across the folds of a vowel.
-        assert!(g.transglottal > 0.5 * g.lung && g.transglottal <= g.subglottal + 0.1, "{g:?}");
+        assert!(
+            g.transglottal > 0.5 * g.lung && g.transglottal <= g.subglottal + 0.1,
+            "{g:?}"
+        );
         assert!(g.area.1 > g.area.0 + 0.02, "{g:?}");
         // Pressed folds stay shut longer than breathy ones.
         v.set_tenseness(0.9);
@@ -293,7 +299,10 @@ mod tests {
         render(&mut v, 0.3);
         let breathy = watch(&mut v, 0.3).closed.unwrap_or(0.0);
         println!("closed quotient pressed {pressed:.2}, breathy {breathy:.2}");
-        assert!(pressed > breathy + 0.03, "pressed {pressed}, breathy {breathy}");
+        assert!(
+            pressed > breathy + 0.03,
+            "pressed {pressed}, breathy {breathy}"
+        );
         // A closed mouth: the pressure above the folds rises to meet the
         // lungs', and the drop across them falls.
         let vowel = watch(&mut v, 0.2).transglottal;
@@ -331,11 +340,11 @@ mod tests {
                 }
             }
         }
-        let n = 2 * Phoneme::ALL.len();
+        let n = f64::from(u32::try_from(2 * Phoneme::ALL.len()).unwrap());
         println!(
             "0.04 s: {:.2} ms each; 0.025 s: {:.2} ms each; worst difference {:.1} %",
-            tl.as_secs_f64() * 1e3 / n as f64,
-            ts.as_secs_f64() * 1e3 / n as f64,
+            tl.as_secs_f64() * 1e3 / n,
+            ts.as_secs_f64() * 1e3 / n,
             worst * 100.0
         );
     }
