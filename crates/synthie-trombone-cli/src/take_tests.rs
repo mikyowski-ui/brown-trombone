@@ -574,6 +574,7 @@ fn the_record_key_works_in_both_modes_and_says_when_it_cannot() {
         cmd,
         snapshots,
         trash,
+        probes: crossbeam_channel::bounded(1).1,
         sample_rate: SR,
         microphone: false,
         microphone_name: None,

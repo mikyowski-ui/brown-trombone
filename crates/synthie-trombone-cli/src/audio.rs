@@ -4,6 +4,7 @@
 
 use crate::record::{self, Clock, Recorder, Tap};
 use crate::take::{Logged, Performer};
+use crate::telemetry::{GlottisGauge, GlottisWatch, PROBE_RATE, Probe, ShapeKey};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender, bounded};
@@ -14,6 +15,7 @@ use synthie::audio::fx::Reverb;
 use synthie_trombone::listen::{Heard, Listener};
 use synthie_trombone::mimic::{Gesture, Mimic};
 use synthie_trombone::speech::{Speaker, Utterance};
+use synthie_trombone::stream::standin::{self, TierActivity};
 use synthie_trombone::{
     Constriction, Engine as SoundModel, MAX_CONSTRICTIONS, N, NOSE_LEN, Phoneme, Trombone,
     VoiceSettings,
@@ -80,6 +82,13 @@ pub struct Snapshot {
     pub heard: Option<Heard>,
     /// How far the take being recorded has got.
     pub take: Option<Clock>,
+    /// Samples the audio thread had rendered when it took the snapshot.
+    pub at: u64,
+    /// The glottis's pressures and closure over the last snapshots.
+    pub glottis: GlottisGauge,
+    /// What each tier of the gesture score is doing, in `Tier::ALL` order
+    /// (stand-in until the gesture engine lands: read off the controls).
+    pub tiers: [TierActivity; 6],
 }
 
 impl Snapshot {
@@ -105,6 +114,9 @@ impl Snapshot {
             level: scope.level,
             heard: None,
             take: None,
+            at: 0,
+            glottis: GlottisGauge::default(),
+            tiers: standin::tier_activity(voice),
         }
     }
 }
@@ -164,6 +176,15 @@ pub(crate) struct Engine {
     heard: Option<Heard>,
     /// Where takes are recorded.
     tap: Tap,
+    /// Samples rendered since the engine started.
+    clock: u64,
+    /// The glottis's readings between snapshots.
+    watch: GlottisWatch,
+    /// Copies of the voice for the formant meter, and the shape last sent.
+    probe_tx: Sender<Probe>,
+    probe_shape: ShapeKey,
+    probe_every: u64,
+    probe_last: u64,
 }
 
 impl Engine {
@@ -250,6 +271,8 @@ impl Engine {
         self.follow();
         for frame in data.chunks_mut(channels.max(1)) {
             let dry = self.core.sample();
+            self.watch.sample(self.core.voice());
+            self.clock += 1;
             self.tap.sample(dry);
             let s = (self.reverb.process(dry, self.core.reverb()) * OUTPUT_GAIN).clamp(-1.0, 1.0);
             frame.fill(s);
@@ -262,8 +285,34 @@ impl Engine {
                     Snapshot::capture(self.core.voice(), self.core.speaker(), &self.scope);
                 snap.heard = self.heard;
                 snap.take = self.tap.clock();
+                snap.at = self.clock;
+                snap.glottis = self.watch.read(self.core.voice());
                 let _ = self.snap_tx.try_send(snap);
+                self.probe();
             }
+        }
+    }
+}
+
+impl Engine {
+    /// Send the formant meter a copy of the voice, if the shape has
+    /// changed, the meter has taken the last one, and it is time. The
+    /// copy goes into a channel slot made up front: nothing is allocated.
+    fn probe(&mut self) {
+        if self.clock < self.probe_last + self.probe_every || !self.probe_tx.is_empty() {
+            return;
+        }
+        let shape = ShapeKey::of(self.core.voice());
+        if shape == self.probe_shape {
+            return;
+        }
+        let probe = Probe {
+            voice: self.core.voice().clone(),
+            at: self.clock,
+        };
+        if self.probe_tx.try_send(probe).is_ok() {
+            self.probe_shape = shape;
+            self.probe_last = self.clock;
         }
     }
 }
@@ -276,6 +325,8 @@ pub struct Link {
     pub cmd: Sender<Cmd>,
     pub snapshots: Receiver<Snapshot>,
     pub trash: Receiver<Utterance>,
+    /// Copies of the voice for the formant meter.
+    pub probes: Receiver<Probe>,
     pub sample_rate: f32,
     /// Whether a microphone is open for mimic mode, and which.
     pub microphone: bool,
@@ -395,6 +446,7 @@ pub(crate) fn wire(
     let (cmd_tx, cmd_rx) = bounded(256);
     let (snap_tx, snap_rx) = bounded(4);
     let (trash_tx, trash_rx) = bounded(16);
+    let (probe_tx, probe_rx) = bounded(1);
     let (tap, recorder) = match takes {
         Some(dir) => {
             let (events, saved) = record::spawn();
@@ -407,6 +459,8 @@ pub(crate) fn wire(
     };
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let snapshot_every = (sample_rate / SNAPSHOT_RATE) as usize;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let probe_every = (sample_rate / PROBE_RATE) as u64;
     let mut reverb = Reverb::new();
     reverb.set_params(0.55, 0.45);
     let engine = Engine {
@@ -422,11 +476,18 @@ pub(crate) fn wire(
         size,
         heard: None,
         tap,
+        clock: 0,
+        watch: GlottisWatch::default(),
+        probe_tx,
+        probe_shape: ShapeKey::NONE,
+        probe_every,
+        probe_last: 0,
     };
     let link = Link {
         cmd: cmd_tx,
         snapshots: snap_rx,
         trash: trash_rx,
+        probes: probe_rx,
         sample_rate,
         microphone: false,
         microphone_name: None,

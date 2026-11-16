@@ -3,6 +3,7 @@
 use crate::audio::{Cmd, Link, Snapshot};
 use crate::line::{self, MAX_CHARS, TextLine};
 use crate::record::Recorder;
+use crate::telemetry::{FormantMeter, Formants};
 use crossbeam_channel::Sender;
 use crossterm::event::{
     KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -255,6 +256,10 @@ pub struct App {
     /// Inner area of the vowel chart, for mouse mapping (empty when it is
     /// not drawn).
     pub chart_area: Rect,
+    /// Measures the tract's formants off the audio thread.
+    meter: FormantMeter,
+    /// The tract's formants as last measured.
+    pub formants: Option<Formants>,
 }
 
 /// Lowercase name of a sound model.
@@ -309,6 +314,8 @@ impl App {
             mimic: None,
             formant_lock: None,
             chart_area: Rect::default(),
+            meter: FormantMeter::new(),
+            formants: None,
         };
         app.status = if keyboard_release {
             "hold a piano key to sing · Space stops · Tab to type or paste text".into()
@@ -325,6 +332,12 @@ impl App {
 
     pub fn sample_rate(&self) -> f32 {
         self.link.sample_rate
+    }
+
+    /// F1, F2 and F3 of the tract as last measured, Hz.
+    #[must_use]
+    pub fn live_formants(&self) -> Option<[f32; 3]> {
+        self.formants.and_then(|f| f.hz)
     }
 
     /// Start from a voice other than the first preset's, with the persona
@@ -440,6 +453,12 @@ impl App {
             self.snap = s;
         }
         while self.link.trash.try_recv().is_ok() {}
+        if let Some(probe) = self.link.probes.try_iter().last() {
+            self.meter.submit(probe);
+        }
+        if let Some(f) = self.meter.poll() {
+            self.formants = Some(f);
+        }
         if let Some(saved) = self.link.recorder.as_ref().and_then(Recorder::poll) {
             self.status = saved_status(&saved);
         }
@@ -1810,6 +1829,7 @@ mod tests {
             cmd,
             snapshots,
             trash,
+            probes: crossbeam_channel::bounded(1).1,
             sample_rate: 48_000.0,
             microphone: false,
             microphone_name: None,

@@ -7,8 +7,18 @@ mod line;
 mod record;
 mod sing;
 mod take;
+mod telemetry;
 mod ui;
 
+// The formant meter of the library's examples, which `replay --trace` uses
+// too: the instrument panel shows the same numbers.
+#[path = "../../synthie-trombone/examples/support/spectrum.rs"]
+mod spectrum;
+#[path = "../../synthie-trombone/examples/support/survey.rs"]
+mod survey;
+
+#[cfg(test)]
+mod cost_tests;
 #[cfg(test)]
 mod screenshots;
 #[cfg(test)]
