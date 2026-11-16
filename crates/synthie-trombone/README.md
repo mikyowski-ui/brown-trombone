@@ -123,7 +123,9 @@ and from stdin.
 independent tiers, `Tier::ALL`: `GlottalAdduction`, `LarynxAndPitch`,
 `Velum`, `TongueBody`, `TongueTip` and `LipsAndJaw`. A `Gesture` is a
 target for its tier's variables (`gesture::var`: a constriction's place and
-degree, the lips' aperture, the port, the glottis's spread, the pitch),
+degree, the lips' aperture and protrusion, the port, the glottis's spread,
+the pitch and the larynx's height; the protrusion and the height lengthen
+the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on),
 moved towards as a mass on a spring of its own stiffness and damping,
 weighted by its dominance against the other gestures active on the tier,
 inside an activation window with ramps. Push one into a playing voice and
@@ -195,8 +197,8 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 25 numbers),
-`ArticulationConfig` (how sounds are made and joined: 67, with a
+`AnatomyConfig` (the body, its tissues and sources: 27 numbers),
+`ArticulationConfig` (how sounds are made and joined: 71, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine
