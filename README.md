@@ -538,9 +538,10 @@ as the model goes:
   spring (`nasal_tip_release`, wave 1), closure and shoulder together:
   at its own speed the gap out of /n/ opened at 2 to 8 cm²/s (Stevens:
   50 to 100) and the second formant overshot onto a fronted vowel and
-  fell back, a /j/. Before the fronted /u/ the tongue is not dropped
-  behind the /n/ (`nasal_cavity_held`): the antiresonance there stands
-  at 2.1 to 2.3 kHz.
+  fell back, a /j/. Keeping the tongue up behind an /n/ before the
+  fronted /u/ (`nasal_cavity_held`) is off since wave 2: its
+  antiresonance stood at 2.1 to 2.3 kHz there, toward /ŋ/ by the
+  owner's ear; dropped as everywhere else it stands at 1.45 to 1.55.
 - **Two speeds of articulator.** The tongue body and the jaw are heavy and
   slow, so the vowel shape glides from vowel to vowel underneath the
   consonants; the tongue tip, blade and lips are light and quick and make
@@ -1414,7 +1415,8 @@ average sentence).
   smoother, no fake 'you' glide") the owner chose: the tip quick out of
   /n/ (`nasal_tip_release` 6, onto a vowel's shape only), the fronted /u/
   after /n/ (`fronted_after_n`), the tongue kept up behind an /n/ before
-  it (`nasal_cavity_held`), and a higher, fronter schwa before it
+  it (`nasal_cavity_held`; switched off again in wave 2, the /n/ leaned
+  toward "ng"), and a higher, fronter schwa before it
   (`schwa_colour`). In the tract (its own formants): the schwa of
   "canoe" stands at F1 320 to 400, F2 1750 to 1790 Hz (before 380 to
   510 and 1645 to 1570; the owner's near 300 and 1800); out of the /n/

@@ -868,8 +868,9 @@ tuning! {
         /// up, the mouth behind the /n/ is the fronted vowel's: its
         /// antiresonance stands at 2.1 to 2.3 kHz (1.45 to 1.55 dropped). Not
         /// before /i ɪ j/: kept up there it rose from 1.4 to 1.8 kHz, where
-        /// round 6's recognizer heard /ŋ/ in a fifth of the /n/.
-        nasal_cavity_held = 1.0, 0.0..=1.0, B;
+        /// round 6's recognizer heard /ŋ/ in a fifth of the /n/. Off since
+        /// wave 2 (on in wave 1): by the owner's ear the /n/ leaned toward /ŋ/.
+        nasal_cavity_held = 0.0, 0.0..=1.0, B;
         /// Whether an unstressed /ə/ takes the colour of a high front or
         /// fronted vowel after it (`1`) or stays the one central schwa (`0`,
         /// as until wave 1; physical engine; see `speech::schwa_colour`): its

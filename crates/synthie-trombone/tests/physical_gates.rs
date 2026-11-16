@@ -1969,17 +1969,12 @@ fn nasal_murmurs_have_the_antiresonance_of_their_place() {
         println!("in {v}: /m/ {m:.0} Hz (notch {m_notch:.0} dB), /n/ {n:.0} Hz, /ŋ/ {ng:?}");
         assert!((700.0..=1250.0).contains(&m), "in {v}: /m/ at {m:.0} Hz");
         assert!(m_notch >= 20.0, "in {v}: /m/ notch {m_notch:.1} dB");
-        // Before the fronted /u/ of "[u n u]" the tongue is kept up behind
-        // the closure (`ArticulationConfig::nasal_cavity_held`, the owner's choice by
-        // ear: dropped, it sprang back after the release into the vowel),
-        // and the mouth behind the /n/ is the fronted /u/'s: 2278 Hz,
-        // inside Fujimura's 1450 to 2200 Hz for /n/ give or take, and far
-        // from /ŋ/'s 3 kHz. Everywhere else the tongue drops.
-        let kept_up = v == Phoneme::Uw
-            && settings.tuning.articulation.fronted_after_n > 0.0
-            && settings.tuning.articulation.nasal_cavity_held > 0.0;
-        let highest = if kept_up { 2400.0 } else { 1700.0 };
-        assert!((1100.0..=highest).contains(&n), "in {v}: /n/ at {n:.0} Hz");
+        // Fujimura: /n/ at 1450 to 2200 Hz give or take, far from /ŋ/'s
+        // 3 kHz. The bound stands at 1700 Hz in every vowel: the tongue
+        // kept up behind an /n/ before a fronted /u/
+        // (`ArticulationConfig::nasal_cavity_held`, off since wave 2) put it
+        // at 2278 Hz, toward /ŋ/ by ear.
+        assert!((1100.0..=1700.0).contains(&n), "in {v}: /n/ at {n:.0} Hz");
         assert!(n >= m + 300.0, "in {v}: /n/ {n:.0} Hz, /m/ {m:.0} Hz");
         assert!(ng.is_none_or(|z| z > 3000.0), "in {v}: /ŋ/ at {ng:?}");
         // The nose has a shallow notch of its own near 1 kHz (11 to 13 dB,
