@@ -2622,3 +2622,122 @@ fn the_accented_vowels_are_as_dark_as_a_speakers() {
     );
     assert!(b - d > 8.0, "only {:.1} dB darker", b - d);
 }
+
+// ----- the tract's length (wave 2A) ----------------------------------------
+
+/// A speaking-speed voice holding `p` with the lip horn (the owner's 1.2
+/// cm) and the larynx slide on.
+fn lengthening_voice(p: Phoneme) -> Trombone {
+    let mut settings = tuned(&VoiceSettings::default());
+    settings.tuning.anatomy.lip_horn = 1.2;
+    settings.tuning.anatomy.larynx_travel = 1.0;
+    let mut t = Trombone::new(SR);
+    t.set_tuning(&settings.tuning);
+    t.set_engine(Engine::Physical);
+    t.articulate_phoneme(p);
+    t.settle();
+    t.set_vibrato(0.0, 0.0);
+    t.set_jitter(0.0);
+    t.set_articulation_speed(2.2);
+    t.set_voicing_rates(40.0, 40.0);
+    t.set_frequency(110.0);
+    t
+}
+
+/// Largest jump from one sample to the next.
+fn largest_jump(x: &[f32]) -> f32 {
+    x.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()))
+}
+
+/// Render `seconds` while the lips are pushed from 0 to 1.2 cm and back
+/// and the larynx from 0.35 cm up to 0.8 down and back, one way in 40 ms
+/// (as fast as the quickest gesture), told every 64 samples; the tract
+/// moves them on its springs.
+fn sweeping(t: &mut Trombone, seconds: f32) -> Vec<f32> {
+    let n = (seconds * SR) as usize;
+    let mut out = Vec::with_capacity(n);
+    let mut buf = [0.0f32; 64];
+    while out.len() < n {
+        let s = out.len() as f32 / SR;
+        let phase = (s / 0.04) as usize % 2;
+        let x = (s / 0.04).fract();
+        let x = if phase == 0 { x } else { 1.0 - x };
+        t.set_lip_protrusion(Some(1.2 * x));
+        t.set_larynx_height(0.35 - 1.15 * x);
+        t.render(&mut buf);
+        out.extend_from_slice(&buf);
+    }
+    out
+}
+
+#[test]
+fn the_lips_protrude_as_they_are_told_not_as_they_pass() {
+    // The protrusion follows the rounding the lips are told to make: an
+    // /u/ pushes them forward and a /b/ closing over it keeps them there,
+    // lips passing through a rounded-sized opening on their way to a
+    // closure do not protrude, and the consonants with lips of their own
+    // protrude too.
+    let mut t = lengthening_voice(Phoneme::Uw);
+    let (rounded, _) = t.tract_lengths();
+    println!("/u/: lips forward {rounded:.2} cm");
+    assert!(rounded > 0.9, "{rounded}");
+    t.set_constriction(SLOT_MAIN, Some(Constriction::new(41.0, 0.0)));
+    render(&mut t, 0.15);
+    let (closed, _) = t.tract_lengths();
+    println!("/u/ under a /b/: {closed:.2} cm");
+    assert!((closed - rounded).abs() < 0.01, "{closed} vs {rounded}");
+
+    let mut t = lengthening_voice(Phoneme::Aa);
+    let mut most = 0.0f32;
+    t.articulate_phoneme(Phoneme::B);
+    for _ in 0..30 {
+        render(&mut t, 0.005);
+        most = most.max(t.tract_lengths().0);
+    }
+    println!("/a/ into /b/: at most {most:.3} cm");
+    assert!(most < 0.01, "{most}");
+
+    for p in [Phoneme::Sh, Phoneme::W, Phoneme::R] {
+        let t = lengthening_voice(p);
+        let (forward, _) = t.tract_lengths();
+        println!("{}: {forward:.2} cm", p.symbol());
+        assert!(forward > 0.3, "{}: {forward}", p.symbol());
+    }
+}
+
+#[test]
+fn moving_the_tract_s_length_puts_no_step_in_the_sound() {
+    // The lips and the larynx swept through their ranges as fast as the
+    // quickest gesture, under a steady /u/ and under a shut tract full of
+    // the lungs' pressure with no voice: the largest step from one sample
+    // to the next is no larger than the steady vowel's own, and in the
+    // silent tract a small share of it.
+    let mut t = lengthening_voice(Phoneme::Uw);
+    t.set_lip_protrusion(Some(0.0));
+    t.set_larynx_height(0.35);
+    t.note_on();
+    render(&mut t, 0.4);
+    let steady = largest_jump(&render(&mut t, 0.24));
+    let swept = largest_jump(&sweeping(&mut t, 0.24));
+    println!(
+        "/u/: largest step {steady:.4} held, {swept:.4} swept ({:.2} times)",
+        swept / steady
+    );
+    assert!(swept <= 1.1 * steady, "{swept} against {steady}");
+
+    let mut t = lengthening_voice(Phoneme::B);
+    t.set_lip_protrusion(Some(0.0));
+    t.set_larynx_height(0.35);
+    t.note_off();
+    t.set_glottal_spread(0.3);
+    render(&mut t, 0.4);
+    let quiet = largest_jump(&render(&mut t, 0.24));
+    let pressure = t.pressure(30);
+    let shut = largest_jump(&sweeping(&mut t, 0.24));
+    println!(
+        "shut at {pressure:.1} cmH2O: largest step {quiet:.2e} held, {shut:.2e} swept ({:.3} of the vowel's)",
+        shut / steady
+    );
+    assert!(pressure > 3.0, "the tract holds only {pressure} cmH2O");
+    assert!(shut <= 0.05 * steady, "{shut} against the vowel's {steady}");
+}

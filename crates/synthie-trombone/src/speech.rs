@@ -153,6 +153,12 @@ pub struct Controls {
     /// an /n/ that leads into a fronted vowel keeps the tongue up for it
     /// ([`ArticulationConfig::nasal_cavity_held`](crate::ArticulationConfig::nasal_cavity_held)).
     pub cavity_held: f32,
+    /// How far the larynx is lowered through the segment, cm (see
+    /// [`Trombone::set_larynx_height`]; a voiced closure's
+    /// [`ArticulationConfig::voiced_stop_larynx`](crate::ArticulationConfig::voiced_stop_larynx),
+    /// a rounded vowel's
+    /// [`ArticulationConfig::rounded_larynx`](crate::ArticulationConfig::rounded_larynx)).
+    pub larynx: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -421,6 +427,9 @@ pub struct Speaker {
     /// with the segment whose shape ends each (gesture path).
     overlap_next: usize,
     overlaps_on: [Option<(u32, crate::gesture::GestureId)>; 4],
+    /// How far the larynx was last told to be lowered, cm (see
+    /// [`Controls::larynx`]): it is told only when that changes.
+    larynx: f32,
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -510,6 +519,7 @@ impl Speaker {
         self.nominal = 0.0;
         self.overlap_next = 0;
         self.overlaps_on = [None; 4];
+        self.larynx = 0.0;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -525,6 +535,10 @@ impl Speaker {
         voice.set_fold_slack(0.0);
         voice.set_fold_softness(0.0);
         voice.set_cavity_expansion(0.0);
+        if self.larynx != 0.0 {
+            voice.set_larynx_height(0.0);
+            self.larynx = 0.0;
+        }
         voice.articulate_phoneme(Phoneme::Sil);
         voice.set_constriction(LABIAL_SLOT, None);
         self.labial = None;
@@ -633,6 +647,7 @@ impl Speaker {
                     plant::slack(voice, g, c.slack);
                     plant::softness(voice, g, c.softness);
                     voice.set_cavity_expansion(c.expansion);
+                    self.lower_larynx(voice, g, c.larynx);
                 }
             }
             let t = (self.elapsed / seg.duration).min(1.0);
@@ -844,6 +859,7 @@ impl Speaker {
                     plant::slack(voice, g, 0.0);
                     plant::softness(voice, g, 0.0);
                     voice.set_cavity_expansion(0.0);
+                    self.lower_larynx(voice, g, 0.0);
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
                     // own. The lungs stop pushing: an utterance that ends
@@ -859,6 +875,18 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Lower the larynx by `cm` (see [`Controls::larynx`]): on the gesture
+    /// path (`g`) the height of the larynx tier's driven gesture, otherwise
+    /// [`Trombone::set_larynx_height`]. Only when it changes, so that a
+    /// voice that never lowers it is never told.
+    fn lower_larynx(&mut self, voice: &mut Trombone, g: bool, cm: f32) {
+        if cm.to_bits() == self.larynx.to_bits() {
+            return;
+        }
+        self.larynx = cm;
+        plant::larynx(voice, g, cm);
     }
 
     /// Whether `seg` is the end of an /n/ or /ŋ/ released into a close
@@ -1190,6 +1218,15 @@ mod plant {
             voice.drive(Tier::LarynxAndPitch, var::larynx::PITCH, hz);
         } else {
             voice.set_frequency(hz);
+        }
+    }
+
+    /// The larynx lowered by `cm`.
+    pub(super) fn larynx(voice: &mut Trombone, g: bool, cm: f32) {
+        if g {
+            voice.drive(Tier::LarynxAndPitch, var::larynx::HEIGHT, -cm);
+        } else {
+            voice.set_larynx_height(-cm);
         }
     }
 
@@ -2724,6 +2761,16 @@ fn darken_before_coda_l(
     }
 }
 
+/// Whether `p` with articulation `a` is a rounded vowel or glide: its
+/// vowel shape's target has rounded lips (/u ʊ oʊ ɝ w/, the fronted /u/,
+/// the back offglides of /oʊ aʊ/). Not a consonant made on one.
+fn rounded(p: Phoneme, a: &Articulation) -> bool {
+    (is_vowel(p) || p == Phoneme::W)
+        && a.vowel
+            .and_then(crate::vowel_targets::target)
+            .is_some_and(|t| t.lips == crate::vowel_targets::Lips::Rounded)
+}
+
 fn silence(duration: f32) -> Draft {
     Draft {
         phoneme: Phoneme::Sil,
@@ -2767,6 +2814,12 @@ fn expand(
     let a = a;
     let mut dur = base_duration(p, stressed, timing, context.is_some()) / rate;
     let accent = if stressed { 1.0 } else { 0.0 };
+    // A rounded vowel lowers the larynx (physical engine).
+    let rounded_larynx = if context.is_some() {
+        timing.articulation.rounded_larynx
+    } else {
+        0.0
+    };
     let draft = |phoneme: Phoneme, articulation: Articulation, duration: f32, voiced: bool| Draft {
         phoneme,
         articulation,
@@ -2777,7 +2830,14 @@ fn expand(
         accent,
         vowel: is_vowel(phoneme),
         part: Part::Head,
-        gesture: Controls::default(),
+        gesture: Controls {
+            larynx: if rounded(phoneme, &articulation) {
+                rounded_larynx
+            } else {
+                0.0
+            },
+            ..Controls::default()
+        },
         aspiration: false,
         into_liquid: false,
         ahead: None,
@@ -2830,6 +2890,7 @@ fn expand(
     let voiced_stop = Controls {
         slack: timing.anatomy.voiced_stop_slack,
         expansion: timing.anatomy.cavity_expansion,
+        larynx: timing.articulation.voiced_stop_larynx,
         ..Controls::default()
     };
     let voiced_fricative = Controls {
