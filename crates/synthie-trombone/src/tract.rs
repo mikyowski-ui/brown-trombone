@@ -572,6 +572,10 @@ impl Tract {
         ((self.nose_diameter[0] - VELUM_CLOSED) / (VELUM_OPEN - VELUM_CLOSED)).clamp(0.0, 1.0)
     }
 
+    pub(crate) fn velum_target_openness(&self) -> f32 {
+        ((self.velum_target - VELUM_CLOSED) / (VELUM_OPEN - VELUM_CLOSED)).clamp(0.0, 1.0)
+    }
+
     /// Place, move or release (`None`) the constriction in `slot`. A released
     /// constriction stops shaping the tract at once but its turbulence fades
     /// out over 100 ms.

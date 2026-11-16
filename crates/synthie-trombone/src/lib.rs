@@ -77,6 +77,7 @@ mod profile;
 pub mod sing;
 #[cfg(feature = "alloc")]
 pub mod speech;
+pub mod stream;
 #[cfg(feature = "alloc")]
 mod talker;
 mod tract;
