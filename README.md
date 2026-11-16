@@ -1283,6 +1283,34 @@ average sentence).
   tip release before it can use it. A fronted /u/ with tight lips is out
   of this tract's reach (the tongue body stops at cell 29; with lips
   rounded F2 falls to 1270 and F3 stays at 2700).
+- **"canoe" (wave 1): the owner's three-part fix is on; the recognizers
+  do not hear the word.** By ear (round 11's experiment clip: "much
+  smoother, no fake 'you' glide") the owner chose: the tip quick out of
+  /n/ (`nasal_tip_release` 6, onto a vowel's shape only), the fronted /u/
+  after /n/ (`fronted_after_n`), the tongue kept up behind an /n/ before
+  it (`nasal_cavity_held`), and a higher, fronter schwa before it
+  (`schwa_colour`). In the tract (its own formants): the schwa of
+  "canoe" stands at F1 320 to 400, F2 1750 to 1790 Hz (before 380 to
+  510 and 1645 to 1570; the owner's near 300 and 1800); out of the /n/
+  F2 rises from 1580 to 1590 and glides back to 1480 (before: the back
+  /u/, 1350 falling to 1000; with the fronted /u/ and the tip at its own
+  speed, 1896 falling to 1644 over 25 ms, the /j/). Each part can be
+  switched off (`0`, the tip release `1`); all four off is the earlier
+  engine sample for sample. Whisper writes sentence 1 "The birch can use
+  it on the smooth planks." (as before), the four-sentence clip "...can
+  easily run the smooth planks..." (24 of 31 words, 25 before), "canoe"
+  in 0 of 10 carrier phrases (1 before). The phoneme recognizer hears
+  the fronted /u/ after /n/ less often than the back one ("the new king",
+  "I knew him" lose their /u/; "a new car", "noon" gain it), and one /n/
+  before it as /ŋ/: kept up, the tongue puts the /n/'s antiresonance at
+  2.1 to 2.3 kHz (1.45 to 1.55 dropped). The same fronted /u/ after /d/
+  is heard as /u/. Over the 30 held-out sentences 26.3 % phoneme error,
+  74.3 % of Whisper's words (26.1, 74.3 before), the 30 tuning ones 22.2
+  and 74.1 % (22.3, 72.8), vowels heard wrong in the LibriSpeech texts
+  23.8 % (24.8), consonants right 88.7 % (88.2). Hastened into /ð s l/
+  as well (the tip moving on to its next place, not letting go), the
+  quick tip cost "in the", "on the", "at once": 74.3 to 72.2 % of the
+  held-out words; it no longer does.
 - **Taps after /ɑ/** are heard as /r/ in 7 of 12 short phrases (other
   vowels 1 of 8). Not their third formant (2700 to 3100 Hz at the tap, the
   reader's 2500 to 2800) nor their length (12, 20 or 30 ms, approach 8 to
