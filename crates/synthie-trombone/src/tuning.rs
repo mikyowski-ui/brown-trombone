@@ -800,12 +800,22 @@ tuning! {
         /// gestures on the tiers that make it (the tongue body, the tip, the
         /// lips and jaw, the velum), the larynx's settings and the pitch
         /// gestures on the glottal and laryngeal tiers, and the tract follows
-        /// the tiers' blend. `0` sends each segment's shape to the tract as
-        /// before. `2` is the gesture path with the series plant, a
-        /// measurement: the tiers' own task-space state, integrated at their
-        /// stiffness, is what the tract is sent, so the tract's articulators
-        /// lag behind a second spring.
-        gesture_score = 0.0, 0.0..=2.0, B;
+        /// the tiers' blend (the tract's articulators move towards it as
+        /// they always have, at the speed of each tier's stiffness). The
+        /// default since Wave 1: with `gesture_overlap` 0 it renders bit for
+        /// bit as the segment path; with 1 the 30 held-out and 30 tuning
+        /// sentences, the vowels and the consonants in the LibriSpeech texts
+        /// score as on it (26.1 / 74.3 %, 22.3 / 72.8 %, 24.8 % wrong, 88.2
+        /// % right). `0` sends each segment's shape to the tract as before,
+        /// kept to compare by ear. `2` is the gesture path with the series
+        /// plant, a measurement: the tiers' own task-space state, integrated
+        /// at their stiffness, is what the tract is sent, so the tract's
+        /// articulators lag behind a second spring; the stops of the
+        /// LibriSpeech texts then shut 21 ms into their phone (2 ms on the
+        /// single spring) and 43 of 193 never do, and the phoneme error of
+        /// the ten `sentence_heldout` sentences is 62 % (21.6 on the single
+        /// spring).
+        gesture_score = 1.0, 0.0..=2.0, B;
         /// On the gesture path, which of the rules about neighbouring sounds
         /// are left to the overlap of gestures instead (counted in order, `0`
         /// none): `1` the tongue body and the lips under a consonant made by
@@ -813,8 +823,11 @@ tuning! {
         /// consonant leans on, spanning it, and the consonant adds only its
         /// own (its constriction, a weak pull of the body towards the tip's,
         /// lips of its own or, under a gap meant to hiss, lips held as they
-        /// are).
-        gesture_overlap = 1.0, 0.0..=1.0, B;
+        /// are). `2` also: a stop released into an /l r/ of its word has the
+        /// liquid's tongue tip on its way (`speech::HELD_TIP`) through its
+        /// closure, the lips' or the back of the tongue's closure and the
+        /// tip overlapping on their two tiers ("dark blue", "glue").
+        gesture_overlap = 1.0, 0.0..=2.0, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags

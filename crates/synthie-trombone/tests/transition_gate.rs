@@ -122,6 +122,7 @@ fn the_second_formant_does_not_fall_onto_u_after_a_coronal() {
         assert!(frames.len() >= 4, "{text}: {} oral frames", frames.len());
         let target = frames.last().expect("frames").1[1];
         let highest = frames.iter().map(|f| f.1[1]).fold(0.0f32, f32::max);
+        println!("{text}: F2 falls from {highest:.0} to {target:.0} Hz into the /u/");
         // Before round 8 the first oral frame of the /u/ of "canoe" stood
         // at 1816 Hz and the vowel's middle near 1150: a fall of 650 Hz
         // over 100 ms, while the lips rounded: /ju/.

@@ -1238,6 +1238,28 @@ impl Trombone {
         }
     }
 
+    /// The tongue tip of `a` (a liquid) as a gesture of the score from now
+    /// until it is ended (the speech front end's gesture path: the liquid's
+    /// tip on its way through the closure of the stop before it, the two
+    /// gestures overlapping on two tiers). `None` if `a` has no tip
+    /// constriction.
+    pub(crate) fn push_tip_ahead(&mut self, a: &Articulation) -> Option<GestureId> {
+        use gesture::{LAYER_SCORE, flag, var};
+        let r = self.resolve(a);
+        let c = r
+            .main
+            .filter(|c| tier_of_place(c.index) == Tier::TongueTip)?;
+        let tip = Target::NONE
+            .with(var::tip::LOCATION, c.index)
+            .with(var::tip::DEGREE, c.diameter);
+        let lateral = if r.lateral { flag::LATERAL } else { 0 };
+        let g = Gesture::new(Tier::TongueTip, tip)
+            .stiffness(self.nominal_stiffness(Tier::TongueTip))
+            .flags(lateral)
+            .layer(LAYER_SCORE);
+        self.play_gesture(g)
+    }
+
     /// Set variables of `tier`'s own segment gesture (the latest; not a
     /// driven or a secondary one) and write the tier at once (the speech
     /// front end's gesture path: the velum shut ahead of the mouth's
@@ -1360,9 +1382,21 @@ impl Trombone {
                 (Tier::LipsAndJaw, &mut lips),
             ] {
                 for v in 0..gesture::VARIABLES {
-                    if !b.values[v].is_nan()
-                        && let Some(x) = self.score.state(tier, v)
+                    if b.values[v].is_nan() {
+                        continue;
+                    }
+                    // A constriction appearing starts from the opening the
+                    // tract has at its place.
+                    if self.score.state(tier, v) == Some(gesture::OPEN)
+                        && v > 0
+                        && let Some(at) = b.get(v - 1)
                     {
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let cell = (at.max(0.0) as usize).min(N - 1);
+                        let open = self.tract.diameter[cell] + 0.3;
+                        self.score.seed(tier, v, open.min(gesture::OPEN));
+                    }
+                    if let Some(x) = self.score.state(tier, v) {
                         b.values[v] = x;
                     }
                 }

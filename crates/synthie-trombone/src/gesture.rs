@@ -1090,6 +1090,17 @@ impl Score {
         }
     }
 
+    /// Put `tier`'s variable `v` at `x`, at rest, in task space (where the
+    /// plant shows it is: a constriction appearing starts from the opening
+    /// the tract has there, not from [`OPEN`]).
+    pub fn seed(&mut self, tier: Tier, v: usize, x: f32) {
+        if v < VARIABLES && x.is_finite() {
+            let s = &mut self.state[tier.index()];
+            s.x[v] = x;
+            s.v[v] = 0.0;
+        }
+    }
+
     /// Where `tier`'s variable `v` is now in task space (`None` before
     /// anything has set it).
     #[must_use]
