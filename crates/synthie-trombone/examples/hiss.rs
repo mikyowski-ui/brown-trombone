@@ -57,10 +57,8 @@ fn voice(size: f32, lung: f32, tenseness: f32) -> Trombone {
     let mut t = Trombone::new(SR);
     t.set_engine(Engine::Physical);
     t.set_tract_length(size);
-    let tuning = Tuning {
-        lung_pressure: lung,
-        ..Tuning::DEFAULT
-    };
+    let mut tuning = Tuning::DEFAULT;
+    tuning.anatomy.lung_pressure = lung;
     t.set_tuning(&tuning);
     t.set_vibrato(0.0, 0.0);
     t.set_jitter(0.0);

@@ -231,35 +231,48 @@ which keeps F1 and F2 within 3 % of the native vowel's, scaled, from 0.6
 to 1.4. The exception is /u/ (and /w/) in a long tract: it is already as
 close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 
-Underneath sit the one hundred and twenty-seven numbers of `Tuning`, each with a default and
-a range a real speaker could plausibly occupy (`Tuning::FIELDS`;
-`say --dump-parameters` prints them). The classic engine reads twelve of
-them (the lengths of sounds, stress and the gaps); the physical engine
-reads the rest as well:
+Underneath sits `Tuning`: a set of numbers, each with a default and a
+range a real speaker could plausibly occupy (`Tuning::FIELDS`;
+`say --dump-parameters` prints them), in three parts by what each number
+physically is. `AnatomyConfig` (`tuning.anatomy`, 25 numbers) is the body,
+its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
+59) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+43) is the rhythm and melody of a phrase. The classic engine reads twelve
+of them (marked *classic*: the lengths of sounds, stress, the gaps and the
+breath after a burst); the physical engine reads the rest as well.
 
-| Group | Fields |
-|---|---|
-| breath and folds | `lung_pressure`, `adduction_time`, `attack_depth`, `attack_hold`, `modal_gap`, `posterior_gap`, `abducted_area` |
-| noise | `jet_efficiency`, `teeth_gain`, `glottal_efficiency`, `hiss_corner` |
-| gaps | `fricative_gap`, `approximant_gap`, `nasal_port` |
-| larynx in consonants | `abduction_time`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `voiced_stop_slack`, `cavity_expansion`, `onset_kick`, `kick_time` |
-| lengths | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `voiced_sibilant_length`, `approximant_length`, `aspirate_length`, `aspiration`, `stress_stretch`, `vowel_hold` |
-| lax vowels | `lax_length`, `unstressed_lax_length`, `lax_nucleus`, `lax_floor`, `ae_nucleus` |
-| voicing timing | `vot_labial`, `vot_alveolar`, `vot_velar`, `devoicing_lead`, `unstressed_vot`, `fortis_closure`, `prefortis_clip`, `prelenis_stretch` |
-| articulators | `lead`, `release_lead`, `articulation_rate`, `body_rate`, `dorsum_rate`, `closing_ratio`, `release_speed`, `closure_overshoot` |
-| breath over a phrase | `phrase_onset`, `onset_pressure`, `phrase_decline`, `final_drop` |
-| hiss of fricatives | `hiss_floor`, `teeth_corner`, `postalveolar_lips`, `frication_widening`, `frication_ramp` |
-| intonation | `accent_size`, `accent_decay`, `declination`, `final_fall` |
-| stops into liquids, nasals | `liquid_transition`, `alveolar_velum`, `nasal_cavity_rate` (and `nasal_cavity`, `velum_lead`) |
-| a softer voice off the accent | `soft_corner`, `sonorant_softness`, `unstressed_softness`, `final_softness` (all off since round 9; and `sonorant_slack`, `final_slack`, now 0) |
-| liquids into vowels | `lateral_gap`, `lateral_release`, `lateral_channel` (round 10) |
-| the front of the tongue | `fronted_nucleus`, `tap_length`, `tap_lead` |
-| the voice's source (round 9) | `voice_tilt`, `tilt_corner`, `voiced_breath_corner`, `cycle_jitter`, `pitch_flutter`, `spread_closing`, `vowel_decline`, `accent_peak` |
-| the rules' prosody against speakers' (round 10) | `unaccented_level`, `final_coda_stretch`, `sentence_pause`, `light_laxness` |
-| the tilt's shape and the voice's breath (round 10) | `tilt_top`, `tilt_top_corner` (a second section, off), `voiced_breath_gain` |
+| Part | Topic | Fields |
+|---|---|---|
+| anatomy | the breath | `lung_pressure` |
+| anatomy | the folds | `attack_depth`, `attack_hold`, `modal_gap`, `posterior_gap`, `voiced_stop_slack`, `cycle_jitter`, `pitch_flutter` |
+| anatomy | the voice's source tilt and softness | `voice_tilt`, `tilt_corner`, `tilt_top`, `tilt_top_corner` (a second section, off), `soft_corner` |
+| anatomy | breath noise | `glottal_efficiency`, `voiced_breath_corner`, `voiced_breath_gain` |
+| anatomy | jets and hiss | `jet_efficiency`, `teeth_gain`, `hiss_corner`, `hiss_floor`, `teeth_corner`, `labial_edge`, `dental_edge` |
+| anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
+| articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
+| articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
+| articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
+| articulation | closures and releases | `closure_floor`, `fortis_closure`, `voicing_tail`, `aspiration` (*classic*), `vot_labial`, `vot_alveolar`, `vot_velar`, `unstressed_vot`, `devoicing_lead`, `tap_length` |
+| articulation | vowels gliding into their neighbours | `lax_nucleus`, `ae_nucleus`, `fronted_nucleus`, `dark_l_share` |
+| articulation | following a speaker's schedule | `follow_breath_low`, `follow_breath_high`, `follow_tenseness_low`, `follow_tenseness_high`, `follow_speed_max`, `follow_shortest`, `follow_shortest_light`, `follow_formant_range` |
+| articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`) |
+| prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
+| prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
+| prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
+| prosody | intonation | `accent_size`, `accent_decay`, `accent_peak`, `declination`, `final_fall` |
+| prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
+| prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
+
+`ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
+dominance) for each of the six tiers of the gesture score
+(`glottal_adduction`, `larynx_and_pitch`, `velum`, `tongue_body`,
+`tongue_tip`, `lips_and_jaw`). The tongue body's and the tip's springs are
+read today, under their old names above; the tiers' other numbers wait for
+the gesture engine and are not in profiles until it reads them.
 
 A voice with its persona and tuning can be kept as a JSON profile (feature
-`profile`); every key is optional and a misspelt one is an error:
+`profile`); every key is optional and a misspelt one is an error. The
+tuning's fields go flat, by their own names:
 
 ```json
 {
@@ -268,6 +281,11 @@ A voice with its persona and tuning can be kept as a JSON profile (feature
   "tuning": { "lead": 0.035, "fricative_length": 0.11 }
 }
 ```
+
+or by part, as `--dump-profile` writes them (`"tuning": {"articulation":
+{"lead": 0.035}, "prosody": {"fricative_length": 0.11}}`), or both mixed;
+a field given both flat and in its part is an error, so which one counts
+never depends on the order of the keys.
 
 ```sh
 cargo run --release -p synthie-trombone --example say -- --engine physical --profile my-voice.json "Hello there."

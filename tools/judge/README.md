@@ -2,8 +2,8 @@
 
 An offline judge that scores how intelligible synthesized speech is, a
 measure of how natural it sounds against a person, and a CMA-ES tuner that
-searches the physical engine's tuning parameters (`params.json`, all 71
-fields of `Tuning`) to improve that score. Everything runs locally once the models
+searches the physical engine's tuning parameters (`params.json`, every
+field of `Tuning`, by its three parts) to improve that score. Everything runs locally once the models
 are downloaded.
 
 ## Setup
@@ -256,8 +256,10 @@ uv run python judge.py score physical --sets sentence_heldout,harvard_heldout,ca
 batch of judging and lets it go while it renders and runs the gates.
 
 - Searches the parameters of the chosen passes (`--pass`: `a` how sounds
-  are made, 31 parameters; `b` how they follow one another, 36; `c` the
-  vowel lengths, 4; letters combine, `bc`), minus those fixed by `--lock`,
+  are made, 58 parameters; `b` how they follow one another, 58; `c` the
+  vowel lengths, 11; letters combine, `bc`; the passes cut across the
+  three parts of `Tuning`), minus those fixed by `--lock` (a profile, its
+  tuning flat or by part),
   those named by `--exclude` (left at their defaults, e.g. the ones the
   scan found pinned by gates) and the twelve the classic engine reads too (`"classic": true` in
   `params.json`: the classic engine is pinned bit for bit, so a tuned value
@@ -409,7 +411,7 @@ bigger tuning split would help more than a longer search.
 | `tune.py` | the CMA-ES tuner and the sensitivity scan. |
 | `vowel_lab.py` | vowel error and margins per vowel under a profile, on the tuning or held-out split. |
 | `vowel_tune.py` | coordinate search over the vowel targets on the tuning split. |
-| `params.json` | the tuning parameters: `lo`, `hi`, `default`, `pass` (a, b, c, as in the engine), `classic` for the twelve the classic engine reads too. |
+| `params.json` | the tuning parameters in the engine's three parts (`anatomy`, `articulation`, `prosody`, as `say --dump-parameters` prints them): `lo`, `hi`, `default`, `pass` (a, b, c, as in the engine), `classic` for the twelve the classic engine reads too. `tune.load_params` reads them flat, each with its `part`. |
 | `data/w2v_vocab.json` | the phoneme model's tokenizer vocabulary (bundled; checked against the model at load). |
 | `data/fold_table.tsv` | every model token and the phonemes it folds to, for review (a test checks it is current). |
 | `tests/` | pytest: normalizer (every symbol maps, round trips, diphthongs and affricates as single model tokens, eSpeak agreement) and model-free parts of the judge and tuner. |

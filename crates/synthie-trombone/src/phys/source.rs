@@ -338,12 +338,12 @@ impl Source {
             phase: 0.0,
             lung: 0.0,
             lung_target: 0.0,
-            lung_base: Tuning::DEFAULT.lung_pressure * CM_H2O,
+            lung_base: Tuning::DEFAULT.anatomy.lung_pressure * CM_H2O,
             tuning: Tuning::DEFAULT,
-            leak: Tuning::DEFAULT.abducted_area,
-            leak_target: Tuning::DEFAULT.abducted_area,
-            gap: Tuning::DEFAULT.abducted_area / (2.0 * 1.4),
-            gap_target: Tuning::DEFAULT.abducted_area / (2.0 * 1.4),
+            leak: Tuning::DEFAULT.articulation.abducted_area,
+            leak_target: Tuning::DEFAULT.articulation.abducted_area,
+            gap: Tuning::DEFAULT.articulation.abducted_area / (2.0 * 1.4),
+            gap_target: Tuning::DEFAULT.articulation.abducted_area / (2.0 * 1.4),
             chink: 0.0,
             chink_target: 0.0,
             spread_target: 0.0,
@@ -458,7 +458,7 @@ impl Source {
     /// included).
     pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
         self.tuning = *tuning;
-        self.lung_base = tuning.lung_pressure * CM_H2O;
+        self.lung_base = tuning.anatomy.lung_pressure * CM_H2O;
     }
 
     /// Lung pressure while sounding, cmH2O.
@@ -511,7 +511,7 @@ impl Source {
     /// modal voice at pitch `hz` and tenseness `tense`.
     fn modal_gap(&self, hz: f32, tense: f32) -> f32 {
         let slack = 1.0 - tense;
-        let gap = (self.tuning.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP)
+        let gap = (self.tuning.anatomy.modal_gap * slack / (1.0 - MODAL_TENSENESS)).min(WIDEST_GAP)
             * (self.lung_base / SOFT_VOICE).min(1.0);
         let (tension, _) = tension_from_table(hz * self.size, gap);
         gap * (tension / SLACK_TENSION).clamp(CLOSEST, 1.0)
@@ -570,7 +570,7 @@ impl Source {
         // cycle-to-cycle jitter only up to twice the natural voice's (at
         // the elder's 2.5 times, 2.5 % of the tension from one cycle to the
         // next made its H1-H2 step by 4 dB between 50 ms frames on /u/).
-        self.jit_size = 0.01 * self.tuning.cycle_jitter * g.jitter.min(JITTER_MOST);
+        self.jit_size = 0.01 * self.tuning.anatomy.cycle_jitter * g.jitter.min(JITTER_MOST);
 
         let voicing = g.voiced || g.always_voice;
         if voicing && !self.voicing && !self.building() {
@@ -588,9 +588,9 @@ impl Source {
             * if voicing {
                 BREATHY_LEAK * slack * slack
             } else {
-                self.tuning.abducted_area
+                self.tuning.articulation.abducted_area
             };
-        let abducted = self.tuning.abducted_area / (2.0 * 1.4);
+        let abducted = self.tuning.articulation.abducted_area / (2.0 * 1.4);
         self.gap_target = self.size
             * if !voicing {
                 abducted
@@ -604,7 +604,7 @@ impl Source {
             };
         let loose = (slack - 0.3).max(0.0) / 0.7;
         self.chink_target = if voicing && self.gap_override.is_none() {
-            area_scale * self.tuning.posterior_gap * loose * loose
+            area_scale * self.tuning.anatomy.posterior_gap * loose * loose
         } else {
             0.0
         };
@@ -660,10 +660,10 @@ impl Source {
     #[inline]
     pub(crate) fn tick(&mut self, lambda: f32, dt: f32) -> (f32, f32) {
         self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
-        let adduction = self.tuning.adduction_time;
+        let adduction = self.tuning.articulation.adduction_time;
         self.leak += (self.leak_target - self.leak) * (dt / adduction);
         let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
-            -self.tuning.attack_depth * self.size
+            -self.tuning.anatomy.attack_depth * self.size
         } else {
             self.gap_target
         };
@@ -674,11 +674,11 @@ impl Source {
         };
         self.gap += (gap_target - self.gap) * (dt / time);
         self.chink += (self.chink_target - self.chink) * (dt / adduction);
-        let arytenoids = self.tuning.abduction_time;
+        let arytenoids = self.tuning.articulation.abduction_time;
         let spread = self.spread_target * self.size * self.size;
         // They bring the glottis back together faster than they open it.
         let closing = if spread < self.spread {
-            self.tuning.spread_closing.min(arytenoids)
+            self.tuning.articulation.spread_closing.min(arytenoids)
         } else {
             arytenoids
         };
@@ -754,7 +754,7 @@ impl Source {
         if self.soft <= 1e-4 {
             return 1.0;
         }
-        let corner = self.tuning.soft_corner / self.soft;
+        let corner = self.tuning.anatomy.soft_corner / self.soft;
         1.0 - exp(-2.0 * PI * corner * dt)
     }
 
@@ -805,7 +805,7 @@ impl Source {
             // hair open for as long as it likes.
             if self.gap <= 0.0 && self.across > START_PRESSURE {
                 self.pressed_for += dt;
-                if self.pressed_for >= self.tuning.attack_hold {
+                if self.pressed_for >= self.tuning.anatomy.attack_hold {
                     self.pressing = false;
                     self.restart_watch();
                 }

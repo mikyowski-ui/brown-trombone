@@ -422,7 +422,7 @@ impl App {
             .with_persona(&self.persona);
         self.tenseness = self.settings.tenseness;
         self.vibrato = self.settings.vibrato;
-        self.loud = self.settings.tuning.lung_pressure;
+        self.loud = self.settings.tuning.anatomy.lung_pressure;
         #[allow(clippy::cast_possible_truncation)]
         let note = (69.0 + 12.0 * (self.settings.pitch / 440.0).log2()).round() as i32;
         self.note = note;
@@ -2348,8 +2348,8 @@ mod tests {
         else {
             panic!("{cmds:?}");
         };
-        assert!(louder.tuning.lung_pressure > small.tuning.lung_pressure);
-        assert!((app.loud - louder.tuning.lung_pressure).abs() < 1e-3);
+        assert!(louder.tuning.anatomy.lung_pressure > small.tuning.anatomy.lung_pressure);
+        assert!((app.loud - louder.tuning.anatomy.lung_pressure).abs() < 1e-3);
         // Del goes back to the voice as it was.
         turn(&mut app, KeyCode::Delete);
         assert_eq!(app.persona, Persona::NEUTRAL);

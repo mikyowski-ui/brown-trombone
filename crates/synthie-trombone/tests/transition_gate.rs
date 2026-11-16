@@ -474,7 +474,7 @@ fn a_vowel_before_a_dark_l_is_dark_already() {
     // into the /l/; until round 11 the engine's held their own shape up to
     // the /l/ (1460 to 1660 Hz by LPC) and fell some 500 Hz into it.
     let mut light = voice();
-    light.tuning.dark_l_share = 0.0;
+    light.tuning.articulation.dark_l_share = 0.0;
     let end_f2 = |settings: &VoiceSettings, text: &str, v: Phoneme| {
         let s = place::speak(settings, text, true);
         let k = s.find(v, 0).expect("the vowel");
