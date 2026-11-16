@@ -95,6 +95,7 @@ fn every_event_survives_the_wire() {
             lips: Some(0.8),
             narrowing: None,
             pharynx: 0.1,
+            modes: Some([0.5, -0.3, 0.2]),
         }),
         Event::TractLength(0.8),
         Event::ArticulationSpeed(2.0),
@@ -134,6 +135,7 @@ fn every_event_survives_the_wire() {
         lips: Some(0.8),
         narrowing: None,
         pharynx: 0.1,
+        modes: Some([0.5, -0.3, 0.2]),
     });
     b.set_tract_length(0.8);
     b.set_articulation_speed(2.0);

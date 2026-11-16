@@ -385,6 +385,7 @@ fn main() {
         lips: Some(1.8),
         narrowing: None,
         pharynx: 0.0,
+        modes: None,
     }
     .coordinates()[2]
         * (DIMS[2] - 1) as f32;

@@ -96,6 +96,13 @@ pub struct Shape {
     /// [`vowel_targets`](crate::vowel_targets) are solved with it free,
     /// against the engine itself.
     pub pharynx: f32,
+    /// The tongue body as the three numbers of the measured modes (see
+    /// [`AnatomyConfig::tongue_model`](crate::AnatomyConfig::tongue_model)),
+    /// or `None`. On a tract with the modal body they are the body, and the
+    /// tongue, its root and the narrowing are not used; `None` there
+    /// projects the cosine tongue `(tongue_index, tongue_diameter)` onto the
+    /// modes. The cosine body ignores them.
+    pub modes: Option<[f32; 3]>,
 }
 
 /// Position of `v` in `range`, `0‥1`.
@@ -175,6 +182,7 @@ impl Shape {
                 )
             }),
             pharynx: 0.0,
+            modes: None,
         }
     }
 }

@@ -715,6 +715,7 @@ impl Articulation {
             pharynx: self
                 .physical_root(tract_length, &vowel_size::OwnShapes::NONE)
                 .unwrap_or(0.0),
+            modes: None,
         })
     }
 

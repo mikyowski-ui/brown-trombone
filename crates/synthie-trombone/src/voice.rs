@@ -1558,6 +1558,7 @@ impl Trombone {
     /// constriction slots, the velum and the voice are left alone.
     pub fn set_shape(&mut self, shape: &crate::inverse::Shape) {
         self.set_tongue(shape.tongue_index, shape.tongue_diameter);
+        self.tract.set_modes(shape.modes);
         let lips = shape
             .lips
             .map(|d| Constriction::new(crate::inverse::LIP_CELL, d));

@@ -1541,6 +1541,7 @@ const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)
         lips,
         narrowing: Some(narrowing),
         pharynx: 0.0,
+        modes: None,
     }
 }
 
@@ -1742,6 +1743,7 @@ impl App {
                 lips: None,
                 narrowing: None,
                 pharynx: 0.0,
+                modes: None,
             },
         };
         if self.shape_formants(&start).is_some() {

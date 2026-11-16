@@ -451,6 +451,16 @@ tuning! {
         /// voiced closure, cm³/s; the air the voice sends into the shut mouth
         /// goes there, so the voice lasts through the closure.
         cavity_expansion = 150.0, 0.0..=300.0, A;
+
+        // ----- the tongue body from measured modes (wave 2, stage 2C) ----------------
+
+        /// The shape of the tongue body on the physical engine: `0` the
+        /// cosine of Pink Trombone (a hump slid along the tube by its place and
+        /// height), `1` a measured neutral shape and three principal modes of
+        /// eleven vowels of one man from MRI (Story 2008; `src/tract_modes.rs`)
+        /// from the top of the epilarynx to the lips, the vowels solved on it
+        /// (`src/vowel_modes_table.rs`). The classic engine keeps the cosine.
+        tongue_model = 0.0, 0.0..=1.0, A;
     } tiers {
     } aliases {
     }

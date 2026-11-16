@@ -83,6 +83,7 @@ pub mod stream;
 mod talker;
 mod tract;
 mod tuning;
+mod tract_modes;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;

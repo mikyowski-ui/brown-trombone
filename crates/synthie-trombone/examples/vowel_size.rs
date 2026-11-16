@@ -247,6 +247,7 @@ fn from_x(x: &[f32; D], rounded: bool) -> Shape {
         lips: rounded.then(|| log(x[2], LIPS)),
         narrowing: Some((lin(x[3], NARROWING_AT), log(x[4], NARROWING))),
         pharynx: lin(x[5], PHARYNX),
+        modes: None,
     }
 }
 
@@ -468,6 +469,7 @@ fn prior(t: &Target) -> [f32; D] {
         } else {
             0.0
         },
+        modes: None,
     });
     if narrowing.is_none() {
         x[3] = 0.5;
@@ -701,6 +703,7 @@ fn interpolate(rows: &[[i32; D]; ROWS], length: f32) -> Shape {
         lips: (rows[a][2] > 0).then(|| v(2).max(MIN_LIPS)),
         narrowing: Some((v(3), v(4).max(MIN_NARROWING))),
         pharynx: v(5).clamp(PHARYNX.0, PHARYNX.1),
+        modes: None,
     }
 }
 

@@ -357,6 +357,9 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
             m.float(s.narrowing.map_or(f32::NAN, |n| n.0));
             m.float(s.narrowing.map_or(f32::NAN, |n| n.1));
             m.float(s.pharynx);
+            for k in 0..3 {
+                m.float(s.modes.map_or(f32::NAN, |q| q[k]));
+            }
         }
         Event::Gesture(g) => {
             #[allow(clippy::cast_possible_truncation)]
@@ -450,6 +453,10 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
                 a.map(|a| (a, b))
             },
             pharynx: r.float(),
+            modes: {
+                let q = [r.float(), r.float(), r.float()];
+                q.iter().all(|v| v.is_finite()).then_some(q)
+            },
         }),
         TAG_LENGTH => Event::TractLength(r.float()),
         TAG_SPEED => Event::ArticulationSpeed(r.float()),
