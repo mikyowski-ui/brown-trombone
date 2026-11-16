@@ -179,10 +179,15 @@ fn report(name: &str, shapes: &[Shape]) -> f32 {
 }
 
 #[test]
-fn the_cluster_tube_rings_in_the_cluster() {
-    let shapes = survey(&tuning(&CLUSTER));
-    let mean = report("cluster", &shapes);
-    for s in &shapes {
+fn the_cluster_tube_rings_in_the_cluster_and_the_original_above_it() {
+    let (cluster, original) = std::thread::scope(|s| {
+        let c = s.spawn(|| survey(&tuning(&CLUSTER)));
+        let o = s.spawn(|| survey(&tuning(&ORIGINAL)));
+        (c.join().expect("cluster"), o.join().expect("original"))
+    });
+    let lifted = report("cluster", &cluster);
+    let mean = report("original", &original);
+    for s in &cluster {
         assert!(
             rings(s, 2850.0, 3300.0).is_some(),
             "{}: no resonance of the tube at 2.85 to 3.3 kHz: {:?}",
@@ -190,21 +195,16 @@ fn the_cluster_tube_rings_in_the_cluster() {
             s.resonances
         );
     }
-    // Measured -0.2 dB; the original's tube -8.2.
-    assert!(mean > -2.0, "band {mean} dB");
-}
-
-#[test]
-fn the_original_tube_rings_above_the_cluster() {
-    let shapes = survey(&tuning(&ORIGINAL));
-    let mean = report("original", &shapes);
-    // Its own resonance (F4 in most shapes) at 3.3 to 3.9 kHz.
-    let at: Vec<f32> = shapes.iter().filter_map(own).collect();
+    // The original's own resonance (F4 in most shapes) at 3.3 to 3.9 kHz.
+    let at: Vec<f32> = original.iter().filter_map(own).collect();
     let above = at.iter().filter(|&&hz| hz > 3300.0).count();
     assert!(
-        above * 4 >= shapes.len() * 3,
+        above * 4 >= original.len() * 3,
         "{above} of {} above 3.3 kHz: {at:?}",
-        shapes.len()
+        original.len()
     );
-    assert!(mean < -6.0, "band {mean} dB");
+    // Measured on today's shapes -0.2 dB against -8.2; on shapes solved
+    // for a tube of four cells the original's is -5.7.
+    assert!(lifted > -2.0, "band {lifted} dB");
+    assert!(lifted - mean > 5.0, "band {lifted} dB against {mean}");
 }

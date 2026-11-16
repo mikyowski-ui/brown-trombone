@@ -304,7 +304,8 @@ macro_rules! tuning {
 tuning! {
     /// The body: its tissues and its sources (see [`Tuning`]). The
     /// lungs, the folds, the voice's source tilt and breath noise, the jets
-    /// and their hiss, the nose's port and the walls.
+    /// and their hiss, the nose's port, the walls and the tube above the
+    /// folds.
     anatomy: AnatomyConfig, Anatomy {
         // ----- the breath ------------------------------------------------------------
 
@@ -465,11 +466,25 @@ tuning! {
         /// no end correction). A fraction makes the cell at the top part tube
         /// and part flare, by area, which moves smoothly but is not a length:
         /// at 7.5 cells the tube rang at 3.48 kHz, where a tube of 7.5 cells
-        /// rings at 3.34 (lengths between cells need a sliding joint).
+        /// rings at 3.34 (lengths between cells need a sliding joint). In the
+        /// vowels the original tube's resonance is F4, 3.3 to 3.9 kHz (mean
+        /// 3.52, F3 2.63); four cells put it near 4 kHz. A cluster at 2.8 to
+        /// 3.2 kHz needs eight cells of 0.25 cm² opening into 3.6 cm²
+        /// (`epilarynx_diameter` 0.45, `epilarynx_flare` 1.7): the tube rings
+        /// at 2.9 to 3.2 kHz in every vowel and the transfer function's 3 kHz
+        /// band rises 8 dB against 0-1 kHz (`tests/epilarynx_gate.rs`). With
+        /// the vowel shapes solved again for each, over the 30 held-out
+        /// sentences that tube gave phoneme error 30.2 % and Whisper words
+        /// 66.1 % (the original 26.3 and 74.3), four cells 24.1 and 75.7 with
+        /// vowels heard wrong in sentences 20.3 % (24.1), but /ɑ æ/ short of
+        /// their F1 with the tongue at its lowest.
         epilarynx_cells = 7.0, 3.0..=9.0, A;
         /// Width of that tube, articulation diameter units (physical engine;
         /// the area is `1.257·d²` cm² at the native size: the default 0.6 is
-        /// 0.45 cm², 0.4 is 0.2 cm², 0.8 is 0.8 cm²).
+        /// 0.45 cm², 0.45 is 0.25 cm², 0.4 is 0.2 cm², 0.8 is 0.8 cm²). At
+        /// 0.2 cm² the folds took twice as long to start at 90 Hz (190 ms
+        /// against 95) with four times the period jitter; at 0.25 cm² and
+        /// wider they start as the original's.
         epilarynx_diameter = 0.6, 0.35..=1.0, A;
         /// Width of the lower pharynx the tube opens into, from its top to
         /// where the tongue's shape begins (cell 10), diameter units (physical
@@ -485,7 +500,11 @@ tuning! {
         /// `2^(−this · (tenseness − 0.65) / 0.3)`, kept within 0.5 to 2 times
         /// and never wider than the flare. Tenseness carries a voice's effort
         /// (`Persona::effort` adds 0.3 per unit of the dial) and the laxness of
-        /// its light syllables. `0` switches it off.
+        /// its light syllables (8 %: 13 % more area in a function word's vowel
+        /// at 1, which moves the tube's resonance by some 25 Hz). At 1, from
+        /// tenseness 0.5 to 0.95 a tube of four cells rings from 3.85 to 4.0
+        /// kHz, and the eight-cell tube that gives the cluster gives it in 4
+        /// to 12 of the 31 vowel shapes. `0` switches it off.
         epilarynx_effort = 0.0, 0.0..=2.0, A;
     } tiers {
     } aliases {

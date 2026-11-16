@@ -421,6 +421,20 @@ against. A few of the figures:
 - The walls resonate against the enclosed air near 190 Hz and give about
   2.7 cm³ per cmH2O, as measured in vivo (Hanna, Smith & Wolfe 2016).
 - The piriform sinuses cut a notch near 4.4 kHz (Dang & Honda 1997).
+- The narrow tube above the folds, the epilaryngeal tube, has numbers of
+  its own (`AnatomyConfig::epilarynx_*`: its length in cells, its width,
+  the width of the lower pharynx it opens into, a step or a ramp, and how
+  far it narrows as the folds press together). The default is the
+  original's: seven cells of 0.45 cm² (2.55 cm) opening into 1.52 cm².
+  Its own resonance is F4, at 3.3 to 3.9 kHz in every vowel shape, with
+  F3 near 2.6 kHz: no cluster at 3 kHz but in /i/. Eight cells (2.9 cm)
+  of 0.25 cm² opening into 3.6 cm² ring at 2.9 to 3.2 kHz (as F3 in the
+  front vowels, F4 in the others) and lift the transfer function's 2.8 to
+  3.2 kHz band by 8 dB against 0 to 1 kHz; four cells (1.46 cm) put the
+  tube's resonance near 4 kHz. Both are off: measured in speech, the
+  cluster cost words and the four cells gained vowels but left open
+  vowels short of their F1 (`examples/epilarynx.rs`,
+  `tests/epilarynx_gate.rs`).
 - The folds sing within a cent of the requested note over every preset's
   range, stop below about 3.4 cmH2O of lung pressure, and keep voicing for
   some 40 ms into a /b/ before the mouth fills.
