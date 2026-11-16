@@ -64,8 +64,14 @@ const CLOSED: f32 = 0.01;
 /// Smallest swing, as a share of the typical peak, that counts as a cycle.
 const SWING: f32 = 0.15;
 const DEFAULT_MATERIAL: [&str; 2] = [
-    "/home/carlos/projects/trombone-next/tools/judge/material/sentence_tune.tsv",
-    "/home/carlos/projects/trombone-next/tools/judge/material/sentence_heldout.tsv",
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tools/judge/material/sentence_tune.tsv"
+    ),
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tools/judge/material/sentence_heldout.tsv"
+    ),
 ];
 
 #[derive(Clone, Copy)]
