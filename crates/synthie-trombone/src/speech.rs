@@ -146,6 +146,11 @@ pub struct Gesture {
     /// closure): a quick gesture thrown late, as the tip of an alveolar
     /// tap is (see [`Tuning::tap_lead`]). `0` keeps the voice's.
     pub approach: f32,
+    /// For a nasal: the share of the tongue's drop behind its closure
+    /// ([`Tuning::nasal_cavity`]) held back, `0` dropping it all the way:
+    /// an /n/ that leads into a fronted vowel keeps the tongue up for it
+    /// ([`Tuning::nasal_cavity_held`]).
+    pub cavity_held: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -550,7 +555,7 @@ impl Speaker {
                 if !self.ahead && !pause {
                     articulate_segment(
                         voice,
-                        &self.utterance.followed,
+                        &self.utterance,
                         self.index,
                         &entry_shape(&seg),
                     );
@@ -650,7 +655,7 @@ impl Speaker {
                     let next = &segments[k];
                     articulate_segment(
                         voice,
-                        &self.utterance.followed,
+                        &self.utterance,
                         self.index + k,
                         &entry_shape(next),
                     );
@@ -722,7 +727,7 @@ impl Speaker {
                 if send {
                     articulate_segment(
                         voice,
-                        &self.utterance.followed,
+                        &self.utterance,
                         self.index + 1,
                         &entry_shape(&next),
                     );
@@ -757,7 +762,7 @@ impl Speaker {
             if physical && self.gap_stage == 0 && self.elapsed >= into - lead.min(0.5 * into) {
                 articulate_segment(
                     voice,
-                    &self.utterance.followed,
+                    &self.utterance,
                     self.index,
                     &seg.articulation,
                 );
@@ -770,7 +775,7 @@ impl Speaker {
                 && self.elapsed >= seg.duration - out_of - lead.min(0.5 * out_of)
             {
                 let a = widened(&seg.articulation, 2.0 * seg.gesture.gap_widening);
-                articulate_segment(voice, &self.utterance.followed, self.index, &a);
+                articulate_segment(voice, &self.utterance, self.index, &a);
                 self.gap_stage = 2;
             }
             // Into a voiceless fricative the larynx moves a little ahead
@@ -1019,18 +1024,17 @@ impl Speaker {
 /// Send segment `k`'s articulation `a` to the voice, with the speed and
 /// the vowel shape a followed utterance gives it (see
 /// [`Utterance::follow_with`]); an utterance that follows nothing has the
-/// voice's own.
-fn articulate_segment(
-    voice: &mut Trombone,
-    followed: &follow::Followed,
-    k: usize,
-    a: &Articulation,
-) {
+/// voice's own; and with as much of the tongue's drop behind a nasal
+/// closure held back as the segment's gesture says
+/// ([`Gesture::cavity_held`]).
+fn articulate_segment(voice: &mut Trombone, utterance: &Utterance, k: usize, a: &Articulation) {
+    let followed = &utterance.followed;
     voice.set_articulation_boost(followed.speed_of(k));
     match followed.shape_of(k) {
         Some((key, shape)) => voice.hold_speech_vowel(Some((key, &shape))),
         None => voice.hold_speech_vowel(None),
     }
+    voice.set_cavity_held(utterance.segments.get(k).map_or(0.0, |s| s.gesture.cavity_held));
     voice.articulate(a);
 }
 
@@ -1428,20 +1432,68 @@ fn is_lax(p: Phoneme) -> bool {
 /// "who'd" are back /u/s (900 to 1300 Hz). The engine's /u/ was a back one
 /// everywhere, F2 1000 to 1100 with F1 390 to 440.
 ///
-/// After /n/, the postalveolars and /j/ the engine's fronted /u/ was heard
-/// as /ju/ whatever its shape: "canoe" as "can use", "the juice" as "the
-/// use", "the new king" as "the n-ee-oo king" (F2 1600 to 1800 gliding
-/// back: the recognizer heard /i/ inserted before 3 of 20 /u/ after
-/// coronals; held at 1400 to 1800, it heard 3 to 6 of them as /i/). So the
-/// /u/ stays back there. After /t d s z/ alone the recognizer heard 13 of
-/// those 20 /u/ right (12 before), none with an /i/ before it.
-fn fronts_u(context: Context) -> bool {
+/// After the postalveolars and /j/ the engine's fronted /u/ was heard as
+/// /ju/ whatever its shape: "the juice" as "the use" (F2 1600 to 1800
+/// gliding back: the recognizer heard /i/ inserted before 3 of 20 /u/
+/// after coronals; held at 1400 to 1800, it heard 3 to 6 of them as /i/).
+/// So the /u/ stays back there. After /t d s z/ alone the recognizer heard
+/// 13 of those 20 /u/ right (12 before), none with an /i/ before it.
+///
+/// After /n/ it is fronted too ([`Tuning::fronted_after_n`]), as the
+/// owner's "canoe" and the reader's "the new" are. Until wave 1 it was not:
+/// "canoe" was heard as "can use" and "the new king" as "the n-ee-oo
+/// king". That /j/ was not the vowel's shape but the tip letting go of the
+/// /n/ slowly onto it, the second formant overshooting to 2134 Hz and
+/// falling back over 25 ms, and the tongue dropped behind the closure
+/// springing back; with the tip quick out of a nasal
+/// ([`Tuning::nasal_tip_release`]) and the tongue kept up (see
+/// [`keeps_tongue_up`]) the formants rise onto the fronted /u/.
+fn fronts_u(context: Context, timing: &Tuning) -> bool {
     use Phoneme as P;
-    let after_front = context
-        .prev
-        .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z));
+    let after_n = timing.fronted_after_n > 0.0 && context.prev == Some(P::N);
+    let after_front = after_n
+        || context
+            .prev
+            .is_some_and(|p| matches!(p, P::T | P::D | P::S | P::Z));
     let dark_l = context.next.is_some_and(|(n, _, same)| same && n == P::L);
     after_front && !dark_l
+}
+
+/// Whether an unstressed /ə/ in `context` takes the colour of the high
+/// front vowel after it (physical engine; [`Tuning::schwa_colour`]; its
+/// shape is [`VowelKey::Fronted`] of /ə/): one consonant of the lips or
+/// the tongue's tip and then /i ɪ/ or a fronted /u/ (see [`fronts_u`]), in
+/// its word or the next one, or a /j/ straight after it ("a canoe", "the
+/// deep", "to eat", "a beam", "a year"). A schwa has next to no shape of
+/// its own: the tongue goes on from its neighbours to the vowel after it
+/// (Browman and Goldstein's targetless schwa), and the vowel after it
+/// colours it across a consonant that leaves the tongue body free
+/// (Öhman's vowel-to-vowel coarticulation). The LibriSpeech reader's /ə/
+/// before a front vowel stands at F1 372, F2 1604 Hz (median of 20, LPC
+/// at its middle) against his others' 460 and 1614, the owner's in
+/// "canoe" near 300 and 1800 to 1890, where the engine's stood at 493 and
+/// 1544 everywhere (F2 the reader's 1522 on average). Not across /l r w/,
+/// which bring a back or rounded colour of their own (the reader's /ə/
+/// before /l/: F2 880), nor /h/; nor across /k g ŋ/, whose body is their
+/// own (`Articulation::leaning_on`): coloured before them the /g/ of
+/// "[ə g i]" followed at the limits of the transfer kept its voice through
+/// a quarter of its closure (0.68 uncoloured).
+fn schwa_colour(context: Context, timing: &Tuning) -> bool {
+    use Phoneme as P;
+    match (context.next, context.after_next) {
+        (Some((P::Y, _, _)), _) => true,
+        (Some((c, _, _)), Some((v, _, same)))
+            if !is_vowel(c)
+                && !matches!(c, P::L | P::R | P::W | P::Hh | P::K | P::G | P::Ng) =>
+        {
+            let fronted_u = v == P::Uw
+                && same
+                && (matches!(c, P::T | P::D | P::S | P::Z)
+                    || (c == P::N && timing.fronted_after_n > 0.0));
+            matches!(v, P::Iy | P::Ih) || fronted_u
+        }
+        _ => false,
+    }
 }
 
 /// The vowel after an alveolar tap takes the time the tap saves against a
@@ -1818,6 +1870,7 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         }
         breathe(&mut drafts, &mut phrases, &accented, &timing);
         lean_on_vowels(&mut drafts);
+        keeps_tongue_up(&mut drafts, &timing);
         assimilate_place(&mut drafts);
         voicing_gestures(&mut drafts, prosody.pitch, &timing);
         release_into_liquids(&mut drafts, &timing, rate);
@@ -2089,6 +2142,32 @@ fn lean_on_vowels(drafts: &mut [Draft]) {
             d.articulation.vowel = prev;
         }
     }
+}
+
+/// An /n/ that leads into a fronted vowel keeps the tongue up behind its
+/// closure (physical engine; [`Tuning::nasal_cavity_held`] of the drop
+/// held back): the tongue drops behind a nasal's closure so that the mouth
+/// behind it makes the /n/'s antiresonance (see `Tract::open_nasal_cavity`),
+/// but before the fronted /u/ it then sprang back up to the vowel's body
+/// after the release and spoiled the vowel's first 20 ms.
+fn keeps_tongue_up(drafts: &mut [Draft], timing: &Tuning) {
+    let held = timing.nasal_cavity_held;
+    if held <= 0.0 {
+        return;
+    }
+    for k in 0..drafts.len().saturating_sub(1) {
+        if drafts[k].phoneme == Phoneme::N
+            && drafts[k + 1].vowel
+            && drafts[k + 1].articulation.vowel.is_some_and(fronted_vowel)
+        {
+            drafts[k].gesture.cavity_held = held;
+        }
+    }
+}
+
+/// The vowels [`keeps_tongue_up`] keeps the tongue up for.
+fn fronted_vowel(key: VowelKey) -> bool {
+    key == VowelKey::Fronted(Phoneme::Uw)
 }
 
 /// Length of the frication of /tʃ/, as a share of a voiceless
@@ -2723,7 +2802,7 @@ fn expand(
             };
             out.push(with(draft(p, a, dur, a.voiced), g));
         }
-        Manner::Vowel if p == Phoneme::Uw && timing.fronted_nucleus > 0.0 && fronts_u(context) => {
+        Manner::Vowel if p == Phoneme::Uw && timing.fronted_nucleus > 0.0 && fronts_u(context, timing) => {
             // Made further front after the front of the tongue, and gliding
             // back towards the plain /u/ over the rest of a long vowel.
             let fronted = VowelKey::Fronted(p).articulation().unwrap_or(a);
@@ -2736,6 +2815,16 @@ fn expand(
                 tail.part = Part::Offglide;
                 out.push(tail);
             }
+        }
+        Manner::Vowel
+            if p == Phoneme::Ax
+                && !stressed
+                && timing.schwa_colour > 0.0
+                && schwa_colour(context, timing) =>
+        {
+            // Coloured by the high front vowel after it.
+            let coloured = VowelKey::Fronted(p).articulation().unwrap_or(a);
+            out.push(draft(p, coloured, dur, true));
         }
         Manner::Vowel if is_lax(p) || (p == Phoneme::Ae && stressed) => {
             // A lax vowel holds its shape for `lax_nucleus` of its length

@@ -917,6 +917,40 @@ tuning! {
     /// `0`) the phoneme error was 27.6 % and Whisper 74.6 %, at 0.6 23.5
     /// and 80.9 %, at 0.5 25.1 and 75.6 % (round 10's rules).
     follow_shortest_light = 0.7, 0.0..=1.0, B;
+
+    // ----- "canoe": an /n/ into a fronted vowel (wave 1) -----------------
+
+    /// How many times faster the tongue tip lets go of a closure while the
+    /// velum is open (physical engine; out of /n/; `1` is off): the tip is
+    /// a critically damped spring at `articulation_rate` that starts its
+    /// release at `release_speed`, and out of an /n/ the gap was at 20 % of
+    /// its opening after 10 ms and 37 % after 20 (2 to 8 cm²/s, where
+    /// Stevens gives 50 to 100 for an alveolar release). Over a fronted
+    /// body the second formant then overshot to 2134 Hz, F3 and F4 11 dB
+    /// over F2, and fell to 1870 over 25 ms: a /j/, "canoe" heard as "can
+    /// use". At 3 it still overshot to 1968 Hz; at 6 it rises onto the
+    /// vowel (see the README). A stop's release is not hastened: the burst
+    /// and the breath cover it, and its transitions are already quicker
+    /// than a speaker's.
+    nasal_tip_release = 6.0, 1.0..=8.0, B;
+    /// Whether the /u/ after /n/ is the fronted one (`1`) or the plain back
+    /// one (`0`, as until wave 1; physical engine; see `speech::fronts_u`):
+    /// the owner's "canoe" holds F2 1860 to 1910 Hz from the release on,
+    /// the LibriSpeech reader's "the new" starts near 1790 and rises.
+    /// Fronted with the slow tip release, it was heard as /ju/; with
+    /// `nasal_tip_release` it is not.
+    fronted_after_n = 1.0, 0.0..=1.0, C;
+    /// Share of the tongue's drop behind an /n/'s closure
+    /// ([`nasal_cavity`](Self::nasal_cavity)) held back when the /n/ leads
+    /// into a fronted vowel (physical engine; `0` is off): the tongue stays
+    /// up under the palate for the vowel, where dropped it sprang back
+    /// after the release and spoiled the vowel's first 20 ms. See
+    /// `speech::keeps_tongue_up`.
+    nasal_cavity_held = 1.0, 0.0..=1.0, B;
+    /// How far an unstressed /ə/ takes the colour of its neighbours
+    /// (physical engine; `0` is off, the one central schwa everywhere; see
+    /// `speech::schwa_colour`).
+    schwa_colour = 1.0, 0.0..=1.0, C;
 }
 
 impl Default for Tuning {

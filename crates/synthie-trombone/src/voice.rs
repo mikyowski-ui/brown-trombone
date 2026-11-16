@@ -749,6 +749,17 @@ impl Trombone {
         }
     }
 
+    /// Share of the tongue's drop behind a nasal closure held back in the
+    /// articulations sent from now on (physical engine; `0`, the default,
+    /// drops it to [`Tuning::nasal_cavity`]). The speaker keeps the tongue
+    /// up behind an /n/ that leads into a fronted vowel
+    /// ([`Tuning::nasal_cavity_held`]).
+    pub(crate) fn set_cavity_held(&mut self, share: f32) {
+        if share.is_finite() {
+            self.tract.cavity_held = share.clamp(0.0, 1.0);
+        }
+    }
+
     /// Current velum openness, `0‥1`.
     #[must_use]
     pub fn velum(&self) -> f32 {
