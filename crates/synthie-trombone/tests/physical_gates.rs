@@ -2650,7 +2650,7 @@ fn largest_jump(x: &[f32]) -> f32 {
 }
 
 /// Render `seconds` while the lips are pushed from 0 to 1.2 cm and back
-/// and the larynx from 0.7 cm up to 0.8 down and back, one way in 40 ms
+/// and the larynx from 0.35 cm up to 0.8 down and back, one way in 40 ms
 /// (as fast as the quickest gesture), told every 64 samples; the tract
 /// moves them on its springs.
 fn sweeping(t: &mut Trombone, seconds: f32) -> Vec<f32> {
@@ -2663,7 +2663,7 @@ fn sweeping(t: &mut Trombone, seconds: f32) -> Vec<f32> {
         let x = (s / 0.04).fract();
         let x = if phase == 0 { x } else { 1.0 - x };
         t.set_lip_protrusion(Some(1.2 * x));
-        t.set_larynx_height(0.7 - 1.5 * x);
+        t.set_larynx_height(0.35 - 1.15 * x);
         t.render(&mut buf);
         out.extend_from_slice(&buf);
     }
@@ -2714,7 +2714,7 @@ fn moving_the_tract_s_length_puts_no_step_in_the_sound() {
     // silent tract a small share of it.
     let mut t = lengthening_voice(Phoneme::Uw);
     t.set_lip_protrusion(Some(0.0));
-    t.set_larynx_height(0.7);
+    t.set_larynx_height(0.35);
     t.note_on();
     render(&mut t, 0.4);
     let steady = largest_jump(&render(&mut t, 0.24));
@@ -2727,7 +2727,7 @@ fn moving_the_tract_s_length_puts_no_step_in_the_sound() {
 
     let mut t = lengthening_voice(Phoneme::B);
     t.set_lip_protrusion(Some(0.0));
-    t.set_larynx_height(0.7);
+    t.set_larynx_height(0.35);
     t.note_off();
     t.set_glottal_spread(0.3);
     render(&mut t, 0.4);

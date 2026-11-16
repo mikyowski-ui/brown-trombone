@@ -280,10 +280,15 @@ pub(crate) const CELL_CM: f32 = C / (2.0 * crate::INTERNAL_RATE);
 /// do.)
 const HORN_CELL: usize = LIP_OPENING;
 /// The cells the larynx slide replaces when it is on
-/// (`AnatomyConfig::larynx_travel`): the uniform stretch just above the
-/// laryngeal tube, three ticks at rest. Its lower end is joint 7, where the
-/// piriform sinuses then open; its upper end joint 10.
-pub(crate) const LARYNX_CELLS: core::ops::Range<usize> = 7..10;
+/// (`AnatomyConfig::larynx_travel`): the uniform stretch above the
+/// laryngeal tube from the piriform sinuses' joint up, two ticks at rest
+/// (so it can be shortened by one, 0.36 cm at native size). Its lower end
+/// is joint 8 ([`PIRIFORM_AT`]): the sinuses hang on the larynx and move
+/// with it, and the pharynx stretches above them. (Made of cells 7 to 9,
+/// with the sinuses at joint 7, the slide at rest lowered the F3 of /i/ by
+/// 4.7 % and of /u/ by 2.3 %, all of it from the sinuses having moved a
+/// cell down: at joint 10 they raised it by 4.1 %.)
+pub(crate) const LARYNX_CELLS: core::ops::Range<usize> = PIRIFORM_AT..10;
 #[allow(clippy::cast_precision_loss)]
 const LARYNX_REST: f32 = (LARYNX_CELLS.end - LARYNX_CELLS.start) as f32;
 
@@ -506,7 +511,7 @@ pub(crate) struct Phys {
     /// native size (`AnatomyConfig::lip_horn`; `0` keeps the lumped lip
     /// tube), and the share of the larynx's travel the slide in the lower
     /// pharynx follows (`AnatomyConfig::larynx_travel`; `0` keeps cells
-    /// 7..9 as cells).
+    /// 8 and 9 as cells).
     lip_horn: f32,
     larynx_travel: f32,
     /// Where the lips' protrusion and the larynx's lengthening of the
@@ -1266,12 +1271,15 @@ impl Phys {
             }
             if larynx_on {
                 self.larynx.set_length(at(1));
-                let mean = (y[7] + y[8] + y[9]) / LARYNX_REST;
+                let mean = LARYNX_CELLS.map(|k| y[k]).sum::<f32>() / LARYNX_REST;
                 lar = (mean, 1.0 / (mean * RHO_C).max(A_MIN));
-                let walls = self.wall_s[7] + self.wall_s[8] + self.wall_s[9];
-                self.wall_s[7] = 0.0;
-                self.wall_s[8] = 0.0;
-                self.wall_s[9] = walls * self.larynx.length() / LARYNX_REST;
+                // The slide's wall hangs on the node at its upper end.
+                let top = LARYNX_CELLS.end - 1;
+                let walls: f32 = LARYNX_CELLS.map(|k| self.wall_s[k]).sum();
+                for k in LARYNX_CELLS.start..top {
+                    self.wall_s[k] = 0.0;
+                }
+                self.wall_s[top] = walls * self.larynx.length() / LARYNX_REST;
                 piston[1] = mean * RHO_C * self.larynx.growth() * sweep;
             }
         }
@@ -1290,7 +1298,8 @@ impl Phys {
         let mut sent = [0.0f32; 4];
         let mut piston_power = 0.0f32;
         let (lar_low, lar_high) = (LARYNX_CELLS.start, LARYNX_CELLS.end);
-        let piriform_at = if larynx_on { lar_low } else { PIRIFORM_AT };
+        // (The larynx slide starts at the piriform sinuses' joint.)
+        let piriform_at = PIRIFORM_AT;
         let mut nr = [0.0f32; N];
         let mut nl = [0.0f32; N];
         let widen = self.widening();

@@ -86,7 +86,7 @@ fn show(f: Option<[f32; 3]>) -> String {
 
 fn formants() {
     use Phoneme as P;
-    let sounds = [P::Uw, P::Uh, P::Ow, P::Ao, P::W, P::R, P::Sh];
+    let sounds = [P::Uw, P::Uh, P::Ow, P::Ao, P::W, P::R, P::Sh, P::Iy, P::Aa];
     let off = tuning(0.0, 0.0, 0.0);
     let cases: Vec<(&str, Tuning, Option<f32>, f32)> = vec![
         ("no protrusion", tuning(1.2, 0.0, 0.0), Some(0.0), 0.0),
@@ -94,6 +94,7 @@ fn formants() {
         ("horn 0.73", tuning(0.73, 0.0, 0.0), None, 0.0),
         ("horn 0.95", tuning(0.95, 0.0, 0.0), None, 0.0),
         ("horn 1.2", tuning(1.2, 0.0, 0.0), None, 0.0),
+        ("larynx slide at rest", tuning(0.0, 1.0, 0.0), None, 0.0),
         ("larynx -0.4", tuning(0.0, 1.0, 0.0), None, -0.4),
         ("larynx -0.8", tuning(0.0, 1.0, 0.0), None, -0.8),
         ("horn 1.2, larynx -0.8", tuning(1.2, 1.0, 0.0), None, -0.8),
@@ -303,7 +304,9 @@ fn closure(r: &stops::Recording, p: Phoneme, nth: usize) -> Option<(usize, usize
     let k = (0..r.phonemes.len())
         .filter(|&k| r.phonemes[k] == p && (k == 0 || r.phonemes[k - 1] != p))
         .nth(nth)?;
-    let samples: Vec<usize> = (0..r.segment.len()).filter(|&s| r.segment[s] == k).collect();
+    let samples: Vec<usize> = (0..r.segment.len())
+        .filter(|&s| r.segment[s] == k)
+        .collect();
     let s = *samples.iter().find(|&&s| r.sealed[s])?;
     let (mut lo, mut hi) = (s, s);
     while lo > 0 && r.sealed[lo - 1] {
@@ -382,7 +385,8 @@ fn voicing() {
                 // How long the folds kept vibrating into the closure, ms:
                 // the glottal area swinging by 0.02 cm² over 12 ms.
                 let swinging = |s: usize| {
-                    let w = &r.glottal_area[s.saturating_sub(288)..(s + 288).min(r.glottal_area.len())];
+                    let w =
+                        &r.glottal_area[s.saturating_sub(288)..(s + 288).min(r.glottal_area.len())];
                     let lo = w.iter().copied().fold(f32::INFINITY, f32::min);
                     let hi = w.iter().copied().fold(0.0f32, f32::max);
                     hi - lo > 0.02
@@ -409,7 +413,8 @@ fn voicing() {
 }
 
 fn cost() {
-    let text = "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.";
+    let text =
+        "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.";
     for (name, t) in [
         ("off", tuning(0.0, 0.0, 0.0)),
         ("lip horn 1.2", tuning(1.2, 0.0, 0.0)),

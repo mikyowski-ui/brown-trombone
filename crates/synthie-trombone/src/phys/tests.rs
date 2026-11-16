@@ -432,8 +432,8 @@ fn slides_at_rest_change_nothing() {
 
 #[test]
 fn the_larynx_slide_at_rest_is_the_cells_it_replaces() {
-    // Uniform and lossless, three cells and a slide three ticks long are
-    // the same tube (but for the rounding of the two joints inside).
+    // Uniform and lossless, two cells and a slide two ticks long are
+    // the same tube (but for the rounding at the joint inside).
     let d = [1.8f32; N];
     let mut cells = Phys::new();
     cells.set_ideal(true);
@@ -472,7 +472,7 @@ fn lengthened_tubes_resonate_where_theory_says() {
         ("lips +1.2 cm", 1.2f32, 0.0f32),
         ("lips +0.73 cm", 0.73, 0.0),
         ("larynx +0.8 cm", 0.0, 0.8),
-        ("larynx -0.7 cm", 0.0, -0.7),
+        ("larynx -0.35 cm", 0.0, -0.35),
         ("both", 1.2, 0.8),
     ] {
         let mut p = with_slides(1.2, 1.0);
@@ -502,17 +502,17 @@ fn lengthened_tubes_resonate_where_theory_says() {
 }
 
 /// The slides' lengths swept through their ranges and back over `period`
-/// seconds, cm, and their speeds, cm/s: the horn 0 to 1.2, the larynx −0.7
+/// seconds, cm, and their speeds, cm/s: the horn 0 to 1.2, the larynx −0.35
 /// to +0.8.
 fn sweep(period: f32) -> (impl Fn(f32) -> [f32; 2], impl Fn(f32) -> [f32; 2]) {
     let w = core::f32::consts::TAU / period;
     let at = move |t: f32| {
         let c = (w * t).cos();
-        [0.6 - 0.6 * c, 0.05 - 0.75 * c]
+        [0.6 - 0.6 * c, 0.225 - 0.575 * c]
     };
     let speed = move |t: f32| {
         let s = (w * t).sin();
-        [0.6 * w * s, 0.75 * w * s]
+        [0.6 * w * s, 0.575 * w * s]
     };
     (at, speed)
 }
@@ -535,7 +535,7 @@ fn energy_never_grows_while_the_slides_move() {
             let mut p = with_slides(1.2, 1.0);
             p.set_ideal(true);
             p.set_pistons(pistons);
-            p.set_lengths(([0.0, 0.05 - 0.75], [0.0; 2]));
+            p.set_lengths(([0.0, 0.225 - 0.575], [0.0; 2]));
             p.snap(&d, 0.0);
             p.reset();
             p.tick(1.0, Drive::Flow(1000.0));

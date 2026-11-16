@@ -471,12 +471,13 @@ tuning! {
         /// `0` keeps the lumped lip tube exactly. The owner's value is 1.2.
         lip_horn = 0.0, 0.0..=2.0, A;
         /// Share of the larynx's height the lower pharynx follows (physical
-        /// engine): with it above `0` cells 7 to 9 are one slide, three ticks
-        /// long at rest, stretched by a lowered larynx and shortened by a
-        /// raised one (at most to one tick: 0.73 cm), the piriform sinuses at
-        /// its lower end; the air the moving larynx sweeps is taken up there
-        /// (the piston). `0` leaves the three cells as cells; `1` gives the
-        /// larynx its full travel.
+        /// engine): with it above `0` cells 8 and 9 are one slide, two ticks
+        /// long at rest, stretched by a lowered larynx (up to 0.8 cm) and
+        /// shortened by a raised one (at most by one tick, 0.36 cm at native
+        /// size), the piriform sinuses at its lower end where they are today;
+        /// the air the moving larynx sweeps is taken up there (the piston).
+        /// `0` leaves the two cells as cells; `1` gives the larynx its full
+        /// travel.
         larynx_travel = 0.0, 0.0..=1.0, A;
     } tiers {
     } aliases {
