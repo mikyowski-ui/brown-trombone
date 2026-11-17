@@ -1321,7 +1321,10 @@ impl Trombone {
             .with(var::glottis::SPREAD, spread)
             .with(var::glottis::TENSENESS, tense);
         let pitch = Target::NONE.with(var::larynx::PITCH, hz);
-        for (tier, target) in [(Tier::GlottalAdduction, folds), (Tier::LarynxAndPitch, pitch)] {
+        for (tier, target) in [
+            (Tier::GlottalAdduction, folds),
+            (Tier::LarynxAndPitch, pitch),
+        ] {
             self.score.push(
                 Gesture::new(tier, target)
                     .window(back)
@@ -1382,7 +1385,12 @@ impl Trombone {
             self.lips_stiffness(),
             Tier::Velum.default_stiffness(),
         ];
-        let tiers = [Tier::TongueBody, Tier::TongueTip, Tier::LipsAndJaw, Tier::Velum];
+        let tiers = [
+            Tier::TongueBody,
+            Tier::TongueTip,
+            Tier::LipsAndJaw,
+            Tier::Velum,
+        ];
         for (k, (tier, target)) in tiers.into_iter().zip([body, tip, lips, port]).enumerate() {
             let flags = if tier == Tier::Velum { nasal } else { 0 };
             self.score.push(

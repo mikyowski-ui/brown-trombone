@@ -2617,8 +2617,16 @@ fn hold_fillers(drafts: &mut [Draft], fillers: &[(u32, u32, Filler)], timing: &T
         let b = a + drafts[a..].iter().take_while(|d| mine(d)).count();
         let total = p.filler_length * if f.hums() { 1.25 } else { 1.0 } / rate;
         // How the length is shared: a hum's vowel a fifth, the rest the hum.
-        let vowels: f32 = drafts[a..b].iter().filter(|d| d.vowel).map(|d| d.duration).sum();
-        let others: f32 = drafts[a..b].iter().filter(|d| !d.vowel).map(|d| d.duration).sum();
+        let vowels: f32 = drafts[a..b]
+            .iter()
+            .filter(|d| d.vowel)
+            .map(|d| d.duration)
+            .sum();
+        let others: f32 = drafts[a..b]
+            .iter()
+            .filter(|d| !d.vowel)
+            .map(|d| d.duration)
+            .sum();
         let (to_vowels, to_others) = match (vowels > 0.0, others > 0.0) {
             (true, true) => (0.2 * total, 0.8 * total),
             (true, false) => (total, 0.0),

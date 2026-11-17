@@ -7,6 +7,7 @@
 //! ```
 
 #![allow(
+    clippy::many_single_char_names,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
@@ -20,13 +21,19 @@ mod wav;
 use synthie_trombone::{Vocal, Vocalization};
 use vocal::{SR, calls, db, deep, envelope, largest_step, median, noise_share, record, rms, voice};
 
+#[allow(clippy::too_many_lines)] // one report per vocalization
 fn main() {
     let dir = std::env::args().nth(1);
-    let strength: f32 = std::env::var("STRENGTH").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let strength: f32 = std::env::var("STRENGTH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
     for kind in Vocalization::ALL {
         let mut v = voice(&deep());
         v.set_frequency(100.0);
-        let seconds = v.vocalize(Vocal::new(kind).with_strength(strength)).expect("room");
+        let seconds = v
+            .vocalize(Vocal::new(kind).with_strength(strength))
+            .expect("room");
         let r = record(&mut v, seconds + 0.3);
         let peak_lung = r.lung.iter().copied().fold(f32::MIN, f32::max);
         let low_lung = r.lung.iter().copied().fold(f32::MAX, f32::min);
@@ -47,7 +54,13 @@ fn main() {
             for k in (0..r.len()).step_by(n) {
                 println!(
                     "   {:.2}  lung {:+6.1} sub {:+6.1} flow {:7.0} area {:.3} edge {:.3} pitch {:5.0} vib {} out {:6.1} dB",
-                    k as f32 / SR, r.lung[k], r.sub[k], r.flow[k], r.area[k], r.edge[k], r.pitch[k],
+                    k as f32 / SR,
+                    r.lung[k],
+                    r.sub[k],
+                    r.flow[k],
+                    r.area[k],
+                    r.edge[k],
+                    r.pitch[k],
                     u8::from(vib[k / (SR as usize / 100)]),
                     db(rms(&r.out[k..(k + n).min(r.len())]))
                 );
@@ -56,21 +69,36 @@ fn main() {
         if let Ok(spec) = std::env::var("FINE") {
             let (name, a, b) = {
                 let p: Vec<&str> = spec.split(',').collect();
-                (p[0].to_string(), p[1].parse::<f32>().unwrap(), p[2].parse::<f32>().unwrap())
+                (
+                    p[0].to_string(),
+                    p[1].parse::<f32>().unwrap(),
+                    p[2].parse::<f32>().unwrap(),
+                )
             };
             if name == kind.name() {
                 let n = (0.002 * SR) as usize;
                 for k in ((a * SR) as usize..(b * SR) as usize).step_by(n) {
                     println!(
                         "   {:.3}  lung {:+6.1} sub {:+6.1} flow {:7.0} area {:.3} lips {:8.1} nose {:7.1} skin {:8.2} out {:+.4}",
-                        k as f32 / SR, r.lung[k], r.sub[k], r.flow[k], r.area[k], r.lips[k], r.nose[k], r.skin[k], r.out[k]
+                        k as f32 / SR,
+                        r.lung[k],
+                        r.sub[k],
+                        r.flow[k],
+                        r.area[k],
+                        r.lips[k],
+                        r.nose[k],
+                        r.skin[k],
+                        r.out[k]
                     );
                 }
             }
         }
         let c = calls(&r);
         for (t, l, hz, level) in &c {
-            println!("      call at {t:.3} s for {:.0} ms, {hz:.0} Hz, {level:.1} dB", 1000.0 * l);
+            println!(
+                "      call at {t:.3} s for {:.0} ms, {hz:.0} Hz, {level:.1} dB",
+                1000.0 * l
+            );
         }
         if c.len() > 1 {
             let rate = (c.len() - 1) as f32 / (c[c.len() - 1].0 - c[0].0);

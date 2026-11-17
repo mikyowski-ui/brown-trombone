@@ -4,6 +4,7 @@
 //! and what a laugh's calls, a cough's burst and a sigh's breath are in it.
 
 #![allow(
+    clippy::many_single_char_names,
     dead_code,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
@@ -205,5 +206,7 @@ pub fn noise_share(x: &[f32], hz: f32) -> f32 {
 
 /// Largest sample-to-sample step of `x`.
 pub fn largest_step(x: &[f32]) -> f32 {
-    x.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
+    x.windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f32::max)
 }

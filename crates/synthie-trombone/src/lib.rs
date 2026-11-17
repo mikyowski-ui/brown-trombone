@@ -79,12 +79,12 @@ pub mod sing;
 #[cfg(feature = "alloc")]
 pub mod speech;
 pub mod stream;
-pub mod vocal;
 #[cfg(feature = "alloc")]
 mod talker;
 mod tract;
 mod tract_modes;
 mod tuning;
+pub mod vocal;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;

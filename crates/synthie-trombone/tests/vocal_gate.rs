@@ -8,6 +8,7 @@
 //! at the highest pressure there is.
 
 #![allow(
+    clippy::many_single_char_names,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
@@ -84,22 +85,38 @@ fn a_laugh_is_calls_at_four_to_five_and_a_half_a_second_falling_in_pitch_and_lev
     let c = calls(&r);
     assert!(c.len() >= 4, "calls {c:?}");
     let rate = (c.len() - 1) as f32 / (c[c.len() - 1].0 - c[0].0);
-    assert!((4.0..=5.5).contains(&rate), "{rate:.2} calls per second: {c:?}");
+    assert!(
+        (4.0..=5.5).contains(&rate),
+        "{rate:.2} calls per second: {c:?}"
+    );
     // Each call is a burst of voice some 60 to 200 ms long, the breath
     // between them unvoiced.
     for (_, length, _, _) in &c {
         assert!((0.06..=0.2).contains(length), "{c:?}");
     }
     let (first, last) = (c[0], c[c.len() - 1]);
-    assert!(last.2 < 0.95 * first.2, "pitch {:.0} -> {:.0} Hz", first.2, last.2);
-    assert!(last.3 < first.3 - 3.0, "level {:.1} -> {:.1} dB", first.3, last.3);
+    assert!(
+        last.2 < 0.95 * first.2,
+        "pitch {:.0} -> {:.0} Hz",
+        first.2,
+        last.2
+    );
+    assert!(
+        last.3 < first.3 - 3.0,
+        "level {:.1} -> {:.1} dB",
+        first.3,
+        last.3
+    );
     // Well above speech: the voice was at 100 Hz.
     assert!(first.2 > 150.0, "{:.0} Hz", first.2);
     // Made by pulses of the lungs' pressure: each call's pressure below
     // the folds well over that between the calls.
     for w in c.windows(2) {
         let (gap_from, gap_to) = (((w[0].0 + w[0].1) * SR) as usize, (w[1].0 * SR) as usize);
-        let between = r.lung[gap_from..gap_to].iter().copied().fold(f32::MAX, f32::min);
+        let between = r.lung[gap_from..gap_to]
+            .iter()
+            .copied()
+            .fold(f32::MAX, f32::min);
         let during = r.lung[(w[1].0 * SR) as usize..((w[1].0 + w[1].1) * SR) as usize]
             .iter()
             .copied()
@@ -138,7 +155,10 @@ fn a_cough_builds_its_pressure_behind_shut_folds_and_bursts() {
     assert!(held > 0.12, "shut for {held:.3} s");
     let behind = shut.iter().map(|&k| r.sub[k]).fold(0.0, f32::max);
     let want = tuning.anatomy.cough_pressure;
-    assert!(behind > 0.9 * want && behind < 1.1 * want, "{behind:.1} cmH2O behind the folds");
+    assert!(
+        behind > 0.9 * want && behind < 1.1 * want,
+        "{behind:.1} cmH2O behind the folds"
+    );
     // Nothing comes out while they are shut (but the end of the breath in).
     let last_shut = *shut.last().unwrap();
     let quiet = rms(&r.out[last_shut - (0.08 * SR) as usize..last_shut]);
@@ -152,9 +172,17 @@ fn a_cough_builds_its_pressure_behind_shut_folds_and_bursts() {
         .take(150)
         .fold((0, 0.0f32), |m, (k, &x)| if x > m.1 { (k, x) } else { m });
     assert!(at <= 50, "the burst peaks {at} ms after the opening");
-    assert!(db(peak) - db(quiet) > 30.0, "burst {:.1} dB, shut {:.1} dB", db(peak), db(quiet));
+    assert!(
+        db(peak) - db(quiet) > 30.0,
+        "burst {:.1} dB, shut {:.1} dB",
+        db(peak),
+        db(quiet)
+    );
     let over = db(peak) - speech_peak();
-    assert!((3.0..=20.0).contains(&over), "burst {over:+.1} dB against speech");
+    assert!(
+        (3.0..=20.0).contains(&over),
+        "burst {over:+.1} dB against speech"
+    );
     // Its noise: the jets' own. The flow is high.
     let flow = r.flow[last_shut..].iter().copied().fold(0.0, f32::max);
     assert!(flow > 1500.0, "{flow:.0} cm3/s");
@@ -183,7 +211,10 @@ fn a_throat_clearing_is_two_weaker_voiced_coughs_through_a_narrowed_tube() {
         narrowest = narrowest.min(t.diameters()[1]);
     }
     assert!(r.finite);
-    assert!(narrowest < 0.7 * rest, "epilarynx {narrowest:.3} against {rest:.3}");
+    assert!(
+        narrowest < 0.7 * rest,
+        "epilarynx {narrowest:.3} against {rest:.3}"
+    );
     let c = calls(&r);
     assert_eq!(c.len(), 2, "{c:?}");
     // Weaker than a cough.
@@ -191,7 +222,9 @@ fn a_throat_clearing_is_two_weaker_voiced_coughs_through_a_narrowed_tube() {
     let peak = |x: &[f32]| envelope(x, 10.0, 5.0).into_iter().fold(0.0, f32::max);
     assert!(db(peak(&r.out)) < db(peak(&cough.out)) - 3.0);
     // Each opens from shut folds with pressure behind them.
-    let shut = (0..r.len()).filter(|&k| r.area[k] < 0.002 && r.sub[k] > 8.0).count();
+    let shut = (0..r.len())
+        .filter(|&k| r.area[k] < 0.002 && r.sub[k] > 8.0)
+        .count();
     assert!(shut as f32 / SR > 0.1);
 }
 
@@ -200,8 +233,16 @@ fn a_sigh_breathes_in_deep_then_out_long_breathy_and_falling() {
     let (r, _) = alone(Vocal::new(Vocalization::Sigh));
     assert!(r.finite);
     // In, then out.
-    let first_in = r.flow.iter().position(|&f| f < -300.0).expect("air goes in");
-    let first_out = r.flow.iter().position(|&f| f > 300.0).expect("air goes out");
+    let first_in = r
+        .flow
+        .iter()
+        .position(|&f| f < -300.0)
+        .expect("air goes in");
+    let first_out = r
+        .flow
+        .iter()
+        .position(|&f| f > 300.0)
+        .expect("air goes out");
     assert!(first_in < first_out);
     let low = r.lung.iter().copied().fold(0.0f32, f32::min);
     assert!(low < -5.0, "lungs {low:.1} cmH2O");
@@ -218,7 +259,10 @@ fn a_sigh_breathes_in_deep_then_out_long_breathy_and_falling() {
     modal.note_on();
     let m = record(&mut modal, 1.0);
     let clean = noise_share(&m.out[(0.3 * SR) as usize..], 100.0);
-    assert!(breathy > clean + 0.1 && breathy > 0.2, "noise {breathy:.2} against {clean:.2}");
+    assert!(
+        breathy > clean + 0.1 && breathy > 0.2,
+        "noise {breathy:.2} against {clean:.2}"
+    );
     // Falling.
     let q = (b - a) / 4;
     let (start, end) = (median(&r.pitch[a..a + q]), median(&r.pitch[b - q..b]));
@@ -251,11 +295,21 @@ fn every_vocalization_stays_finite_at_the_highest_pressure() {
 fn tags_parse_and_bracketed_phonemes_stay_phonemes() {
     let tokens = phonemize("[laugh] [HH AX L OW1] [clear-throat] world [cough]");
     assert_eq!(tokens[0], Token::Vocal(Vocalization::Laugh));
-    assert!(matches!(tokens[1], Token::Phone { phoneme: Phoneme::Hh, .. }));
+    assert!(matches!(
+        tokens[1],
+        Token::Phone {
+            phoneme: Phoneme::Hh,
+            ..
+        }
+    ));
     assert!(tokens.contains(&Token::Vocal(Vocalization::ClearThroat)));
     assert_eq!(tokens.last(), Some(&Token::Vocal(Vocalization::Cough)));
     for name in ["sigh", "laugh", "chuckle", "clear-throat", "cough"] {
-        assert!(phonemize(&format!("[{name}]")).iter().any(|t| matches!(t, Token::Vocal(_))));
+        assert!(
+            phonemize(&format!("[{name}]"))
+                .iter()
+                .any(|t| matches!(t, Token::Vocal(_)))
+        );
     }
     // Only the tags as written: the rest is ARPAbet as before.
     for text in ["[Laugh]", "[L AE F]", "[K ER1 L]", "[HH AX L OW1] world"] {
@@ -267,7 +321,9 @@ fn tags_parse_and_bracketed_phonemes_stay_phonemes() {
     // A tag in text is a pause segment of the event's length.
     let settings = deep().with_engine(Engine::Physical);
     let u = Utterance::from_text("Well, [sigh] I suppose so.", &settings.prosody());
-    let k = (0..u.segments().len()).find(|&k| u.vocal_at(k).is_some()).unwrap();
+    let k = (0..u.segments().len())
+        .find(|&k| u.vocal_at(k).is_some())
+        .unwrap();
     let v = u.vocal_at(k).unwrap();
     assert_eq!(v.kind, Vocalization::Sigh);
     assert_eq!(u.segments()[k].phoneme, Phoneme::Sil);
@@ -303,7 +359,10 @@ fn fillers_are_words_to_the_front_end_and_hold_low_and_level() {
     assert!((held - 1.25 * p.filler_length).abs() < 0.02, "{held}");
     let base = settings.prosody().pitch;
     let (start, end) = (s[phones[0]].pitch.1, s[*phones.last().unwrap()].pitch.1);
-    assert!(start < 0.92 * base && end < start && end > 0.85 * start, "{start} {end} of {base}");
+    assert!(
+        start < 0.92 * base && end < start && end > 0.85 * start,
+        "{start} {end} of {base}"
+    );
     // The hum: the nose open, the lips shut; then a pause.
     let m = *phones.last().unwrap();
     assert_eq!(s[m].phoneme, Phoneme::M);
@@ -321,7 +380,9 @@ fn hmm_is_hummed_through_the_nose_with_the_mouth_shut() {
     let mut t = voice(&settings);
     let mut speaker = Speaker::new();
     let u = Utterance::from_text("Hmm.", &settings.prosody());
-    let m = (0..u.segments().len()).find(|&k| u.segments()[k].phoneme == Phoneme::M).unwrap();
+    let m = (0..u.segments().len())
+        .find(|&k| u.segments()[k].phoneme == Phoneme::M)
+        .unwrap();
     let from: f32 = u.segments()[..m].iter().map(|s| s.duration).sum();
     let length = u.segments()[m].duration;
     speaker.speak(u);
@@ -333,10 +394,16 @@ fn hmm_is_hummed_through_the_nose_with_the_mouth_shut() {
         let out = speaker.process(&mut t);
         r.push(out, &t);
     }
-    let (a, b) = (((from + 0.1) * SR) as usize, ((from + length - 0.05) * SR) as usize);
+    let (a, b) = (
+        ((from + 0.1) * SR) as usize,
+        ((from + length - 0.05) * SR) as usize,
+    );
     let nose = rms(&r.nose[a..b]);
     let lips = rms(&r.lips[a..b]);
-    assert!(nose > 20.0 && nose > 10.0 * lips, "nose {nose:.1} lips {lips:.1} cm3/s");
+    assert!(
+        nose > 20.0 && nose > 10.0 * lips,
+        "nose {nose:.1} lips {lips:.1} cm3/s"
+    );
     // Voiced and low.
     let hz = median(&r.pitch[a..b]);
     assert!(hz > 0.0 && hz < settings.prosody().pitch, "{hz:.0} Hz");
@@ -361,14 +428,22 @@ fn a_cough_pushed_mid_sentence_leaves_the_voice_speaking_afterwards() {
     }
     // The sentence waited for the cough and was all said after it.
     let grown = (out.len() as f32 - (alone.len() as f32 - 0.25 * SR)) / SR;
-    assert!((grown - cough).abs() < 0.02, "{grown:.3} s longer for a {cough:.3} s cough");
+    assert!(
+        (grown - cough).abs() < 0.02,
+        "{grown:.3} s longer for a {cough:.3} s cough"
+    );
     // The voice speaks after the cough: the stretch after it is as loud
     // as the same stretch of the sentence alone.
     let resume = ((0.8 + cough + 0.1) * SR) as usize;
     let n = (0.8 * SR) as usize;
     let after = rms(&out[resume..resume + n]);
     let same = rms(&alone[(0.9 * SR) as usize..(0.9 * SR) as usize + n]);
-    assert!((db(after) - db(same)).abs() < 3.0, "{:.1} against {:.1} dB", db(after), db(same));
+    assert!(
+        (db(after) - db(same)).abs() < 3.0,
+        "{:.1} against {:.1} dB",
+        db(after),
+        db(same)
+    );
     assert!(out.iter().all(|x| x.is_finite()));
 }
 
@@ -376,7 +451,9 @@ fn a_cough_pushed_mid_sentence_leaves_the_voice_speaking_afterwards() {
 fn tags_in_text_play_without_allocating_and_the_speech_goes_on() {
     let settings = deep().with_engine(Engine::Physical);
     let u = Utterance::from_text("Well, [laugh] that was close.", &settings.prosody());
-    let laugh = (0..u.segments().len()).find(|&k| u.vocal_at(k).is_some()).unwrap();
+    let laugh = (0..u.segments().len())
+        .find(|&k| u.vocal_at(k).is_some())
+        .unwrap();
     let start: f32 = u.segments()[..laugh].iter().map(|s| s.duration).sum();
     let length = u.segments()[laugh].duration;
     let total = u.duration();

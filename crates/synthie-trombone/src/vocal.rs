@@ -323,7 +323,13 @@ impl Plan {
         );
     }
 
-    fn hold(&mut self, posture: Posture, (start, end): (f32, f32), ramps: (f32, f32), dominance: f32) {
+    fn hold(
+        &mut self,
+        posture: Posture,
+        (start, end): (f32, f32),
+        ramps: (f32, f32),
+        dominance: f32,
+    ) {
         if self.held == MOST_HOLDS {
             return;
         }
@@ -388,10 +394,18 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
     use var::glottis::{PUSH, SEAL, SPREAD, TENSENESS, VOICING};
     let v = v.clamped();
     let (len, s) = (v.length, v.strength);
-    let p0 = if v.pitch > 0.0 { v.pitch } else { pitch.max(40.0) };
+    let p0 = if v.pitch > 0.0 {
+        v.pitch
+    } else {
+        pitch.max(40.0)
+    };
     let mut plan = Plan::new();
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
-    let calls = ((v.kind.calls() as f32 * len).round() as usize).clamp(1, 12);
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let calls = ((v.kind.calls() as f32 * len + 0.5) as usize).clamp(1, 12);
     match v.kind {
         Vocalization::Laugh | Vocalization::Chuckle => {
             let laugh = v.kind == Vocalization::Laugh;
@@ -412,7 +426,11 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
             let mut ends = start;
             for k in 0..calls {
                 #[allow(clippy::cast_precision_loss)]
-                let along = if calls > 1 { k as f32 / (calls - 1) as f32 } else { 0.0 };
+                let along = if calls > 1 {
+                    k as f32 / (calls - 1) as f32
+                } else {
+                    0.0
+                };
                 let length = if k == 0 && laugh { 1.4 * voice } else { voice };
                 let push = tuning.anatomy.laugh_pressure * pressure * s * (1.0 - 0.4 * along);
                 let hz = p0 * rise * (1.0 - 0.125 * along);
@@ -487,7 +505,11 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                 (tail, tail + 0.16 * len),
                 (0.02, 0.04),
             );
-            plan.push(0.25 * peak.min(24.0), (burst + 0.05, tail + 0.12 * len), (0.1, 0.08));
+            plan.push(
+                0.25 * peak.min(24.0),
+                (burst + 0.05, tail + 0.12 * len),
+                (0.1, 0.08),
+            );
             plan.glide((1.15 * p0, 0.9 * p0), (tail, tail + 0.16 * len), 0.05);
             plan.seconds = tail + 0.16 * len + 0.2;
         }
@@ -519,11 +541,7 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                     (t + shut, t + shut + voice),
                     (0.005, 0.03),
                 );
-                plan.glide(
-                    (0.95 * p0, 0.82 * p0),
-                    (t + shut, t + shut + voice),
-                    0.03,
-                );
+                plan.glide((0.95 * p0, 0.82 * p0), (t + shut, t + shut + voice), 0.03);
                 t += shut + voice + 0.08;
             }
             plan.lay(
@@ -546,7 +564,12 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
             let exhale = 1.3 * len;
             let end = out + exhale;
             // Open, relaxing towards schwa over the breath out.
-            plan.hold(Posture::Open, (0.0, out + 0.2 * exhale), (0.06, 0.7 * exhale), STRONG);
+            plan.hold(
+                Posture::Open,
+                (0.0, out + 0.2 * exhale),
+                (0.06, 0.7 * exhale),
+                STRONG,
+            );
             plan.hold(
                 Posture::Relaxed,
                 (out + 0.2 * exhale, end + 0.2),
@@ -565,7 +588,11 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                 (0.04, 0.1),
             );
             // The push falls through the breath out.
-            plan.push(6.0 * s, (out - 0.03, out + 0.15 * exhale), (0.05, 0.85 * exhale));
+            plan.push(
+                6.0 * s,
+                (out - 0.03, out + 0.15 * exhale),
+                (0.05, 0.85 * exhale),
+            );
             plan.push(1.2 * s, (out + 0.15 * exhale, end), (0.85 * exhale, 0.15));
             plan.glide((1.25 * p0, 0.8 * p0), (out, end - 0.3 * len), 0.04);
             plan.seconds = end + 0.25;
@@ -606,9 +633,16 @@ mod tests {
                 let v = Vocal::new(kind).with_length(length).with_strength(2.0);
                 let p = plan(&v, 110.0, &Tuning::DEFAULT);
                 assert!(p.len() < MOST, "{kind:?} {length}: {}", p.len());
-                assert!(p.seconds > 0.3 && p.seconds < 6.0, "{kind:?}: {}", p.seconds);
+                assert!(
+                    p.seconds > 0.3 && p.seconds < 6.0,
+                    "{kind:?}: {}",
+                    p.seconds
+                );
                 for g in p.gestures() {
-                    assert!(g.window.end + g.window.ramp_out <= p.seconds + 1e-3, "{kind:?} {g:?}");
+                    assert!(
+                        g.window.end + g.window.ramp_out <= p.seconds + 1e-3,
+                        "{kind:?} {g:?}"
+                    );
                 }
             }
         }

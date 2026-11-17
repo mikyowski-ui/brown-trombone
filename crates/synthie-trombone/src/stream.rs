@@ -417,7 +417,10 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         }),
         Event::Vocalize(v) => {
             #[allow(clippy::cast_possible_truncation)]
-            let kind = Vocalization::ALL.iter().position(|&k| k == v.kind).unwrap_or(0) as u32;
+            let kind = Vocalization::ALL
+                .iter()
+                .position(|&k| k == v.kind)
+                .unwrap_or(0) as u32;
             m.word(kind);
             m.float(v.length);
             m.float(v.strength);
@@ -876,7 +879,8 @@ impl<'a> VoiceStream<'a> {
     /// [`Full`] with the vocalization when the ring has no room for it.
     pub fn vocalize(&mut self, v: impl Into<Vocal>, when: When) -> Result<(), Full<Vocal>> {
         let v = v.into();
-        self.push_when(when, Event::Vocalize(v)).map_err(|_| Full(v))
+        self.push_when(when, Event::Vocalize(v))
+            .map_err(|_| Full(v))
     }
 
     /// Words free in the ring.
