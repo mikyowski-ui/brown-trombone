@@ -592,6 +592,26 @@ impl Utterance {
                 match (before, after) {
                     (Some(&b), Some(_)) => {
                         let total = schedule.gap_after(b as usize).max(MIN_PAUSE);
+                        // A breath the rules put in the pause (see
+                        // `speech::breathe_in`) keeps its length, and the turn
+                        // and lungs' lead-in after it, where the speaker's
+                        // pause leaves the voice time to die away before it;
+                        // the pause takes none otherwise.
+                        if let Some(x) = self.segments[i..j]
+                            .iter()
+                            .position(|s| s.gesture.intake > 0.0)
+                        {
+                            let fixed: f32 = rule[x..].iter().sum();
+                            let rest: f32 = rule[..x].iter().sum();
+                            if x > 0 && rest > 0.0 && total - fixed >= super::BREATH_DIE_AWAY {
+                                new.extend(rule.iter().enumerate().map(|(k, &r)| {
+                                    if k < x { r * (total - fixed) / rest } else { r }
+                                }));
+                                i = j;
+                                continue;
+                            }
+                            self.segments[i + x].gesture.intake = 0.0;
+                        }
                         // The lungs' lead-in before a phrase that opens on
                         // an obstruent is the last part; it keeps its length
                         // up to half the pause.
@@ -674,6 +694,7 @@ impl Utterance {
             if g.transition > 0.0 {
                 g.transition = (g.transition * f).min(d);
             }
+            g.creak_from *= f;
             s.duration = d;
         }
 

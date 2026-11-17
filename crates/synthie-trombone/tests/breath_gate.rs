@@ -96,8 +96,6 @@ fn the_air_goes_in_during_a_breath_and_out_after_it() {
         );
         assert!(inflow < -200.0, "{inflow} cm3/s through the glottis");
         // The voice after it: the air goes out.
-        let after = phrase_vowels(&t, b);
-        assert!(!after.is_empty());
         let (first, _) = breath::vowel_after(&t, b).expect("a vowel after the breath");
         let out = t.flow[first..first + (0.1 * SR) as usize]
             .iter()
@@ -130,7 +128,7 @@ fn the_lungs_reach_the_pressure_asked() {
     v.note_on();
     v.render(&mut buf);
     let mut flow = 0.0;
-    for s in buf.iter_mut() {
+    for s in &mut buf {
         *s = v.process();
         flow += v.gauges().glottal_flow;
     }
@@ -246,6 +244,6 @@ fn a_breath_taken_with_the_api_comes_and_goes() {
         assert!((-4.0..=-3.0).contains(&lowest), "{lowest}");
         assert!(inflow < -100.0);
         assert!(after > -0.1, "still drawing at {after}");
-        assert!(v.inhalation() == 0.0);
+        assert!(v.inhalation().abs() < f32::EPSILON);
     }
 }

@@ -789,6 +789,22 @@ impl<'a> VoiceStream<'a> {
             .map_err(|_| Full(gesture))
     }
 
+    /// Take a breath: the voice's lungs draw `cm_h2o` below the air's
+    /// pressure for `seconds` (a [`Gesture::inhalation`] with 30 ms ramps,
+    /// as [`Trombone::breathe_in`] takes; physical engine).
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the gesture when the ring has no room for it.
+    pub fn breathe_in(
+        &mut self,
+        cm_h2o: f32,
+        seconds: f32,
+        when: When,
+    ) -> Result<(), Full<Gesture>> {
+        self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
     /// Words free in the ring.
     #[must_use]
     pub fn free(&self) -> usize {

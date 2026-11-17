@@ -107,7 +107,7 @@ fn speech_report(settings: &VoiceSettings, text: &str) {
             .windows(2)
             .map(|w| (w[1] - w[0]).abs())
             .fold(0.0f32, f32::max);
-        let mid = (a + b) / 2;
+        let mid = usize::midpoint(a, b);
         println!(
             "    middle: area {:.3} cm2, below the folds {:.2} cmH2O, lungs {:.2}",
             t.area[mid], t.sub[mid], t.lung[mid]

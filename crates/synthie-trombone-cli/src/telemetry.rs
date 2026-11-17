@@ -41,7 +41,8 @@ pub struct GlottisGauge {
     pub transglottal: f32,
     /// Pressure below the folds, cmH2O, averaged.
     pub subglottal: f32,
-    /// The lung pressure the voice asks for, cmH2O.
+    /// The lung pressure the voice asks for, cmH2O; while a breath is
+    /// drawn, the lungs' own (negative).
     pub lung: f32,
     /// Share of the time the vibrating edges were shut while the voice
     /// sounded (the closed quotient); `None` while it does not.
@@ -122,7 +123,13 @@ impl GlottisWatch {
             physical,
             transglottal: all.transglottal / n,
             subglottal: all.subglottal / n,
-            lung: voice.lung_pressure(),
+            // While a breath is drawn, the lungs as they are (below the
+            // air's pressure); otherwise what the voice asks of them.
+            lung: if g.lung_pressure < 0.0 {
+                g.lung_pressure
+            } else {
+                voice.lung_pressure()
+            },
             // Most of the window sounding, or the share means little.
             closed: (physical && all.sounding * 2 > all.samples)
                 .then(|| all.shut as f32 / all.sounding as f32),
