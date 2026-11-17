@@ -1308,11 +1308,17 @@ pitch.
 
 Measured on the deep voice at 100 Hz (`examples/vocal.rs`,
 `tests/vocal_gate.rs`): a **laugh** is a breath in and five calls at 4.4 a
-second (Bachorowski, Smoski & Owren 2001: 4.37), each a pulse of the lungs
-of up to `laugh_pressure` (12 cmH2O, falling to six tenths) and a burst of
-voice of 0.11 s (0.15 s the first) on an open mouth, the breath between
-them through the open glottis; the calls fall from 179 to 140 Hz and by
-8 dB along the bout. A **chuckle** is three such calls with the lips shut,
+second (Bachorowski, Smoski & Owren 2001: 4.37), each made by a pulse of
+the lungs of up to `laugh_pressure` (12 cmH2O, falling to seven tenths)
+and a burst of the folds' adductors in time with it (Luschei et al. 2006),
+on an open mouth held still: the voicing gate stays on through the bout,
+each pulse blows the narrowed glottis into a call of some 0.13 to 0.18 s,
+and between the pulses the folds stop by themselves and the breath goes
+out through the glottis as it opens again (0.22 cm²). Pulses alone, the
+glottis held at one opening, made the calls on a voice by itself (with
+none, one long call), but in a sentence's pause the folds kept going
+between some of them. The calls fall from 176 to 147 Hz and by 6 dB along
+the bout. A **chuckle** is three such calls with the lips shut,
 the voice out of the nose. A **cough** draws a breath, shuts the folds for
 0.19 s while the pressure behind them builds to `cough_pressure` (40
 cmH2O; people reach 50 to 100 and more in the chest, the model holds

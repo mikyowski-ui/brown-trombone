@@ -618,7 +618,7 @@ tuning! {
         /// Peak of each pulse of pressure the lungs push a laugh's call with,
         /// cmH2O (physical engine): laughter is made by pulses of subglottal
         /// pressure at some 4 to 5 per second (Luschei et al. 2006), here
-        /// falling to six tenths of this along the bout as the lungs empty.
+        /// falling to seven tenths of this along the bout as the lungs empty.
         laugh_pressure = 12.0, 4.0..=30.0, A;
     } tiers {
     } aliases {
@@ -1083,13 +1083,15 @@ tuning! {
         /// Calls per second in a laugh (physical engine; see
         /// `Trombone::vocalize`): 4.37 in 1,024 bouts of 97 young adults
         /// (Bachorowski, Smoski & Owren 2001), the intervals between them
-        /// growing towards the end of the bout (here by a quarter).
+        /// growing towards the end of the bout (here by a fifth).
         laugh_rate = 4.4, 3.0..=6.0, B;
-        /// Seconds of voice in each call of a laugh after the first (voiced,
-        /// open-mouth calls 0.11 s, with 0.12 s between them, in the same
-        /// study); the first is longer (0.28 against 0.13 s there; here twice
-        /// this). Between the calls the glottis is open and the air goes out
-        /// as breath.
+        /// Seconds of each call of a laugh after the first (voiced, open-mouth
+        /// calls 0.11 s, with 0.12 s between them, in the same study); the
+        /// first is longer (0.28 against 0.13 s there; here 1.4 times this).
+        /// The lungs' pulse holds for half of it and lets go through the rest,
+        /// the adductors narrowing the glottis with it; the folds sound while
+        /// it blows them and stop by themselves after it, and the breath goes
+        /// out between.
         laugh_voiced = 0.11, 0.05..=0.2, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).

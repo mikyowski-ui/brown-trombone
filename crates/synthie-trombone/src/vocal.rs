@@ -11,11 +11,16 @@
 //!   [`ArticulationConfig::laugh_voiced`] of voice (0.11 s in voiced,
 //!   open-mouth calls there, the first about twice as long) followed by
 //!   breath through the open glottis, the intervals growing towards the end
-//!   of the bout. Each call is a pulse of subglottal pressure and a burst of
-//!   the folds' adductors at about 5 Hz (Luschei et al. 2006), on a mouth
-//!   held open and not re-articulated; the pulses fall from
-//!   [`AnatomyConfig::laugh_pressure`] to six tenths of it along the bout as
-//!   the lungs empty, and the pitch sits well above speech (male laughter
+//!   of the bout. Each call is a pulse of subglottal pressure at some 4 to 5
+//!   a second (Luschei et al. 2006) on a mouth held open and not
+//!   re-articulated, with a burst of the folds' adductors in time with each
+//!   (the same study): the voice is on through the bout, each pulse blows
+//!   the narrowed glottis into a call, and between the pulses the folds
+//!   stop by themselves and the breath goes out through the glottis as it
+//!   opens again.
+//!   The pulses fall from [`AnatomyConfig::laugh_pressure`] to seven tenths
+//!   of it along the bout as the lungs empty, and the pitch sits well above
+//!   speech (male laughter
 //!   282 Hz against 120 in speech in the same study: here 1.8 times the
 //!   voice's pitch) and falls within each call and a little along the
 //!   bout (Bachorowski et al. found no fall of the mean along a bout; the
@@ -290,9 +295,9 @@ impl Plan {
     }
 
     /// The same at the weight of a background the other gestures of the
-    /// event lie over.
+    /// event lie over (still well over speech's).
     fn glottis_under(&mut self, sets: &[(usize, f32)], window: (f32, f32), ramps: (f32, f32)) {
-        self.lay(Tier::GlottalAdduction, sets, window, ramps, 1.0);
+        self.lay(Tier::GlottalAdduction, sets, window, ramps, UNDER);
     }
 
     /// The lungs pushing `cm_h2o` over a window (its own gesture, so that
@@ -365,20 +370,25 @@ impl Plan {
 /// Dominance of a vocalization's gestures: they win over the speech's
 /// (dominance 1, a consonant's own lips 1000) where both act.
 const STRONG: f32 = 1000.0;
+/// Dominance of an event's background (the folds' setting through a laugh)
+/// under its own strong gestures: still a hundred times speech's.
+const UNDER: f32 = 100.0;
 /// Ramps of a vocalization's breaths in, seconds (as `Trombone::breathe_in`).
 const BREATH_RAMP: f32 = 0.03;
 /// Seconds from a breath in letting go to the first sound after it (as
 /// speech's turn, `speech::BREATH_TURN`).
 const TURN: f32 = 0.1;
-/// Glottal opening between a laugh's calls, cm² at native size: the
-/// breath of an /h/ (an aspirated stop's is 0.25 to 0.4).
-const LAUGH_BREATH: f32 = 0.3;
-/// Opening held behind the vibrating folds in a laugh's call, cm²: a
-/// breathy voice.
-const LAUGH_SPREAD: f32 = 0.05;
+/// Opening held behind the folds between a laugh's calls, cm² at native
+/// size: the breath of an /h/ (with none, the folds did not stop between
+/// the pulses of pressure: one long call; at 0.05 to 0.15 alone they
+/// stopped with each on a voice by itself, and in a sentence's pause, its
+/// lungs at 3 cmH2O between the pulses, not always).
+const LAUGH_BREATH: f32 = 0.22;
+/// Opening the adductors narrow it to in a call, cm²: a breathy voice.
+const LAUGH_SPREAD: f32 = 0.07;
 /// Lung pressure between a laugh's calls, cmH2O: the breath that carries
 /// the /h/.
-const LAUGH_FLOOR: f32 = 2.5;
+const LAUGH_FLOOR: f32 = 2.0;
 /// Lung pressure an event holds where none of its gestures push, cmH2O.
 const LUNGS_HELD: f32 = 0.3;
 /// How far past touching the folds are pressed in a cough's compression,
@@ -412,7 +422,7 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
             let (inhale, posture, rise, pressure, voiced) = if laugh {
                 (0.25, Posture::Open, 1.8, 1.0, 1.0)
             } else {
-                (0.0, Posture::Hum, 1.5, 0.8, 0.7)
+                (0.0, Posture::Hum, 1.5, 1.0, 0.7)
             };
             let rate = tuning.articulation.laugh_rate;
             let voice = tuning.articulation.laugh_voiced * voiced;
@@ -432,34 +442,50 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                     0.0
                 };
                 let length = if k == 0 && laugh { 1.4 * voice } else { voice };
-                let push = tuning.anatomy.laugh_pressure * pressure * s * (1.0 - 0.4 * along);
+                let push = tuning.anatomy.laugh_pressure * pressure * s * (1.0 - 0.3 * along);
                 let hz = p0 * rise * (1.0 - 0.125 * along);
                 // The pressure leads the voice by the lungs' own time, and
                 // lets go through its second half, so the call dies away
                 // with it and the breath between the calls is let out at
                 // the floor's pressure.
                 plan.push(push, (t - 0.03, t + 0.55 * length), (0.025, 0.04));
+                // With each pulse a burst of the folds' adductors (Luschei
+                // et al. 2006: in time with the pressure, at about 5 Hz),
+                // narrowing the glottis behind them for the call.
                 plan.glottis(
-                    &[(VOICING, 1.0), (SPREAD, LAUGH_SPREAD), (TENSENESS, 0.55)],
-                    (t, t + length),
-                    (0.01, 0.015),
+                    &[(SPREAD, LAUGH_SPREAD)],
+                    (t - 0.02, t + 0.6 * length),
+                    (0.02, 0.04),
                 );
                 plan.glide((1.06 * hz, 0.9 * hz), (t, t + length), 0.03);
                 ends = t + length;
-                // The interval to the next grows along the bout (by a quarter,
+                // The interval to the next grows along the bout (by a fifth,
                 // about the rate), and leaves the breath at least 70 ms.
-                t += ((0.875 + 0.25 * along) / rate).max(length + 0.07);
+                t += ((0.9 + 0.2 * along) / rate).max(length + 0.07);
             }
-            // Between the calls: breath through the open glottis.
+            // Through the bout the folds are held for a breathy voice and
+            // the lungs push a breath's worth: each pulse of pressure blows
+            // them into a call, and between the pulses they stop by
+            // themselves and the breath goes out through the glottis (an
+            // /h/). With the glottis shut behind them (no opening) the folds
+            // kept vibrating at the floor's pressure: one long call.
             plan.glottis_under(
-                &[
-                    (VOICING, 0.0),
-                    (SPREAD, LAUGH_BREATH),
-                    (TENSENESS, 0.55),
-                    (PUSH, LAUGH_FLOOR * s.min(1.0) * pressure),
-                ],
-                (start - 0.05, ends + 0.06),
-                (0.03, 0.06),
+                &[(VOICING, 1.0), (SPREAD, LAUGH_BREATH), (TENSENESS, 0.55)],
+                (start - 0.05, ends),
+                (0.03, 0.04),
+            );
+            // (Its own gesture, under the pulses: speech never pushes.)
+            plan.lay(
+                Tier::GlottalAdduction,
+                &[(PUSH, LAUGH_FLOOR * s.min(1.0) * pressure)],
+                (start - 0.05, ends),
+                (0.03, 0.04),
+                1.0,
+            );
+            plan.glottis_under(
+                &[(VOICING, 0.0), (SPREAD, 0.0)],
+                (ends, ends + 0.1),
+                (0.04, 0.04),
             );
             plan.seconds = ends + 0.18;
             plan.hold(posture, (0.0, plan.seconds - 0.08), (0.04, 0.08), STRONG);
