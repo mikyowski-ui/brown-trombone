@@ -3535,16 +3535,32 @@ fn breathe_in(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], ti
 /// the voice in a phrase that ends in a fall (`.` `!`), the folds go
 /// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry) of the way
 /// into creak (see [`Trombone::set_fold_creak`]), never from before the
-/// middle of its last vowel; questions and commas end in modal voice. The consonants after the last voiced sound keep it, and
-/// the next phrase starts without.
+/// middle of its last vowel; questions and commas end in modal voice. The
+/// creak ends with the last sonorant (a vowel, a nasal, a liquid or a
+/// glide): a voiced obstruent after it is spoken in modal voice, and the
+/// voiceless consonants after the last sonorant keep the creak (their
+/// folds are apart), unless a voiced obstruent follows it. The next phrase
+/// starts without.
 fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], timing: &Tuning) {
     for &(a, b, brk) in phrases {
         if !matches!(brk, Break::Period | Break::Exclamation) || a >= b {
             continue;
         }
-        let Some(last) = drafts[a..b].iter().rposition(|d| d.voiced) else {
+        // Pressed together, the folds pass too little air for a fricative:
+        // creaked through, a final /ʒ/ lost 30 dB of its jet noise and a
+        // final /dʒ/ all of it (`affricate_gate`), and every final /z/ of a
+        // plural would have gone with them.
+        let sonorant = |d: &Draft| {
+            d.voiced
+                && matches!(
+                    d.phoneme.manner(),
+                    Manner::Vowel | Manner::Diphthong | Manner::Nasal | Manner::Approximant
+                )
+        };
+        let Some(last) = drafts[a..b].iter().rposition(sonorant) else {
             continue;
         };
+        let modal_after = drafts[a + last + 1..b].iter().any(|d| d.voiced);
         let end: f32 = drafts[a..=a + last].iter().map(|d| d.duration).sum();
         // Never before the middle of the last vowel: the consonant before it
         // and the vowel's onset keep their modal voice (the pitch raised
@@ -3559,10 +3575,10 @@ fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], ti
         });
         let from = (end - timing.prosody.fry_time).max(middle);
         let mut t = 0.0;
-        for d in &mut drafts[a..b] {
+        for (i, d) in drafts[a..b].iter_mut().enumerate() {
             let start = t;
             t += d.duration;
-            if t <= from {
+            if t <= from || (modal_after && i > last) {
                 continue;
             }
             d.gesture.creak = timing.prosody.final_fry;

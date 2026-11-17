@@ -1594,6 +1594,34 @@ impl Tuning {
         }
         self
     }
+
+    /// This tuning with the living voice of wave 3 on or off (every other
+    /// number as it is). On: the mono output is the head's mixdown
+    /// (`anatomy.head_mixdown` 1), the lungs draw a breath of 5 cmH2O in
+    /// the pauses between sentences but not before the utterance
+    /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
+    /// in creak over their last 0.1 s of voice (`final_fry` 1, `fry_time`
+    /// 0.1). Off: the five numbers as they were before wave 3 (the plain
+    /// sum of the ports, no breaths, modal voice to the end; `breath_first`
+    /// 1 and `fry_time` 0.12, read only when their switch is on).
+    #[must_use]
+    pub const fn with_living_voice(mut self, on: bool) -> Self {
+        let p = &mut self.prosody;
+        if on {
+            self.anatomy.head_mixdown = 1.0;
+            p.breath_intake = 5.0;
+            p.breath_first = 0.0;
+            p.final_fry = 1.0;
+            p.fry_time = 0.1;
+        } else {
+            self.anatomy.head_mixdown = 0.0;
+            p.breath_intake = 0.0;
+            p.breath_first = 1.0;
+            p.final_fry = 0.0;
+            p.fry_time = 0.12;
+        }
+        self
+    }
 }
 
 /// The JSON (or any serde) form of a [`Tuning`]: written nested, one object
