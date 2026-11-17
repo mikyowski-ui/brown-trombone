@@ -28,10 +28,20 @@ From the text:
   sentences are joined on one clock.
 * **pitch** -- the model's F0 every frame; through the frames it calls
   unvoiced a line in semitones (``prosody.fill_pitch``).
-* **level** -- the model's energy (log RMS of its recordings) as dB; each
-  vowel's mean against the mean of all vowels becomes its breath share
-  (``prosody.db_breath``, within ``prosody.LEVEL_RANGE``); the consonants take the
-  line between the vowels either side.
+* **level** -- the model's energy (log RMS of its recordings) as dB, each
+  phone's mean against the mean of the vowels (``level_db`` in the schedule).
+  With ``--breath energy`` each vowel's becomes its breath share
+  (``prosody.db_breath``, within ``prosody.LEVEL_RANGE``) and the consonants take
+  the line between the vowels either side. Not by default (``BREATH``): the
+  rules' own level already follows the model's (measured on the 14
+  sentences of the fast check, 123 vowels: correlation 0.68, 2.6 dB RMS
+  apart, spread 2.9 dB against the model's 3.5), so the shares laid on top
+  of it doubled the swing (5.0 dB, 3.1 dB RMS from the model's) and the
+  phonemes were heard worse in every comparison made (held-out sentences
+  18.0 against 27.3 %, 15.5 against 24.9 % at the speed 0.8).
+* **speed** -- the model's own tempo is 23 % faster than the engine's rules
+  (M2; 18 % for F2; vowels 30 % shorter), past what the engine's
+  articulators keep up with; ``SPEED`` slows it to about the rules' pace.
 
     python prosody.py neural "Any text at all." --out s.json [--voice M2] [--speed 1.0]
     bin/say --engine physical --voice deep --match-prosody s.json "Any text at all."
@@ -113,6 +123,16 @@ MAX_TOKENS = 512
 KEEP_PAUSE = 0.05
 #: Threads the model runs on (the model card's speed is for four).
 THREADS = 4
+#: The model's speaking rate asked for (1 = as it predicts, larger is
+#: faster): at 1 its phones last 0.77 of the engine's rule durations (M2;
+#: F2 0.82; median of the 14 sentences of the fast check), and the engine,
+#: whose articulators are driven at most 1.43 times their speed to keep up
+#: (``follow_speed_max``), was heard worse on the held-out sentences (phoneme
+#: error 18.0 % at 1, 21.2 % at 0.9, 15.5 % at 0.8, the rules 15.5 %).
+SPEED = 0.8
+#: Where the breath shares come from: ``"rules"`` (a share of 1, the rules'
+#: level) or ``"energy"`` (the model's level, see the module).
+BREATH = "rules"
 
 
 def frame_seconds(hop: int = HOP, rate: int = SAMPLE_RATE) -> float:
@@ -237,7 +257,7 @@ class TinyVoca:
         self.config = json.loads((self.dir / "config.json").read_text(encoding="utf-8"))
         self.dizione = load_dizione(self.dir)
         have = front_end_fingerprint(self.dizione.VERSION, list(self.dizione.symbols.SYMBOLS))
-        if have != self.config["phonemizer"]["fingerprint"]:
+        if have != self.config["phonemizer"]["fingerprint"] or tuple(self.dizione.symbols.SYMBOLS) != SYMBOLS:
             raise RuntimeError("dizione's tokens are not the ones the model was trained on")
         if self.config["sample_rate"] != SAMPLE_RATE or self.config["hop"] != HOP:
             raise RuntimeError("the model's frame is not 256 samples at 24 kHz")
@@ -321,10 +341,18 @@ class ModelPhones:
     unknown: list[str] = field(default_factory=list)
 
 
-#: The model's tokens that are no phone: the utterance edges, the word
-#: gap, the unknown word and the punctuation (dizione's first 17 symbols).
-NOT_PHONES = frozenset(("<pad>", "<bos>", "<eos>", "<sp>", "<unk>", ",", ".", "?", "!", ";", ":", '"', "'", "(", ")",
-                        "—", "…"))  # fmt: skip
+#: The model's 76 tokens (its ``vocab``, dizione's ``SYMBOLS``, in id order): 5
+#: special ones, 12 marks, 26 consonants and 33 vowels.
+SYMBOLS = (
+    "<pad>", "<bos>", "<eos>", "<sp>", "<unk>", ",", ".", "?", "!", ";", ":", '"', "'", "(", ")", "—", "…",
+    "p", "b", "t", "d", "k", "ɡ", "f", "v", "θ", "ð", "s", "z", "ʃ", "ʒ", "h", "m", "n", "ŋ", "l", "ɹ", "j", "w",
+    "tʃ", "dʒ", "ɾ", "ʔ",
+    "ə", "ɐ", "ɚ", "ᵻ", "ɪ", "i", "iː", "ɛ", "æ", "ʌ", "ɑː", "ɔ", "ɔː", "ʊ", "uː", "ɜː", "eɪ", "aɪ", "ɔɪ", "oʊ", "aʊ",
+    "iə", "oː", "ɑːɹ", "ɔːɹ", "oːɹ", "ɪɹ", "ɛɹ", "ʊɹ", "aɪɚ", "aɪə", "əl", "n̩",
+)  # fmt: skip
+#: The tokens that are no phone: the utterance edges, the word gap, the
+#: unknown word and the punctuation.
+NOT_PHONES = frozenset(SYMBOLS[:17])
 
 #: How a token the model writes for two phones shares its time out: the
 #: vowel's part weighs this much against a consonant's 1 (as
@@ -563,7 +591,7 @@ def breath_shares(phones: list[str], start, end, db, hop: float) -> tuple[np.nda
     return lv, np.asarray(Pr.db_breath(np.clip(target, *Pr.LEVEL_RANGE)), float)
 
 
-def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: bool = True,
+def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: bool = False,
                    meta: dict | None = None) -> tuple[dict, dict]:  # fmt: skip
     """The schedule (``prosody.analyse_audio``'s format) of the engine's phones on
     the model's timing, pitch and level, and a report of the mapping."""
@@ -642,8 +670,9 @@ def read_phones(path: Path) -> tuple[list[str], np.ndarray]:
     return list(rec["phones"]), spans[:, 1] - spans[:, 0]
 
 
-def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float = 1.0, pitch_shift_st: float = 0.0,
-                    pitch_range: float = 1.0, breath: bool = True, phones: tuple[list[str], np.ndarray] | None = None,
+def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float = SPEED, pitch_shift_st: float = 0.0,
+                    pitch_range: float = 1.0, breath: bool = BREATH == "energy",
+                    phones: tuple[list[str], np.ndarray] | None = None,
                     say: Path | None = None) -> tuple[dict, dict]:  # fmt: skip
     """The schedule for ``text`` with the model's prosody, and a report (the
     mapping, the time the model took)."""
@@ -675,7 +704,7 @@ def cmd_neural(args) -> int:
     model = TinyVoca(Path(args.model_dir) if args.model_dir else None, args.threads)
     phones = read_phones(Path(args.phones)) if args.phones else None
     sched, rep = neural_schedule(model, args.text, args.voice, args.speed, args.pitch_shift, args.pitch_range,
-                                 not args.no_breath, phones, Path(args.say) if args.say else None)  # fmt: skip
+                                 args.breath == "energy", phones, Path(args.say) if args.say else None)  # fmt: skip
     Path(args.out).write_text(json.dumps(sched, indent=1, ensure_ascii=False), encoding="utf-8")
     f0 = rep["f0"]
     print(f"{args.out}: {rep['phones']} phones, {rep['pauses']} pauses, {rep['speech_s']:.2f} s of speech; the model "
@@ -700,10 +729,12 @@ def add_parser(sub) -> None:
     n.add_argument("text")
     n.add_argument("--out", required=True)
     n.add_argument("--voice", choices=["F2", "M2"], default="M2", help="the model's voice (default: %(default)s)")
-    n.add_argument("--speed", type=float, default=1.0, help="the model's speaking rate, 0.25 to 4 (larger is faster)")
+    n.add_argument("--speed", type=float, default=SPEED,
+                   help="the model's speaking rate, 0.25 to 4, larger is faster (default: %(default)s, about the rules' pace)")
     n.add_argument("--pitch-shift", type=float, default=0.0, help="semitones added to the model's pitch")
     n.add_argument("--pitch-range", type=float, default=1.0, help="the model's pitch movement around its mean, scaled")
-    n.add_argument("--no-breath", action="store_true", help="leave the breath to the rules (no level)")
+    n.add_argument("--breath", choices=["rules", "energy"], default=BREATH,
+                   help="breath shares from the rules (1) or the model's energy (default: %(default)s)")
     n.add_argument("--phones", help="the engine's phones and rule spans as JSON (as say --phone-times writes them)")
     n.add_argument("--say", help="the say binary for the engine's phones (default: bin/say, or SAY_BIN)")
     n.add_argument("--model-dir", help="where the model is (default: TINY_VOCA_DIR, else .cache/tiny-voca)")

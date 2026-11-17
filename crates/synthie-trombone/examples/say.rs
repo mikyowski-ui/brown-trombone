@@ -52,7 +52,10 @@
 //! its voice `F2` or `M2`: the engine's phones for the text go to
 //! `tools/judge/prosody.py neural`, which writes the schedule beside the
 //! output (`out.neural.json`), and the text is spoken following it as with
-//! `--match-prosody` (the `--prosody-*` flags apply). The bridge runs in
+//! `--match-prosody` (the `--prosody-*` flags apply; the pitch is moved
+//! to the voice's own median unless `--prosody-pitch speaker` says
+//! not). SPEED is the model's speaking rate (default 0.8, about the
+//! engine's rule pace; larger is faster). The bridge runs in
 //! the Python of `SYNTHIE_NEURAL_PYTHON` (default: `tools/judge/.venv`,
 //! with the judge's `neural` dependency group installed) from the judge
 //! folder `SYNTHIE_JUDGE_DIR` (default: this checkout's).
@@ -139,7 +142,7 @@ fn neural_schedule(
     out: &str,
     settings: &synthie_trombone::VoiceSettings,
 ) -> std::io::Result<String> {
-    let (voice, speed) = spec.split_once(':').unwrap_or((spec, "1"));
+    let (voice, speed) = spec.split_once(':').map_or((spec, None), |(v, s)| (v, Some(s)));
     let utterance = Utterance::from_tokens(&speech::phonemize(text), &settings.prosody());
     let spans: Vec<[f32; 2]> = utterance
         .phone_spans()
@@ -161,7 +164,9 @@ fn neural_schedule(
     let status = Command::new(&python)
         .arg(format!("{judge}/prosody.py"))
         .arg("neural")
-        .args(["--voice", voice, "--speed", speed, "--phones"])
+        .args(["--voice", voice])
+        .args(speed.map(|s| ["--speed", s]).into_iter().flatten())
+        .arg("--phones")
         .arg(&phones_file)
         .arg("--out")
         .arg(&schedule_file)
@@ -267,7 +272,7 @@ fn main() -> std::io::Result<()> {
     let mut profile: Option<String> = None;
     let mut dump = false;
     let mut schedule: Option<String> = None;
-    let mut pitch_mode = PitchMode::Speaker;
+    let mut pitch_mode = None;
     let mut phone_times: Option<String> = None;
     let mut kick = true;
     let mut follow_voice = true;
@@ -323,11 +328,11 @@ fn main() -> std::io::Result<()> {
             "--profile" => profile = Some(value("--profile")),
             "--match-prosody" => schedule = Some(value("--match-prosody")),
             "--prosody-pitch" => {
-                pitch_mode = match value("--prosody-pitch").as_str() {
+                pitch_mode = Some(match value("--prosody-pitch").as_str() {
                     "speaker" => PitchMode::Speaker,
                     "voice" => PitchMode::Voice,
                     other => panic!("unknown pitch mode {other:?}; try speaker or voice"),
-                };
+                });
             }
             "--phone-times" => phone_times = Some(value("--phone-times")),
             "--prosody-kick" => kick = value("--prosody-kick") != "off",
@@ -359,6 +364,13 @@ fn main() -> std::io::Result<()> {
     if let Some(spec) = &neural {
         schedule = Some(neural_schedule(spec, &text, &path, &settings)?);
     }
+    // The model's voice is not this one: by default its contour is moved to
+    // this voice's own median.
+    let pitch_mode = pitch_mode.unwrap_or(if neural.is_some() {
+        PitchMode::Voice
+    } else {
+        PitchMode::Speaker
+    });
     // A schedule's own voice: the speaker's tract length, voice quality and
     // pitch, as a profile laid over the preset (a --profile goes on top).
     let schedule_json = match &schedule {
