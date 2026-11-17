@@ -726,7 +726,7 @@ impl Head {
         } else {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             {
-                self.glide = (8.0 * GLIDE / self.dt) as u32;
+                self.glide = ((8.0 * GLIDE / self.dt) as u32).max(1);
             }
         }
     }
@@ -808,6 +808,49 @@ impl Head {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The response of `[b0, b1, a1]` at `hz` for ticks of `dt`: (re, im).
+    fn response(c: &[f32; 3], hz: f32, dt: f32) -> (f32, f32) {
+        let w = 2.0 * PI * hz * dt;
+        let (zr, zi) = (cos(w), -sin(w));
+        let (nr, ni) = (c[0] + c[1] * zr, c[1] * zi);
+        let (dr, di) = (1.0 + c[2] * zr, c[2] * zi);
+        let d = dr * dr + di * di;
+        ((nr * dr + ni * di) / d, (ni * dr - nr * di) / d)
+    }
+
+    #[test]
+    fn the_mixdown_makes_no_notch_between_ports() {
+        // Two ports of equal level summed in the mixdown, each through its
+        // own beaming: the sum never falls more than a tenth of a dB under
+        // the sum of their levels below 8 kHz (the worst pair is the lips
+        // and a cheek, whose shelves differ most in phase: 16° at 820 Hz).
+        // A listener's paths are not phase-clean: straight ahead the
+        // chest's return alone, 0.62 ms late at 0.18 of the lips' level,
+        // puts a notch of about 1.5 dB near 800 Hz.
+        let head = Head::new();
+        let flat = [1.0, 0.0, 0.0];
+        let mut worst = (0.0f32, 0, 0, 0.0);
+        for p in 0..PORTS {
+            for q in p + 1..PORTS {
+                let (cp, cq) = (if p == LIPS { flat } else { head.mix_c[p] }, head.mix_c[q]);
+                let mut hz = 20.0;
+                while hz <= 8000.0 {
+                    let (a, b) = (response(&cp, hz, head.dt), response(&cq, hz, head.dt));
+                    let together = sqrt((a.0 + b.0).powi(2) + (a.1 + b.1).powi(2));
+                    let apart = sqrt(a.0 * a.0 + a.1 * a.1) + sqrt(b.0 * b.0 + b.1 * b.1);
+                    let db = 20.0 * (together / apart).log10();
+                    if db < worst.0 {
+                        worst = (db, p, q, hz);
+                    }
+                    hz += 10.0;
+                }
+            }
+        }
+        std::println!("worst notch {worst:?}");
+        assert!(worst.0 > -0.1, "{worst:?}");
+        assert!(worst.0 < -0.01, "{worst:?}");
+    }
 
     #[test]
     fn shut_opening_presents_no_load() {
