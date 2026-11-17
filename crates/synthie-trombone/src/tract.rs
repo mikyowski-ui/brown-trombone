@@ -8,6 +8,7 @@
 use crate::INTERNAL_RATE;
 use crate::math::{cos, exp, lerp, move_towards, powf, spring_step, sqrt};
 use crate::phys::Stream;
+use crate::tract_modes as modes;
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
 
@@ -101,6 +102,105 @@ fn pharynx_weight(i: usize) -> f32 {
     } else {
         0.0
     }
+}
+
+// ----- the tongue body from measured modes (physical engine) -------------
+//
+// With `AnatomyConfig::tongue_model` 1 the body from the top of the
+// epilarynx to the lips is not the cosine hump but a measured neutral shape
+// plus three principal modes of eleven vowels of one man (Story 2008, MRI;
+// `src/tract_modes.rs`), weighted by the body's three numbers
+// (`Tract::modes`). A cosine tongue set by its place and height (the app's
+// handle, the consonants with a body of their own) is projected onto the
+// modes. The lips, the consonants carved on the body and the nose are as
+// on the cosine body.
+
+/// Narrowest diameter the modal body gives a cell: some 0.1 cm², the
+/// narrowest the measured vowels have (/ɔ/'s pharynx).
+const MODAL_FLOOR: f32 = 0.3;
+/// How far each body number may go beyond the measured vowels' range, in
+/// spans of that range, either way.
+const MODAL_REACH: f32 = 1.0;
+
+/// The body numbers a tract allows: the measured range widened by
+/// [`MODAL_REACH`] of its span either way.
+pub(crate) fn mode_range(k: usize) -> (f32, f32) {
+    let (lo, hi) = modes::RANGE[k];
+    let span = hi - lo;
+    (lo - MODAL_REACH * span, hi + MODAL_REACH * span)
+}
+
+/// `q` with every number inside [`mode_range`]; numbers not finite are `0`
+/// (the neutral shape).
+pub(crate) fn clamp_modes(q: [f32; 3]) -> [f32; 3] {
+    let mut out = [0.0; 3];
+    for (k, (o, v)) in out.iter_mut().zip(q).enumerate() {
+        let (lo, hi) = mode_range(k);
+        *o = if v.is_finite() { v.clamp(lo, hi) } else { 0.0 };
+    }
+    out
+}
+
+/// Diameter of cell `i` (from [`modes::FROM`] to before [`modes::TO`]) of
+/// the modal body with numbers `q`.
+fn modal_cell(i: usize, q: &[f32; 3]) -> f32 {
+    let j = i - modes::FROM;
+    let mut d = modes::NEUTRAL[j];
+    for (m, qk) in modes::MODES.iter().zip(q) {
+        d += qk * m[j];
+    }
+    d.max(MODAL_FLOOR)
+}
+
+/// The cosine tongue `(index, diameter)` of the cells before the lips (as
+/// `Tract::rest_diameter` makes it), projected onto the modes: the body
+/// numbers whose shape is nearest to it in the least-squares sense over the
+/// cosine's own cells.
+#[must_use]
+pub(crate) fn project_tongue(index: f32, diameter: f32) -> [f32; 3] {
+    clamp_modes(projection(index, diameter))
+}
+
+/// [`project_tongue`] without the clamping.
+fn projection(index: f32, diameter: f32) -> [f32; 3] {
+    let mut q = [0.0f32; 3];
+    for i in modes::COSINE_FROM..modes::TO {
+        let d = cosine_tongue(i, index, diameter) - modes::NEUTRAL[i - modes::FROM];
+        for (qk, p) in q.iter_mut().zip(&modes::PROJECTION) {
+            *qk += p[i - modes::COSINE_FROM] * d;
+        }
+    }
+    q
+}
+
+/// How the modal body's numbers move when a cosine tongue at `from` is
+/// drawn `w` of the way towards `to` (as a consonant's tip draws the
+/// vowel's body forward and up): the projection of that change of shape,
+/// added to whatever numbers the body has. Drawn towards the projection of
+/// `to` itself instead, the body moved much further than the cosine one
+/// does (the /ɔ/ of a body drawn 0.3 of the way to the tip's: F2 1030 to
+/// 1470 Hz on the modal body, 1030 to 1120 on the cosine one, heard as
+/// /ɑ/), since the tip's own tongue projects onto an /i/-like body.
+#[must_use]
+pub(crate) fn drawn_modes(q: [f32; 3], from: (f32, f32), to: (f32, f32), w: f32) -> [f32; 3] {
+    let a = projection(from.0, from.1);
+    let b = projection(from.0 + (to.0 - from.0) * w, from.1 + (to.1 - from.1) * w);
+    [0, 1, 2].map(|k| q[k] + b[k] - a[k])
+}
+
+/// The cosine tongue's diameter of cell `i` (`BLADE_START..LIP_START`).
+#[allow(clippy::cast_precision_loss)]
+fn cosine_tongue(i: usize, index: f32, diameter: f32) -> f32 {
+    let t = 1.1 * PI * (index - i as f32) / (TIP_START - BLADE_START) as f32;
+    let fixed = 2.0 + (diameter - 2.0) / 1.5;
+    let mut curve = (1.5 - fixed + GRID_OFFSET) * cos(t);
+    if i == BLADE_START - 2 || i == LIP_START - 1 {
+        curve *= 0.8;
+    }
+    if i == BLADE_START || i == LIP_START - 2 {
+        curve *= 0.94;
+    }
+    1.5 - curve
 }
 
 // ----- articulators of two speeds (physical engine) ----------------------
@@ -380,6 +480,11 @@ pub(crate) struct Tract {
     /// back, `0` at rest (see [`pharynx_weight`]). Part of the vowel shape,
     /// moved with the tongue body. The classic engine leaves it at rest.
     pub(crate) pharynx: f32,
+    /// The modal body's three numbers (physical engine with
+    /// `AnatomyConfig::tongue_model` 1), or `None`: the cosine tongue
+    /// `(tongue_index, tongue_diameter)` projected onto the modes. Setting
+    /// the tongue lets go of them.
+    pub(crate) modes: Option<[f32; 3]>,
     /// Tenseness the folds are set to (`Trombone::set_tenseness`): the
     /// epilaryngeal tube narrows with it (physical engine, see
     /// [`Tract::epilarynx`]).
@@ -525,6 +630,7 @@ impl Tract {
             tongue_index: 12.9,
             tongue_diameter: 2.43,
             pharynx: 0.0,
+            modes: None,
             tenseness: 0.6,
             velum_target: VELUM_CLOSED,
             velum_haste: 1.0,
@@ -623,6 +729,48 @@ impl Tract {
     pub(crate) fn set_tongue(&mut self, index: f32, diameter: f32) {
         self.tongue_index = index.clamp(*TONGUE_INDEX.start(), *TONGUE_INDEX.end());
         self.tongue_diameter = diameter.clamp(*TONGUE_DIAMETER.start(), *TONGUE_DIAMETER.end());
+        self.modes = None;
+    }
+
+    /// Set the modal body's three numbers (see [`Tract::modes`]), inside
+    /// [`mode_range`]; `None` follows the cosine tongue again.
+    pub(crate) fn set_modes(&mut self, q: Option<[f32; 3]>) {
+        self.modes = q.map(clamp_modes);
+    }
+
+    /// Whether the tongue body is the modal one (physical engine with
+    /// `AnatomyConfig::tongue_model` 1).
+    pub(crate) fn modal(&self) -> bool {
+        self.jaw && self.motion.anatomy.tongue_model >= 0.5
+    }
+
+    /// First cell the modal body shapes: above the tube over the folds and
+    /// its ramp (`AnatomyConfig::epilarynx_cells`, `epilarynx_flare_cells`;
+    /// a cell the tube's top falls in is the tube's), never below the first
+    /// cell the modes are measured over. The measured body has a lower
+    /// pharynx of its own, which takes the place of the epilarynx's uniform
+    /// flare; the larynx slide (cells 8 and 9, `larynx_travel`) takes their
+    /// mean area.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn modal_from(&self) -> usize {
+        let a = &self.motion.anatomy;
+        let end = a.epilarynx_cells.max(0.0) + a.epilarynx_flare_cells.max(0.0);
+        // Rounded up (no `ceil` without `std`).
+        let whole = end as usize;
+        #[allow(clippy::cast_precision_loss)]
+        let top = if (whole as f32) < end {
+            whole + 1
+        } else {
+            whole
+        };
+        top.clamp(modes::FROM, BLADE_START)
+    }
+
+    /// The modal body's three numbers now: those set, or the cosine
+    /// tongue's projection.
+    pub(crate) fn body_modes(&self) -> [f32; 3] {
+        self.modes
+            .unwrap_or_else(|| project_tongue(self.tongue_index, self.tongue_diameter))
     }
 
     /// Set the tongue root (see [`Tract::pharynx`]), within
@@ -822,16 +970,7 @@ impl Tract {
             let ramp = ((i + 1 - LIP_START) as f32 / JAW_RAMP).min(1.0);
             return LIP_REST + self.jaw_open * ramp;
         }
-        let t = 1.1 * PI * (self.tongue_index - i as f32) / (TIP_START - BLADE_START) as f32;
-        let fixed = 2.0 + (self.tongue_diameter - 2.0) / 1.5;
-        let mut curve = (1.5 - fixed + GRID_OFFSET) * cos(t);
-        if i == BLADE_START - 2 || i == LIP_START - 1 {
-            curve *= 0.8;
-        }
-        if i == BLADE_START || i == LIP_START - 2 {
-            curve *= 0.94;
-        }
-        1.5 - curve
+        cosine_tongue(i, self.tongue_index, self.tongue_diameter)
     }
 
     /// [`rest_diameter`](Self::rest_diameter) with the tongue root's own
@@ -854,6 +993,16 @@ impl Tract {
     /// behind the rounding, a lowered tongue would widen the mouth of a
     /// /u/ and give it a second way to its formants, one that a gliding
     /// voice would have to leave by a jump.
+    ///
+    /// On the modal body too the jaw follows the height of the cosine
+    /// tongue the vowel shape carries (the cosine table's, or what the
+    /// body's numbers project nearest to): the jaw is the `LipsAndJaw` tier's,
+    /// as before, and only the body under it changes. Following the modal
+    /// body's own opening instead (its narrowest cell from the soft palate
+    /// on, between that of the closest and of the most open measured vowel)
+    /// opened the jaw of /ʌ ɔ/ to 0.7 to 0.8 where the cosine's is under
+    /// 0.2, and in sentences /ʌ/ was heard as /ɑ/ 8 times in 18 (vowels
+    /// wrong in the LibriSpeech texts 31.1 % against 26.2 % with this jaw).
     fn jaw_opening(&self) -> f32 {
         let open = (self.tongue_diameter - *TONGUE_DIAMETER.start())
             / (*TONGUE_DIAMETER.end() - *TONGUE_DIAMETER.start());
@@ -885,8 +1034,13 @@ impl Tract {
         clippy::cast_sign_loss
     )]
     fn compute_targets(&mut self) {
+        let modal = self.modal().then(|| self.body_modes());
+        let from = self.modal_from();
         for i in 0..N {
-            self.target[i] = self.body_diameter(i);
+            self.target[i] = match &modal {
+                Some(q) if (from..modes::TO).contains(&i) => modal_cell(i, q),
+                _ => self.body_diameter(i),
+            };
         }
         let floor = match self.dynamics {
             Dynamics::Linear => 0.0,

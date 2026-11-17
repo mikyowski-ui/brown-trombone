@@ -26,14 +26,82 @@ const STEP: f32 = 4.0;
 /// Tick rate of the native tract, Hz.
 const NATIVE_RATE: f32 = 96_000.0;
 
-/// A physical-engine voice holding `shape` at `tract_length`, settled.
+/// A physical-engine voice holding `shape` at `tract_length`, settled, with
+/// the [`base`] tuning; a shape with the modal body's numbers
+/// ([`Shape::modes`]) on the modal body (`tongue_model` 1), a rounded one
+/// (lips set) with the larynx lowered by `rounded_larynx`, as speech lowers
+/// it for a rounded vowel.
 pub fn voice(shape: &Shape, tract_length: f32) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
+    let mut tuning = base();
+    if shape.modes.is_some() {
+        tuning.anatomy.tongue_model = 1.0;
+    }
+    if tuning != synthie_trombone::Tuning::DEFAULT {
+        t.set_tuning(&tuning);
+    }
     t.set_tract_length(tract_length);
+    if shape.lips.is_some() && tuning.articulation.rounded_larynx > 0.0 {
+        t.set_larynx_height(-tuning.articulation.rounded_larynx);
+    }
     t.set_shape(shape);
     t.settle();
     t
+}
+
+static BASE: std::sync::OnceLock<synthie_trombone::Tuning> = std::sync::OnceLock::new();
+
+/// Measure every shape with `tuning` from now on (once, before the first
+/// measurement), in place of the default: the tables are solved for the
+/// tract it configures.
+pub fn set_base(tuning: synthie_trombone::Tuning) {
+    let _ = BASE.set(tuning);
+}
+
+/// The tract the wave is switched on with (`--lengthened`): the lip horn
+/// 1.2 cm, the larynx's full travel, a rounded vowel's larynx lowered
+/// 0.5 cm, none for a voiced stop, a tube of four cells above the folds.
+pub fn lengthened(mut tuning: synthie_trombone::Tuning) -> synthie_trombone::Tuning {
+    tuning.anatomy.lip_horn = 1.2;
+    tuning.anatomy.larynx_travel = 1.0;
+    tuning.articulation.rounded_larynx = 0.5;
+    tuning.articulation.voiced_stop_larynx = 0.0;
+    tuning.anatomy.epilarynx_cells = 4.0;
+    tuning
+}
+
+/// The tract the command line asks for, made the [`base`]: the default,
+/// with `--lengthened` [`lengthened`], and then `--profile FILE` laid on
+/// top (a voice profile's `tuning`, as `say --profile` reads it).
+pub fn base_from_args() -> synthie_trombone::Tuning {
+    let args: Vec<String> = std::env::args().collect();
+    let mut tuning = synthie_trombone::Tuning::DEFAULT;
+    if args.iter().any(|a| a == "--lengthened") {
+        tuning = lengthened(tuning);
+    }
+    if let Some(path) = args
+        .iter()
+        .position(|a| a == "--profile")
+        .and_then(|k| args.get(k + 1))
+    {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let voice = synthie_trombone::VoiceSettings {
+            tuning,
+            ..synthie_trombone::VoiceSettings::default()
+        };
+        tuning = voice
+            .with_profile(&text)
+            .unwrap_or_else(|e| panic!("{path}: {e}"))
+            .tuning;
+    }
+    set_base(tuning);
+    tuning
+}
+
+/// The tuning shapes are measured with (see [`set_base`]; the default).
+pub fn base() -> synthie_trombone::Tuning {
+    *BASE.get_or_init(|| synthie_trombone::Tuning::DEFAULT)
 }
 
 /// The first three peaks of a transfer function magnitude sampled every

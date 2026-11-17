@@ -305,7 +305,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 32 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 33 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 71) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
@@ -322,6 +322,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
 | anatomy | the tract's length (wave 2A; each `0` off) | `lip_horn`, `larynx_travel` |
 | anatomy | the epilarynx (wave 2B; the original's tube by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
+| anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -889,6 +890,90 @@ as the model goes:
   target until the tables are solved again on this tract
   (`examples/vowel_size.rs`, then `examples/babble.rs`);
   `examples/tract_length.rs` measures all of this.
+- **The tongue body from measured modes (Wave 2C, off).** With
+  `tongue_model` 1 the physical tract's body, from the top of the tube
+  above the folds (`epilarynx_cells`: cell 7 by default, 4 with four cells
+  of tube) to where the lips begin (cell 38), is a measured
+  neutral shape plus three principal modes, weighted by three numbers
+  (`Shape::modes`, the `TongueBody` tier's `mode_1..3`), in place of the
+  cosine hump. `examples/tract_modes.rs` computes them from Story's (2008)
+  MRI area functions of eleven vowels of one man
+  (`data/story2008_area_functions.csv`; a lossless tube of each row, with
+  the lips' radiation inertance, gives the paper's calculated F3 within
+  0.4 % and F2 within 2.4 %): over all 44 sections the mean and four modes
+  carry 74.3, 14.7, 5.8 and 3.8 % of the variance, over the body's cells
+  (4 to 38) 78.1, 13.7, 6.0 and 1.2 % (97.8 % with three; the fourth, over all
+  sections the lips' and the front of the mouth's opening, is gone once the
+  lips are left out, and the lips stay the `LipsAndJaw` tier's so that a
+  vowel's rounding can span a consonant). Mode 1 is the pharynx wide and the
+  front of the mouth narrow against the reverse (/i/ −1.6 to /ɑ ɔ/ +1.4:
+  the owner's "jaw" mode, but without the jaw, which stays the lips' tier's);
+  mode 2 a narrowing at the soft palate against an open middle (/u ʊ o/
+  −1.3 to −1.9 against the rest: the front–back of the dorsum, as far as it
+  is a separate thing in this speaker); mode 3 the whole lower tract wider,
+  the lower pharynx most (/i/ +2.0, /ɑ u/ +1.0 to +1.2 against /æ ɛ ɪ/
+  −0.8 to −1.2: the tongue root, which puts /i u/ against /ɪ ʊ/ and /ɑ/
+  against /ʌ/, but /e o/ on the lax side). His shapes are scaled to the
+  native tract as a similar tube (0.749 × the equivalent diameter; his own
+  areas or a wider scale change the engine's formants of his vowels by
+  about a point: a lossless tube depends on area ratios alone). His own
+  epilarynx is four sections (1.5 cm) of diameters 0.51 to 0.61 (a uniform
+  tube of the same air 0.56, the engine's 0.6; on the wave's tract, with
+  the tables of 0.6, a tube of 0.56 heard the vowels wrong 24.1 % of the
+  time against 25.5 %, the 30 held-out sentences 27.9 % and 70.9 % against
+  28.8 % and 70.0 %); the body taken from the
+  fifth over the original seven cells of tube put the tract's fourth
+  formant at 3.8 to 4.3 kHz and the 4 to 8 kHz band 5 to 12 dB higher in
+  every vowel, as four cells of tube do: the body begins where the tube
+  above the folds ends (`Tract::modal_from`), and its measured lower
+  pharynx takes the place of the epilarynx's flare. A tongue set by place and height (the app's
+  handle, the consonants with a body of their own) is projected onto the
+  modes (least squares over the cosine's cells); a consonant's tip draws
+  the body by as much as it changes the vowel's cosine tongue (drawn
+  towards the projection of the tip's own tongue, /ɔ/'s F2 rose from 1030
+  to 1470 Hz under an alveolar, the cosine's to 1120, and it was heard as
+  /ɑ/). The jaw follows the height of the cosine tongue the shape carries:
+  following the modal body's own opening it opened /ʌ ɔ/ to 0.7 to 0.8 and
+  /ʌ/ was heard as /ɑ/ 8 times in 18. Every vowel is solved again for the
+  modal body (`src/vowel_modes_table.rs`), started from and pulled towards
+  the speaker's shape for the eleven he said (a blend of his shapes for the
+  others); on the default tract F1 and F2 land within 3 % at every size but
+  /ɔ ɔɪ/ (F1 up to 3.7 % short in small bodies; on the wave's tract up to
+  4.7 %, and /æ aɪ aʊ/ up to 3.2 %, where the cosine body misses /ɑ/ by up
+  to 5 % and the modal body reaches it), the open vowels /ɑ ɔ æ aʊ ɔɪ/ and the end of
+  /ʌ/'s glide with a narrowing of the lower pharynx as on the cosine body
+  (the piriform sinuses, some 2 cm³ hung below, pull an open vowel's F1
+  down by a quarter: the speaker's /ɑ/ on the engine is at 552 Hz with
+  them, 745 without, his own 761 scaled). Solved, his vowels move by up to
+  2.3 of their units from his own shapes (/ɔ/'s second number, /æ ɛ ʌ/'s
+  third; /e o/ by under half a unit): one supine man holding vowels in a
+  scanner, and targets that are 45 men's. The third number keeps /i/
+  (+0.9) apart from /ɪ/ (−1.4) and /ɑ/ (+2.1) from /ʌ/ (−1.6), not /u/
+  (−0.5) from /ʊ/ (0.0) or /e/ (−0.7) from /ɛ/ (+0.6). Measured on the merged engine (single runs): on the
+  default tract the modal body hears vowels in the LibriSpeech texts wrong
+  25.2 % of the time (the cosine 24.1 %), the ten `sentence_heldout`
+  sentences 23.3 % phoneme error and 85.0 % of Whisper's words (22.0, 81.2),
+  the 30 held-out 26.3 % and 77.4 % (26.3, 74.3), the 30 tuning 23.5 % and
+  74.4 % (21.4, 74.1), consonants right 86.9 % (88.9); on the tract the
+  wave is switched on with (`lip_horn` 1.2, `larynx_travel` 1,
+  `rounded_larynx` 0.5, four cells of tube) the cosine body, solved again,
+  gives 19.2 % vowels wrong, 16.3 % and 81.2 %, 20.4 % and 73.5 %, 17.1 %
+  and 79.1 %, 90.5 % right, and the modal body 25.5 %, 24.5 % and 78.8 %,
+  28.8 % and 70.0 %, 25.3 % and 74.1 %, 87.6 %. The modal body's front
+  vowels are heard as well or better (/ɛ/ 0 % wrong on the default tract,
+  the cosine's 17 %), its back ones worse (/ɔ/ 75 to 88 % against 62 %,
+  mostly as /ɑ/; /ʌ/ 22 against 6 to 11 %), and the tense–lax confusions
+  the third mode was to cure are few either way (9 of the cosine's 69
+  wrong vowels; most are /ə/ heard as /ɪ æ/ and /ɔ ɑ/ heard as /ɑ æ/).
+  The tables are solved per tract as well: a voice with the
+  lengthened tract (`lip_horn` or `larynx_travel` above 0, or the tube
+  above the folds off its defaults) reads
+  `src/vowel_size_wave_table.rs` or `src/vowel_modes_wave_table.rs`
+  (`vowel_targets::lengthened`), solved by
+  `vowel_size -- --lengthened --both`; `babble -- --modal --lengthened`
+  measures the modal body's babble map (`inverse::modal`), used by `mimic`
+  (`Mimic::set_modal`), Formant Lock and a followed speaker's vowels on a
+  modal voice.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 

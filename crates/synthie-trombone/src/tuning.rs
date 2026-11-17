@@ -534,6 +534,19 @@ tuning! {
         /// kHz, and the eight-cell tube that gives the cluster gives it in 4
         /// to 12 of the 31 vowel shapes. `0` switches it off.
         epilarynx_effort = 0.0, 0.0..=2.0, A;
+
+        // ----- the tongue body from measured modes (wave 2, stage 2C) ----------------
+
+        /// The shape of the tongue body on the physical engine: `0` the
+        /// cosine of Pink Trombone (a hump slid along the tube by its place and
+        /// height), `1` a measured neutral shape and three principal modes of
+        /// eleven vowels of one man from MRI (Story 2008; `src/tract_modes.rs`)
+        /// from the top of the epilarynx to the lips, the vowels solved on it
+        /// (`src/vowel_modes_table.rs`; on the lengthened tract, see
+        /// `vowel_targets::lengthened`, `src/vowel_modes_wave_table.rs`). The jaw
+        /// follows the cosine tongue the shapes carry. The classic engine keeps
+        /// the cosine.
+        tongue_model = 0.0, 0.0..=1.0, A;
     } tiers {
     } aliases {
     }
@@ -1510,9 +1523,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (32, 71, 43)
+            (33, 71, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 146);
+        assert_eq!(Tuning::FIELDS.len(), 147);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1527,10 +1540,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_sixty_six_and_sixty_five() {
+    fn two_passes_of_sixty_seven_and_sixty_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (66, 65));
+        assert_eq!((a, b), (67, 65));
     }
 
     #[test]

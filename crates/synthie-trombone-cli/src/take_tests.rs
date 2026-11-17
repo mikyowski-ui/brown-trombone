@@ -478,6 +478,7 @@ fn header_and_commands_round_trip() {
         lips: Some(0.733),
         narrowing: Some((14.0, 1.203)),
         pharynx: -0.25,
+        modes: None,
     };
     let mut voice = Preset::Critter.settings();
     voice.tuning.anatomy.lung_pressure = 9.37;

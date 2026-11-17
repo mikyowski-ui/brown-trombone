@@ -88,6 +88,12 @@ fn body_target(r: &Resolved, narrowing: bool) -> Target {
     if let Some((index, diameter)) = r.tongue {
         t = t.with(body::LOCATION, index).with(body::DEGREE, diameter);
     }
+    if let Some(q) = r.modes {
+        t = t
+            .with(body::MODE_1, q[0])
+            .with(body::MODE_2, q[1])
+            .with(body::MODE_3, q[2]);
+    }
     if let Some(root) = r.root {
         t = t.with(body::ROOT, root);
     }
@@ -124,6 +130,9 @@ struct Resolved {
     root: Option<f32>,
     narrowing: Option<Constriction>,
     tongue: Option<(f32, f32)>,
+    /// The modal body's three numbers, where the tract has the modal body
+    /// and the articulation sets them (see `Articulation::physical_modes`).
+    modes: Option<[f32; 3]>,
     main: Option<Constriction>,
     lips: Option<Constriction>,
     velum: f32,
@@ -975,6 +984,7 @@ impl Trombone {
         self.tract.set_narrowing(r.narrowing);
         if let Some((index, diameter)) = r.tongue {
             self.set_tongue(index, diameter);
+            self.tract.set_modes(r.modes);
         }
         self.tract.set_constriction(SLOT_MAIN, r.main);
         self.tract.set_constriction(SLOT_LIPS, r.lips);
@@ -990,17 +1000,22 @@ impl Trombone {
         let own_lips = a.lips.is_some() && a.constriction.is_some();
         let lateral = self.engine == Engine::Physical && a.lateral();
         let mut root = None;
+        let mut modes = None;
         // Vowel shapes are tuned per engine.
         let (a, narrowing) = match self.engine {
             Engine::Classic => (*a, None),
             // Physical vowel shapes also follow the speaker's size, and the
             // tongue root goes with the tongue body.
             Engine::Physical => {
-                let mut held = self.own_vowels;
+                let mut held = self.own_vowels.on(crate::vowel_size::Table::of(
+                    &self.tuning,
+                    self.tract.modal(),
+                ));
                 if let Some((key, shape)) = &self.speech_vowel {
                     held.set(*key, Some(shape));
                 }
                 root = a.physical_root(self.tract_length, &held);
+                modes = a.physical_modes(self.tract_length, &held);
                 a.physical_in(self.tract_length, &held)
             }
         };
@@ -1061,6 +1076,7 @@ impl Trombone {
             root,
             narrowing,
             tongue,
+            modes,
             main: a.constriction,
             lips: a.lips,
             velum,
@@ -1189,6 +1205,7 @@ impl Trombone {
     /// gesture of its own (dominance `w / (1 − w)` for a pull of `w`); its
     /// own lips, or, under a gap meant to hiss, lips held unrounded, are a
     /// dominant lip gesture.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn articulate_as_gestures(
         &mut self,
         a: &Articulation,
@@ -1242,6 +1259,24 @@ impl Trombone {
             body = body
                 .with(var::body::LOCATION, index)
                 .with(var::body::DEGREE, diameter);
+            // The same pull on the modal body: a target whose blend with
+            // the vowel's, `w` of the way, moves the body's numbers as the
+            // vowel's cosine tongue moves when drawn `w` of the way to the
+            // tip's (`tract::drawn_modes`).
+            if let Some(v) = lean.and_then(crate::vowel_targets::VowelKey::articulation)
+                && self.tract.modal()
+                && w > 0.0
+            {
+                let v = self.resolve(&v);
+                if let (Some(q), Some(from)) = (v.modes, v.tongue) {
+                    let drawn = crate::tract::drawn_modes(q, from, (index, diameter), w);
+                    let m = [0, 1, 2].map(|k| q[k] + (drawn[k] - q[k]) / w);
+                    body = body
+                        .with(var::body::MODE_1, m[0])
+                        .with(var::body::MODE_2, m[1])
+                        .with(var::body::MODE_3, m[2]);
+                }
+            }
             body_dominance = w / (1.0 - w);
         }
         if colour.is_some() {
@@ -1524,6 +1559,13 @@ impl Trombone {
             {
                 self.set_tongue(index, diameter);
             }
+            if let (Some(a), Some(b), Some(c)) = (
+                body.get(var::body::MODE_1),
+                body.get(var::body::MODE_2),
+                body.get(var::body::MODE_3),
+            ) {
+                self.tract.set_modes(Some([a, b, c]));
+            }
             if let Some(root) = body.get(var::body::ROOT) {
                 self.tract.set_pharynx(root);
             }
@@ -1615,6 +1657,7 @@ impl Trombone {
     /// constriction slots, the velum and the voice are left alone.
     pub fn set_shape(&mut self, shape: &crate::inverse::Shape) {
         self.set_tongue(shape.tongue_index, shape.tongue_diameter);
+        self.tract.set_modes(shape.modes);
         let lips = shape
             .lips
             .map(|d| Constriction::new(crate::inverse::LIP_CELL, d));

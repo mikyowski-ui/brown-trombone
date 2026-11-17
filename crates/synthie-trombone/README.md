@@ -125,7 +125,9 @@ independent tiers, `Tier::ALL`: `GlottalAdduction`, `LarynxAndPitch`,
 target for its tier's variables (`gesture::var`: a constriction's place and
 degree, the lips' aperture and protrusion, the port, the glottis's spread,
 the pitch and the larynx's height; the protrusion and the height lengthen
-the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on),
+the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on;
+with `AnatomyConfig::tongue_model` 1 the tongue body is three numbers of
+measured MRI modes, `mode_1..3`, see `inverse::Shape::modes`),
 moved towards as a mass on a spring of its own stiffness and damping,
 weighted by its dominance against the other gestures active on the tier,
 inside an activation window with ramps. Push one into a playing voice and
@@ -202,7 +204,7 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 32 numbers),
+`AnatomyConfig` (the body, its tissues and sources: 33 numbers),
 `ArticulationConfig` (how sounds are made and joined: 71, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with

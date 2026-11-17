@@ -156,6 +156,7 @@ fn table_shape(fronted: bool) -> Shape {
             lips: Some(0.867),
             narrowing: Some((14.0, 1.775)),
             pharynx: 0.0,
+            modes: None,
         }
     } else {
         Shape {
@@ -164,6 +165,7 @@ fn table_shape(fronted: bool) -> Shape {
             lips: Some(0.733),
             narrowing: Some((14.0, 1.203)),
             pharynx: 0.0,
+            modes: None,
         }
     }
 }

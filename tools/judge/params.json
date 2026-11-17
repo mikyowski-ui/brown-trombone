@@ -31,7 +31,8 @@
     "epilarynx_diameter": {"lo": 0.4, "hi": 0.8, "default": 0.6, "pass": "a"},
     "epilarynx_flare": {"lo": 0.8, "hi": 2.2, "default": 1.1, "pass": "a"},
     "epilarynx_flare_cells": {"lo": 0, "hi": 4, "default": 0, "pass": "a"},
-    "epilarynx_effort": {"lo": 0, "hi": 2, "default": 0, "pass": "a"}
+    "epilarynx_effort": {"lo": 0, "hi": 2, "default": 0, "pass": "a"},
+    "tongue_model": {"lo": 0, "hi": 1, "default": 0, "pass": "a"}
   },
   "articulation": {
     "adduction_time": {"lo": 0.003, "hi": 0.02, "default": 0.008, "pass": "a"},

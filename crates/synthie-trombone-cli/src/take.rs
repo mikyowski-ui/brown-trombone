@@ -560,13 +560,18 @@ fn constriction_from(v: &Value) -> Result<Option<Constriction>, String> {
 }
 
 pub fn shape_json(s: &Shape) -> Value {
-    json!({
+    let mut v = json!({
         "tongue_index": s.tongue_index,
         "tongue_diameter": s.tongue_diameter,
         "lips": s.lips,
         "narrowing": s.narrowing.map(|(at, d)| [at, d]),
         "pharynx": s.pharynx,
-    })
+    });
+    // The modal body's three numbers, only where a shape has them.
+    if let (Some(q), Some(map)) = (s.modes, v.as_object_mut()) {
+        map.insert("modes".into(), json!(q));
+    }
+    v
 }
 
 fn shape_from(v: &Value) -> Result<Shape, String> {
@@ -590,6 +595,16 @@ fn shape_from(v: &Value) -> Result<Shape, String> {
             num(v, "pharynx")?
         } else {
             0.0
+        },
+        // Shapes of the cosine body have none.
+        modes: match v.get("modes").and_then(Value::as_array).map(Vec::as_slice) {
+            Some([a, b, c]) => match (a.as_f64(), b.as_f64(), c.as_f64()) {
+                #[allow(clippy::cast_possible_truncation)]
+                (Some(a), Some(b), Some(c)) => Some([a as f32, b as f32, c as f32]),
+                _ => return Err("modes is not three numbers".into()),
+            },
+            Some(_) => return Err("modes is not three numbers".into()),
+            None => None,
         },
     })
 }

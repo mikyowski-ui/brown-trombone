@@ -312,3 +312,140 @@ fn f3_steers_among_equal_shapes() {
         assert!(err(f[0], f1) < 0.03 && err(f[1], f2) < 0.03, "{f:?}");
     }
 }
+
+// ----- the modal tongue body (`inverse::modal`) ----------------------------
+
+/// F1..F3 of modal shapes on the tract the modal map is measured on (the
+/// lengthened one, see `src/inverse_modes_table.rs`), on all threads.
+fn measure_modal(jobs: &[(Shape, f32)]) -> Vec<Option<[f32; 3]>> {
+    use synthie_trombone::{Engine, Trombone, Tuning};
+    let mut tuning = Tuning::DEFAULT;
+    tuning.anatomy.tongue_model = 1.0;
+    tuning.anatomy.lip_horn = 1.2;
+    tuning.anatomy.larynx_travel = 1.0;
+    tuning.articulation.rounded_larynx = 0.5;
+    tuning.anatomy.epilarynx_cells = 4.0;
+    let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    let chunk = jobs.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    let mut m = Meter::new();
+                    part.iter()
+                        .map(|(shape, l)| {
+                            let mut t = Trombone::new(48_000.0);
+                            t.set_engine(Engine::Physical);
+                            t.set_tuning(&tuning);
+                            t.set_tract_length(*l);
+                            if shape.lips.is_some() {
+                                t.set_larynx_height(-tuning.articulation.rounded_larynx);
+                            }
+                            t.set_shape(shape);
+                            t.settle();
+                            m.formants(&t)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("worker panicked"))
+            .collect()
+    })
+}
+
+/// Random targets over the modal map's reach.
+fn modal_targets(seed: u64, n: usize, length: f32) -> Vec<(f32, f32)> {
+    let mut rng = Lcg(seed);
+    let (a, b) = (inverse::modal::F1_RANGE, inverse::modal::F2_RANGE);
+    let mut out = Vec::new();
+    while out.len() < n {
+        let f1 = (a.0.ln() + (a.1.ln() - a.0.ln()) * rng.unit()).exp() / length;
+        let f2 = (b.0.ln() + (b.1.ln() - b.0.ln()) * rng.unit()).exp() / length;
+        if inverse::modal::reachable_for(f1, f2, length) {
+            out.push((f1, f2));
+        }
+    }
+    out
+}
+
+/// Solve `targets` on the modal map at `length`, measure them on the modal
+/// body, and count the misses beyond `limit`.
+fn modal_misses(name: &str, targets: &[(f32, f32)], length: f32, limit: f32) -> usize {
+    let shapes: Vec<Shape> = targets
+        .iter()
+        .map(|&(f1, f2)| inverse::modal::solve_for(f1, f2, None, None, length))
+        .collect();
+    for s in &shapes {
+        assert_no_hiss(s);
+        assert!(s.modes.is_some(), "{s:?}");
+    }
+    let jobs: Vec<(Shape, f32)> = shapes.iter().map(|&s| (s, length)).collect();
+    let got = measure_modal(&jobs);
+    let mut misses = 0;
+    let mut worst = 0.0f32;
+    for (i, (&(f1, f2), f)) in targets.iter().zip(&got).enumerate() {
+        let e = f.map_or(f32::INFINITY, |f| err(f[0], f1).max(err(f[1], f2)));
+        worst = worst.max(e);
+        if e > limit {
+            misses += 1;
+            println!(
+                "{name} miss #{i}: target ({f1:.0}, {f2:.0}) got {f:?}, shape {:?}",
+                shapes[i]
+            );
+        }
+    }
+    println!(
+        "{name}: {} of {} within {:.0} %, worst {:.2} %",
+        targets.len() - misses,
+        targets.len(),
+        100.0 * limit,
+        100.0 * worst
+    );
+    misses
+}
+
+// The modal map is held to 95 % of its targets where the cosine map is
+// held to all of them: half its cells are rough (the body pinching shut,
+// formants changing names), and next to them the solver lands a few
+// targets wide or on a shape the engine shows no three formants for (6 of
+// 150 at the native length, 1 of 50 at 1.3).
+
+#[test]
+fn modal_map_targets_land_within_three_percent() {
+    let t = modal_targets(0x5eed, 150, 1.0);
+    let misses = modal_misses("modal gate", &t, 1.0, 0.03);
+    assert!(
+        misses <= 7,
+        "{misses} of 150 targets missed by more than 3 %"
+    );
+}
+
+#[test]
+fn modal_map_other_tract_lengths_land_within_five_percent() {
+    for length in [0.7f32, 1.3] {
+        let t = modal_targets(0x00c0_ffee + (length * 10.0) as u64, 50, length);
+        let misses = modal_misses(&format!("modal, length {length}"), &t, length, 0.05);
+        assert!(
+            misses <= 2,
+            "length {length}: {misses} of 50 missed by more than 5 %"
+        );
+    }
+}
+
+#[test]
+fn a_modal_shape_solves_on_the_modal_map_and_predicts_what_it_measures() {
+    // A `near` shape of the modal body keeps `solve` on the modal map, and
+    // the map's prediction of a solved shape is what the engine measures.
+    let near = inverse::modal::solve(500.0, 1500.0, None, None);
+    let s = inverse::solve(520.0, 1450.0, None, Some(&near));
+    assert!(s.modes.is_some(), "{s:?}");
+    let want = inverse::predict(&s).expect("a prediction");
+    let got = measure_modal(&[(s, 1.0)])[0].expect("formants");
+    for k in 0..2 {
+        assert!(err(got[k], want[k]) < 0.03, "{got:?} vs {want:?}");
+    }
+}
