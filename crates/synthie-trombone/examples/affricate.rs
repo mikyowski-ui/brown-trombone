@@ -29,6 +29,7 @@
     clippy::float_cmp
 )]
 
+use std::fmt::Write as _;
 use synthie_trombone::speech::{Speaker, Utterance};
 use synthie_trombone::{Engine, Manner, Phoneme, Preset, TractModel, Trombone, Tuning};
 
@@ -79,16 +80,16 @@ fn say(text: &str, tract: TractModel, tongue: f32) -> (Vec<Reading>, Vec<(Phonem
     (r, s)
 }
 
-/// As `say`, with each segment's larynx as planned (its gesture controls).
-fn say_planned(
-    text: &str,
-    tract: TractModel,
-    tongue: f32,
-) -> (
+/// The readings, the segments (phoneme, start, end) and each segment's
+/// larynx as planned (its gesture controls).
+type Planned = (
     Vec<Reading>,
     Vec<(Phoneme, f32, f32)>,
     Vec<synthie_trombone::speech::Controls>,
-) {
+);
+
+/// As `say`, with each segment's larynx as planned.
+fn say_planned(text: &str, tract: TractModel, tongue: f32) -> Planned {
     let mut settings = Preset::Deep.settings().with_engine(Engine::Physical);
     settings.tuning = Tuning::DEFAULT.with_tract(tract);
     settings.tuning.anatomy.tongue_model = tongue;
@@ -154,7 +155,7 @@ fn periodic(r: &[Reading], a: usize) -> bool {
         return false;
     }
     // Centred on the frame: from half the longest lag before it.
-    let a = a.saturating_sub((win + hi) / 2 - win / 2);
+    let a = a.saturating_sub(usize::midpoint(win, hi) - win / 2);
     if a + win + hi > r.len() {
         return false;
     }
@@ -210,10 +211,10 @@ fn finals(text: &str, tract: TractModel, tongue: f32) {
         // segments' ends beside it (FILE.txt).
         let bytes: Vec<u8> = audio.iter().flat_map(|x| x.to_le_bytes()).collect();
         std::fs::write(path, bytes).expect("--raw: cannot write");
-        let ends: String = segments
-            .iter()
-            .map(|s| format!("{} {:.4} {:.4}\n", s.0, s.1, s.2))
-            .collect();
+        let mut ends = String::new();
+        for s in &segments {
+            writeln!(ends, "{} {:.4} {:.4}", s.0, s.1, s.2).expect("a string");
+        }
         std::fs::write(format!("{path}.txt"), ends).expect("--raw: cannot write");
     }
     println!("{tract:?}: {text}");
@@ -265,32 +266,31 @@ fn finals(text: &str, tract: TractModel, tongue: f32) {
             // shut (|) or open, voiced (v) or not, and the hiss of that frame
             // (2 to 8 kHz) in dB against the vowel's loudest 10 ms (all bands).
             let mut line = String::new();
-            let step = (0.01 * SR) as isize;
-            for j in -5..15isize {
-                let at = c1 as isize + j * step;
-                if at < 0 || at as usize + step as usize > r.len() {
+            let step = (0.01 * SR) as usize;
+            for j in 0..20 {
+                let Some(at) = (c1 + j * step).checked_sub(5 * step) else {
+                    continue;
+                };
+                if at + step > r.len() {
                     break;
                 }
-                let at = at as usize;
-                let h = db(band(&audio[at..at + step as usize], 2000.0, 8000.0) / reference);
+                let h = db(band(&audio[at..at + step], 2000.0, 8000.0) / reference);
                 // The voice's swing: the glottal flow's range over the frame
                 // while it repeats, cm³/s.
-                let (lo, hi) = r[at..at + step as usize]
+                let (lo, hi) = r[at..at + step]
                     .iter()
                     .fold((f32::MAX, f32::MIN), |(l, h), q| {
                         (l.min(q.glottal), h.max(q.glottal))
                     });
-                line.push_str(&format!(
+                write!(
+                    line,
                     " {}{}{:.0}/{:.0}",
-                    if r[at + step as usize / 2].shut {
-                        "|"
-                    } else {
-                        ""
-                    },
+                    if r[at + step / 2].shut { "|" } else { "" },
                     if periodic(&r, at) { "v" } else { "-" },
                     if periodic(&r, at) { hi - lo } else { 0.0 },
                     h
-                ));
+                )
+                .expect("a string");
             }
             println!("  10 ms frames from -50 ms (voice swing cm³/s / hiss dB):{line}");
             println!(
