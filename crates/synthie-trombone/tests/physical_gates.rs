@@ -2463,7 +2463,12 @@ fn the_voice_is_softer_off_the_accent_and_the_folds_are_not_opened() {
     // The softening is off by default since round 9 (the owner heard the
     // accented vowels jump out where it let go); the mechanism is tested
     // at round 8's setting.
+    // Measured on the plain sum of the ports and without creak (wave 3
+    // off): the head's mixdown darkens the nasals by 1.3 dB (the nostrils
+    // point 40° down), the firm voice's to the reader's -5.7 and the
+    // softened one's to -8.5.
     let mut soft = tuned(&VoiceSettings::default()).with_engine(Engine::Physical);
+    soft.tuning = soft.tuning.with_living_voice(false);
     soft.tuning.prosody.sonorant_softness = 1.0;
     soft.tuning.prosody.unstressed_softness = 0.5;
     let mut firm = soft;

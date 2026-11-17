@@ -570,10 +570,11 @@ tuning! {
         /// mixdown: the lips, the nostrils, the throat and the cheeks as
         /// heard straight ahead on the mouth's axis, each through its own
         /// beaming, summed without the paths' delays. `0` keeps the plain
-        /// sum of the ports' flows (as before the head), `1` the mixdown;
+        /// sum of the ports' flows (as before the head), `1` the mixdown
+        /// (the default since wave 3 was switched on);
         /// the two differ by under 0.1 dB in vowels and by 0 to −1.3 dB in
         /// nasals (the nostrils point 40° down), in 500 Hz bands to 5 kHz.
-        head_mixdown = 0.0, 0.0..=1.0, A;
+        head_mixdown = 1.0, 0.0..=1.0, A;
         /// Share of the mouth's sound the chest sends back, in stereo: an
         /// image of the lips mirrored in a surface facing up and forward,
         /// heard as far as the listener sees that surface (0.18 of the lips'
@@ -1413,13 +1414,16 @@ tuning! {
         /// `speech::breathe_in`): the folds part wide, the mouth takes the shape
         /// of the vowel ahead, and the air rushes in through it. A breath before
         /// a short phrase is shallower (seven tenths of it before a phrase of a
-        /// second). `0` takes none.
-        breath_intake = 0.0, 0.0..=6.0, A;
+        /// second). `0` takes none; 5 by default, in the pauses between
+        /// sentences only (`breath_first` 0).
+        breath_intake = 5.0, 0.0..=6.0, A;
         /// Whether an utterance opens with a breath too (`1`), its first sound
         /// then coming `breath_time` and 0.1 s later, or only its long pauses
         /// take one (`0`: a single sentence is spoken exactly as without
-        /// breaths). Read only with `breath_intake` on.
-        breath_first = 1.0, 0.0..=1.0, B;
+        /// breaths; the default: the breath before the utterance cost about a
+        /// point of phoneme error on single sentences, `say --breath-intake`
+        /// asks for it). Read only with `breath_intake` on.
+        breath_first = 0.0, 0.0..=1.0, B;
         /// Shortest pause between phrases that takes a breath, s (a sentence's
         /// pause is `sentence_pause`, a comma's 0.18 s).
         breath_pause = 0.45, 0.2..=1.5, B;
@@ -1430,12 +1434,16 @@ tuning! {
         /// a statement, `0‥1` (physical engine; not before a question or a
         /// comma): the cover slackens and the folds are pressed together, and
         /// as the breath runs down they alternate strong and weak pulses. `0`
-        /// ends every statement in modal voice.
-        final_fry = 0.0, 0.0..=1.0, A;
-        /// Seconds of voice at the end of a statement over which it is in creak
-        /// (the folds alternate from their third or fourth pulse, some 40 ms,
-        /// on).
-        fry_time = 0.12, 0.05..=0.25, B;
+        /// ends every statement in modal voice; `1` by default.
+        final_fry = 1.0, 0.0..=1.0, A;
+        /// Seconds of voice at the end of a statement over which it is in creak,
+        /// up to the end of its last sonorant (the folds alternate from their
+        /// third or fourth pulse, some 40 ms, on). 0.08 by default: over those
+        /// 80 ms the pulse heights of the breath gate's two statements
+        /// alternate by 0.38 and 0.56 of their mean;
+        /// stage 3A's 0.12 creaks longer at about a point of phoneme error on
+        /// single sentences.
+        fry_time = 0.08, 0.05..=0.25, B;
     } tiers {
     } aliases {
     }
@@ -1591,6 +1599,34 @@ impl Tuning {
                 a.epilarynx_flare_cells = 4.0;
                 r.rounded_larynx = 0.5;
             }
+        }
+        self
+    }
+
+    /// This tuning with the living voice of wave 3 on or off (every other
+    /// number as it is). On: the mono output is the head's mixdown
+    /// (`anatomy.head_mixdown` 1), the lungs draw a breath of 5 cmH2O in
+    /// the pauses between sentences but not before the utterance
+    /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
+    /// in creak over their last 0.08 s of voice (`final_fry` 1, `fry_time`
+    /// 0.08). Off: the five numbers as they were before wave 3 (the plain
+    /// sum of the ports, no breaths, modal voice to the end; `breath_first`
+    /// 1 and `fry_time` 0.12, read only when their switch is on).
+    #[must_use]
+    pub const fn with_living_voice(mut self, on: bool) -> Self {
+        let p = &mut self.prosody;
+        if on {
+            self.anatomy.head_mixdown = 1.0;
+            p.breath_intake = 5.0;
+            p.breath_first = 0.0;
+            p.final_fry = 1.0;
+            p.fry_time = 0.08;
+        } else {
+            self.anatomy.head_mixdown = 0.0;
+            p.breath_intake = 0.0;
+            p.breath_first = 1.0;
+            p.final_fry = 0.0;
+            p.fry_time = 0.12;
         }
         self
     }

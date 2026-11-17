@@ -323,7 +323,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the tract's length (wave 2A; on by default, the anatomical tract's; each `0` off) | `lip_horn`, `larynx_travel` |
 | anatomy | the epilarynx (wave 2B; the anatomical tract's four cells flaring over four by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
-| anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, `head_mixdown` `0` off) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
+| anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, on by default; `head_mixdown` `0` the plain sum) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | anatomy | creak (wave 3; heard only where creak is asked for) | `creak_coupling`, `creak_press` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
@@ -341,7 +341,7 @@ breath after a burst); the physical engine reads the rest as well.
 | prosody | intonation | `accent_size`, `accent_decay`, `accent_peak`, `declination`, `final_fall` |
 | prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
 | prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
-| prosody | breaths and creak (wave 3; `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
+| prosody | breaths and creak (wave 3; on by default, `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
 
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score
@@ -1037,7 +1037,7 @@ as the model goes:
   12 to 14 dB, its lows below 300 Hz 2 to 3 dB, the voice bar of a /b/ (the
   walls alone) 2.2; from 60° below the face /m/'s 1.5 to 5 kHz are 5.8 dB
   stronger than from 60° above, a vowel's 0.5. The mono mixdown
-  (`Tuning::head_mixdown` 1) is the ports as heard straight ahead, each
+  (`Tuning::head_mixdown` 1, the default since wave 3 was switched on) is the ports as heard straight ahead, each
   through its own beaming, with no path's delay: no two ports can cancel
   (the deepest notch two equal ports make below 8 kHz is 0.08 dB, where a
   listener's chest return makes 1.5), and it stays within 0.1 dB of the
@@ -1231,12 +1231,18 @@ Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
 for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
 Peterson & Barney (1952) for the vowel targets.
 
-### Breaths and creak (wave 3, stage 3A; off by default)
+### Breaths and creak (wave 3, stage 3A; on by default)
 
-The physical engine can breathe in and creak, both switched off by
-default (`ProsodyConfig::breath_intake` and `final_fry` `0`; `say
---breath-intake --fry 1`, the same flags in the terminal app,
-`VoiceSettings::with_breath(5.0, 1.0)` for a `Talker` or the stream).
+The physical engine breathes in between sentences and creaks at the end
+of a statement, by default since wave 3 was switched on (below):
+`ProsodyConfig::breath_intake` 5 with `breath_first` 0, `final_fry` 1
+with `fry_time` 0.08. `say --breath-intake` (and the terminal app's
+flag of the same name) takes the breath before the utterance as well,
+`--no-breath` takes none, `--fry 0` ends statements in modal voice;
+`VoiceSettings::with_breath(0.0, 0.0)` switches both off for a `Talker`
+or the stream, `Tuning::with_living_voice(false)` all of wave 3 (the
+head's mixdown too). The stream, which compiles a sentence at a time,
+opens a sentence with the breath the text's pause would have taken.
 
 **Breathing in.** The lungs may draw below the air's pressure
 (`Trombone::set_inhalation`, the glottal tier's `inhale` variable,
@@ -1274,11 +1280,50 @@ the half-pitch stands 8 to 14 dB under the pitch
 (`Trombone::set_fold_creak`, `AnatomyConfig::creak_coupling`,
 `creak_press`; taken there within 10 ms they alternate from the third or
 fourth pulse). Statements (`.` `!`) go into creak over the last
-`fry_time` (0.12 s) of their voice, never before the middle of the last
-vowel; questions and commas do not. In the four listening sentences the
-last 100 ms of voice then alternate by 0.6 to 0.7 of their mean pulse height
-(0.03 to 0.2 without). The share works as a switch: at 0.6 the folds do
-not cross into alternation.
+`fry_time` of their voice (0.08 s by default, stage 3A's 0.12 as an
+option), never before the middle of the last vowel, up to the end of the
+last sonorant: a voiced obstruent after it is spoken in modal voice (creaked
+through, a final /ʒ/ lost 30 dB of its jet noise, a final /dʒ/ all of it,
+the /z/ of "rose" 8.5 dB; `tests/living_voice.rs`). Questions and commas
+do not creak. At 0.12 s, in the four listening sentences the last 100 ms
+of voice alternate by 0.6 to 0.7 of their mean pulse height (0.03 to 0.2
+without); at 0.08 s the 80 ms of creak alternate by 0.38 to 0.56 in the
+breath gate's two statements. The share works as a switch: at 0.6 the
+folds do not cross into alternation.
+
+### Wave 3 switched on (`w3-switch`)
+
+Since `w3-switch` the physical engine's default is the living voice
+(`Tuning::with_living_voice(true)`): the mono output is the head's
+mixdown (`head_mixdown` 1), the lungs draw a breath of 5 cmH2O in the
+pauses between sentences (`breath_intake` 5, `breath_first` 0), and
+statements creak over their last 80 ms of voice (`final_fry` 1,
+`fry_time` 0.08). A single sentence is compiled exactly as without
+breaths, and between sentences the breath takes its time from the pause:
+the four listening sentences last as long as before. `Tuning::with_living_voice(false)`,
+or a profile setting `head_mixdown`, `breath_intake` and `final_fry` to
+`0`, gives back the engine before it sample for sample. The breath before
+the utterance (`say --breath-intake`) and stage 3A's longer creak
+(`fry_time` 0.12) stay optional: each costs about a point of phoneme error
+on single sentences. Text with bracketed phonemes (the judge's probes) and
+songs take neither breath nor creak. Measured (single runs; phoneme error
+and Whisper's words; vowels in the LibriSpeech texts heard wrong; the
+consonant probe `score physical --sets vcv`):
+
+| | ten held out | four listening | the four as one clip | 30 held out | 30 tuning | vowels wrong | vcv |
+|---|---|---|---|---|---|---|---|
+| wave 3 off (`main` before) | 15.9 %, 81.2 % | 15.2 %, 83.9 % | 12.1 %, 77.4 % | 21.1 %, 76.1 % | 17.0 %, 74.1 % | 20.6 % | 60.2 % |
+| the default | 15.1 %, 81.2 % | 16.2 %, 87.1 % | 12.1 %, 77.4 % | 21.0 %, 77.0 % | 16.5 %, 74.5 % | 20.3 % | 60.2 % |
+| with `fry_time` 0.10 | 16.3 %, 81.2 % | 15.2 %, 83.9 % | 11.1 %, 77.4 % | 21.2 %, 76.5 % | | 20.3 % | |
+| with `fry_time` 0.12 | 16.7 %, 81.2 % | 16.2 %, 83.9 % | 13.1 %, 83.9 % | 21.8 %, 75.7 % | | 20.3 % | |
+| with the breath before (`breath_first` 1) | 16.3 %, 86.2 % | 19.2 %, 83.9 % | 11.1 %, 77.4 % | 21.7 %, 79.3 % | | 19.2 % | |
+
+Whisper writes the four sentences as one text the same in every row ("The
+birch can easily run the smooth planks. …", 24 of 31 words); of the last
+words of the 30 held-out sentences one is gained ("boards", heard "bars"
+with wave 3 off) and one lost ("reef", now "cliff").
+With creak, probes creaked too at first and the consonant probe went to
+64.0 %: they no longer do.
 
 ## A voice that listens
 
