@@ -489,6 +489,10 @@ pub(crate) struct Tract {
     /// epilaryngeal tube narrows with it (physical engine, see
     /// [`Tract::epilarynx`]).
     pub(crate) tenseness: f32,
+    /// How far the epilaryngeal tube is drawn in, `0‥1`
+    /// (`Trombone::set_epilarynx_squeeze`; wave 3, w3-vocal): its area is
+    /// `1 − squeeze` of itself (physical engine, see [`Tract::epilarynx`]).
+    pub(crate) squeeze: f32,
     pub(crate) velum_target: f32,
     /// How many times faster than [`VELUM_SHUTTING`] the velum shuts now
     /// (physical engine; `1` but out of a nasal into a vowel, see
@@ -632,6 +636,7 @@ impl Tract {
             pharynx: 0.0,
             modes: None,
             tenseness: 0.6,
+            squeeze: 0.0,
             velum_target: VELUM_CLOSED,
             velum_haste: 1.0,
             movement_speed: MOVEMENT_SPEED,
@@ -930,6 +935,11 @@ impl Tract {
             let x = -a.epilarynx_effort * (self.tenseness - EPILARYNX_TENSENESS) / 0.3;
             let share = powf(2.0, x).clamp(0.5, 2.0);
             tube = (tube * sqrt(share)).min(flare);
+        }
+        if self.squeeze > 0.0 {
+            // Drawn in by the aryepiglottic and false folds (wave 3,
+            // w3-vocal): a throat clearing's narrowed tube.
+            tube *= sqrt(1.0 - self.squeeze.min(1.0));
         }
         let ramp = a.epilarynx_flare_cells.max(0.0);
         let (from, to) = (i as f32, i as f32 + 1.0);

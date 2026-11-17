@@ -104,8 +104,10 @@ impl Tier {
                 "softness",
                 "creak",
                 "inhale",
+                "push",
+                "seal",
             ],
-            Tier::LarynxAndPitch => &["pitch", "height"],
+            Tier::LarynxAndPitch => &["pitch", "height", "squeeze"],
             Tier::Velum => &["port", "haste"],
             Tier::TongueBody => &[
                 "location",
@@ -152,9 +154,17 @@ impl Tier {
     /// pitch).
     #[must_use]
     pub const fn neutral(self, v: usize) -> Option<f32> {
-        use var::{body, glottis, lips, tip, velum};
+        use var::{body, glottis, larynx, lips, tip, velum};
         match self {
-            Tier::GlottalAdduction if v == glottis::CREAK || v == glottis::INHALE => Some(0.0),
+            Tier::GlottalAdduction
+                if v == glottis::CREAK
+                    || v == glottis::INHALE
+                    || v == glottis::PUSH
+                    || v == glottis::SEAL =>
+            {
+                Some(0.0)
+            }
+            Tier::LarynxAndPitch if v == larynx::SQUEEZE => Some(0.0),
             Tier::Velum if v == velum::PORT => Some(0.0),
             Tier::Velum if v == velum::HASTE => Some(1.0),
             Tier::TongueBody if v == body::NARROWING_DEGREE || v == body::DORSAL_DEGREE => {
@@ -220,6 +230,18 @@ pub mod var {
         /// neutral `0`, so a breath gesture fades in and out with its
         /// ramps and is over when it ends.
         pub const INHALE: usize = 6;
+        /// How hard the lungs push while a vocalization drives them, cmH2O
+        /// (wave 3, w3-vocal; see
+        /// [`Trombone::set_lung_push`](crate::Trombone::set_lung_push)): in
+        /// place of the voice's own breath while above `0`, its neutral, so
+        /// a pulse of it fades in and out with its ramps.
+        pub const PUSH: usize = 7;
+        /// How far past touching the folds are pressed shut, cm at native
+        /// size (wave 3, w3-vocal; see
+        /// [`Trombone::set_fold_seal`](crate::Trombone::set_fold_seal)): the
+        /// effort closure behind which a cough builds its pressure; neutral
+        /// `0`.
+        pub const SEAL: usize = 8;
     }
     /// [`Tier::LarynxAndPitch`](super::Tier::LarynxAndPitch).
     pub mod larynx {
@@ -231,6 +253,12 @@ pub mod var {
         /// heard with `AnatomyConfig::larynx_travel` on). Unset, the larynx
         /// stays where the setter holds it.
         pub const HEIGHT: usize = 1;
+        /// How far the epilaryngeal tube above the folds is drawn in, `0‥1`
+        /// (wave 3, w3-vocal; see
+        /// [`Trombone::set_epilarynx_squeeze`](crate::Trombone::set_epilarynx_squeeze)):
+        /// the aryepiglottic folds and the false folds narrowing it, as in a
+        /// throat clearing; neutral `0`.
+        pub const SQUEEZE: usize = 2;
     }
     /// [`Tier::Velum`](super::Tier::Velum).
     pub mod velum {
@@ -496,6 +524,10 @@ pub const LAYER_SCORE: u8 = 1;
 /// The layer [`Trombone::push_gesture`](crate::Trombone::push_gesture)
 /// gives a gesture that names none (`layer` `0` or `1` is moved here).
 pub const LAYER_EXTERNAL: u8 = 2;
+/// The layer of a vocalization's gestures (wave 3, w3-vocal; see
+/// [`Trombone::vocalize`](crate::Trombone::vocalize)): a sigh, a laugh, a
+/// cough, laid over whatever else plays and let go of together.
+pub const LAYER_VOCAL: u8 = 3;
 
 impl Gesture {
     /// A gesture on `tier` towards `target`: critically damped at the

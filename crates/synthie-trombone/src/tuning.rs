@@ -604,6 +604,22 @@ tuning! {
         /// cm: at 0.005 the alternation holds from 4 cmH2O; pressed at 0.01 the
         /// folds need 6.
         creak_press = 0.005, 0.0..=0.01, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Peak pressure the lungs build behind the shut folds in a cough, cmH2O
+        /// (physical engine; see `Trombone::vocalize`). People reach 50 to 100
+        /// and more in the chest in a voluntary cough (58 to 214 cmH2O
+        /// intrathoracic); this model holds finite and its output bounded to
+        /// 100 (`tests/vocal_gate.rs`), and at 40, the most a voice's lung
+        /// pressure is ever set to, the burst after the release is some 10 dB
+        /// over the speech around it.
+        cough_pressure = 40.0, 10.0..=100.0, A;
+        /// Peak of each pulse of pressure the lungs push a laugh's call with,
+        /// cmH2O (physical engine): laughter is made by pulses of subglottal
+        /// pressure at some 4 to 5 per second (Luschei et al. 2006), here
+        /// falling to six tenths of this along the bout as the lungs empty.
+        laugh_pressure = 12.0, 4.0..=30.0, A;
     } tiers {
     } aliases {
     }
@@ -1061,6 +1077,20 @@ tuning! {
         /// 1.4 L/s, as in a quick breath between sentences. A shallower breath
         /// than 3 cmH2O opens it in proportion.
         breath_opening = 0.35, 0.1..=1.0, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Calls per second in a laugh (physical engine; see
+        /// `Trombone::vocalize`): 4.37 in 1,024 bouts of 97 young adults
+        /// (Bachorowski, Smoski & Owren 2001), the intervals between them
+        /// growing towards the end of the bout (here by a quarter).
+        laugh_rate = 4.4, 3.0..=6.0, B;
+        /// Seconds of voice in each call of a laugh after the first (voiced,
+        /// open-mouth calls 0.11 s, with 0.12 s between them, in the same
+        /// study); the first is longer (0.28 against 0.13 s there; here twice
+        /// this). Between the calls the glottis is open and the air goes out
+        /// as breath.
+        laugh_voiced = 0.11, 0.05..=0.2, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1436,6 +1466,29 @@ tuning! {
         /// (the folds alternate from their third or fourth pulse, some 40 ms,
         /// on).
         fry_time = 0.12, 0.05..=0.25, B;
+
+        // ----- hesitation fillers (wave 3, w3-vocal; `fillers` 0 off) ---------------
+
+        /// Whether "uh", "um", "hmm", "er" and "mm" are spoken as hesitation
+        /// fillers (`1`, physical engine): long, low and level, the schwa held
+        /// and the nasal hummed, with a pause after; `0` speaks them as words.
+        fillers = 0.0, 0.0..=1.0, A;
+        /// Seconds a filler is held at the speaking rate 1: its vowel, or its
+        /// vowel and nasal together ("um" a fifth of it the schwa, the rest
+        /// the hum). Filled pauses run from 0.2 to over a second in
+        /// conversation, "um" longer than "uh" (Clark & Fox Tree 2002); here
+        /// "uh" and "er" take this, "um", "hmm" and "mm" a quarter more.
+        filler_length = 0.42, 0.2..=1.0, B;
+        /// Seconds of silence after a filler before the speech goes on ("um"
+        /// leaves a longer delay after it than "uh", Clark & Fox Tree 2002:
+        /// "uh" takes six tenths of this), unless a pause is there already.
+        filler_pause = 0.3, 0.0..=1.0, B;
+        /// Pitch of a filler as a share of the voice's baseline, at its start;
+        /// it falls a semitone and a half to its end. Clause-internal filled
+        /// pauses lie a fixed share (0.6) of the way down from the peak before
+        /// them to the speaker's lowest pitch, and fall a little and linearly
+        /// (Shriberg & Lickley 1992).
+        filler_pitch = 0.86, 0.6..=1.0, A;
     } tiers {
     } aliases {
     }

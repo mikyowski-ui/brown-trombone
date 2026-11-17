@@ -103,12 +103,13 @@ pub(crate) fn roles(tokens: &[Token]) -> Vec<Role> {
                 roles_of_word(&word, &mut out, &mut nuclei);
                 word.clear();
             }
-            Token::Break(_) => {
+            Token::Break(_) | Token::Vocal(_) => {
                 roles_of_word(&word, &mut out, &mut nuclei);
                 word.clear();
                 mark_last(&mut out[phrase..], &nuclei[phrase..], &vowels, phrase);
                 phrase = out.len();
             }
+            Token::Filler(_) => {}
         }
     }
     roles_of_word(&word, &mut out, &mut nuclei);

@@ -277,6 +277,12 @@ pub(crate) struct Source {
     /// How far below the air's pressure the lungs are drawing, cmH2O (`0`:
     /// not breathing in; see `Trombone::set_inhalation`).
     pub(crate) intake: f32,
+    /// How hard the lungs push while a vocalization drives them, cmH2O
+    /// (`0`: the voice's own breath; see `Trombone::set_lung_push`).
+    pub(crate) push: f32,
+    /// How far past touching the folds are pressed shut, cm at native size
+    /// (`0`: not; see `Trombone::set_fold_seal`).
+    pub(crate) seal: f32,
     /// A fixed share of the coupling between the cover pieces, for
     /// measuring the folds.
     pub(crate) coupling_override: Option<f32>,
@@ -370,6 +376,8 @@ impl Source {
             creak_target: 0.0,
             creak: 0.0,
             intake: 0.0,
+            push: 0.0,
+            seal: 0.0,
             coupling_override: None,
             fold_share: 1.0,
             f0: 140.0,
@@ -447,7 +455,9 @@ impl Source {
         let (spread, slack, breath) = (self.spread_target, self.slack_target, self.breath);
         let soft = self.soft_target;
         let (creak, intake, coupling) = (self.creak_target, self.intake, self.coupling_override);
+        let (push, seal) = (self.push, self.seal);
         *self = Self::new();
+        (self.push, self.seal) = (push, seal);
         (self.spread_target, self.slack_target, self.breath) = (spread, slack, breath);
         self.soft_target = soft;
         (self.creak_target, self.intake, self.coupling_override) = (creak, intake, coupling);
@@ -507,8 +517,12 @@ impl Source {
     /// start (or stop) by themselves as the pressure passes what they need,
     /// growing (or fading) over a few cycles, as in a soft onset; pressed
     /// together they would start at once, as from a glottal stop.
+    ///
+    /// A vocalization's push counts as a breath building (wave 3, w3-vocal):
+    /// a laugh's call starts out of its pressure pulse, not from a glottal
+    /// stop.
     fn building(&self) -> bool {
-        self.breath < 1.0 && self.lung < SOFT_START * CM_H2O
+        (self.breath < 1.0 || self.push > 0.0) && self.lung < SOFT_START * CM_H2O
     }
 
     /// Fold size follows the tract: `len` is the relative tract length.
@@ -610,7 +624,10 @@ impl Source {
         let area_scale = self.size * self.size;
         let slack = 1.0 - self.tense1;
         self.leak_target = area_scale
-            * if voicing {
+            * if self.seal > 0.0 {
+                // Held shut (the pulse source's standing leak too).
+                0.0
+            } else if voicing {
                 BREATHY_LEAK * slack * slack
             } else {
                 self.tuning.articulation.abducted_area
@@ -677,6 +694,10 @@ impl Source {
         self.lung_target = if self.intake > 0.0 {
             // Breathing in: the lungs draw, whatever else is asked.
             -self.intake * CM_H2O
+        } else if self.push > 0.0 {
+            // A vocalization drives the lungs (wave 3, w3-vocal): a laugh's
+            // pulses, a cough's pressure behind the shut folds.
+            self.push * CM_H2O
         } else if breathing {
             self.lung_base * effort * self.breath
         } else {
@@ -695,7 +716,12 @@ impl Source {
         // before they began to alternate; over 10 ms they alternate from the
         // third or fourth pulse (`examples/breath.rs --onset`).
         self.creak += (self.creak_target - self.creak) * (dt / adduction);
-        let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
+        let gap_target = if self.seal > 0.0 {
+            // Pressed shut (wave 3, w3-vocal): the effort closure of a cough.
+            // Pressed edges feel no lung pressure (see `Folds::step`), so
+            // they hold at any pressure behind them.
+            -self.seal * self.size
+        } else if self.pressing && self.tense1 >= WHISPER_TENSENESS {
             -self.tuning.anatomy.attack_depth * self.size
         } else if self.creak > 0.0 && self.voicing && self.gap_override.is_none() {
             // Creak: the folds are pressed together.

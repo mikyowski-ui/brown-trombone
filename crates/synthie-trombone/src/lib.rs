@@ -79,6 +79,7 @@ pub mod sing;
 #[cfg(feature = "alloc")]
 pub mod speech;
 pub mod stream;
+pub mod vocal;
 #[cfg(feature = "alloc")]
 mod talker;
 mod tract;
@@ -110,6 +111,7 @@ pub use tuning::{
     AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, TongueModel,
     TractModel, Tuning,
 };
+pub use vocal::{Vocal, Vocalization};
 pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
 /// Rate at which the glottis runs; the tract runs at twice this.

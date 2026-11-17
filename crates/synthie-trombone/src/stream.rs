@@ -89,7 +89,7 @@ pub use text::Granularity;
 
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
-use crate::{Constriction, Listener, Phoneme, Stereo, Trombone};
+use crate::{Constriction, Listener, Phoneme, Stereo, Trombone, Vocal, Vocalization};
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
@@ -169,6 +169,8 @@ pub enum Event {
     Listener(Listener),
     /// How the two channels are heard (see [`Trombone::set_stereo`]).
     Stereo(Stereo),
+    /// A vocalization, now (wave 3; see [`VoiceStream::vocalize`]).
+    Vocalize(Vocal),
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -224,6 +226,7 @@ const TAG_GESTURE: u8 = 18;
 const TAG_STOP: u8 = 19;
 const TAG_LISTENER: u8 = 40;
 const TAG_STEREO: u8 = 41;
+const TAG_VOCALIZE: u8 = 30;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -328,6 +331,7 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::StopSpeaking => TAG_STOP,
         Event::Listener(_) => TAG_LISTENER,
         Event::Stereo(_) => TAG_STEREO,
+        Event::Vocalize(_) => TAG_VOCALIZE,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -411,6 +415,14 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
             Stereo::Binaural => 1,
             Stereo::Pair => 2,
         }),
+        Event::Vocalize(v) => {
+            #[allow(clippy::cast_possible_truncation)]
+            let kind = Vocalization::ALL.iter().position(|&k| k == v.kind).unwrap_or(0) as u32;
+            m.word(kind);
+            m.float(v.length);
+            m.float(v.strength);
+            m.float(v.pitch);
+        }
         Event::NoteOff | Event::StopSpeaking => {}
     }
     m
@@ -530,6 +542,18 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             2 => Stereo::Pair,
             _ => Stereo::Off,
         }),
+        TAG_VOCALIZE => {
+            let kind = Vocalization::ALL
+                .get(r.word() as usize)
+                .copied()
+                .unwrap_or(Vocalization::Sigh);
+            Event::Vocalize(Vocal {
+                kind,
+                length: r.float(),
+                strength: r.float(),
+                pitch: r.float(),
+            })
+        }
         #[cfg(feature = "std")]
         TAG_SPEAK => {
             let mode = if r.word() == 1 {
@@ -840,6 +864,19 @@ impl<'a> VoiceStream<'a> {
         when: When,
     ) -> Result<(), Full<Gesture>> {
         self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// Make a vocalization (wave 3; see [`Trombone::vocalize`]): a sigh, a
+    /// laugh, a chuckle, a throat clearing or a cough. Speech the stream is
+    /// saying waits for it and carries on after it (see
+    /// [`Speaker::interject`](crate::speech::Speaker::interject)).
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the vocalization when the ring has no room for it.
+    pub fn vocalize(&mut self, v: impl Into<Vocal>, when: When) -> Result<(), Full<Vocal>> {
+        let v = v.into();
+        self.push_when(when, Event::Vocalize(v)).map_err(|_| Full(v))
     }
 
     /// Words free in the ring.
@@ -1284,6 +1321,16 @@ impl<'a> VoicePlayer<'a> {
             }
             Event::Listener(l) => voice.set_listener(l),
             Event::Stereo(s) => voice.set_stereo(s),
+            Event::Vocalize(v) => {
+                #[cfg(feature = "std")]
+                if let Some(talk) = &mut self.talk
+                    && talk.state == State::Speaking
+                {
+                    talk.speaker.interject(voice, v);
+                    return;
+                }
+                voice.vocalize(v);
+            }
         }
     }
 }
