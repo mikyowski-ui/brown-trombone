@@ -11,7 +11,7 @@
 #[path = "../examples/support/breath.rs"]
 mod breath;
 
-use breath::{span, take, tone};
+use breath::{creak, phrase_ends, span, take, tone};
 use synthie_trombone::sing::{self, SingOptions, SungNote};
 use synthie_trombone::speech::{Speaker, Utterance};
 use synthie_trombone::stream::{Granularity, voice_stream};
@@ -259,4 +259,52 @@ fn streamed_sentences_breathe_between_them_as_the_text_whole() {
         (streamed.1 - whole.1).abs() < 0.02,
         "{streamed:?} against {whole:?}"
     );
+}
+
+#[test]
+fn the_default_is_the_living_voice() {
+    assert_eq!(Tuning::DEFAULT, Tuning::DEFAULT.with_living_voice(true));
+    assert_eq!(VoiceSettings::default().tuning, Tuning::DEFAULT);
+    // No breath before a single sentence, one between two.
+    let prosody = Preset::Deep
+        .settings()
+        .with_engine(Engine::Physical)
+        .prosody();
+    assert_eq!(breaths(&Utterance::from_text(ONE, &prosody)), 0);
+    assert_eq!(breaths(&Utterance::from_text(TWO, &prosody)), 1);
+}
+
+#[test]
+fn by_default_statements_end_in_creak_and_questions_do_not() {
+    // Stage 3A's measure (`tests/breath_gate.rs`) over the creak's own
+    // stretch, the last `fry_time` (80 ms) of the voice: the pulse heights
+    // alternate by 0.56 and 0.38 of their mean and the half-pitch stands
+    // 12.5 and 11.2 dB under the pitch (0.02 to 0.22 and 15 to 35 dB under
+    // in modal voice). Over 100 ms, the gate's window for 0.12 s of creak,
+    // "It is mine." alternates by 0.25 only: 20 ms of it are modal.
+    let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    let time = settings.tuning.prosody.fry_time;
+    let ends = |text: &str| -> Vec<(f32, f32)> {
+        let t = take(&settings, text);
+        phrase_ends(&t, time)
+            .iter()
+            .map(|&(a, b, _)| {
+                let (_, alternation, _, half) = creak(&t.out[a..b], &t.flow[a..b]);
+                (alternation, half)
+            })
+            .collect()
+    };
+    for text in ["She sells sea shells by the sea shore.", "It is mine."] {
+        for (alternation, half) in ends(text) {
+            println!("{text}: alternation {alternation:.2}, half-pitch {half:+.1} dB");
+            assert!(
+                alternation >= 0.35 && half >= -15.0,
+                "{text}: no creak, {alternation:.2} {half:+.1} dB"
+            );
+        }
+    }
+    for (alternation, half) in ends("Where is the car?") {
+        println!("question: alternation {alternation:.2}, half-pitch {half:+.1} dB");
+        assert!(alternation <= 0.1, "a question in creak: {alternation}");
+    }
 }
