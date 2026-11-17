@@ -33,6 +33,11 @@
     "epilarynx_flare_cells": {"lo": 0, "hi": 4, "default": 4, "pass": "a"},
     "epilarynx_effort": {"lo": 0, "hi": 2, "default": 0, "pass": "a"},
     "tongue_model": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+    "head_radius": {"lo": 7, "hi": 10.5, "default": 8.75, "pass": "a"},
+    "head_mixdown": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+    "chest_reflection": {"lo": 0, "hi": 0.6, "default": 0.25, "pass": "a"},
+    "chest_distance": {"lo": 8, "hi": 25, "default": 15, "pass": "a"},
+    "chest_corner": {"lo": 500, "hi": 4000, "default": 1500, "pass": "a"},
     "creak_coupling": {"lo": 0.02, "hi": 0.5, "default": 0.05, "pass": "a"},
     "creak_press": {"lo": 0, "hi": 0.01, "default": 0.005, "pass": "a"}
   },

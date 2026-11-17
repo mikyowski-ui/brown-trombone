@@ -8,7 +8,7 @@ use crate::audio::{output, wire};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
-use synthie_trombone::Engine;
+use synthie_trombone::{Engine, Stereo};
 use synthie_ui::{Key, KeyCode};
 
 const SR: f32 = 48_000.0;
@@ -26,9 +26,10 @@ const SECONDS: f32 = 6.0;
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn measure(engine: Engine, text: &str) -> (f64, f64, f64) {
+fn measure(engine: Engine, text: &str, stereo: Stereo) -> (f64, f64, f64) {
     let size = Arc::new(AtomicU32::new(1.0f32.to_bits()));
-    let (core, link) = wire(SR, None, size, None);
+    let (mut core, link) = wire(SR, None, size, None);
+    core.set_stereo(stereo);
     let mut app = App::new(link, true, engine);
     let mut callback = output(core, CHANNELS);
     let mut buf = vec![0.0f32; BLOCK * CHANNELS];
@@ -61,13 +62,17 @@ fn measure(engine: Engine, text: &str) -> (f64, f64, f64) {
 fn callback_cost() {
     let text =
         "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.";
-    for engine in [Engine::Classic, Engine::Physical] {
+    for (engine, stereo) in [
+        (Engine::Classic, Stereo::Off),
+        (Engine::Physical, Stereo::Off),
+        (Engine::Physical, Stereo::Binaural),
+    ] {
         for (what, t) in [("speaking", text), ("drone", "")] {
             // The first run warms caches and the allocator up.
-            let _ = measure(engine, t);
-            let (median, p99, share) = measure(engine, t);
+            let _ = measure(engine, t, stereo);
+            let (median, p99, share) = measure(engine, t, stereo);
             println!(
-                "{engine:?} {what}: {median:.0} µs median, {p99:.0} µs p99 per {BLOCK}-frame callback \
+                "{engine:?} {stereo:?} {what}: {median:.0} µs median, {p99:.0} µs p99 per {BLOCK}-frame callback \
                  ({:.0} µs budget); {:.1} % of a core",
                 BLOCK as f64 / f64::from(SR) * 1e6,
                 share * 100.0
@@ -118,9 +123,14 @@ static GLOBAL: Counting = Counting;
 /// for the formant meter) on, while the voice speaks and is played.
 #[test]
 fn the_callback_never_allocates() {
-    for engine in [Engine::Physical, Engine::Classic] {
+    for (engine, stereo) in [
+        (Engine::Physical, Stereo::Off),
+        (Engine::Physical, Stereo::Binaural),
+        (Engine::Classic, Stereo::Binaural),
+    ] {
         let size = Arc::new(AtomicU32::new(1.0f32.to_bits()));
-        let (core, link) = wire(SR, None, size, None);
+        let (mut core, link) = wire(SR, None, size, None);
+        core.set_stereo(stereo);
         let mut app = App::new(link, true, engine);
         let mut callback = output(core, CHANNELS);
         let mut buf = vec![0.0f32; BLOCK * CHANNELS];

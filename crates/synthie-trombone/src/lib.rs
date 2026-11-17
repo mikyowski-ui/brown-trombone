@@ -96,6 +96,7 @@ mod lpc;
 pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
 pub use phoneme::{Articulation, Manner, Phoneme};
+pub use phys::radiation::{Listener, Stereo};
 pub use preset::{Persona, Preset, VoiceSettings};
 #[cfg(feature = "profile")]
 pub use profile::{ProfileError, tuning_parameters};

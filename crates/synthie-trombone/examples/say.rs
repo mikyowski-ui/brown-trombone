@@ -55,6 +55,19 @@
 //! on the LibriSpeech texts). `--phone-times file.json` writes where each
 //! phone starts and ends in the output.
 //!
+//! `--stereo` writes two channels: the two ears of a listener, each port of
+//! the tract (lips, nostrils, throat, cheeks) on its own path round the
+//! talker's head and the listener's (`--stereo-pair`: a plain ORTF
+//! microphone pair instead). `--listener AZIMUTH[,ELEVATION[,DISTANCE]]`
+//! puts the listener where the talker's head sees them (degrees, positive
+//! to the talker's right and up; metres; default `0,0,1`), `--heard
+//! AZIMUTH[,ELEVATION]` turns the listener's own head (where they hear the
+//! talker; default straight ahead), and `--turn FROM,TO` turns the
+//! talker's head from `FROM` to `TO` degrees (positive to the talker's
+//! right) while speaking; `--pan FROM,TO` turns where the listener hears
+//! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
+//! bringing the loudest to 0.89 (for comparing levels between files).
+//!
 //! The living voice (wave 3, physical engine): `--breath-intake` takes a
 //! breath before the text and in the pauses between its sentences (the
 //! lungs drawing up to 5 cmH2O; `ProsodyConfig::breath_intake`), `--fry 0.8`
@@ -77,6 +90,7 @@ use synthie_trombone::{
     Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
     inverse,
 };
+use synthie_trombone::{Listener, Stereo};
 use synthie_trombone::{Trombone, normalize};
 
 /// A prosody schedule (`tools/judge/prosody.py`) from its JSON.
@@ -181,6 +195,17 @@ fn take_vowels(json: &str) -> (String, Vec<(VowelKey, [f32; 3])>) {
     (value.to_string(), targets)
 }
 
+/// Up to three numbers separated by commas, the rest left as `into` has
+/// them.
+fn numbers(text: &str, into: &mut [f32]) {
+    for (slot, part) in into.iter_mut().zip(text.split(',')) {
+        *slot = part
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("not a number: {part:?}"));
+    }
+}
+
 /// Shape `voice`'s vowels for `targets` (adult man, Hz), at its size.
 fn hold_vowels(voice: &mut Trombone, targets: &[(VowelKey, [f32; 3])]) {
     let length = voice.tract_length();
@@ -222,6 +247,11 @@ fn main() -> std::io::Result<()> {
     let mut follow_speed = true;
     let mut breath_intake: Option<f32> = None;
     let mut fry: Option<f32> = None;
+    let mut stereo = Stereo::Off;
+    let mut listener = Listener::FRONT;
+    let mut turn: Option<[f32; 2]> = None;
+    let mut pan: Option<[f32; 2]> = None;
+    let mut raw = false;
     let mut tract: Option<TractModel> = None;
     let mut tongue: Option<TongueModel> = None;
     let mut text = Vec::new();
@@ -301,6 +331,29 @@ fn main() -> std::io::Result<()> {
             "--dump-profile" => dump = true,
             "--breath-intake" => breath_intake = Some(5.0),
             "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
+            "--raw" => raw = true,
+            "--stereo" => stereo = Stereo::Binaural,
+            "--stereo-pair" => stereo = Stereo::Pair,
+            "--listener" => {
+                let mut v = [listener.azimuth, listener.elevation, listener.distance];
+                numbers(&value("--listener"), &mut v);
+                [listener.azimuth, listener.elevation, listener.distance] = v;
+            }
+            "--heard" => {
+                let mut v = [listener.heard_azimuth, listener.heard_elevation];
+                numbers(&value("--heard"), &mut v);
+                [listener.heard_azimuth, listener.heard_elevation] = v;
+            }
+            "--turn" => {
+                let mut v = [0.0; 2];
+                numbers(&value("--turn"), &mut v);
+                turn = Some(v);
+            }
+            "--pan" => {
+                let mut v = [0.0; 2];
+                numbers(&value("--pan"), &mut v);
+                pan = Some(v);
+            }
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
                 return Ok(());
@@ -425,12 +478,52 @@ fn main() -> std::io::Result<()> {
     }
     println!();
     let started = Instant::now();
-    let mut out = talker.bake_utterance(utterance);
+    let channels = if stereo == Stereo::Off { 1 } else { 2 };
+    let mut out = if stereo == Stereo::Off {
+        talker.bake_utterance(utterance)
+    } else {
+        talker.set_stereo(stereo);
+        talker.set_listener(listener);
+        match (turn, pan) {
+            (None, None) => talker.bake_utterance_stereo(utterance),
+            (turn, pan) => {
+                let [from, to] = turn.unwrap_or([0.0; 2]);
+                let [pan_from, pan_to] = pan.unwrap_or([listener.heard_azimuth; 2]);
+                // The talker's head turns while it speaks: the listener,
+                // where it stands, is seen further and further the other
+                // way.
+                let frames = ((utterance.duration() + 0.25) * SR as f32) as usize;
+                let at = |k: usize| {
+                    let t = k as f32 / frames.max(1) as f32;
+                    Listener {
+                        azimuth: listener.azimuth - (from + (to - from) * t),
+                        heard_azimuth: pan_from + (pan_to - pan_from) * t,
+                        ..listener
+                    }
+                };
+                talker.set_listener(at(0));
+                talker.voice_mut().reset();
+                talker.say_utterance(utterance);
+                let mut out = vec![0.0; 2 * frames];
+                for (k, block) in out.chunks_mut(2 * 64).enumerate() {
+                    talker.set_listener(at(k * 64));
+                    talker.render_stereo(block);
+                }
+                out
+            }
+        }
+    };
     let took = started.elapsed().as_secs_f32();
-    normalize(&mut out, 0.89);
+    if !raw {
+        normalize(&mut out, 0.89);
+    }
 
-    wav::write(&path, SR, &out)?;
-    let seconds = out.len() as f32 / SR as f32;
+    if channels == 1 {
+        wav::write(&path, SR, &out)?;
+    } else {
+        wav::write_stereo(&path, SR, &out)?;
+    }
+    let seconds = out.len() as f32 / (channels * SR) as f32;
     println!(
         "wrote {path} ({seconds:.1} s, rendered in {took:.2} s: {:.0}x real time)",
         seconds / took

@@ -89,7 +89,7 @@ pub use text::Granularity;
 
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
-use crate::{Constriction, Phoneme, Trombone};
+use crate::{Constriction, Listener, Phoneme, Stereo, Trombone};
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
@@ -165,6 +165,10 @@ pub enum Event {
     Gesture(Gesture),
     /// Stop speaking, and drop the speech queued after it.
     StopSpeaking,
+    /// Move the listener (see [`Trombone::set_listener`]): it glides there.
+    Listener(Listener),
+    /// How the two channels are heard (see [`Trombone::set_stereo`]).
+    Stereo(Stereo),
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -218,6 +222,8 @@ const TAG_LENGTH: u8 = 16;
 const TAG_SPEED: u8 = 17;
 const TAG_GESTURE: u8 = 18;
 const TAG_STOP: u8 = 19;
+const TAG_LISTENER: u8 = 40;
+const TAG_STEREO: u8 = 41;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -298,6 +304,7 @@ impl Reader<'_> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn encode(event: &Event, at: Option<u64>) -> Message {
     let tag = match event {
         Event::NoteOn(_) => TAG_NOTE_ON,
@@ -319,6 +326,8 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::ArticulationSpeed(_) => TAG_SPEED,
         Event::Gesture(_) => TAG_GESTURE,
         Event::StopSpeaking => TAG_STOP,
+        Event::Listener(_) => TAG_LISTENER,
+        Event::Stereo(_) => TAG_STEREO,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -386,6 +395,22 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
                 m.float(x);
             }
         }
+        Event::Listener(l) => {
+            for x in [
+                l.azimuth,
+                l.elevation,
+                l.distance,
+                l.heard_azimuth,
+                l.heard_elevation,
+            ] {
+                m.float(x);
+            }
+        }
+        Event::Stereo(s) => m.word(match s {
+            Stereo::Off => 0,
+            Stereo::Binaural => 1,
+            Stereo::Pair => 2,
+        }),
         Event::NoteOff | Event::StopSpeaking => {}
     }
     m
@@ -493,6 +518,18 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             })
         }
         TAG_STOP => Event::StopSpeaking,
+        TAG_LISTENER => Event::Listener(Listener {
+            azimuth: r.float(),
+            elevation: r.float(),
+            distance: r.float(),
+            heard_azimuth: r.float(),
+            heard_elevation: r.float(),
+        }),
+        TAG_STEREO => Event::Stereo(match r.word() {
+            1 => Stereo::Binaural,
+            2 => Stereo::Pair,
+            _ => Stereo::Off,
+        }),
         #[cfg(feature = "std")]
         TAG_SPEAK => {
             let mode = if r.word() == 1 {
@@ -1173,6 +1210,22 @@ impl<'a> VoicePlayer<'a> {
         }
     }
 
+    /// [`process`](Self::process) as a frame, `[left, right]` (see
+    /// [`Trombone::set_stereo`]).
+    pub fn process_stereo(&mut self, voice: &mut Trombone) -> [f32; 2] {
+        self.process(voice);
+        voice.frame()
+    }
+
+    /// Fill `out` with interleaved frames, left then right (see
+    /// [`process_stereo`](Self::process_stereo); an odd last sample is
+    /// left alone).
+    pub fn render_stereo(&mut self, voice: &mut Trombone, out: &mut [f32]) {
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo(voice);
+        }
+    }
+
     fn carry_out(&mut self, voice: &mut Trombone, item: Item) {
         let event = match item {
             Item::Event(e) => e,
@@ -1229,6 +1282,8 @@ impl<'a> VoicePlayer<'a> {
                     }
                 }
             }
+            Event::Listener(l) => voice.set_listener(l),
+            Event::Stereo(s) => voice.set_stereo(s),
         }
     }
 }
