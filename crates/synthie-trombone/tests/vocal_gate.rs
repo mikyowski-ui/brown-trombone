@@ -428,7 +428,7 @@ fn tags_and_fillers_sit_with_the_breaths_and_the_creak() {
     assert!(s[after..].iter().any(|x| x.gesture.intake > 0.0));
     // The statement before the tag creaks at its end; the filler does not
     // (it ends no statement).
-    assert!(s[..before + 1].iter().any(|x| x.gesture.creak > 0.0));
+    assert!(s[..=before].iter().any(|x| x.gesture.creak > 0.0));
     let um = (1..s.len())
         .find(|&k| s[k].phoneme == Phoneme::M && s[k - 1].phoneme == Phoneme::Ah)
         .unwrap();
