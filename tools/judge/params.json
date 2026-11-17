@@ -41,7 +41,9 @@
     "creak_coupling": {"lo": 0.02, "hi": 0.5, "default": 0.05, "pass": "a"},
     "creak_press": {"lo": 0, "hi": 0.01, "default": 0.005, "pass": "a"},
     "cough_pressure": {"lo": 10, "hi": 100, "default": 40, "pass": "a"},
-    "laugh_pressure": {"lo": 4, "hi": 30, "default": 12, "pass": "a"}
+    "laugh_pressure": {"lo": 4, "hi": 30, "default": 12, "pass": "a"},
+    "valve_open": {"lo": 0.5, "hi": 4, "default": 2, "pass": "a"},
+    "flutter_rate": {"lo": 40, "hi": 120, "default": 70, "pass": "a"}
   },
   "articulation": {
     "adduction_time": {"lo": 0.003, "hi": 0.02, "default": 0.008, "pass": "a"},
@@ -112,6 +114,8 @@
     "breath_opening": {"lo": 0.1, "hi": 1, "default": 0.35, "pass": "a"},
     "laugh_rate": {"lo": 3, "hi": 6, "default": 4.4, "pass": "b"},
     "laugh_voiced": {"lo": 0.05, "hi": 0.2, "default": 0.11, "pass": "b"},
+    "valve_closing": {"lo": 0.005, "hi": 0.1, "default": 0.02, "pass": "b"},
+    "valve_opening": {"lo": 0.0005, "hi": 0.01, "default": 0.002, "pass": "b"},
     "articulation_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "lips_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "body_rate": {"lo": 8, "hi": 18, "default": 11.4, "pass": "b"},

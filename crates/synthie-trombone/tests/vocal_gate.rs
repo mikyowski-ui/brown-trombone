@@ -195,28 +195,35 @@ fn a_cough_builds_its_pressure_behind_shut_folds_and_bursts() {
 }
 
 #[test]
-fn a_throat_clearing_is_two_weaker_voiced_coughs_through_a_narrowed_tube() {
+fn a_throat_clearing_is_two_weaker_scrapes_through_the_narrowed_valve() {
+    // (Until the ventricular valve, c3-valve: two weaker voiced coughs
+    // through the epilaryngeal tube drawn in to under 0.7 of its diameter,
+    // which Whisper wrote "uh, uh" in a sentence. Now the folds are open
+    // and silent behind the valve held narrow, the aryepiglottic folds
+    // fluttering in it: `tests/valve_gate.rs` measures the flutter.)
     let mut t = voice(&deep());
     t.set_frequency(100.0);
-    let rest = t.diameters()[1];
     let seconds = t.vocalize(Vocalization::ClearThroat).unwrap();
-    let mut narrowest = f32::MAX;
-    let mut r = vocal::Rec {
-        finite: true,
-        ..vocal::Rec::default()
-    };
-    for _ in 0..((seconds + 0.2) * SR) as usize {
-        let out = t.process();
-        r.push(out, &t);
-        narrowest = narrowest.min(t.diameters()[1]);
-    }
+    let r = record(&mut t, seconds + 0.2);
     assert!(r.finite);
-    assert!(
-        narrowest < 0.7 * rest,
-        "epilarynx {narrowest:.3} against {rest:.3}"
-    );
-    let c = calls(&r);
-    assert_eq!(c.len(), 2, "{c:?}");
+    let rest = r.valve[0];
+    // Two scrapes, each through the valve narrowed to under 0.7 of its
+    // rest area (and shut between them).
+    let mut scrapes = 0;
+    let mut k = 0;
+    while k < r.len() {
+        if r.valve[k] > 0.0 && r.valve[k] < 0.7 * rest {
+            let from = k;
+            while k < r.len() && r.valve[k] > 0.0 && r.valve[k] < 0.7 * rest {
+                k += 1;
+            }
+            if (k - from) as f32 / SR > 0.08 {
+                scrapes += 1;
+            }
+        }
+        k += 1;
+    }
+    assert_eq!(scrapes, 2);
     // Weaker than a cough.
     let (cough, _) = alone(Vocal::new(Vocalization::Cough));
     let peak = |x: &[f32]| envelope(x, 10.0, 5.0).into_iter().fold(0.0, f32::max);
