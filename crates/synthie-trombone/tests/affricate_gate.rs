@@ -10,6 +10,10 @@
 //! at the end of a word, and the hiss of a final /dʒ/ was 12 to 15 dB under
 //! that of a final /ʒ/. The tract made no difference: the original one
 //! measured the same.
+//!
+//! A final /dʒ/ is told from a final /tʃ/ by the voice through its closure
+//! and into its frication as well: "He wore a large orange badge." was
+//! heard as "batch" while the voice died in its frication.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -156,6 +160,116 @@ fn pairs(affricate: &str, fricative: &str) -> Vec<(TractModel, String, Frication
         }
     }
     out
+}
+
+/// Whether the glottal flow of the 10 ms around sample `a` is a voice: it
+/// swings by more than 50 cm³/s and repeats itself (normalised
+/// autocorrelation over 0.5) at some lag between 2.5 and 12.5 ms. (The
+/// flutter of folds held apart for a /tʃ/ swings by 20 to 40.)
+fn periodic(flow: &[f32], a: usize) -> bool {
+    let win = (0.01 * SR) as usize;
+    let (lo, hi) = ((0.0025 * SR) as usize, (0.0125 * SR) as usize);
+    let a = a.saturating_sub(hi / 2);
+    if a + win + hi > flow.len() {
+        return false;
+    }
+    let x = &flow[a..a + win + hi];
+    let (min, max) = x[..win]
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+    if max - min < 50.0 {
+        return false;
+    }
+    let mean = |s: &[f32]| s.iter().sum::<f32>() / s.len() as f32;
+    let m0 = mean(&x[..win]);
+    (lo..=hi).step_by(12).any(|lag| {
+        let m1 = mean(&x[lag..lag + win]);
+        let (mut xy, mut xx, mut yy) = (0.0, 0.0, 0.0);
+        for k in 0..win {
+            let (p, q) = (x[k] - m0, x[k + lag] - m1);
+            xy += p * q;
+            xx += p * p;
+            yy += q * q;
+        }
+        xy / (xx * yy).sqrt().max(1e-12) > 0.5
+    })
+}
+
+/// Share of the closure and frication of the last affricate of `text`
+/// (its two segments) over which the glottal flow is a voice, in 10 ms
+/// frames every 2.5 ms, said by the deep voice on `tract`.
+fn voiced_share(text: &str, tract: TractModel) -> f32 {
+    let mut settings = Preset::Deep.settings().with_engine(Engine::Physical);
+    settings.tuning = Tuning::DEFAULT.with_tract(tract);
+    let mut voice = Trombone::new(SR);
+    settings.apply(&mut voice);
+    Speaker::prepare(&mut voice);
+    let utterance = Utterance::from_text(text, &settings.prosody());
+    let mut t = 0.0;
+    let segments: Vec<(Phoneme, f32, f32)> = utterance
+        .segments()
+        .iter()
+        .map(|s| {
+            t += s.duration;
+            (s.phoneme, t - s.duration, t)
+        })
+        .collect();
+    let mut speaker = Speaker::new();
+    speaker.speak(utterance);
+    let mut flow = Vec::new();
+    while speaker.is_speaking() {
+        speaker.process(&mut voice);
+        flow.push(voice.gauges().glottal_flow);
+    }
+    let k = (1..segments.len())
+        .rev()
+        .find(|&k| {
+            segments[k].0.manner() == Manner::Affricate && segments[k - 1].0 == segments[k].0
+        })
+        .unwrap_or_else(|| panic!("{text}: no affricate"));
+    let (a, b) = (
+        (segments[k - 1].1 * SR) as usize,
+        ((segments[k].2 * SR) as usize).min(flow.len()),
+    );
+    let hop = (0.0025 * SR) as usize;
+    let frames: Vec<bool> = (a..b).step_by(hop).map(|i| periodic(&flow, i)).collect();
+    frames.iter().filter(|&&v| v).count() as f32 / frames.len() as f32
+}
+
+#[test]
+fn final_dzh_is_voiced_through_its_closure_and_frication_where_tsh_is_not() {
+    // A final /dʒ/ is often partly devoiced in English; what keeps it /dʒ/
+    // is, among the rest, the voice through its closure and into its
+    // frication, where that of /tʃ/ stops with its closure. Measured with
+    // the voice held through the release of a /dʒ/ before a pause
+    // (`final_voicing_hold`): /dʒ/ 65 to 82 % of the two on both tracts,
+    // /tʃ/ 0 to 9 %. Without the hold "badge" ending the sentence was
+    // voiced for 56 % (and heard as "batch"), the words alone 72 to 82 %.
+    for tract in [TractModel::Anatomical, TractModel::Original] {
+        for (dzh, tsh) in [
+            (
+                "He wore a large orange badge.",
+                "He wore a large orange batch.",
+            ),
+            ("[B AE1 JH]", "[B AE1 CH]"),
+            ("[EH1 JH]", "[EH1 CH]"),
+            ("[UW1 JH]", "[UW1 CH]"),
+        ] {
+            let (d, t) = (voiced_share(dzh, tract), voiced_share(tsh, tract));
+            println!(
+                "{tract:?} {dzh}: voiced {:.0} % of the closure and frication, {tsh} {:.0} %",
+                100.0 * d,
+                100.0 * t
+            );
+            assert!(d > 0.6, "{tract:?} {dzh}: voiced {:.0} %", 100.0 * d);
+            assert!(
+                d > t + 0.4,
+                "{tract:?} {dzh}: voiced {:.0} %, {tsh} {:.0} %",
+                100.0 * d,
+                100.0 * t
+            );
+        }
+    }
 }
 
 #[test]

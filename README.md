@@ -1520,6 +1520,43 @@ uh, shall we, uh, go around?"). Alone, as before, it hallucinates letters
 ("P-P-P…", before "F-f-f…"). `tests/valve_gate.rs` measures all of this;
 the valve costs some 1 to 3 % of the render while it acts, nothing at rest.
 
+### A /dʒ/ before a pause (close-out, c2-badge; on by default)
+
+"He wore a large orange badge." was heard as "... foreign batch". Measured
+through the final /dʒ/ (`examples/affricate.rs --final TEXT`, which prints
+the voice's swing and the hiss every 10 ms around the release): the vowel
+before it is longer than before /tʃ/ and its closure is voiced, but at the
+end of a phrase the glottis opened for the hiss as the frication began and
+the folds all but stopped (the glottal flow repeated itself through half of
+the frication of "badge", swinging by 80 to 100 cm³/s 10 to 40 ms after the
+release against 135 just before it; "age?" 24 cm³/s). Changing one thing
+at a time showed that the cue is in "badge" itself: the same change to the
+/dʒ/ of "large" and "orange" alone left "batch", to that of "badge" alone
+gave "badge"; cutting off the hiss after the frication changed nothing.
+
+Now the folds stay together through the release of a /dʒ/ before a pause,
+the cover slack and the pharynx widening as in its closure, behind the
+voiced fricative's small leak, for `final_voicing_hold` (20 ms) after the
+mouth actually opens, and then open for the hiss as before: the voice swings
+by 118 cm³/s there ("age?" 56), the glottal gap opens some 10 ms later and
+the hiss is as loud (0.3 to 0.5 dB under). Before a voiced sound the
+frication of a word-final /dʒ/ was already voiced for 92 to 100 % of it, and
+held there it only lost its hiss ("badge on" became "bags on"); before a
+voiceless one English lets the voice go; so only a /dʒ/ before a pause
+changes, and every other render is byte-identical (`tests/final_voicing.rs`;
+`affricate_gate` now also holds a final /dʒ/'s voice through 65 to 82 % of
+its closure and frication against 0 to 9 % for /tʃ/).
+
+Whisper now writes "He are a large foreign badge." and "He are a large
+badge." (both "batch" before); "Stand at the edge.", "What is your age?",
+"Climb the ridge.", "Turn the page." and the four-sentence clip (byte for
+byte) are unchanged. "orange" is still heard as "foreign" in that sentence,
+as before (in "She has a large orange badge." it is right). The benchmarks
+are unchanged but for one sentence: "A cup of sugar makes sweet fudge."
+keeps its words and its last phonemes, but the phoneme recognizer drops the
+"a" at its start (the audio is identical up to the /dʒ/), so the 30
+held-out sentences' phoneme error is 21.1 % (21.0).
+
 ## A voice that listens
 
 Four tools turn sound back into settings. All of them work on the physical

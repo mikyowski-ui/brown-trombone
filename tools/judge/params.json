@@ -116,6 +116,7 @@
     "laugh_voiced": {"lo": 0.05, "hi": 0.2, "default": 0.11, "pass": "b"},
     "valve_closing": {"lo": 0.005, "hi": 0.1, "default": 0.02, "pass": "b"},
     "valve_opening": {"lo": 0.0005, "hi": 0.01, "default": 0.002, "pass": "b"},
+    "final_voicing_hold": {"lo": 0, "hi": 0.06, "default": 0.02, "pass": "a"},
     "articulation_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "lips_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "body_rate": {"lo": 8, "hi": 18, "default": 11.4, "pass": "b"},
