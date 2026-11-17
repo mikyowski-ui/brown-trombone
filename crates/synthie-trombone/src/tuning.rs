@@ -571,8 +571,8 @@ tuning! {
         /// heard straight ahead on the mouth's axis, each through its own
         /// beaming, summed without the paths' delays. `0` keeps the plain
         /// sum of the ports' flows (as before the head), `1` the mixdown;
-        /// the two differ by 0 to −2 dB above 1 kHz where the nose sounds,
-        /// and by up to −5 dB in the walls' (low) sound.
+        /// the two differ by under 0.1 dB in vowels and by 0 to −1.3 dB in
+        /// nasals (the nostrils point 40° down), in 500 Hz bands to 5 kHz.
         head_mixdown = 0.0, 0.0..=1.0, A;
         /// Share of the mouth's sound the chest sends back, in stereo: an
         /// image of the lips mirrored in a surface facing up and forward,

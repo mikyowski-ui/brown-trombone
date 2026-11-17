@@ -56,7 +56,8 @@
 //! AZIMUTH[,ELEVATION]` turns the listener's own head (where they hear the
 //! talker; default straight ahead), and `--turn FROM,TO` turns the
 //! talker's head from `FROM` to `TO` degrees (positive to the talker's
-//! right) while speaking.
+//! right) while speaking. `--raw` writes the samples as rendered, without
+//! bringing the loudest to 0.89 (for comparing levels between files).
 
 #![allow(
     clippy::cast_precision_loss,
@@ -229,6 +230,7 @@ fn main() -> std::io::Result<()> {
     let mut stereo = Stereo::Off;
     let mut listener = Listener::FRONT;
     let mut turn: Option<[f32; 2]> = None;
+    let mut raw = false;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -290,6 +292,7 @@ fn main() -> std::io::Result<()> {
             "--prosody-formants" => follow_formants = value("--prosody-formants") == "on",
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--dump-profile" => dump = true,
+            "--raw" => raw = true,
             "--stereo" => stereo = Stereo::Binaural,
             "--stereo-pair" => stereo = Stereo::Pair,
             "--listener" => {
@@ -451,7 +454,9 @@ fn main() -> std::io::Result<()> {
         }
     };
     let took = started.elapsed().as_secs_f32();
-    normalize(&mut out, 0.89);
+    if !raw {
+        normalize(&mut out, 0.89);
+    }
 
     if channels == 1 {
         wav::write(&path, SR, &out)?;

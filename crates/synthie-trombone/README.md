@@ -117,6 +117,34 @@ ring and the events are `no_std` (`StreamBuffer::split`); utterances and text
 need `std`. `examples/stream.rs` feeds a voice from a script of timed events
 and from stdin.
 
+## Stereo
+
+The physical engine can be heard by a listener's two ears: each port of
+the tract (the lips, each nostril, the throat's and the cheeks' walls)
+from its own place on a head, on its own path round the talker's head
+and the listener's, and off the chest. Turn the talker's head away by
+moving the listener's `azimuth`; the paths glide, so it can move while
+the voice speaks.
+
+```rust
+use synthie_trombone::{Engine, Listener, Preset, Stereo, Talker};
+
+let mut npc = Talker::new(48_000.0, Preset::Deep.settings().with_engine(Engine::Physical));
+npc.set_stereo(Stereo::Binaural); // or Stereo::Pair: a microphone pair
+// The listener at the talker's right, 2 m away, hearing the talker ahead.
+npc.set_listener(Listener { azimuth: 90.0, distance: 2.0, ..Listener::FRONT });
+let frames: Vec<f32> = npc.bake_stereo("Over here."); // left, right, left, ...
+assert_eq!(frames.len() % 2, 0);
+// A game with both on a map (metres east, north, up; headings clockwise
+// from north) lets the library work the angles out:
+npc.set_listener(Listener::on_map([0.0, 0.0, 1.6], 90.0, [3.0, 4.0, 1.7], 200.0));
+```
+
+`Trombone::process_stereo`, `render_stereo` (interleaved) and `frame` do
+the same on the voice, `VoicePlayer::render_stereo` on a stream, and
+`Event::Listener` / `Event::Stereo` move them from another thread. The
+mono output is unchanged by all of it.
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six

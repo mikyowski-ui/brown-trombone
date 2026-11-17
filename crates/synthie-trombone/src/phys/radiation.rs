@@ -429,6 +429,11 @@ impl Section {
 ///
 /// The mono mixdown is the ports as heard straight ahead on the axis, each
 /// through its own beaming and nothing else: no path lengths, no chest.
+/// Its filters are first-order shelves that differ in phase by at most 16°
+/// (the lips' and a cheek's, near 820 Hz), so no two ports can cancel: the
+/// deepest notch two equal ports make in it below 8 kHz is 0.08 dB, where
+/// a listener a metre in front hears one of about 1.5 dB near 800 Hz from
+/// the chest's return.
 #[derive(Clone, Debug)]
 pub(crate) struct Head {
     stereo: Stereo,
