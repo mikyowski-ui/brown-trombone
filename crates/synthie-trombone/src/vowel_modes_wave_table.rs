@@ -20,7 +20,8 @@
 //! 1.4: 1.63 / 1.03 /  3.60 %
 //! 1.5: 1.54 / 0.93 /  3.95 %
 //! 1.6: 1.46 / 0.84 /  4.27 %
-//! Solved for: `lip_horn` 1.2, `larynx_travel` 1, `rounded_larynx` 0.5.
+//! Solved for: `lip_horn` 1.2, `larynx_travel` 1, `rounded_larynx` 0.5 (`-- --lengthened --both`, with `--profile` for
+//! any other of these numbers).
 //! ```
 
 use crate::phoneme::Phoneme;

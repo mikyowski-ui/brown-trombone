@@ -125,7 +125,9 @@ independent tiers, `Tier::ALL`: `GlottalAdduction`, `LarynxAndPitch`,
 target for its tier's variables (`gesture::var`: a constriction's place and
 degree, the lips' aperture and protrusion, the port, the glottis's spread,
 the pitch and the larynx's height; the protrusion and the height lengthen
-the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on),
+the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on;
+with `AnatomyConfig::tongue_model` 1 the tongue body is three numbers of
+measured MRI modes, `mode_1..3`, see `inverse::Shape::modes`),
 moved towards as a mass on a spring of its own stiffness and damping,
 weighted by its dominance against the other gestures active on the tier,
 inside an activation window with ramps. Push one into a playing voice and

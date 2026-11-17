@@ -49,6 +49,10 @@ pub(crate) const MEASURED: [(&str, [f32; 3]); 11] = [
 ];
 /// Lowest and highest coefficient of each mode over the vowels.
 pub(crate) const RANGE: [(f32, f32); 3] = [(-1.6376, 1.4077), (-1.9237, 1.1868), (-1.1919, 1.8646)];
+/// The cosine tongue a modal body carries, place and height, as
+/// `TONGUE[k][0] + Σ TONGUE[k][m + 1]·q_m` (a least-squares fit over
+/// the projections of cosine tongues): what the jaw follows.
+pub(crate) const TONGUE: [[f32; 4]; 2] = [[18.90350, -4.39381, -1.96426, 0.29630], [-3.18250, 2.12049, -1.04905, 2.64815]];
 /// Least-squares projection of a body shape onto the modes over cells
 /// `COSINE_FROM..TO`: coefficient `k` is `Σ PROJECTION[k][j]·(d − neutral)`
 /// over those cells (`j` from `COSINE_FROM`).

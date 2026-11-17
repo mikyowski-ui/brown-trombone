@@ -487,7 +487,10 @@ tuning! {
         /// height), `1` a measured neutral shape and three principal modes of
         /// eleven vowels of one man from MRI (Story 2008; `src/tract_modes.rs`)
         /// from the top of the epilarynx to the lips, the vowels solved on it
-        /// (`src/vowel_modes_table.rs`). The classic engine keeps the cosine.
+        /// (`src/vowel_modes_table.rs`; on the lengthened tract, see
+        /// `vowel_targets::lengthened`, `src/vowel_modes_wave_table.rs`). The jaw
+        /// follows the cosine tongue the shapes carry. The classic engine keeps
+        /// the cosine.
         tongue_model = 0.0, 0.0..=1.0, A;
     } tiers {
     } aliases {

@@ -530,7 +530,19 @@ impl Articulation {
         tract_length: f32,
         held: &vowel_size::OwnShapes,
     ) -> Option<[f32; 3]> {
-        if !held.1.modal() || self.tongue == Some(VELAR_TONGUE) {
+        if !held.1.modal() {
+            return None;
+        }
+        // A vowel or glide itself (/w/ has the velars' classic tongue).
+        if let Some(key) = self.vowel
+            && let Some(own) = key.articulation()
+            && self.tongue == own.tongue
+            && self.constriction == own.constriction
+            && self.lips == own.lips
+        {
+            return vowel_size::shape_in(key, tract_length, held).and_then(|s| s.4);
+        }
+        if self.tongue == Some(VELAR_TONGUE) {
             return None;
         }
         if self.own_body() {

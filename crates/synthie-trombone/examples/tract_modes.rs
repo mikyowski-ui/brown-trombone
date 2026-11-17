@@ -194,7 +194,7 @@ fn lossless_formants(areas: &[f64], length: f64) -> [f64; 3] {
         if last.signum() != v.signum() {
             let (mut lo, mut hi, mut vlo) = (f, next, last);
             for _ in 0..50 {
-                let mid = 0.5 * (lo + hi);
+                let mid = f64::midpoint(lo, hi);
                 let vm = d_of(mid);
                 if vm.signum() == vlo.signum() {
                     lo = mid;
@@ -203,7 +203,7 @@ fn lossless_formants(areas: &[f64], length: f64) -> [f64; 3] {
                     hi = mid;
                 }
             }
-            out[found] = 0.5 * (lo + hi);
+            out[found] = f64::midpoint(lo, hi);
             found += 1;
         }
         f = next;
@@ -576,6 +576,62 @@ fn main() {
         );
     }
 
+    // The way back, smoothly: the cosine tongue (place, height) of a body
+    // as a linear function of its three numbers, fitted over the
+    // projections of a grid of cosine tongues. A shape of the modal body
+    // carries a cosine tongue (the jaw follows its height); the nearest
+    // projection on a grid jumped from point to point, and so did the jaw:
+    // 63 % of the modal babble map's cells were rough.
+    let mut ata = [[0.0f64; 4]; 4];
+    let mut atb = [[0.0f64; 4]; 2];
+    for a in 0..=34 {
+        let ti = 12.0 + 17.0 * f64::from(a) / 34.0;
+        for b in 0..=15 {
+            let td = 2.05 + 1.45 * f64::from(b) / 15.0;
+            let mut q = [0.0; 3];
+            for (j, i) in cells.clone().enumerate() {
+                let d = cosine(i, ti, td) - neutral[i - FROM];
+                for m in 0..3 {
+                    q[m] += projection[m][j] * d;
+                }
+            }
+            let row = [1.0, q[0], q[1], q[2]];
+            for r in 0..4 {
+                atb[0][r] += row[r] * ti;
+                atb[1][r] += row[r] * td;
+                for c in 0..4 {
+                    ata[r][c] += row[r] * row[c];
+                }
+            }
+        }
+    }
+    let solve4 = |a: [[f64; 4]; 4], b: [f64; 4]| {
+        let (mut a, mut b) = (a, b);
+        for p in 0..4 {
+            for r in p + 1..4 {
+                let m = a[r][p] / a[p][p];
+                for c in p..4 {
+                    a[r][c] -= m * a[p][c];
+                }
+                b[r] -= m * b[p];
+            }
+        }
+        let mut x = [0.0; 4];
+        for p in (0..4).rev() {
+            let mut s = b[p];
+            for c in p + 1..4 {
+                s -= a[p][c] * x[c];
+            }
+            x[p] = s / a[p][p];
+        }
+        x
+    };
+    let back = [solve4(ata, atb[0]), solve4(ata, atb[1])];
+    println!(
+        "Cosine tongue from the three numbers: place {:.3} {:+.3} {:+.3} {:+.3}, height {:.3} {:+.3} {:+.3} {:+.3}",
+        back[0][0], back[0][1], back[0][2], back[0][3], back[1][0], back[1][1], back[1][2], back[1][3]
+    );
+
     // Write the table.
     let list = |v: &[f64]| {
         v.iter()
@@ -655,6 +711,14 @@ fn main() {
             .map(|(a, b)| format!("({a:.4}, {b:.4})"))
             .collect::<Vec<_>>()
             .join(", ")
+    );
+    let _ = writeln!(
+        src,
+        "/// The cosine tongue a modal body carries, place and height, as\n\
+         /// `TONGUE[k][0] + Σ TONGUE[k][m + 1]·q_m` (a least-squares fit over\n\
+         /// the projections of cosine tongues): what the jaw follows.\n\
+         pub(crate) const TONGUE: [[f32; 4]; 2] = [[{:.5}, {:.5}, {:.5}, {:.5}], [{:.5}, {:.5}, {:.5}, {:.5}]];",
+        back[0][0], back[0][1], back[0][2], back[0][3], back[1][0], back[1][1], back[1][2], back[1][3]
     );
     let _ = writeln!(
         src,

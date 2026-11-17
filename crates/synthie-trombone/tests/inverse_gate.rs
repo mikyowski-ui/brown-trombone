@@ -315,6 +315,47 @@ fn f3_steers_among_equal_shapes() {
 
 // ----- the modal tongue body (`inverse::modal`) ----------------------------
 
+/// F1..F3 of modal shapes on the tract the modal map is measured on (the
+/// lengthened one, see `src/inverse_modes_table.rs`), on all threads.
+fn measure_modal(jobs: &[(Shape, f32)]) -> Vec<Option<[f32; 3]>> {
+    use synthie_trombone::{Engine, Trombone, Tuning};
+    let mut tuning = Tuning::DEFAULT;
+    tuning.anatomy.tongue_model = 1.0;
+    tuning.anatomy.lip_horn = 1.2;
+    tuning.anatomy.larynx_travel = 1.0;
+    tuning.articulation.rounded_larynx = 0.5;
+    let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    let chunk = jobs.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    let mut m = Meter::new();
+                    part.iter()
+                        .map(|(shape, l)| {
+                            let mut t = Trombone::new(48_000.0);
+                            t.set_engine(Engine::Physical);
+                            t.set_tuning(&tuning);
+                            t.set_tract_length(*l);
+                            if shape.lips.is_some() {
+                                t.set_larynx_height(-tuning.articulation.rounded_larynx);
+                            }
+                            t.set_shape(shape);
+                            t.settle();
+                            m.formants(&t)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("worker panicked"))
+            .collect()
+    })
+}
+
 /// Random targets over the modal map's reach.
 fn modal_targets(seed: u64, n: usize, length: f32) -> Vec<(f32, f32)> {
     let mut rng = Lcg(seed);
@@ -342,7 +383,7 @@ fn modal_misses(name: &str, targets: &[(f32, f32)], length: f32, limit: f32) -> 
         assert!(s.modes.is_some(), "{s:?}");
     }
     let jobs: Vec<(Shape, f32)> = shapes.iter().map(|&s| (s, length)).collect();
-    let got = measure_all(&jobs);
+    let got = measure_modal(&jobs);
     let mut misses = 0;
     let mut worst = 0.0f32;
     for (i, (&(f1, f2), f)) in targets.iter().zip(&got).enumerate() {
@@ -393,7 +434,7 @@ fn a_modal_shape_solves_on_the_modal_map_and_predicts_what_it_measures() {
     let s = inverse::solve(520.0, 1450.0, None, Some(&near));
     assert!(s.modes.is_some(), "{s:?}");
     let want = inverse::predict(&s).expect("a prediction");
-    let got = measure_all(&[(s, 1.0)])[0].expect("formants");
+    let got = measure_modal(&[(s, 1.0)])[0].expect("formants");
     for k in 0..2 {
         assert!(err(got[k], want[k]) < 0.03, "{got:?} vs {want:?}");
     }

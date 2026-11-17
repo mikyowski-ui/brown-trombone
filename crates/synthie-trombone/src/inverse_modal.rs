@@ -3,7 +3,7 @@
 //! [`super::solve`] does for the cosine body. The table
 //! (`src/inverse_modes_table.rs`) is measured by
 //! `cargo run -p synthie-trombone --example babble --release -- --modal`
-//! over a grid of the three numbers (each over [`super::mode_range`]) and
+//! over a grid of the three numbers (each over the measured range widened by half its span) and
 //! the lip rounding; the size correction is the cosine map's (measured on
 //! modal shapes by the same run: see the table's header).
 
@@ -39,15 +39,26 @@ pub const F1_RANGE: (f32, f32) = table::REACH_F1;
 pub const F2_RANGE: (f32, f32) = table::REACH_F2;
 
 /// Coordinate of body number `k` with value `q`, `0‥1` over
-/// [`super::mode_range`].
+/// [`map_range`].
 fn unit_mode(k: usize, q: f32) -> f32 {
-    let (lo, hi) = super::mode_range(k);
+    let (lo, hi) = map_range(k);
     ((q - lo) / (hi - lo)).clamp(0.0, 1.0)
 }
 
 fn from_unit_mode(k: usize, x: f32) -> f32 {
-    let (lo, hi) = super::mode_range(k);
+    let (lo, hi) = map_range(k);
     lo + (hi - lo) * x.clamp(0.0, 1.0)
+}
+
+/// The range of body number `k` the map covers: the measured vowels'
+/// widened by half its span either way (the tract takes a whole span
+/// either way, `super::mode_range`). Over the tract's whole range two
+/// thirds of the map's cells were rough (formants that bend or change
+/// names between corners, out where the body pinches shut).
+fn map_range(k: usize) -> (f32, f32) {
+    let (lo, hi) = crate::tract_modes::RANGE[k.min(2)];
+    let span = hi - lo;
+    (lo - 0.5 * span, hi + 0.5 * span)
 }
 
 /// The relaxed shape: the neutral body, lips at the knee.
@@ -77,8 +88,8 @@ pub fn coordinates(shape: &Shape) -> [f32; D] {
 }
 
 /// The shape at modal coordinates `x`: its body numbers, no narrowing, the
-/// root at rest, and as its cosine tongue the place and height whose
-/// projection is nearest the body (what the app's tongue handle shows).
+/// root at rest, and as its cosine tongue the place and height that go
+/// with the body (what the jaw follows and the app's tongue handle shows).
 #[must_use]
 pub fn from_coordinates(x: [f32; D]) -> Shape {
     let q = [0, 1, 2].map(|k| from_unit_mode(k, x[k]));
@@ -93,23 +104,18 @@ pub fn from_coordinates(x: [f32; D]) -> Shape {
     }
 }
 
-/// The cosine tongue whose projection onto the modes is nearest `q`
-/// (searched on a grid of place and height).
-#[allow(clippy::cast_precision_loss)]
+/// The cosine tongue a body of numbers `q` carries (`tract_modes::TONGUE`,
+/// a smooth fit of place and height to the projections of cosine tongues),
+/// inside the cosine tongue's ranges.
 fn nearest_tongue(q: [f32; 3]) -> (f32, f32) {
-    let mut best = (f32::INFINITY, (20.0, 2.75));
-    for a in 0..=34 {
-        let index = TONGUE_INDEX.0 + (TONGUE_INDEX.1 - TONGUE_INDEX.0) * a as f32 / 34.0;
-        for b in 0..=15 {
-            let d = TONGUE_DIAMETER.0 + (TONGUE_DIAMETER.1 - TONGUE_DIAMETER.0) * b as f32 / 15.0;
-            let p = super::project_tongue(index, d);
-            let e = (0..3).map(|k| (p[k] - q[k]) * (p[k] - q[k])).sum::<f32>();
-            if e < best.0 {
-                best = (e, (index, d));
-            }
-        }
-    }
-    best.1
+    let at = |k: usize| {
+        let c = crate::tract_modes::TONGUE[k];
+        c[0] + c[1] * q[0] + c[2] * q[1] + c[3] * q[2]
+    };
+    (
+        at(0).clamp(TONGUE_INDEX.0, TONGUE_INDEX.1),
+        at(1).clamp(TONGUE_DIAMETER.0, TONGUE_DIAMETER.1),
+    )
 }
 
 /// `ln` of F1, F2 and F3 at a grid node, or `None` if it was not measured.

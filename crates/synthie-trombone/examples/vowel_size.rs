@@ -1389,7 +1389,11 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         })
         .collect();
     if !changed.is_empty() {
-        let _ = writeln!(src, "//! Solved for: {}.", changed.join(", "));
+        let _ = writeln!(
+            src,
+            "//! Solved for: {} (`-- --lengthened --both`, with `--profile` for\n//! any other of these numbers).",
+            changed.join(", ")
+        );
     }
     let _ = writeln!(
         src,
