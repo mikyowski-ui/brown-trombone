@@ -24,8 +24,8 @@ From the text:
   phone before it. Every phone gets at least ``prosody.FLOOR``.
 * **the floor on consonants** -- a stop, an affricate, a sibilant or a
   consonant of a cluster gets at least ``CONSONANT_FLOOR`` of the rules'
-  duration for it in that place, taken from the vowels beside it
-  (``floor_consonants``); the pitch and level go with their phones
+  duration for it in that place, taken from the vowels beside it in its
+  own word (``floor_consonants``); the pitch and level go with their phones
   (``warp_tracks``).
 * **pauses** -- the frames the model gives punctuation, word gaps and the
   utterance edges, where they are at least ``KEEP_PAUSE`` long; shorter ones
@@ -171,8 +171,10 @@ BREATH = "rules"
 # of what the rules give the same phone in the same place and taken from the
 # vowels beside them, brought the 30 tuning sentences from 75.3 to 79.6 %
 # (M2) and from 71.9 to 74.0 % (F2) of Whisper's words, the phoneme error
-# from 20.1 to 16.1 and 21.1 to 18.6 %. Single runs of 30 sentences move by
-# 2 to 3 points with the pitch jittered by 0.1 semitone; over four such runs
+# from 20.1 to 16.1 and 21.1 to 18.6 % (the time then taken across words as
+# well; within the word, the default, see ``FLOOR_SAME_WORD``). Single runs
+# of 30 sentences move by 2 to 3 points with the pitch jittered by 0.1
+# semitone; over four such runs
 # the floor gained 4.4 (M2) and 4.9 (F2) points of words there.
 
 #: The least a stop, an affricate, a sibilant or a consonant of a cluster
@@ -196,6 +198,17 @@ CONSONANT_FLOOR = 0.85
 #: in this version, 2: 79.6 / 74.0 %; the four sentences as one clip 26 and
 #: 27 of 31 words against 25 and 28).
 FLOOR_KEEP = 0.6
+#: Whether the vowels that give a floored consonant time must be in its own
+#: word (the model's word gaps). Across words the K of "canoe" took 23 ms
+#: from the stressed ER of "birch" and Whisper heard "slid" as "sleet" or
+#: "lead": the four sentences as one clip with M2 gave 25 to 28 of 31 words
+#: over five renders (the K lengthened alone: 28 in all five; the ER
+#: shortened alone: 24 to 27); within the word 28 in all five. Four-run
+#: means, Whisper's words across words / within (phoneme error): 30 tuning
+#: sentences M2 79.0 / 77.7 % (16.2 / 14.7 %), F2 73.5 / 74.6 % (19.0 /
+#: 19.5 %); 30 held-out M2 77.2 / 78.1 % (19.4 / 18.9 %), F2 70.6 / 71.2 %
+#: (19.6 / 20.8 %); the clip with F2 27 or 28 either way.
+FLOOR_SAME_WORD = True
 FLOOR_REACH = 2
 #: The consonants the floor holds besides those of clusters.
 FLOORED = frozenset(A.STOPS + A.AFFRICATES + ["S", "Z", "SH", "ZH"])
@@ -414,6 +427,7 @@ class ModelPhones:
     energy_db: np.ndarray = field(default_factory=lambda: np.zeros(0))
     pieces: list[tuple[float, float]] = field(default_factory=list)
     unknown: list[str] = field(default_factory=list)
+    word: list[int] = field(default_factory=list)  #: which word each sub-phone is in, counted on one clock
 
 
 #: The model's 76 tokens (its ``vocab``, dizione's ``SYMBOLS``, in id order): 5
@@ -454,6 +468,7 @@ def lay_out(runs: list[dict], frame: float | None = None) -> ModelPhones:
     mp = ModelPhones()
     f0, voiced, energy = [], [], []
     t0 = 0
+    word = 0
     for run in runs:
         d = np.asarray(run["durations"], int)
         ends = t0 + np.cumsum(d)
@@ -461,6 +476,8 @@ def lay_out(runs: list[dict], frame: float | None = None) -> ModelPhones:
         first = len(mp.start)
         for sym, a, b, n in zip(run["symbols"], starts, ends, d):
             parts = () if sym in NOT_PHONES else fold(sym)
+            if sym in NOT_PHONES:
+                word += 1  # a word gap, a mark or an edge: the next phone is in another word
             if n <= 0 or not parts:
                 continue
             if A.OTHER in parts:
@@ -470,6 +487,7 @@ def lay_out(runs: list[dict], frame: float | None = None) -> ModelPhones:
             for p, e0, e1 in zip(parts, edges[:-1], edges[1:]):
                 mp.symbols.append(p)
                 mp.token.append(sym)
+                mp.word.append(word)
                 mp.start.append(float(e0) * frame)
                 mp.end.append(float(e1) * frame)
         if len(mp.start) > first:
@@ -545,6 +563,7 @@ class Placed:
     substituted: list[tuple[str, str]] = field(default_factory=list)  #: (model's, engine's)
     dropped: list[str] = field(default_factory=list)  #: model phones the engine does not say
     added: list[str] = field(default_factory=list)  #: engine phones the model has no token for
+    word: list[int] = field(default_factory=list)  #: the model's word each engine phone is in (its first phone's)
 
 
 def place(mp: ModelPhones, engine: list[str], rule) -> Placed:
@@ -581,6 +600,12 @@ def place(mp: ModelPhones, engine: list[str], rule) -> Placed:
         if own[j]:
             res.start[j] = min(mp.start[i] for i in own[j])
             res.end[j] = max(mp.end[i] for i in own[j])
+    words = mp.word if len(mp.word) == len(mp.symbols) else list(range(len(mp.symbols)))
+    for j in range(n):
+        if own[j]:
+            res.word.append(words[min(own[j])])
+        else:  # a phone the model has no token for: the word of the phone before it
+            res.word.append(res.word[-1] if res.word else -1)
     have = ~np.isnan(res.start)
     if not have.any():
         raise ValueError("no phone of the model's matched one of the engine's")
@@ -650,11 +675,12 @@ def floored(phones: list[str], start, end) -> list[bool]:
 
 
 def floor_consonants(phones: list[str], start, end, rule, share: float = CONSONANT_FLOOR, keep: float = FLOOR_KEEP,
-                     reach: int = FLOOR_REACH) -> tuple[np.ndarray, np.ndarray, int, float]:  # fmt: skip
+                     reach: int = FLOOR_REACH, words=None) -> tuple[np.ndarray, np.ndarray, int, float]:  # fmt: skip
     """Each phone of `floored` given at least `share` of its rule duration
     (`rule`), the time taken from the vowels within `reach` phones either
-    side (not across a pause), each down to `keep` of its own rule duration
-    and in proportion to what it has above that; what they cannot give is
+    side (not across a pause; with `words`, a word number per phone, only
+    those of its own word), each down to `keep` of its own rule duration and
+    in proportion to what it has above that; what they cannot give is
     added. The pauses keep their lengths; the phones after an addition move
     later. Returns the new starts and ends, how many phones were lengthened
     and the seconds added in all."""
@@ -681,7 +707,7 @@ def floor_consonants(phones: list[str], start, end, rule, share: float = CONSONA
             if gaps[j - 1] > 1e-6:
                 break
             near.append(j)
-        near = [j for j in near if phones[j] in A.VOCALIC]
+        near = [j for j in near if phones[j] in A.VOCALIC and (words is None or words[j] == words[k])]
         spare = np.array([max(0.0, d[j] - keep * rule[j]) for j in near])
         if near and spare.sum() > 1e-9:
             take = min(need, float(spare.sum()))
@@ -828,7 +854,8 @@ def open_gaps(mp: ModelPhones, start, end, want: dict[int, float], frame: float 
 def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: bool = False,
                    meta: dict | None = None, gaps: dict[int, float] | None = None,
                    sentence_pause: float = 0.0, floor: float = CONSONANT_FLOOR, keep: float = FLOOR_KEEP,
-                   spike: float = SPIKE_ST, reach: int = FLOOR_REACH) -> tuple[dict, dict]:  # fmt: skip
+                   spike: float = SPIKE_ST, reach: int = FLOOR_REACH,
+                   same_word: bool = FLOOR_SAME_WORD) -> tuple[dict, dict]:  # fmt: skip
     """The schedule (``prosody.analyse_audio``'s format) of the engine's phones on
     the model's timing, pitch and level, and a report of the mapping;
     ``gaps`` (phone -> seconds) are pauses held open at least that long (a
@@ -845,7 +872,8 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
     short = [(engine[k], round(float(end[k] - start[k]), 4)) for k in range(len(engine))
              if end[k] - start[k] < Pr.FLOOR - 1e-9]  # fmt: skip
     placed = start.copy(), end.copy()
-    start, end, lengthened, added = floor_consonants(engine, start, end, rule, floor, keep, reach)
+    start, end, lengthened, added = floor_consonants(engine, start, end, rule, floor, keep, reach,
+                                                     pl.word if same_word else None)  # fmt: skip
     if lengthened:
         mp = warp_tracks(mp, *placed, start, end, frame)
     f0, spikes = smooth_spikes(mp.f0, mp.voiced, spike)
@@ -992,7 +1020,7 @@ def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float 
                     phones: tuple[list[str], np.ndarray] | None = None, say: Path | None = None,
                     sentence_pause: float = SENTENCE_PAUSE, floor: float = CONSONANT_FLOOR,
                     keep: float = FLOOR_KEEP, spike: float = SPIKE_ST,
-                    reach: int = FLOOR_REACH) -> tuple[dict, dict]:  # fmt: skip
+                    reach: int = FLOOR_REACH, same_word: bool = FLOOR_SAME_WORD) -> tuple[dict, dict]:  # fmt: skip
     """The schedule for ``text`` with the model's prosody, and a report (the
     mapping, the time the model took). ``phones``: the engine's phones and
     their rule spans, if known (``say --neural`` passes them). Fillers ("um")
@@ -1017,9 +1045,9 @@ def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float 
             "frame_s": frame_seconds(), "frames": int(len(mp.f0)), "sentences": len(runs),
             "tokens": [" ".join(r["symbols"]) for r in runs], "sentence_pause": sentence_pause,
             "vocal_gaps": {str(k): round(v, 4) for k, v in gaps.items()}, "consonant_floor": floor,
-            "floor_keep": keep, "floor_reach": reach, "spike_st": spike}  # fmt: skip
+            "floor_keep": keep, "floor_reach": reach, "floor_same_word": same_word, "spike_st": spike}  # fmt: skip
     sched, report = build_schedule(text, mp, engine, rule, breath, meta, gaps, sentence_pause, floor, keep, spike,
-                                   reach)  # fmt: skip
+                                   reach, same_word)  # fmt: skip
     v = mp.f0[mp.voiced]
     report.update({
         "model_s": t_model, "speech_s": len(mp.f0) * frame_seconds(), "total_s": time.perf_counter() - t0,
@@ -1035,7 +1063,7 @@ def cmd_neural(args) -> int:
     sched, rep = neural_schedule(model, args.text, args.voice, args.speed, args.pitch_shift, args.pitch_range,
                                  args.breath == "energy", phones, Path(args.say) if args.say else None,
                                  args.sentence_pause, args.consonant_floor, args.floor_keep, args.spike,
-                                 args.floor_reach)  # fmt: skip
+                                 args.floor_reach, not args.floor_across_words)  # fmt: skip
     Path(args.out).write_text(json.dumps(sched, indent=1, ensure_ascii=False), encoding="utf-8")
     f0 = rep["f0"]
     print(f"{args.out}: {rep['phones']} phones, {rep['pauses']} pauses, {rep['speech_s']:.2f} s of speech; the model "
@@ -1080,6 +1108,9 @@ def add_parser(sub) -> None:
                    "(default: %(default)s)")
     n.add_argument("--floor-reach", type=int, default=FLOOR_REACH,
                    help="how many phones either side of a floored consonant its vowels may be (default: %(default)s)")
+    n.add_argument("--floor-across-words", action="store_true",
+                   help="let the floor take time from the vowels of the next or the last word as well (by default "
+                   "only from those of the consonant's own word)")
     n.add_argument("--spike", type=float, default=SPIKE_ST,
                    help="a pitch frame standing out from its neighbours by more than this many semitones is "
                    "replaced by the median of three (default: %(default)s; 0 leaves the track)")
