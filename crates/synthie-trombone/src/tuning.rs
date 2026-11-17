@@ -460,7 +460,8 @@ tuning! {
         /// goes there, so the voice lasts through the closure.
         cavity_expansion = 150.0, 0.0..=300.0, A;
 
-        // ----- the tract's length (wave 2A; each `0` off) ---------------------------
+        // ----- the tract's length (wave 2A; each `0` off, the anatomical tract's
+        // values by default: `TractModel::Anatomical`) ------------------------------
 
         /// Length of the fully protruded lip tube, cm at native size (physical
         /// engine; it scales with the tract): with it above `0` the lips' cell
@@ -469,24 +470,27 @@ tuning! {
         /// lip tube of up to two cells in front of the opening is not used. The
         /// protrusion is a state of the tract moved by the lips' spring towards
         /// this times the rounding slot's protrusion (see `Tract::lengths`).
-        /// `0` keeps the lumped lip tube exactly. The owner's value is 1.2.
-        lip_horn = 0.0, 0.0..=2.0, A;
+        /// `0` keeps the lumped lip tube exactly (the original tract,
+        /// `TractModel::Original`). The default is the owner's 1.2.
+        lip_horn = 1.2, 0.0..=2.0, A;
         /// Share of the larynx's height the lower pharynx follows (physical
         /// engine): with it above `0` cells 8 and 9 are one slide, two ticks
         /// long at rest, stretched by a lowered larynx (up to 0.8 cm) and
         /// shortened by a raised one (at most by one tick, 0.36 cm at native
         /// size), the piriform sinuses at its lower end where they are today;
         /// the air the moving larynx sweeps is taken up there (the piston).
-        /// `0` leaves the two cells as cells; `1` gives the larynx its full
-        /// travel.
-        larynx_travel = 0.0, 0.0..=1.0, A;
+        /// `0` leaves the two cells as cells (the original tract); `1`, the
+        /// default, gives the larynx its full travel.
+        larynx_travel = 1.0, 0.0..=1.0, A;
 
         // ----- the epilarynx (physical engine) ---------------------------------------
 
         /// Length of the epilaryngeal tube, the narrow tube just above the
         /// folds, in tract cells from the glottis (0.3645 cm each at the native
         /// size: 4 are 1.46 cm, 7 are 2.55 cm, 8 are 2.92 cm; physical engine;
-        /// see `Tract::epilarynx`). The default is the original's seven cells.
+        /// see `Tract::epilarynx`). The default is the anatomical tract's
+        /// four, flaring over the next four (`epilarynx_flare_cells`); the
+        /// original's is seven, opening in a step.
         /// Opening in a step into a tract of 6.1 cm², the tube rings at 5.9 kHz
         /// at four cells, 4.8 at five, 3.85 at six, 3.5 at seven and 2.84 at
         /// eight (the two-tube equation within 2 %; the quarter wave `c / 4L`
@@ -506,7 +510,7 @@ tuning! {
         /// 66.1 % (the original 26.3 and 74.3), four cells 24.1 and 75.7 with
         /// vowels heard wrong in sentences 20.3 % (24.1), but /ɑ æ/ short of
         /// their F1 with the tongue at its lowest.
-        epilarynx_cells = 7.0, 3.0..=9.0, A;
+        epilarynx_cells = 4.0, 3.0..=9.0, A;
         /// Width of that tube, articulation diameter units (physical engine;
         /// the area is `1.257·d²` cm² at the native size: the default 0.6 is
         /// 0.45 cm², 0.45 is 0.25 cm², 0.4 is 0.2 cm², 0.8 is 0.8 cm²). At
@@ -521,8 +525,12 @@ tuning! {
         epilarynx_flare = 1.1, 0.6..=2.2, A;
         /// Cells over which the tube widens into the flare (physical engine):
         /// `0` a step, as the original's tube; more, a ramp linear in area
-        /// starting at the tube's top, cut off at cell 10.
-        epilarynx_flare_cells = 0.0, 0.0..=6.0, A;
+        /// starting at the tube's top, cut off at cell 10. The default, 4, is
+        /// the anatomical tract's: the measured speaker's first four sections
+        /// are a narrow tube that flares over sections 5 to 8 (Story 2008); in
+        /// a step the four cells of tube left the open vowels' F1 3 to 6 %
+        /// lower on the same shapes, as 1.2 cm³ more of lower pharynx.
+        epilarynx_flare_cells = 4.0, 0.0..=6.0, A;
         /// How far the tube narrows as the folds press together and widens as
         /// they slacken (physical engine): its area is multiplied by
         /// `2^(−this · (tenseness − 0.65) / 0.3)`, kept within 0.5 to 2 times
@@ -992,8 +1000,9 @@ tuning! {
         /// How far the larynx is lowered in a rounded vowel (/u ʊ oʊ ɝ w/ and
         /// the rounded glides), cm (physical engine; with `larynx_travel` on):
         /// the measured speaker's /u/ tract is 2.7 cm longer than his /i/, lips
-        /// and larynx together (Story 2008).
-        rounded_larynx = 0.0, 0.0..=0.8, C;
+        /// and larynx together (Story 2008). The default, 0.5, is the
+        /// anatomical tract's; `0` the original's.
+        rounded_larynx = 0.5, 0.0..=0.8, C;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1364,7 +1373,7 @@ pub enum TractModel {
     /// (1.46 cm) above the folds that flares over the next four
     /// (`epilarynx_flare_cells`), as the measured speaker's first four
     /// sections are a narrow tube that flares over sections 5 to 8 (Story
-    /// 2008).
+    /// 2008). [`Tuning::DEFAULT`]'s.
     Anatomical,
 }
 

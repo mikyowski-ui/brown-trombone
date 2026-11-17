@@ -320,8 +320,8 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | breath noise | `glottal_efficiency`, `voiced_breath_corner`, `voiced_breath_gain` |
 | anatomy | jets and hiss | `jet_efficiency`, `teeth_gain`, `hiss_corner`, `hiss_floor`, `teeth_corner`, `labial_edge`, `dental_edge` |
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
-| anatomy | the tract's length (wave 2A; each `0` off) | `lip_horn`, `larynx_travel` |
-| anatomy | the epilarynx (wave 2B; the original's tube by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
+| anatomy | the tract's length (wave 2A; on by default, the anatomical tract's; each `0` off) | `lip_horn`, `larynx_travel` |
+| anatomy | the epilarynx (wave 2B; the anatomical tract's four cells flaring over four by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
@@ -331,7 +331,7 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | following a speaker's schedule | `follow_breath_low`, `follow_breath_high`, `follow_tenseness_low`, `follow_tenseness_high`, `follow_speed_max`, `follow_shortest`, `follow_shortest_light`, `follow_formant_range` |
 | articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `lips_rate` (`lips_and_jaw.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`), `larynx_rate` (`larynx_and_pitch.stiffness`), `larynx_damping` (`larynx_and_pitch.damping`) |
 | articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
-| articulation | who lowers the larynx (wave 2A; each `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
+| articulation | who lowers the larynx (wave 2A; `rounded_larynx` 0.5 by default, `voiced_stop_larynx` `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -438,15 +438,17 @@ against. A few of the figures:
 - The narrow tube above the folds, the epilaryngeal tube, has numbers of
   its own (`AnatomyConfig::epilarynx_*`: its length in cells, its width,
   the width of the lower pharynx it opens into, a step or a ramp, and how
-  far it narrows as the folds press together). The default is the
-  original's: seven cells of 0.45 cm² (2.55 cm) opening into 1.52 cm².
-  Its own resonance is F4, at 3.3 to 3.9 kHz in every vowel shape, with
-  F3 near 2.6 kHz: no cluster at 3 kHz but in /i/. Eight cells (2.9 cm)
+  far it narrows as the folds press together). The original's is seven
+  cells of 0.45 cm² (2.55 cm) opening into 1.52 cm²; the default, the
+  anatomical tract's, is four cells (1.46 cm) flaring into it over the next
+  four (see "Two tracts" below; its tube's resonance stands near 3.8 kHz).
+  The original's own resonance is F4, at 3.3 to 3.9 kHz in every vowel
+  shape, with F3 near 2.6 kHz: no cluster at 3 kHz but in /i/. Eight cells (2.9 cm)
   of 0.25 cm² opening into 3.6 cm² ring at 2.9 to 3.2 kHz (as F3 in the
   front vowels, F4 in the others) and lift the transfer function's 2.8 to
   3.2 kHz band by 8 dB against 0 to 1 kHz; four cells (1.46 cm) put the
-  tube's resonance near 4 kHz. Both are off: measured in speech, the
-  cluster cost words and the four cells gained vowels but left open
+  tube's resonance near 4 kHz. Measured in speech, the cluster cost
+  words; the four cells gained vowels but, opening in a step, left open
   vowels short of their F1 (`examples/epilarynx.rs`,
   `tests/epilarynx_gate.rs`).
 - The folds sing within a cent of the requested note over every preset's
@@ -847,7 +849,7 @@ as the model goes:
   2 ms and 43 of 193 never do, and the speech falls apart (62 % phoneme
   error on `sentence_heldout`); the cells' contact, their aim past it and
   their quicker closing are the plant's own physics, not the tiers'.
-- **A tract that changes length (Wave 2A, off).** `phys/slide.rs` is a
+- **A tract that changes length (Wave 2A, on by default since the switch below).** `phys/slide.rs` is a
   uniform tube of variable length: two delay lines read at a fractional
   delay by linear interpolation (passive at every fraction: at the half
   sample 0.04, 0.12 and 0.30 dB per pass at 3, 5 and 8 kHz; while it grows
@@ -974,7 +976,7 @@ as the model goes:
   measures the modal body's babble map (`inverse::modal`), used by `mimic`
   (`Mimic::set_modal`), Formant Lock and a followed speaker's vowels on a
   modal voice.
-- **Two tracts, each with its own tables and map (wave 2).**
+- **Two tracts, each with its own tables and map (wave 2); the anatomical one is the default.**
   `TractModel::Original` is the tract above; `TractModel::Anatomical`
   (`Tuning::with_tract`) is the lip horn of 1.2 cm, the larynx's full
   travel lowered 0.5 cm in rounded vowels, and a tube of four cells above
@@ -998,7 +1000,11 @@ as the model goes:
   with the larynx at rest as `Trombone::set_shape` holds a shape), which
   `Mimic::set_tract`, a followed speaker's vowels, `say --vowels` and the
   app read; the free functions of `inverse` read the default tract's.
-  The gates name the tract they hold.
+  The gates name the tract they hold. The anatomical tract with the cosine
+  tongue is the default (`Tuning::DEFAULT`); `Tuning::with_tract` with
+  `TractModel::Original`, or a profile setting `lip_horn`, `larynx_travel`
+  and `rounded_larynx` to `0`, `epilarynx_cells` to 7 and
+  `epilarynx_flare_cells` to 0, speaks with the original one.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 

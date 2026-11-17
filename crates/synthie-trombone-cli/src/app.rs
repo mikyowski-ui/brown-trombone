@@ -2894,7 +2894,12 @@ mod tests {
                 panic!("{at:?}: {cmds:?}");
             };
             let e = error(heard(&app, &s), target);
-            assert!(e < 0.03, "{at:?}: {target:?} → {:?}", heard(&app, &s));
+            // Within 3 %, but at the chart's closest row: on the anatomical
+            // tract two of 123 cells, at F1 275 Hz (closer than /i/'s 342),
+            // land at 284 and 285 Hz, the closest the map's shapes make there
+            // (the hull of its cells' corners that draws its reach takes in
+            // a little more than they do).
+            assert!(e < 0.037, "{at:?}: {target:?} → {:?}", heard(&app, &s));
             worst = worst.max(e);
             pressed += 1;
             // The tongue handle and the arrow keys start from the solved shape.
@@ -2967,10 +2972,16 @@ mod tests {
         // in particular the first step off the vowel's own shape is small.
         // On the coarse chart a step is 10 % of F1, and the last one, onto
         // /ɑ/ (F1 above 760 Hz, which only a pharynx narrowed low reaches),
-        // moves the shape by up to 0.35; the fine chart shows that it is a
-        // big step, not a jump.
-        assert!(coarse < 0.35, "{coarse}: {path:?}");
-        assert!(fine < 0.2, "{fine}: {path_fine:?}");
+        // moves the shape by up to 0.35 on the original tract; the fine
+        // chart shows that it is a big step, not a jump. On the anatomical
+        // tract the tongue alone reaches some 725 Hz there, and the step onto
+        // /ɑ/ puts the narrowing low in the pharynx at once (0.52 on the
+        // coarse chart, 0.60 on the fine one): every step before it is under
+        // 0.2 on the fine chart.
+        assert!(coarse < 0.55, "{coarse}: {path:?}");
+        let fine_before = largest_step(&path_fine[..path_fine.len() - 1]);
+        assert!(fine_before < 0.2, "{fine_before}: {path_fine:?}");
+        assert!(fine < 0.65, "{fine}: {path_fine:?}");
         let first = largest_step(&path_fine[..2]);
         println!("first step off the /i/ mark: {first:.3}");
         assert!(first < 0.1, "{first}: {path_fine:?}");
