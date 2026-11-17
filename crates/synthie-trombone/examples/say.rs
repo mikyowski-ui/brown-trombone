@@ -56,7 +56,8 @@
 //! AZIMUTH[,ELEVATION]` turns the listener's own head (where they hear the
 //! talker; default straight ahead), and `--turn FROM,TO` turns the
 //! talker's head from `FROM` to `TO` degrees (positive to the talker's
-//! right) while speaking. `--raw` writes the samples as rendered, without
+//! right) while speaking; `--pan FROM,TO` turns where the listener hears
+//! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
 //! bringing the loudest to 0.89 (for comparing levels between files).
 
 #![allow(
@@ -230,6 +231,7 @@ fn main() -> std::io::Result<()> {
     let mut stereo = Stereo::Off;
     let mut listener = Listener::FRONT;
     let mut turn: Option<[f32; 2]> = None;
+    let mut pan: Option<[f32; 2]> = None;
     let mut raw = false;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -309,6 +311,11 @@ fn main() -> std::io::Result<()> {
                 let mut v = [0.0; 2];
                 numbers(&value("--turn"), &mut v);
                 turn = Some(v);
+            }
+            "--pan" => {
+                let mut v = [0.0; 2];
+                numbers(&value("--pan"), &mut v);
+                pan = Some(v);
             }
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
@@ -427,9 +434,11 @@ fn main() -> std::io::Result<()> {
     } else {
         talker.set_stereo(stereo);
         talker.set_listener(listener);
-        match turn {
-            None => talker.bake_utterance_stereo(utterance),
-            Some([from, to]) => {
+        match (turn, pan) {
+            (None, None) => talker.bake_utterance_stereo(utterance),
+            (turn, pan) => {
+                let [from, to] = turn.unwrap_or([0.0; 2]);
+                let [pan_from, pan_to] = pan.unwrap_or([listener.heard_azimuth; 2]);
                 // The talker's head turns while it speaks: the listener,
                 // where it stands, is seen further and further the other
                 // way.
@@ -438,6 +447,7 @@ fn main() -> std::io::Result<()> {
                     let t = k as f32 / frames.max(1) as f32;
                     Listener {
                         azimuth: listener.azimuth - (from + (to - from) * t),
+                        heard_azimuth: pan_from + (pan_to - pan_from) * t,
                         ..listener
                     }
                 };
