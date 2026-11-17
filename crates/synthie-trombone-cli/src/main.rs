@@ -41,7 +41,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
-use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
+use synthie_trombone::{Engine, Persona, Preset, TongueModel, TractModel, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
@@ -59,6 +59,18 @@ struct Cli {
     /// tuner or by `match_voice.py`.
     #[arg(long)]
     profile: Option<PathBuf>,
+    /// The physical engine's vocal tract, laid over the voice after the
+    /// profile: `anatomical` (the default's: lip horn, moving larynx, the
+    /// measured tube above the folds) or `original` (Pink Trombone's tube
+    /// in real units). Left out, the voice keeps its own.
+    #[arg(long, value_parser = parse_tract)]
+    tract: Option<TractModel>,
+    /// The physical engine's tongue body, laid over the voice after the
+    /// profile: `cosine` (the default's) or `mri` (the measured modes of
+    /// one man's vowels). `--tract original --tongue-model mri` is
+    /// `profiles/mri-tongue.json`.
+    #[arg(long, value_parser = parse_tongue)]
+    tongue_model: Option<TongueModel>,
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
@@ -114,6 +126,12 @@ impl Cli {
                 .with_profile(&json)
                 .with_context(|| format!("in {}", path.display()))?;
         }
+        if let Some(t) = self.tract {
+            base.tuning = base.tuning.with_tract(t);
+        }
+        if let Some(t) = self.tongue_model {
+            base.tuning = base.tuning.with_tongue(t);
+        }
         let persona = Persona {
             size: self.size,
             effort: self.effort,
@@ -130,6 +148,16 @@ fn parse_engine(name: &str) -> Result<Engine, String> {
         "physical" => Ok(Engine::Physical),
         other => Err(format!("unknown engine {other:?}; try classic or physical")),
     }
+}
+
+fn parse_tract(name: &str) -> Result<TractModel, String> {
+    TractModel::from_name(name)
+        .ok_or_else(|| format!("unknown tract {name:?}; try anatomical or original"))
+}
+
+fn parse_tongue(name: &str) -> Result<TongueModel, String> {
+    TongueModel::from_name(name)
+        .ok_or_else(|| format!("unknown tongue model {name:?}; try cosine or mri"))
 }
 
 #[derive(Debug, Subcommand)]
@@ -321,4 +349,84 @@ fn restore() -> Result<()> {
         DisableMouseCapture
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synthie_trombone::Tuning;
+
+    fn voice(args: &[&str]) -> VoiceSettings {
+        let mut all = vec!["synthie-trombone"];
+        all.extend_from_slice(args);
+        Cli::try_parse_from(all)
+            .expect("flags")
+            .voice()
+            .expect("a voice")
+            .1
+    }
+
+    const PROFILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../profiles/mri-tongue.json"
+    );
+
+    #[test]
+    fn tract_and_tongue_flags_parse() {
+        for (flag, value) in [
+            ("--tract", "anatomical"),
+            ("--tract", "Original"),
+            ("--tongue-model", "cosine"),
+            ("--tongue-model", "mri"),
+            ("--tongue-model", "measured"),
+        ] {
+            assert!(Cli::try_parse_from(["synthie-trombone", flag, value]).is_ok());
+        }
+        for (flag, value) in [("--tract", "wide"), ("--tongue-model", "flat")] {
+            assert!(Cli::try_parse_from(["synthie-trombone", flag, value]).is_err());
+        }
+        // The `sing` subcommand's own --tract is the tract length.
+        let cli = Cli::try_parse_from(["synthie-trombone", "--tract", "original", "sing", "x.mid"])
+            .expect("flags");
+        assert_eq!(cli.tract, Some(TractModel::Original));
+    }
+
+    #[test]
+    fn the_flags_select_what_they_say() {
+        let plain = voice(&["--engine", "physical"]);
+        // Left out or given as the default's, nothing changes.
+        assert_eq!(plain.tuning, Tuning::DEFAULT);
+        assert_eq!(
+            voice(&[
+                "--engine",
+                "physical",
+                "--tract",
+                "anatomical",
+                "--tongue-model",
+                "cosine"
+            ]),
+            plain
+        );
+        let original = voice(&["--engine", "physical", "--tract", "original"]);
+        assert_eq!(
+            original.tuning,
+            Tuning::DEFAULT.with_tract(TractModel::Original)
+        );
+        assert_eq!(TractModel::of(&original.tuning), TractModel::Original);
+        let mri = voice(&["--engine", "physical", "--tongue-model", "mri"]);
+        assert_eq!(mri.tuning.anatomy.tongue_model, 1.0);
+        assert_eq!(TractModel::of(&mri.tuning), TractModel::Anatomical);
+        // Both together are the profile, field for field.
+        assert_eq!(
+            voice(&[
+                "--engine",
+                "physical",
+                "--tract",
+                "original",
+                "--tongue-model",
+                "mri"
+            ]),
+            voice(&["--engine", "physical", "--profile", PROFILE])
+        );
+    }
 }

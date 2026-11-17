@@ -718,13 +718,19 @@ impl Speaker {
                 && let Some(&next) = self.utterance.segments.get(self.index + 1)
                 && next.phoneme != Phoneme::Sil
             {
-                let closed = matches!(
-                    seg.phoneme.manner(),
-                    Manner::Stop | Manner::Affricate | Manner::Nasal
-                ) && seg
-                    .articulation
-                    .constriction
-                    .is_some_and(|c| c.diameter <= 0.3);
+                // An affricate's frication is its closure letting go: the
+                // tongue holds the narrow channel and leaves it for the
+                // next sound as late as a closure does. With the usual lead
+                // the next shape was sent 30 ms into the 60 ms frication of
+                // /dʒ/, while the channel was still forming out of the
+                // closure (some 30 ms): it was narrow enough to hiss for
+                // about 10 ms.
+                let closed = seg.phoneme.manner() == Manner::Affricate
+                    || matches!(seg.phoneme.manner(), Manner::Stop | Manner::Nasal)
+                        && seg
+                            .articulation
+                            .constriction
+                            .is_some_and(|c| c.diameter <= 0.3);
                 let lead = if next.gesture.approach > 0.0 {
                     next.gesture.approach
                 } else if closed {
@@ -3014,12 +3020,26 @@ fn expand(
         Manner::Affricate => {
             let fric = if a.voiced { Phoneme::Zh } else { Phoneme::Sh };
             let g = if a.voiced { voiced_stop } else { voiceless };
-            // The frication of /dʒ/ comes straight out of the closure, with
-            // the folds still pressed for its voice.
-            let fg = if a.voiced {
-                Controls::default()
-            } else {
+            // The frication of /dʒ/ is made with the larynx of /ʒ/ in the
+            // same place: air behind the vibrating folds (and the pharynx
+            // widened a little inside a word), word-finally the plainer hiss
+            // of a partly voiceless /ʒ/. With the folds pressed as for the
+            // closure (as it was) the channel, as narrow as that of /ʒ/
+            // (0.04 to 0.05 cm²), carried a mean flow of some 20 cm³/s
+            // against the 90 of /ʒ/: its Reynolds number stayed under the
+            // critical 1700 for half of the frication, the jet was
+            // turbulent for 45 to 53 % of it (/ʒ/ 65 to 71 %) and not at all
+            // at the end of "edge", on both tracts.
+            let word_final = context.next.is_none_or(|(_, _, same)| !same);
+            let fg = if !a.voiced {
                 voiceless
+            } else if word_final {
+                Controls {
+                    spread: timing.articulation.voiced_sibilant_spread,
+                    ..Controls::default()
+                }
+            } else {
+                medial_zh
             };
             out.push(with(draft(p, a, dur * 0.6, a.voiced), g));
             // The frication of /tʃ/ is nearly as long as a fricative's (70
