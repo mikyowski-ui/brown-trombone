@@ -180,10 +180,11 @@ formants; and breath and intonation shaped per phrase. Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
-`AnatomyConfig::epilarynx_*` (the original's tube by default). There are
-two tracts, `TractModel::Original` and `TractModel::Anatomical` (a lip horn,
-a larynx that moves, a tube of four cells above the folds flaring over
-four more; `Tuning::with_tract` sets their numbers), and each has its own
+`AnatomyConfig::epilarynx_*`. There are two tracts,
+`TractModel::Anatomical` (the default: a lip horn, a larynx that moves, a
+tube of four cells above the folds flaring over four more) and
+`TractModel::Original` (Pink Trombone's tube; `Tuning::with_tract` sets
+either's numbers), and each has its own
 vowel tables and babble map (`inverse::Map::for_tuning`). After changing
 the tract's acoustics, solve them again, the map first:
 

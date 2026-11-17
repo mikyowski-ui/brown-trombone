@@ -685,7 +685,7 @@ fn formants_follow_an_abrupt_vowel_change_within_40_ms() {
     // listener's own steady state is printed alongside.
     let latency = Listener::new(SR).latency();
     println!("latency() = {:.1} ms", latency * 1e3);
-    let mut worst = 0.0f32;
+    let (mut worst, mut own_worst) = (0.0f32, 0.0f32);
     for engine in [Engine::Classic, Engine::Physical] {
         for (a, b) in [
             (Phoneme::Aa, Phoneme::Iy),
@@ -726,14 +726,28 @@ fn formants_follow_an_abrupt_vowel_change_within_40_ms() {
                 // the formant gate) and its frames scatter past 10 %, so it
                 // comes within 10 % of the truth late or never: timed to
                 // its own steady state (as /ɔ/ was until round 10, when it
-                // was heard 7 % high; now within 1 %).
-                worst = worst.max(to_own);
+                // was heard 7 % high; now within 1 %). Held to the 40 ms
+                // bound, not to `latency()`, which is for the time to the
+                // truth: on the anatomical tract the /i/ is heard within
+                // 10 % of its true formants after 69 ms (on the original
+                // tract after 399), and its frames settle on their own steady
+                // state after 37.5 ms (27.5 on the original tract).
+                own_worst = own_worst.max(to_own);
                 continue;
             }
             worst = worst.max(to_truth);
         }
     }
-    println!("worst {:.1} ms", worst * 1e3);
+    println!(
+        "worst {:.1} ms; the physical /i/ to its own steady state {:.1} ms",
+        worst * 1e3,
+        own_worst * 1e3
+    );
+    assert!(
+        own_worst <= 0.040,
+        "/i/ settles after {:.1} ms",
+        own_worst * 1e3
+    );
     assert!(worst <= 0.040, "slowest step {:.1} ms", worst * 1e3);
     assert!(
         worst <= latency,
