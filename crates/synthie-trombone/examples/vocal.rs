@@ -79,8 +79,7 @@ fn main() {
         record(&mut v, seconds);
         let vowel = t0.elapsed().as_secs_f64() / f64::from(seconds);
         println!(
-            "rendering     {:.3} s a second of audio with a laugh playing (then silence), {:.3} s for a held vowel",
-            laugh, vowel
+            "rendering     {laugh:.3} s a second of audio with a laugh playing (then silence), {vowel:.3} s for a held vowel"
         );
     }
     for kind in Vocalization::ALL {
