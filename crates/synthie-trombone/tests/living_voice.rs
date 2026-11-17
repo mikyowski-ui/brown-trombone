@@ -13,8 +13,9 @@ mod breath;
 
 use breath::{span, take, tone};
 use synthie_trombone::sing::{self, SingOptions, SungNote};
-use synthie_trombone::speech::Utterance;
-use synthie_trombone::{Engine, Manner, Phoneme, Preset, Tuning, VoiceSettings};
+use synthie_trombone::speech::{Speaker, Utterance};
+use synthie_trombone::stream::{Granularity, voice_stream};
+use synthie_trombone::{Engine, Manner, Phoneme, Preset, Trombone, Tuning, VoiceSettings};
 
 /// The deep voice on the physical engine with wave 3 `on` or off.
 fn voice(on: bool) -> VoiceSettings {
@@ -31,7 +32,7 @@ fn the_living_voice_switches_five_numbers_and_nothing_else() {
     assert_eq!(on.prosody.breath_intake, 5.0);
     assert_eq!(on.prosody.breath_first, 0.0);
     assert_eq!(on.prosody.final_fry, 1.0);
-    assert_eq!(on.prosody.fry_time, 0.1);
+    assert_eq!(on.prosody.fry_time, 0.08);
     assert_eq!(off.anatomy.head_mixdown, 0.0);
     assert_eq!(off.prosody.breath_intake, 0.0);
     assert_eq!(off.prosody.breath_first, 1.0);
@@ -181,4 +182,77 @@ fn a_statement_s_last_voiced_fricative_hisses_in_creak_as_without() {
             }
         }
     }
+}
+
+/// Breaths (runs of the lungs drawing more than half a cmH2O) and the
+/// seconds from the first sound to the last, of a voice spoken sample by
+/// sample with `step`.
+fn breaths_and_length(mut step: impl FnMut(&mut Trombone) -> Option<f32>) -> (usize, f32) {
+    let mut voice = Trombone::new(48_000.0);
+    voice.set_engine(Engine::Physical);
+    let (mut count, mut drawing) = (0, false);
+    let (mut first, mut last, mut n) = (None, 0, 0usize);
+    while let Some(x) = step(&mut voice) {
+        let lungs = voice.gauges().lung_pressure;
+        if lungs < -0.5 && !drawing {
+            count += 1;
+        }
+        drawing = lungs < -0.5;
+        if x.abs() > 1e-4 {
+            first.get_or_insert(n);
+            last = n;
+        }
+        n += 1;
+        assert!(n < 30 * 48_000, "never fell silent");
+    }
+    (count, (last - first.unwrap_or(0)) as f32 / 48_000.0)
+}
+
+#[test]
+fn streamed_sentences_breathe_between_them_as_the_text_whole() {
+    // The stream compiles a sentence at a time; with breaths between
+    // sentences and none before the utterance each sentence after the
+    // first opens with the breath the text's pause would have taken, out of
+    // the pause's own time.
+    let prosody = voice(true).prosody();
+    let whole = {
+        let u = Utterance::from_text(TWO, &prosody);
+        let mut speaker = Speaker::new();
+        let mut started = false;
+        breaths_and_length(|v| {
+            if !started {
+                Speaker::prepare(v);
+                speaker.speak(u.clone());
+                started = true;
+            }
+            speaker.is_speaking().then(|| speaker.process(v))
+        })
+    };
+    let streamed = {
+        let (mut stream, mut player) = voice_stream(1024);
+        stream.set_prosody(prosody);
+        stream.set_granularity(Granularity::Sentence);
+        let mut fed = false;
+        breaths_and_length(|v| {
+            if !fed {
+                for word in TWO.split_inclusive(' ') {
+                    stream.push_text(word);
+                }
+                stream.flush_text();
+                fed = true;
+                return Some(player.process(v));
+            }
+            (!player.is_idle()).then(|| player.process(v))
+        })
+    };
+    println!(
+        "the text whole: {} breaths, {:.3} s; streamed: {} breaths, {:.3} s",
+        whole.0, whole.1, streamed.0, streamed.1
+    );
+    assert_eq!(whole.0, 1);
+    assert_eq!(streamed.0, 1, "the stream's breaths");
+    assert!(
+        (streamed.1 - whole.1).abs() < 0.02,
+        "{streamed:?} against {whole:?}"
+    );
 }

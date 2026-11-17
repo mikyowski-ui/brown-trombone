@@ -1600,8 +1600,8 @@ impl Tuning {
     /// (`anatomy.head_mixdown` 1), the lungs draw a breath of 5 cmH2O in
     /// the pauses between sentences but not before the utterance
     /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
-    /// in creak over their last 0.1 s of voice (`final_fry` 1, `fry_time`
-    /// 0.1). Off: the five numbers as they were before wave 3 (the plain
+    /// in creak over their last 0.08 s of voice (`final_fry` 1, `fry_time`
+    /// 0.08). Off: the five numbers as they were before wave 3 (the plain
     /// sum of the ports, no breaths, modal voice to the end; `breath_first`
     /// 1 and `fry_time` 0.12, read only when their switch is on).
     #[must_use]
@@ -1612,7 +1612,7 @@ impl Tuning {
             p.breath_intake = 5.0;
             p.breath_first = 0.0;
             p.final_fry = 1.0;
-            p.fry_time = 0.1;
+            p.fry_time = 0.08;
         } else {
             self.anatomy.head_mixdown = 0.0;
             p.breath_intake = 0.0;
