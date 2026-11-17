@@ -452,6 +452,9 @@ pub struct Speaker {
     creak: f32,
     /// When, on `clock`, the segment's creak is due.
     creak_at: Option<f32>,
+    /// The segment being spoken is the turn after a breath: the next
+    /// sound's shape is still to be sent.
+    turning: bool,
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -545,6 +548,7 @@ impl Speaker {
         self.inhale = 0.0;
         self.creak = 0.0;
         self.creak_at = None;
+        self.turning = false;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -687,11 +691,12 @@ impl Speaker {
                         // for it yet: now, before the air moves.
                         self.ready(voice, g);
                     }
-                    if self.inhale > 0.0 && c.intake <= 0.0 && pause && !self.ahead {
-                        // The breath turns: the first sound's shape is sent
-                        // now, so that it is made by the time it is due.
-                        self.send_next(voice, g);
-                    }
+                    // The breath turns: the first sound's shape is sent half
+                    // way through the turn, once the stream going in has all
+                    // but stopped (sent as the lungs let go, a gap forming in
+                    // the inward stream hissed 25 dB louder than the breath),
+                    // so that it is made by the time it is due.
+                    self.turning = self.inhale > 0.0 && c.intake <= 0.0 && pause;
                     self.breathe(voice, g, c.intake);
                     if c.creak_from > 0.0 {
                         self.creak_at = Some(self.clock + c.creak_from);
@@ -701,6 +706,10 @@ impl Speaker {
                         self.go_creaky(voice, g, c.creak);
                     }
                 }
+            }
+            if self.turning && !self.ahead && self.elapsed >= 0.5 * seg.duration {
+                self.turning = false;
+                self.send_next(voice, g);
             }
             if let Some(t) = self.creak_at
                 && self.clock >= t
@@ -3508,9 +3517,13 @@ fn breathe_in(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], ti
         }
         let seconds: f32 = drafts[a..b].iter().map(|d| d.duration).sum();
         let share = (0.55 + 0.15 * seconds).clamp(0.6, 1.0);
+        // The lungs push in neither (a pause's breath, see `breathe`).
         let mut draw = silence(breath);
         draw.gesture.intake = timing.prosody.breath_intake * share;
-        drafts.splice(at..at, [draw, silence(BREATH_TURN)]);
+        draw.gesture.pressure_drop = (1.0, 1.0);
+        let mut turn = silence(BREATH_TURN);
+        turn.gesture.pressure_drop = (1.0, 1.0);
+        drafts.splice(at..at, [draw, turn]);
         for q in &mut phrases[p..] {
             (q.0, q.1) = (q.0 + 2, q.1 + 2);
         }

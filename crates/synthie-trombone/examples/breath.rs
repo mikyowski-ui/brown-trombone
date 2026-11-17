@@ -108,6 +108,17 @@ fn speech_report(settings: &VoiceSettings, text: &str) {
             .map(|w| (w[1] - w[0]).abs())
             .fold(0.0f32, f32::max);
         let mid = usize::midpoint(a, b);
+        let (loud, _) = (a..b)
+            .map(|k| (k, t.out[k].abs()))
+            .fold((a, 0.0f32), |m, x| if x.1 > m.1 { x } else { m });
+        println!(
+            "    loudest at {:.4} s (segment {}, lungs {:.2}, flow {:.0}, area {:.3})",
+            loud as f32 / SR,
+            t.segment[loud],
+            t.lung[loud],
+            t.flow[loud],
+            t.area[loud]
+        );
         println!(
             "    middle: area {:.3} cm2, below the folds {:.2} cmH2O, lungs {:.2}",
             t.area[mid], t.sub[mid], t.lung[mid]
@@ -244,6 +255,23 @@ fn main() {
                 && let Ok(v) = value.parse::<f32>()
             {
                 assert!(settings.tuning.set(name, v), "no tuning field {name}");
+            }
+        }
+        if args.iter().any(|a| a == "--segments") {
+            let u = synthie_trombone::speech::Utterance::from_text(
+                &text,
+                &settings.with_engine(Engine::Physical).prosody(),
+            );
+            for (k, s) in u.segments().iter().take(8).enumerate() {
+                println!(
+                    "  {k}: {:?} {:.3} s intake {:.2} drop {:?} spread {:.2} voiced {}",
+                    s.phoneme,
+                    s.duration,
+                    s.gesture.intake,
+                    s.gesture.pressure_drop,
+                    s.gesture.spread,
+                    s.voiced
+                );
             }
         }
         speech_report(&settings, &text);
