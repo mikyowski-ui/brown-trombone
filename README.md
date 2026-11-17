@@ -1257,19 +1257,31 @@ laid on the breath by default (the rules' level already follows it, r =
 the rules' pause for its vocalization, a filler the model's timing; the
 sentence pauses are held at 0.5 s so that the breath between sentences is
 drawn (in the model's 0.27 to 0.32 s it fell out), and the creak at a
-statement's end stays. Measured on the deep voice with wave 3 on
-(phoneme error / Whisper words; F2 before wave 3):
+statement's end stays. A floor on consonants (close-out of wave 4, on by
+default; `prosody.py neural --consonant-floor 0 --spike 0` gives the
+schedules of before to the byte) gives every stop, affricate, sibilant and
+consonant of a cluster at least 0.85 of the rules' duration for it in that
+place, taken from the vowels beside it, the model's pitch and level carried
+along with each phone, and replaces single-frame pitch spikes by the median
+of three (`tools/judge/README.md`, "Floor on consonants, pitch spikes").
+Measured on the deep voice (phoneme error / Whisper words, single runs):
 
-| | rules | M2 | F2 (before wave 3) |
+| | rules | M2 | F2 |
 |---|---:|---:|---:|
-| ten held-out sentences | 15.1 / 81.2 % | 19.2 / 83.8 % | 18.4 / 77.5 % |
-| four listening sentences | 16.2 / 87.1 % | 15.2 / 87.1 % | 18.2 / 80.6 % |
-| the four as one clip | 12.1 / 77.4 % | 9.1 / 90.3 % | 7.1 / 83.9 % |
-| 30 held-out sentences | 21.0 / 77.1 % | 22.2 / 72.3 % | 22.6 / 70.1 % |
+| ten held-out sentences | 15.1 / 81.2 % | 17.1 / 85.0 % | 14.3 / 77.5 % |
+| four listening sentences | 16.2 / 87.1 % | 10.1 / 83.9 % | 17.2 / 80.6 % |
+| the four as one clip | 12.1 / 77.4 % | 9.1 / 80.6 % | 7.1 / 90.3 % |
+| 30 tuning sentences | 16.5 / 74.5 % | 16.1 / 79.6 % | 18.6 / 74.0 % |
+| 30 held-out sentences | 21.0 / 77.1 % | 20.0 / 77.1 % | 19.7 / 71.4 % |
 
-With M2 Whisper writes the clip "The birch can use slid on the smooth
-planks. Glue the sheet to the dark blue background. She sells seashells by
-the sea shore. The juice of lemons makes fine punch." (28 of 31 words).
+Before the floor M2 gave 22.2 / 71.0 % on the 30 held-out sentences and F2
+22.8 / 69.7 %. With F2 Whisper writes the clip "The birch can be slid on
+the smooth planks. Glue the sheet to the dark blue background. She sells
+seashells by the sea shore. The juice of lemons makes fine punch." (28 of
+31 words); with M2 "The birch can use sleet on the smooth planks. ... She
+sells seashells by the seashore. ..." (25; 28 before the floor: the
+phones of "slid" and "sea shore" keep their durations, the floor lengthens
+the K of "canoe" from 53 to 84 ms).
 A real-time path would put the `ort` crate in a std crate beside the
 library (the CLI, not `synthie-trombone`), run the cut graph on a worker
 thread once per sentence before it is spoken and hand the stream a
