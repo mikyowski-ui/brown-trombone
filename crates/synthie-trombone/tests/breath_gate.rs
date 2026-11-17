@@ -25,16 +25,23 @@ const TEXT: &str =
 /// owner asked for (3 to 5).
 const DEPTH: f32 = 5.0;
 
-/// The owner's voice with breaths and creak on.
+/// The owner's voice with breaths and creak on as stage 3A measured them:
+/// a breath before the utterance as well as between its sentences, creak
+/// over the last 0.12 s of a statement's voice, the plain sum of the ports.
 fn living() -> VoiceSettings {
-    let mut s = Preset::Deep.settings().with_engine(Engine::Physical);
+    let mut s = plain();
     s.tuning.prosody.breath_intake = DEPTH;
+    s.tuning.prosody.breath_first = 1.0;
     s.tuning.prosody.final_fry = 1.0;
+    s.tuning.prosody.fry_time = 0.12;
     s
 }
 
+/// The same voice with wave 3 off.
 fn plain() -> VoiceSettings {
-    Preset::Deep.settings().with_engine(Engine::Physical)
+    let mut s = Preset::Deep.settings().with_engine(Engine::Physical);
+    s.tuning = s.tuning.with_living_voice(false);
+    s
 }
 
 #[test]
