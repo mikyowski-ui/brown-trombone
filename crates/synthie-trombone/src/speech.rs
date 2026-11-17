@@ -172,6 +172,19 @@ pub struct Controls {
     pub creak: f32,
     /// Seconds into the segment at which its `creak` is asked for.
     pub creak_from: f32,
+    /// For the frication of a /dʒ/ before a pause: seconds after the mouth
+    /// opens (the release, as the tract stops being shut) for which the
+    /// folds keep the segment's own larynx (adducted, the cover slack, the
+    /// pharynx widening) before they take `hiss_spread` and
+    /// `hiss_expansion` for the hiss (see
+    /// [`ArticulationConfig::final_voicing_hold`](crate::ArticulationConfig::final_voicing_hold)).
+    /// `0`: none, the segment's larynx throughout.
+    pub hiss_after: f32,
+    /// The glottal opening behind the folds after `hiss_after`, cm² at
+    /// native size.
+    pub hiss_spread: f32,
+    /// The pharynx's active widening after `hiss_after`, cm³/s.
+    pub hiss_expansion: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -519,6 +532,11 @@ pub struct Speaker {
     creak: f32,
     /// When, on `clock`, the segment's creak is due.
     creak_at: Option<f32>,
+    /// The segment holds its own larynx until `Controls::hiss_after` after
+    /// the release, and the mouth has not opened yet.
+    hiss_pending: bool,
+    /// When, on `clock`, the segment's larynx for the hiss is due.
+    hiss_at: Option<f32>,
     /// The segment being spoken is the turn after a breath: the next
     /// sound's shape is still to be sent.
     turning: bool,
@@ -621,6 +639,8 @@ impl Speaker {
         self.inhale = 0.0;
         self.creak = 0.0;
         self.creak_at = None;
+        self.hiss_pending = false;
+        self.hiss_at = None;
         self.turning = false;
         self.waiting = 0.0;
         core::mem::replace(&mut self.utterance, utterance)
@@ -656,6 +676,8 @@ impl Speaker {
             self.creak = 0.0;
         }
         self.creak_at = None;
+        self.hiss_pending = false;
+        self.hiss_at = None;
         voice.articulate_phoneme(Phoneme::Sil);
         voice.set_constriction(LABIAL_SLOT, None);
         self.labial = None;
@@ -812,6 +834,20 @@ impl Speaker {
                     // so that it is made by the time it is due.
                     self.turning = self.inhale > 0.0 && c.intake <= 0.0 && pause;
                     self.breathe(voice, g, c.intake);
+                    // The larynx for the hiss of a final /dʒ/ is timed from
+                    // the release: from the moment the mouth opens, or from
+                    // when it opened if that was just before this segment.
+                    self.hiss_at = None;
+                    self.hiss_pending = c.hiss_after > 0.0;
+                    if self.hiss_pending && !voice.mouth_shut() {
+                        let from = if self.clock - self.opened_at < c.hiss_after {
+                            self.opened_at
+                        } else {
+                            self.clock
+                        };
+                        self.hiss_at = Some(from + c.hiss_after);
+                        self.hiss_pending = false;
+                    }
                     if c.creak_from > 0.0 {
                         self.creak_at = Some(self.clock + c.creak_from);
                         self.go_creaky(voice, g, 0.0);
@@ -1273,6 +1309,20 @@ impl Speaker {
         }
         if !shut && self.was_shut {
             self.opened_at = self.clock;
+            if self.hiss_pending {
+                self.hiss_pending = false;
+                self.hiss_at = Some(self.clock + seg.gesture.hiss_after);
+            }
+        }
+        if let Some(t) = self.hiss_at
+            && self.clock >= t
+        {
+            // The voice has run through the release into the frication:
+            // now the glottis opens behind the folds for the hiss.
+            self.hiss_at = None;
+            plant::spread(voice, g, seg.gesture.hiss_spread);
+            plant::slack(voice, g, 0.0);
+            voice.set_cavity_expansion(seg.gesture.hiss_expansion);
         }
         self.was_shut = shut;
         if let Some(t) = self.voice_at
@@ -3530,6 +3580,37 @@ fn expand(
                 }
             } else {
                 medial_zh
+            };
+            // Before a pause the voice of a final /dʒ/ died in its
+            // frication: the glottis opened for the hiss as the frication
+            // began, and with the mouth's pressure at the release the folds
+            // all but stopped (the glottal flow repeated itself through 50 %
+            // of the frication of "badge" ending a statement, 30 % of that
+            // of "age?", swinging by 80 to 100 cm³/s 10 to 40 ms after the
+            // release of "badge" against 135 just before it), and Whisper
+            // wrote "batch". There the folds stay together through the
+            // release, the cover slack and the pharynx widening as in the
+            // closure, behind the voiced fricative's small leak (air enough
+            // for the channel to hiss as it forms), for `final_voicing_hold`
+            // after the mouth opens; then the glottis opens behind them for
+            // the hiss, as before: the swing is 110 to 125 cm³/s there, the
+            // hiss some 10 ms later and as loud. Elsewhere the voice did not
+            // die: before a voiced sound the frication was voiced for 92 to
+            // 100 % of it ("large orange", "orange badge", "huge river"), and
+            // held there it only lost its hiss ("badge on" was heard as "bags
+            // on"); before a voiceless sound English lets it go ("large
+            // size").
+            let hold = timing.articulation.final_voicing_hold / rate;
+            let fg = if a.voiced && context.next.is_none() && hold > 0.0 {
+                Controls {
+                    spread: timing.articulation.voiced_fricative_spread,
+                    hiss_after: hold,
+                    hiss_spread: fg.spread,
+                    hiss_expansion: fg.expansion,
+                    ..voiced_stop
+                }
+            } else {
+                fg
             };
             out.push(with(draft(p, a, dur * 0.6, a.voiced), g));
             // The frication of /tʃ/ is nearly as long as a fricative's (70

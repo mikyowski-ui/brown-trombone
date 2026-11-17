@@ -1094,6 +1094,20 @@ tuning! {
         /// it blows them and stop by themselves after it, and the breath goes
         /// out between.
         laugh_voiced = 0.11, 0.05..=0.2, B;
+
+        // ----- a /dʒ/ before a pause (c2-badge; `0` off) ---------------------------
+
+        /// Seconds after the release of a /dʒ/ before a pause ("badge.",
+        /// "edge.", "age?") for which the folds stay together, the cover
+        /// slack and the pharynx widening as in its closure, behind the
+        /// voiced fricative's small leak (`voiced_fricative_spread`), so that
+        /// the voice runs through the release into the frication; then the
+        /// glottis opens behind them for the hiss, as before (physical
+        /// engine). The channel takes some 20 ms to form after the release.
+        /// `0`: the glottis opens as the frication begins, and the voice
+        /// all but died in it ("badge" ending a statement voiced through
+        /// half of its frication; heard as "batch").
+        final_voicing_hold = 0.02, 0.0..=0.06, A;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1861,7 +1875,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_forty_two_seventy_four_and_fifty_three() {
+    fn three_parts_of_forty_two_seventy_five_and_fifty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1869,9 +1883,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (42, 74, 53)
+            (42, 75, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 169);
+        assert_eq!(Tuning::FIELDS.len(), 170);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
