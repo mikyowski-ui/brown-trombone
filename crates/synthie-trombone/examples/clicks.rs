@@ -31,10 +31,28 @@ fn main() {
     } else {
         None
     };
+    // `--set name=value` (repeatable) on top; `--voice NAME` for one voice.
+    let mut sets = Vec::new();
+    let mut only = None;
+    for w in args.windows(2) {
+        if w[0] == "--set" {
+            let (k, v) = w[1].split_once('=').expect("--set name=value");
+            sets.push((k.to_string(), v.parse::<f32>().expect("a number")));
+        }
+        if w[0] == "--voice" {
+            only = Some(w[1].clone());
+        }
+    }
     for preset in Preset::ALL {
+        if only.as_ref().is_some_and(|o| *o != preset.to_string()) {
+            continue;
+        }
         let mut settings: VoiceSettings = preset.settings();
         if let Some(t) = tract {
             settings.tuning = settings.tuning.with_tract(t);
+        }
+        for (k, v) in &sets {
+            assert!(settings.tuning.set(k, *v), "no field {k}");
         }
         let (mut click, mut at_release) = ((0.0f32, String::new()), (0.0f32, String::new()));
         for text in TEXTS {

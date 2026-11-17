@@ -803,9 +803,22 @@ fn highest(model: Model, t: &Target) -> [f32; D] {
     let mut hi = [1.0; D];
     if model == Model::Cosine {
         hi[5] = root_x(root_range(t.key).1);
+        if vowel_targets::lengthened(&survey::base()) {
+            hi[1] =
+                (LENGTHENED_LOWEST - TONGUE_DIAMETER.0) / (TONGUE_DIAMETER.1 - TONGUE_DIAMETER.0);
+        }
     }
     hi
 }
+
+/// The lowest tongue (largest diameter) a cosine shape of the anatomical
+/// tract may have, short of the engine's 3.5. Solved down to 3.5, /æ/'s
+/// tongue stood at 3.5 up to length 0.8 and at 3.48 at 0.9, and the
+/// whisper (0.9) shut its tongue tip onto the /n/ of "and" with a click 6.6
+/// times its loudest vowel sample (the bound is 6; on the original tract
+/// /æ/ stands at 3.36 there and the worst click is 1.3); with its tongue at
+/// 3.3 the worst click was 1.55.
+const LENGTHENED_LOWEST: f32 = 3.4;
 
 /// Which coordinates of target `t` are solved.
 fn free(kind: Kind, key: VowelKey) -> [bool; D] {
