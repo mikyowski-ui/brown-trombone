@@ -1231,6 +1231,55 @@ Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
 for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
 Peterson & Barney (1952) for the vowel targets.
 
+### Breaths and creak (wave 3, stage 3A; off by default)
+
+The physical engine can breathe in and creak, both switched off by
+default (`ProsodyConfig::breath_intake` and `final_fry` `0`; `say
+--breath-intake --fry 1`, the same flags in the terminal app,
+`VoiceSettings::with_breath(5.0, 1.0)` for a `Talker` or the stream).
+
+**Breathing in.** The lungs may draw below the air's pressure
+(`Trombone::set_inhalation`, the glottal tier's `inhale` variable,
+`Gesture::inhalation`, `Trombone::breathe_in`, `VoiceStream::breathe_in`):
+the glottis is held open behind the folds as they draw
+(`ArticulationConfig::breath_opening`, 0.6 cm² in all), the air goes in
+through the tract, and what is heard is the noise of its own jets: the
+glottal jet, and behind every narrowing of the tract a jet that forms on
+the glottis's side of it (`Phys::tick` runs the jet rule in reverse while
+the lungs draw; the folds feel the stream from above). Speech takes a
+breath before an utterance (`breath_first`) and in every pause of at
+least `breath_pause` (0.45 s: a sentence's, not a comma's), `breath_time`
+(0.15 s) long, then 0.1 s of turn before the phrase; the mouth is readied
+for the phrase's first vowel before it, the velum shut as for that vowel,
+and the first sound's shape is sent half way through the turn. At 5 cmH2O
+before a phrase of three seconds or more (seven tenths of it before one
+of a second) the air goes in at 0.4 to 0.6 L/s, and the breath stands 31
+to 37 dB under the vowels of the phrase after it (published speech
+breaths: 20 to 40 dB under the speech); the turn's largest sample step
+is under a fifth of the vowels' (`tests/breath_gate.rs`). In a pause the
+breath takes its time from the pause; before the utterance it is added,
+and every phone comes `breath_time` + 0.1 s later. Text with bracketed
+phonemes and hand-made segments (singing) take no breath; a schedule
+followed with `--match-prosody` keeps a breath where the speaker's pause
+leaves room for it and drops it otherwise.
+
+**Creak.** The standard folds are periodic wherever they vibrate (energy
+at half the pitch 50 to 90 dB under the pitch's, `examples/breath.rs`).
+Coupled more loosely between the two pieces of their cover, as a thick,
+slack fold is (Titze & Story's rules give that coupling 0.065 of the lower
+piece's stiffness, the standard folds 0.31), and pressed together, they
+alternate strong and weak pulses by themselves: at 0.05 of the coupling,
+pressed 0.005 cm and blown at 2 to 6 cmH2O, on /a i ə/ at 60 to 130 Hz,
+the half-pitch stands 8 to 14 dB under the pitch
+(`Trombone::set_fold_creak`, `AnatomyConfig::creak_coupling`,
+`creak_press`; taken there within 10 ms they alternate from the third or
+fourth pulse). Statements (`.` `!`) go into creak over the last
+`fry_time` (0.12 s) of their voice, never before the middle of the last
+vowel; questions and commas do not. In the four listening sentences the
+last 100 ms of voice then alternate by 0.6 to 0.7 of their mean pulse height
+(0.03 to 0.2 without). The share works as a switch: at 0.6 the folds do
+not cross into alternation.
+
 ## A voice that listens
 
 Four tools turn sound back into settings. All of them work on the physical
