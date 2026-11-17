@@ -1136,6 +1136,43 @@ Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
 for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
 Peterson & Barney (1952) for the vowel targets.
 
+### Neural prosody from text (tiny-voca, held)
+
+`say --neural M2` (or `F2`, with `:SPEED` after it) speaks any text
+with the timing, pauses and pitch of tiny-voca, a small neural
+text-to-speech model (Apache-2.0, 4.5 M parameters), instead of the rules,
+with no recording: the engine's phones for the text go to
+`tools/judge/prosody.py neural`, which runs the model's ONNX graph on the
+CPU (cut where its pitch, voicing and energy are computed: 3.5 ms a
+sentence), lines its phones up with the engine's and writes the schedule
+beside the output (`out.neural.json`); the text is then spoken following
+it as with `--match-prosody`, the contour moved to the voice's own median
+unless `--prosody-pitch speaker` says not. It needs the judge's `neural`
+dependency group (`uv sync --group neural` in `tools/judge`, or
+`SYNTHIE_NEURAL_PYTHON` naming a Python that has onnxruntime); the model
+and its phonemizer are fetched into `tools/judge/.cache/tiny-voca` on first
+use. The library, `speech.rs` and interactive play are untouched: without
+`--neural` every output is the same to the byte. The model's own tempo is
+23 % faster than the rules', so it is asked for 0.8 of it; its energy is not
+laid on the breath by default (the rules' level already follows it, r =
+0.68, and on top the phonemes were heard worse). Measured on the deep voice
+(phoneme error / Whisper words):
+
+| | rules | M2 | F2 |
+|---|---:|---:|---:|
+| ten held-out sentences | 15.5 / 83.8 % | 15.5 / 83.8 % | 18.4 / 77.5 % |
+| four listening sentences | 17.2 / 83.9 % | 15.2 / 87.1 % | 18.2 / 80.6 % |
+| the four as one clip | 11.1 / 74.2 % | 7.1 / 90.3 % | 7.1 / 83.9 % |
+| 30 held-out sentences | 20.6 / 75.8 % | 20.6 / 70.6 % | 22.6 / 70.1 % |
+
+With M2 Whisper writes the clip "The birch can use slid on the smooth
+planks. Glue the sheet to the dark blue background. She sells seashells by
+the sea shore. The juice of lemons makes fine punch." (28 of 31 words).
+A real-time path would put the `ort` crate in a std crate beside the
+library (the CLI, not `synthie-trombone`), run the cut graph on a worker
+thread once per sentence before it is spoken and hand the stream a
+followed `Utterance`; the phonemizer (dizione, Python) would need a port.
+
 ## A voice that listens
 
 Four tools turn sound back into settings. All of them work on the physical
