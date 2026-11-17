@@ -41,7 +41,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
-use synthie_trombone::{Engine, Persona, Preset, TongueModel, TractModel, VoiceSettings};
+use synthie_trombone::{Engine, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
@@ -102,6 +102,12 @@ struct Cli {
     /// misbehave in a terminal. It holds whatever is typed.
     #[arg(long, value_name = "FILE")]
     key_log: Option<PathBuf>,
+    /// Play the physical engine in stereo, as the two ears of a listener a
+    /// metre in front of the talker (each port of the tract on its own
+    /// path round both heads); `--stereo pair` for a plain microphone pair
+    /// instead, for loudspeakers.
+    #[arg(long, value_name = "MODE", num_args = 0..=1, default_missing_value = "binaural", value_parser = parse_stereo)]
+    stereo: Option<Stereo>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -139,6 +145,15 @@ impl Cli {
             clarity: self.clarity,
         };
         Ok((preset, base, persona))
+    }
+}
+
+fn parse_stereo(name: &str) -> Result<Stereo, String> {
+    match name.to_ascii_lowercase().as_str() {
+        "binaural" | "ears" => Ok(Stereo::Binaural),
+        "pair" => Ok(Stereo::Pair),
+        "off" | "mono" => Ok(Stereo::Off),
+        other => Err(format!("unknown stereo {other:?}; try binaural or pair")),
     }
 }
 
@@ -184,6 +199,7 @@ fn main() -> Result<()> {
                 cli.mic.as_deref(),
                 cli.record,
                 cli.key_log.as_deref(),
+                cli.stereo.unwrap_or(Stereo::Off),
             )
         }
     }
@@ -196,6 +212,7 @@ fn tui(
     microphone: Option<&str>,
     takes: PathBuf,
     key_log: Option<&std::path::Path>,
+    stereo: Stereo,
 ) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -203,7 +220,7 @@ fn tui(
         original_hook(info);
     }));
 
-    let (streams, link) = audio::start(mimic, microphone, takes)?;
+    let (streams, link) = audio::start(mimic, microphone, takes, stereo)?;
     let _streams = streams;
 
     enable_raw_mode()?;

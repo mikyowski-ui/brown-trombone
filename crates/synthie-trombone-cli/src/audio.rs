@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use synthie::audio::fx::Reverb;
+use synthie_trombone::Stereo;
 use synthie_trombone::listen::{Heard, Listener};
 use synthie_trombone::mimic::{Gesture, Mimic};
 use synthie_trombone::speech::{Speaker, Utterance};
@@ -210,9 +211,16 @@ pub(crate) struct Engine {
     probe_shape: ShapeKey,
     probe_every: u64,
     probe_last: u64,
+    /// How the two channels of a stereo device are heard (`--stereo`).
+    stereo: Stereo,
 }
 
 impl Engine {
+    /// Hear the physical engine's two ears on a stereo device.
+    pub(crate) fn set_stereo(&mut self, stereo: Stereo) {
+        self.stereo = stereo;
+    }
+
     fn apply(&mut self, cmd: Cmd) {
         let logged = match cmd {
             Cmd::Record(on) => {
@@ -298,13 +306,26 @@ impl Engine {
             self.apply(cmd);
         }
         self.follow();
+        if self.core.voice().stereo() != self.stereo {
+            // A rebuilt voice (a take's start) hears as asked again.
+            self.core.voice_mut().set_stereo(self.stereo);
+        }
+        let stereo = self.stereo != Stereo::Off && channels >= 2;
         for frame in data.chunks_mut(channels.max(1)) {
             let dry = self.core.sample();
             self.watch.sample(self.core.voice());
             self.clock += 1;
             self.tap.sample(dry);
-            let s = (self.reverb.process(dry, self.core.reverb()) * OUTPUT_GAIN).clamp(-1.0, 1.0);
+            let wet = self.reverb.process(dry, self.core.reverb());
+            let s = (wet * OUTPUT_GAIN).clamp(-1.0, 1.0);
             frame.fill(s);
+            if stereo {
+                // Each ear with the room's (mono) share of the reverb on it.
+                let ears = self.core.voice().frame();
+                for (out, ear) in frame.iter_mut().zip(ears) {
+                    *out = ((ear + wet - dry) * OUTPUT_GAIN).clamp(-1.0, 1.0);
+                }
+            }
             self.scope.push(s);
 
             self.since_snapshot += 1;
@@ -511,6 +532,7 @@ pub(crate) fn wire(
         probe_shape: ShapeKey::NONE,
         probe_every,
         probe_last: 0,
+        stereo: Stereo::Off,
     };
     let link = Link {
         cmd: cmd_tx,
@@ -526,12 +548,14 @@ pub(crate) fn wire(
 }
 
 /// Open the default output device and start the engine; with `mimic`, the
-/// default microphone too. Takes are recorded into `takes`. The streams
-/// stop when dropped.
+/// default microphone too. Takes are recorded into `takes`. A device of
+/// two or more channels plays the physical engine's two ears as `stereo`
+/// says. The streams stop when dropped.
 pub fn start(
     mimic: bool,
     microphone: Option<&str>,
     takes: PathBuf,
+    stereo: Stereo,
 ) -> Result<(Vec<cpal::Stream>, Link)> {
     let host = cpal::default_host();
     let device = host
@@ -561,7 +585,8 @@ pub fn start(
     } else {
         None
     };
-    let (engine, mut link) = wire(sample_rate, ear_rx, size, Some(takes));
+    let (mut engine, mut link) = wire(sample_rate, ear_rx, size, Some(takes));
+    engine.set_stereo(stereo);
     let mut callback = output(engine, channels);
     link.microphone = heard_on.is_some();
     link.microphone_name = heard_on;

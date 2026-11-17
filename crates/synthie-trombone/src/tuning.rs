@@ -555,6 +555,38 @@ tuning! {
         /// follows the cosine tongue the shapes carry. The classic engine keeps
         /// the cosine.
         tongue_model = 0.0, 0.0..=1.0, A;
+
+        // ----- the head (wave 3, stage 3C) -------------------------------------------
+
+        /// Radius of the talker's head as a rigid sphere, cm at the native
+        /// size (it grows with the tract): above about `c/(πa)`, 620 Hz at
+        /// 8.75 cm, the ports' high frequencies beam the way they point, and
+        /// the paths round the head to a listener are this long (Brown &
+        /// Duda 1998; see `phys::radiation::Head`). Physical engine, read
+        /// while the head is on: in stereo (`Trombone::set_stereo`) or for
+        /// the mixdown (`head_mixdown`).
+        head_radius = 8.75, 7.0..=10.5, A;
+        /// How much of the physical engine's mono output is the head's
+        /// mixdown: the lips, the nostrils, the throat and the cheeks as
+        /// heard straight ahead on the mouth's axis, each through its own
+        /// beaming, summed without the paths' delays. `0` keeps the plain
+        /// sum of the ports' flows (as before the head), `1` the mixdown;
+        /// the two differ by under 0.1 dB in vowels and by 0 to −1.3 dB in
+        /// nasals (the nostrils point 40° down), in 500 Hz bands to 5 kHz.
+        head_mixdown = 0.0, 0.0..=1.0, A;
+        /// Share of the mouth's sound the chest sends back, in stereo: an
+        /// image of the lips mirrored in a surface facing up and forward,
+        /// heard as far as the listener sees that surface (0.18 of the lips'
+        /// level straight ahead, none from behind). Not in the mixdown.
+        chest_reflection = 0.25, 0.0..=0.6, A;
+        /// Distance from the lips to the chest's surface along its normal,
+        /// cm at the native size: the return's delay (0.62 ms straight ahead
+        /// at 15 cm; its first notch near 800 Hz).
+        chest_distance = 15.0, 8.0..=25.0, A;
+        /// Corner of the chest return's low-pass, Hz at the native size
+        /// (clothes and a surface smaller than the wavelengths above it
+        /// return little of them).
+        chest_corner = 1500.0, 500.0..=4000.0, A;
     } tiers {
     } aliases {
     }
@@ -1673,7 +1705,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_thirty_two_seventy_one_and_forty_three() {
+    fn three_parts_of_thirty_eight_seventy_one_and_forty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1681,9 +1713,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (33, 71, 43)
+            (38, 71, 43)
         );
-        assert_eq!(Tuning::FIELDS.len(), 147);
+        assert_eq!(Tuning::FIELDS.len(), 152);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1698,10 +1730,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_sixty_seven_and_sixty_five() {
+    fn two_passes_of_seventy_two_and_sixty_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (67, 65));
+        assert_eq!((a, b), (72, 65));
     }
 
     #[test]

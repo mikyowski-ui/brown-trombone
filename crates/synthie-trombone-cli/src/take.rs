@@ -248,6 +248,11 @@ impl Performer {
         &self.voice
     }
 
+    /// The voice, for settings that are not controls (how it is heard).
+    pub fn voice_mut(&mut self) -> &mut Trombone {
+        &mut self.voice
+    }
+
     #[must_use]
     pub fn speaker(&self) -> &Speaker {
         &self.speaker

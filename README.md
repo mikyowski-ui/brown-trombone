@@ -305,7 +305,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 33 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 38 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 71) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
@@ -323,6 +323,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the tract's length (wave 2A; on by default, the anatomical tract's; each `0` off) | `lip_horn`, `larynx_travel` |
 | anatomy | the epilarynx (wave 2B; the anatomical tract's four cells flaring over four by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
+| anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, `head_mixdown` `0` off) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -1005,6 +1006,40 @@ as the model goes:
   `TractModel::Original`, or a profile setting `lip_horn`, `larynx_travel`
   and `rounded_larynx` to `0`, `epilarynx_cells` to 7 and
   `epilarynx_flare_cells` to 0, speaks with the original one.
+- **A head and two ears (wave 3C; stereo is asked for, the mono mixdown off).**
+  The tract's sound leaves by six ports, kept apart at the end of each
+  tick: the lips (with the edge source of /f θ/), each nostril, the
+  throat's walls and each cheek's. `phys/radiation.rs::Head` puts each on
+  a rigid sphere of 8.75 cm (growing with the speaker) at its own place,
+  pointing its own way, and sends it on its own path to each ear of a
+  listener: Brown & Duda's one-pole sphere shadow from where the port
+  points (the lips' highs beam forward), the straight line plus the arc
+  round the talker's head and the listener's, 1/r; the mouth's sound comes
+  back off the chest too (an image of the lips under a surface facing up
+  and forward, 0.25 of it, low-passed at 1.5 kHz, 0.62 ms late straight
+  ahead). All of it is relative to the mouth heard on its axis, which is
+  what the engine was fitted to. `Trombone::set_stereo(Stereo::Binaural)`
+  (or `Stereo::Pair`, an ORTF microphone pair) and
+  `set_listener(Listener { .. })`, then `process_stereo` /
+  `render_stereo`; `Talker` and the stream's `VoicePlayer` have the same,
+  `Event::Listener` moves the listener from another thread, and the paths
+  glide over 30 ms, so moving costs no click. `say --stereo [--listener
+  AZ,EL,DIST] [--heard AZ] [--turn FROM,TO]` writes two channels, the app
+  plays them with `--stereo`, the web engine has `renderStereo`. Measured
+  (`tests/head_gate.rs`): straight ahead the ears are alike (a vowel to
+  120 dB, a nasal to 29, the nostrils' own asymmetry); the talker heard at
+  the listener's side reaches the far ear 0.78 ms later (Kuhn's 3a/c for a
+  voice's lows; Woodworth's 0.66 for its highs) and 14 dB duller at 2 to
+  6 kHz; from beside and behind the talker a vowel's 2 to 6 kHz fall 8 and
+  12 to 14 dB, its lows below 300 Hz 2 to 3 dB, the voice bar of a /b/ (the
+  walls alone) 2.2; from 60° below the face /m/'s 1.5 to 5 kHz are 5.8 dB
+  stronger than from 60° above, a vowel's 0.5. The mono mixdown
+  (`Tuning::head_mixdown` 1) is the ports as heard straight ahead, each
+  through its own beaming, with no path's delay: no two ports can cancel
+  (the deepest notch two equal ports make below 8 kHz is 0.08 dB, where a
+  listener's chest return makes 1.5), and it stays within 0.1 dB of the
+  plain sum in vowels and 0 to −1.3 dB in nasals. Stereo costs about 5 %
+  of the physical engine's time.
 - **The tract and the tongue by name; affricates that hiss after their
   release (wave 3, `w3-juice`).** `say --tract anatomical|original` and
   `--tongue-model cosine|mri`, and the app's flags of the same names, lay

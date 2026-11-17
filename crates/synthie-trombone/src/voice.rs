@@ -7,6 +7,7 @@ use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
+use crate::phys::radiation::{Listener, Stereo};
 use crate::phys::source::{Source, SourceKind, WHISPER_TENSENESS};
 use crate::phys::{CM_H2O, Drive, Phys};
 use crate::tract::{Constriction, Dynamics, HISS_WIDEST, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
@@ -296,6 +297,23 @@ pub struct Trombone {
     dc_y: f32,
     dc_r: f32,
     gain: f32,
+    /// The two channels of the head's listener (see [`Trombone::set_stereo`]).
+    ears: Ears,
+}
+
+/// The two channels of the physical engine's listener on their way out:
+/// each ear's radiated flow at the last internal sample, after the soft
+/// folds' low-pass, its last two internal samples for resampling, its DC
+/// blocker, and the frame [`Trombone::process`] made last.
+#[derive(Clone, Copy, Debug, Default)]
+struct Ears {
+    flow: [f32; 2],
+    soft: [f32; 2],
+    prev: [f32; 2],
+    cur: [f32; 2],
+    dc_x: [f32; 2],
+    dc_y: [f32; 2],
+    frame: [f32; 2],
 }
 
 impl Trombone {
@@ -361,6 +379,7 @@ impl Trombone {
             dc_y: 0.0,
             dc_r: 1.0 - 2.0 * PI * 10.0 / sample_rate,
             gain: 1.0,
+            ears: Ears::default(),
         }
     }
 
@@ -386,6 +405,7 @@ impl Trombone {
         self.cur = 0.0;
         self.dc_x = 0.0;
         self.dc_y = 0.0;
+        self.ears = Ears::default();
     }
 
     // ----- engine ------------------------------------------------------
@@ -843,6 +863,7 @@ impl Trombone {
         self.source.reset();
         self.phys_flow = 0.0;
         self.soft_out = 0.0;
+        self.ears = Ears::default();
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 
@@ -1951,21 +1972,40 @@ impl Trombone {
     }
 
     /// One output sample.
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, clippy::needless_range_loop)]
     pub fn process(&mut self) -> f32 {
+        let ears = self.ears_on();
         while self.frac >= 1.0 {
             self.prev = self.cur;
             self.cur = self.internal_sample();
+            self.ears.prev = self.ears.cur;
+            self.ears.cur = self.ears.soft;
             self.frac -= 1.0;
         }
-        let x = self.prev + (self.cur - self.prev) * self.frac as f32;
+        let t = self.frac as f32;
+        let x = self.prev + (self.cur - self.prev) * t;
         self.frac += self.step;
 
         // DC blocker: the glottal flow derivative is not quite zero-mean.
         let y = x - self.dc_x + self.dc_r * self.dc_y;
         self.dc_x = x;
         self.dc_y = y;
-        y * self.gain
+        let out = y * self.gain;
+        self.ears.frame = if ears {
+            let e = &mut self.ears;
+            let mut frame = [0.0f32; 2];
+            for k in 0..2 {
+                let x = e.prev[k] + (e.cur[k] - e.prev[k]) * t;
+                let y = x - e.dc_x[k] + self.dc_r * e.dc_y[k];
+                e.dc_x[k] = x;
+                e.dc_y[k] = y;
+                frame[k] = y * self.gain;
+            }
+            frame
+        } else {
+            [out, out]
+        };
+        out
     }
 
     /// Fill `out` with mono samples.
@@ -1973,6 +2013,75 @@ impl Trombone {
         for s in out {
             *s = self.process();
         }
+    }
+
+    // ----- stereo --------------------------------------------------------
+
+    /// Hear the voice in two channels as a listener does (physical engine;
+    /// see [`Stereo`] and [`Trombone::set_listener`]): the ports of the
+    /// tract (the lips, each nostril, the throat's and the cheeks' walls)
+    /// each from its own place on the head, on its own path to each ear,
+    /// and the mouth's return off the chest. [`Stereo::Off`] (the default)
+    /// gives both channels the mono output, and costs nothing. The mono
+    /// output is the same whichever is chosen. Switching starts the two
+    /// channels' paths from silence.
+    pub fn set_stereo(&mut self, stereo: Stereo) {
+        self.phys.head.set_stereo(stereo);
+        let frame = self.ears.frame;
+        self.ears = Ears {
+            frame,
+            ..Ears::default()
+        };
+    }
+
+    /// How the two channels are heard.
+    #[must_use]
+    pub fn stereo(&self) -> Stereo {
+        self.phys.head.stereo()
+    }
+
+    /// Put the listener somewhere else: where the talker's head sees them,
+    /// how far, and how their own head is turned (see [`Listener`]). The
+    /// paths glide to the new place over 30 ms, so the voice can be moved
+    /// while it speaks without a click. A game turns the talker's head
+    /// away from the listener with `set_listener(Listener { azimuth: 180.0,
+    /// ..voice.listener() })`, or sets both from a map with
+    /// [`Listener::on_map`].
+    pub fn set_listener(&mut self, listener: Listener) {
+        self.phys.head.set_listener(listener);
+    }
+
+    /// Where the listener is.
+    #[must_use]
+    pub fn listener(&self) -> Listener {
+        self.phys.head.listener()
+    }
+
+    /// The two channels, `[left, right]`, of the sample
+    /// [`process`](Self::process) made last (both the mono sample while
+    /// [`stereo`](Self::stereo) is off or the classic engine plays).
+    #[must_use]
+    pub fn frame(&self) -> [f32; 2] {
+        self.ears.frame
+    }
+
+    /// One output frame, `[left, right]` (see [`set_stereo`](Self::set_stereo)).
+    pub fn process_stereo(&mut self) -> [f32; 2] {
+        self.process();
+        self.ears.frame
+    }
+
+    /// Fill `out` with interleaved frames, left then right (an odd last
+    /// sample is left alone).
+    pub fn render_stereo(&mut self, out: &mut [f32]) {
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo();
+        }
+    }
+
+    /// Whether the two channels are the head's own.
+    fn ears_on(&self) -> bool {
+        self.engine == Engine::Physical && self.phys.head.stereo() != Stereo::Off
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -2071,15 +2180,30 @@ impl Trombone {
     /// leaving the mouth and nose.
     fn physical_sample(&mut self, tract: [f32; 2], folds: [f32; 2]) -> f32 {
         let dt = 0.5 / self.internal_rate;
+        let head_on = self.phys.head.on();
         let (area, lung) = self.source.tick(folds[0], dt);
         let flow = self.phys.tick(tract[0], Drive::Glottis { area, lung });
         self.phys.radiate(flow);
+        if head_on {
+            self.phys.radiate_head();
+        }
         self.source.react(&self.phys.gauge, folds[0], dt);
         let (area, lung) = self.source.tick(folds[1], dt);
         let flow = self.phys.tick(tract[1], Drive::Glottis { area, lung });
-        let flow = self.phys.radiate(flow);
+        let mut flow = self.phys.radiate(flow);
+        let channels = if head_on {
+            self.phys.radiate_head()
+        } else {
+            [0.0; 3]
+        };
         self.source.react(&self.phys.gauge, folds[1], dt);
         self.glottal_area = area;
+        // The mono output: the plain sum of the ports, or as far as
+        // `Tuning::head_mixdown` says the head's mixdown of them.
+        let mixdown = self.tuning.anatomy.head_mixdown;
+        if mixdown > 0.0 {
+            flow += (channels[0] - flow) * mixdown;
+        }
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;
         // Soft folds: the voice through a one-pole low-pass. The tract is
@@ -2091,13 +2215,25 @@ impl Trombone {
         let pass = self.source.soft_pass(2.0 * dt);
         self.soft_out += (out - self.soft_out) * pass;
         let out = self.soft_out;
-        if out.is_finite() {
+        let mut ears_finite = true;
+        if self.phys.head.stereo() != Stereo::Off {
+            // The ears' flows to sound, as the mono one above.
+            let e = &mut self.ears;
+            for k in 0..2 {
+                let o = (channels[1 + k] - e.flow[k]) * (0.5 / dt) * PHYSICAL_GAIN;
+                e.flow[k] = channels[1 + k];
+                e.soft[k] += (o - e.soft[k]) * pass;
+                ears_finite &= e.soft[k].is_finite();
+            }
+        }
+        if out.is_finite() && ears_finite {
             out
         } else {
             self.phys.reset();
             self.source.reset();
             self.phys_flow = 0.0;
             self.soft_out = 0.0;
+            self.ears = Ears::default();
             0.0
         }
     }
