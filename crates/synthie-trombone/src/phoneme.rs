@@ -594,7 +594,8 @@ impl Articulation {
             }
             return (self, None);
         };
-        let Some((tongue, lips, narrow, _, _)) = vowel_size::shape_in(key, tract_length, held) else {
+        let Some((tongue, lips, narrow, _, _)) = vowel_size::shape_in(key, tract_length, held)
+        else {
             return (self, None);
         };
         let mut a = self;

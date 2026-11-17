@@ -1772,7 +1772,10 @@ impl App {
         // tongue projected onto them), solved on its own map.
         let start = if self.modal_body() {
             Shape {
-                modes: Some(inverse::project_tongue(start.tongue_index, start.tongue_diameter)),
+                modes: Some(inverse::project_tongue(
+                    start.tongue_index,
+                    start.tongue_diameter,
+                )),
                 narrowing: None,
                 ..start
             }

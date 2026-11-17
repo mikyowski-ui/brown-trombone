@@ -378,7 +378,10 @@ fn modal_map_other_tract_lengths_land_within_five_percent() {
     for length in [0.7f32, 1.3] {
         let t = modal_targets(0x00c0_ffee + (length * 10.0) as u64, 50, length);
         let misses = modal_misses(&format!("modal, length {length}"), &t, length, 0.05);
-        assert_eq!(misses, 0, "length {length}: {misses} missed by more than 5 %");
+        assert_eq!(
+            misses, 0,
+            "length {length}: {misses} missed by more than 5 %"
+        );
     }
 }
 

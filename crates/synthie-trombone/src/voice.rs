@@ -1004,7 +1004,10 @@ impl Trombone {
             // Physical vowel shapes also follow the speaker's size, and the
             // tongue root goes with the tongue body.
             Engine::Physical => {
-                let mut held = self.own_vowels.on(crate::vowel_size::Table::of(&self.tuning, self.tract.modal()));
+                let mut held = self.own_vowels.on(crate::vowel_size::Table::of(
+                    &self.tuning,
+                    self.tract.modal(),
+                ));
                 if let Some((key, shape)) = &self.speech_vowel {
                     held.set(*key, Some(shape));
                 }

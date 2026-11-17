@@ -887,7 +887,10 @@ fn modal_inside(cell: [usize; 4], frac: [f32; 4]) -> [f32; 4] {
 /// ln F1, F2, F3 of modal coordinates `x` at `length`.
 fn modal_ln_formants(meter: &mut Meter, x: &[f32; 4], length: f32) -> Option<[f32; 3]> {
     meter
-        .measure(&synthie_trombone::inverse::modal::from_coordinates(*x), length)
+        .measure(
+            &synthie_trombone::inverse::modal::from_coordinates(*x),
+            length,
+        )
         .filter(|f| f.iter().all(|v| v.is_finite() && *v > 0.0))
         .map(|f| f.map(f32::ln))
 }
@@ -912,7 +915,8 @@ fn modal_main() {
     let knee = inverse::modal::coordinates(&Shape {
         lips: Some(1.8),
         ..inverse::modal::from_coordinates([0.5; 4])
-    })[3] * (d[3] - 1) as f32;
+    })[3]
+        * (d[3] - 1) as f32;
     assert!(
         (knee - knee.round()).abs() < 1e-3,
         "lip rounding 1.8 must fall on a grid line of the lip coordinate"
@@ -1029,7 +1033,8 @@ fn modal_main() {
         };
         let c = modal_corners(&table, all_cells[n]).expect("checked above");
         let p = modal_interpolate(&c, frac);
-        if (p[0] - t[0]).abs().max((p[1] - t[1]).abs()) > ROUGH_F12 || (p[2] - t[2]).abs() > ROUGH_F3
+        if (p[0] - t[0]).abs().max((p[1] - t[1]).abs()) > ROUGH_F12
+            || (p[2] - t[2]).abs() > ROUGH_F3
         {
             rough[n] = true;
         }
@@ -1148,10 +1153,8 @@ fn modal_main() {
             for s in 0..MODAL_SIZE_SHAPES {
                 let row = &sized[s * LENGTHS.len()..(s + 1) * LENGTHS.len()];
                 if let (Some(n), Some(f)) = (row[native_at], row[li]) {
-                    let want = inverse::formants_at_length(
-                        [n[0].exp(), n[1].exp(), n[2].exp()],
-                        l,
-                    )[k];
+                    let want =
+                        inverse::formants_at_length([n[0].exp(), n[1].exp(), n[2].exp()], l)[k];
                     left.push((f[k] - want.ln()).abs());
                 }
             }

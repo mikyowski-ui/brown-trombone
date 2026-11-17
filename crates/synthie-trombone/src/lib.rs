@@ -82,8 +82,8 @@ pub mod stream;
 #[cfg(feature = "alloc")]
 mod talker;
 mod tract;
-mod tuning;
 mod tract_modes;
+mod tuning;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;

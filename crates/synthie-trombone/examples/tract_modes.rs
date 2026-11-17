@@ -488,7 +488,10 @@ fn main() {
             .fold(f64::INFINITY, f64::min)
     };
     let orals: Vec<f64> = p.coef.iter().map(|c| oral(c)).collect();
-    println!("Narrowest of the mouth (cells {ORAL_FROM}..{}) and the lips' opening, engine diameters:", TO - 1);
+    println!(
+        "Narrowest of the mouth (cells {ORAL_FROM}..{}) and the lips' opening, engine diameters:",
+        TO - 1
+    );
     for (i, v) in vowels.iter().enumerate() {
         println!(
             "  {v:2} {:.2} {:.2}",
@@ -509,11 +512,7 @@ fn main() {
     }
     let mut projection = vec![vec![0.0; TO - COSINE_FROM]; 3];
     for (j, i) in cells.clone().enumerate() {
-        let col = [
-            modes[0][i - FROM],
-            modes[1][i - FROM],
-            modes[2][i - FROM],
-        ];
+        let col = [modes[0][i - FROM], modes[1][i - FROM], modes[2][i - FROM]];
         let x = solve3(g, col);
         for a in 0..3 {
             projection[a][j] = x[a];
@@ -524,7 +523,9 @@ fn main() {
     // the measured row, of the row with its body made of three modes, and
     // of that body in the native tract's 44 cells of 0.3645 cm with the
     // speaker's epilarynx and lips scaled as the body is.
-    println!("Lossless F1/F2/F3, Hz: measured row | its body from three modes | that in the native tract:");
+    println!(
+        "Lossless F1/F2/F3, Hz: measured row | its body from three modes | that in the native tract:"
+    );
     for (i, r) in rows.iter().enumerate() {
         let mut three = r.area;
         for j in FROM..TO {
@@ -638,7 +639,11 @@ fn main() {
          pub(crate) const MEASURED: [(&str, [f32; 3]); 11] = ["
     );
     for (v, c) in vowels.iter().zip(&p.coef) {
-        let _ = writeln!(src, "    (\"{v}\", [{:.4}, {:.4}, {:.4}]),", c[0], c[1], c[2]);
+        let _ = writeln!(
+            src,
+            "    (\"{v}\", [{:.4}, {:.4}, {:.4}]),",
+            c[0], c[1], c[2]
+        );
     }
     let _ = writeln!(src, "];");
     let _ = writeln!(

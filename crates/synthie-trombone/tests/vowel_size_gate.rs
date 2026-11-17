@@ -517,7 +517,11 @@ fn modal_lengths_between_table_rows_meet_it_too() {
 #[test]
 fn vowels_of_the_lengthened_tract_meet_their_targets() {
     let lengths = [0.6, 0.75, 0.85, 1.0, 1.15, 1.3, 1.4];
-    gate_on("lengthened tract, cosine body", &lengths, &lengthened(false));
+    gate_on(
+        "lengthened tract, cosine body",
+        &lengths,
+        &lengthened(false),
+    );
     gate_on("lengthened tract, modal body", &lengths, &lengthened(true));
 }
 
@@ -572,7 +576,12 @@ fn modal_shapes_stay_inside_the_body_and_do_not_hiss() {
                 assert!(s.lips.is_none_or(|d| d >= 0.65), "{} at {l}: {s:?}", t.key);
                 let (_, d) = s.narrowing.expect("a narrowing (none is wide open)");
                 assert!(d >= 0.7, "{} at {l}: {s:?}", t.key);
-                assert_eq!(s.lips.is_some(), t.lips == Lips::Rounded, "{} at {l}", t.key);
+                assert_eq!(
+                    s.lips.is_some(),
+                    t.lips == Lips::Rounded,
+                    "{} at {l}",
+                    t.key
+                );
             }
             for l in [0.6, 1.0, 1.3] {
                 let a = articulation(t.key);

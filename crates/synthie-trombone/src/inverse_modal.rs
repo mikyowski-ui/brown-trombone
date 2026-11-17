@@ -52,7 +52,12 @@ fn from_unit_mode(k: usize, x: f32) -> f32 {
 
 /// The relaxed shape: the neutral body, lips at the knee.
 fn relaxed() -> [f32; D] {
-    [unit_mode(0, 0.0), unit_mode(1, 0.0), unit_mode(2, 0.0), LIPS_KNEE_AT]
+    [
+        unit_mode(0, 0.0),
+        unit_mode(1, 0.0),
+        unit_mode(2, 0.0),
+        LIPS_KNEE_AT,
+    ]
 }
 
 /// `shape` as the modal map's four coordinates: its three numbers (or its

@@ -274,11 +274,15 @@ fn carrying(shape: Shape, key: VowelKey, length: f32) -> Shape {
     if shape.modes.is_none() {
         return shape;
     }
-    let solved = SOLVED_COSINE.lock().expect("lock").as_ref().and_then(|rows| {
-        rows.iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, r)| interpolate(Model::Cosine, r, length))
-    });
+    let solved = SOLVED_COSINE
+        .lock()
+        .expect("lock")
+        .as_ref()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, r)| interpolate(Model::Cosine, r, length))
+        });
     let cosine = solved.unwrap_or_else(|| {
         let mut t = survey::base();
         t.anatomy.tongue_model = 0.0;
@@ -346,7 +350,11 @@ fn to_x(s: &Shape) -> [f32; D] {
         s.lips.map_or(1.0, |l| log(l, LIPS)),
         lin(
             at,
-            narrowing_at(if s.modes.is_some() { Model::Modal } else { Model::Cosine }),
+            narrowing_at(if s.modes.is_some() {
+                Model::Modal
+            } else {
+                Model::Cosine
+            }),
         ),
         log(narrow, NARROWING),
         lin(s.pharynx, PHARYNX),
@@ -452,7 +460,10 @@ impl Goal {
     }
 
     fn eval(&self, m: &mut Meter, x: &[f32; D]) -> Option<([f32; 3], f32)> {
-        let f = m.measure(&carrying(from_x(x, self.kind), self.key, self.length), self.length)?;
+        let f = m.measure(
+            &carrying(from_x(x, self.kind), self.key, self.length),
+            self.length,
+        )?;
         let r = self.residuals(f);
         Some((r, self.cost(x, &r)))
     }
@@ -1046,9 +1057,14 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
             .filter(|t| measured_vowel(t.key).is_some())
             .collect();
         let at_measured = par_map(&measured, |m, t| {
-            m.measure(&carrying(from_x(&prior(first(t), t), first(t)), t.key, 1.0), 1.0)
+            m.measure(
+                &carrying(from_x(&prior(first(t), t), first(t)), t.key, 1.0),
+                1.0,
+            )
         });
-        println!("The measured shapes on the engine (lips as the cosine body's), against the targets:");
+        println!(
+            "The measured shapes on the engine (lips as the cosine body's), against the targets:"
+        );
         for (t, f) in measured.iter().zip(&at_measured) {
             let e = errors(*f, t.key, 1.0);
             println!(
@@ -1070,10 +1086,22 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         // a narrowing along the tongue as well, starting from the cosine
         // body's.
         let short: Vec<usize> = (0..targets.len())
-            .filter(|&v| !kinds[v].narrowed && natives[v].err[..2].iter().any(|e| e.abs() > NEEDS_NARROWING))
+            .filter(|&v| {
+                !kinds[v].narrowed
+                    && natives[v].err[..2]
+                        .iter()
+                        .any(|e| e.abs() > NEEDS_NARROWING)
+            })
             .collect();
         let again = par_map(&short, |m, &v| {
-            native_row(m, Kind { narrowed: true, ..kinds[v] }, &targets[v])
+            native_row(
+                m,
+                Kind {
+                    narrowed: true,
+                    ..kinds[v]
+                },
+                &targets[v],
+            )
         });
         for (&v, s) in short.iter().zip(again) {
             let miss = |s: &Solved| s.err[0].abs().max(s.err[1].abs());
@@ -1089,7 +1117,12 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
             }
         }
     }
-    let kind = |t: &Target| kinds[targets.iter().position(|u| u.key == t.key).expect("a target")];
+    let kind = |t: &Target| {
+        kinds[targets
+            .iter()
+            .position(|u| u.key == t.key)
+            .expect("a target")]
+    };
     for (t, s) in targets.iter().zip(&natives) {
         println!(
             "{:>4} native: F1 {:+.2} % F2 {:+.2} % F3 {:+.2} %{}  {:?}",
@@ -1102,16 +1135,29 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         );
     }
     if model == Model::Modal {
-        println!("How far each solved body ends from the speaker's (coefficients, unit RMS over his vowels):");
+        println!(
+            "How far each solved body ends from the speaker's (coefficients, unit RMS over his vowels):"
+        );
         for (t, s) in targets.iter().zip(&natives) {
             let q = from_x(&s.x, kind(t)).modes.expect("modal");
             let p = measured_prior(t);
             println!(
                 "  {:>4}{}: {:+.2} {:+.2} {:+.2} from {:+.2} {:+.2} {:+.2} (moved {:+.2} {:+.2} {:+.2})",
                 t.key.to_string(),
-                if measured_vowel(t.key).is_some() { " *" } else { "  " },
-                q[0], q[1], q[2], p[0], p[1], p[2],
-                q[0] - p[0], q[1] - p[1], q[2] - p[2]
+                if measured_vowel(t.key).is_some() {
+                    " *"
+                } else {
+                    "  "
+                },
+                q[0],
+                q[1],
+                q[2],
+                p[0],
+                p[1],
+                p[2],
+                q[0] - p[0],
+                q[1] - p[1],
+                q[2] - p[2]
             );
         }
     }
@@ -1156,7 +1202,10 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         .flat_map(|v| lengths.iter().map(move |&l| (v, l)))
         .collect();
     let measured = par_map(&checks, |m, &(v, l)| {
-        let f = m.measure(&carrying(interpolate(model, &table[v], l), targets[v].key, l), l);
+        let f = m.measure(
+            &carrying(interpolate(model, &table[v], l), targets[v].key, l),
+            l,
+        );
         (f, errors(f, targets[v].key, l))
     });
 
@@ -1396,8 +1445,11 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
     };
     std::fs::write(path, &src).expect("write the table");
     if model == Model::Cosine {
-        let rows: Vec<(VowelKey, [[i32; D]; ROWS])> =
-            targets.iter().map(|t| t.key).zip(table.iter().copied()).collect();
+        let rows: Vec<(VowelKey, [[i32; D]; ROWS])> = targets
+            .iter()
+            .map(|t| t.key)
+            .zip(table.iter().copied())
+            .collect();
         *SOLVED_COSINE.lock().expect("lock") = Some(rows);
     }
     println!(

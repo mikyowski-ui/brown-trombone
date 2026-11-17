@@ -133,15 +133,15 @@ impl Rows {
     fn at(&self, key: VowelKey, tract_length: f32) -> Option<([f32; 6], [i32; 6])> {
         let (_, rows) = self.shapes.iter().find(|(k, _)| *k == key)?;
         // Row below the length, and how far towards the next one it lies.
-        let (row, frac) =
-            if tract_length.to_bits() == 1.0f32.to_bits() || !tract_length.is_finite() {
-                (self.native, 0.0)
-            } else {
-                let last = (rows.len() - 1) as f32;
-                let pos = ((tract_length - self.first) / self.step).clamp(0.0, last);
-                let row = (pos as usize).min(rows.len() - 2);
-                (row, pos - row as f32)
-            };
+        let (row, frac) = if tract_length.to_bits() == 1.0f32.to_bits() || !tract_length.is_finite()
+        {
+            (self.native, 0.0)
+        } else {
+            let last = (rows.len() - 1) as f32;
+            let pos = ((tract_length - self.first) / self.step).clamp(0.0, last);
+            let row = (pos as usize).min(rows.len() - 2);
+            (row, pos - row as f32)
+        };
         let v = |k: usize| {
             let lo = rows[row][k] as f32;
             let hi = rows.get(row + 1).map_or(lo, |r| r[k] as f32);
@@ -254,7 +254,8 @@ fn root(pharynx: f32) -> f32 {
 /// The shape of `key` at `tract_length` from the table `own` names, unless
 /// `own` holds a shape of its own for `key`.
 pub(crate) fn shape_in(key: VowelKey, tract_length: f32, own: &OwnShapes) -> Option<VowelShape> {
-    own.get(key).or_else(|| shape_from(own.1, key, tract_length))
+    own.get(key)
+        .or_else(|| shape_from(own.1, key, tract_length))
 }
 
 /// The shape of `key` at `tract_length` in `table` (a modal one with the
