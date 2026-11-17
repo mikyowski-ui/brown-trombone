@@ -1283,6 +1283,66 @@ last 100 ms of voice then alternate by 0.6 to 0.7 of their mean pulse height
 (0.03 to 0.2 without). The share works as a switch: at 0.6 the folds do
 not cross into alternation.
 
+### Laughs, sighs, coughs and fillers (wave 3, stage 3B; off by default)
+
+The physical engine can sigh, laugh, chuckle, clear its throat and cough
+(`Vocalization`; `src/vocal.rs`). Each is a macro that lays gestures on
+the tiers of the gesture score for one event, with the lungs' push as a
+gesture of its own: the glottal tier has a `push` (cmH2O, in place of the
+voice's own breath while above 0; `Trombone::set_lung_push`) and a `seal`
+(the folds pressed shut, cm past touching; `Trombone::set_fold_seal`), the
+larynx's tier a `squeeze` (the epilaryngeal tube drawn in;
+`Trombone::set_epilarynx_squeeze`), and a vocalization's breaths in are
+Stage 3A's. Text takes them as tags, `"Well, [sigh] I suppose so.
+[laugh]"` (exactly `[sigh]`, `[laugh]`, `[chuckle]`, `[clear-throat]`,
+`[cough]`; anything else in brackets is phonemes as before), and a voice
+as a call that can be made while it speaks: `Trombone::vocalize` (laid
+over whatever plays), `Speaker::interject` and `Talker::vocalize` (the
+sentence waits for it and carries on from where it was),
+`VoiceStream::vocalize` / `Event::Vocalize` (wire tag 30). A tag ends the
+phrase before it as a comma does (the voice held up), takes its own time,
+and is followed by 0.15 s in which the mouth is readied for the next
+phrase; the classic engine leaves a comma's pause. `Vocal` sets how long
+(`length`), how strong (`strength`: the lungs' pressure) and around what
+pitch.
+
+Measured on the deep voice at 100 Hz (`examples/vocal.rs`,
+`tests/vocal_gate.rs`): a **laugh** is a breath in and five calls at 4.4 a
+second (Bachorowski, Smoski & Owren 2001: 4.37), each a pulse of the lungs
+of up to `laugh_pressure` (12 cmH2O, falling to six tenths) and a burst of
+voice of 0.11 s (0.15 s the first) on an open mouth, the breath between
+them through the open glottis; the calls fall from 179 to 140 Hz and by
+8 dB along the bout. A **chuckle** is three such calls with the lips shut,
+the voice out of the nose. A **cough** draws a breath, shuts the folds for
+0.19 s while the pressure behind them builds to `cough_pressure` (40
+cmH2O; people reach 50 to 100 and more in the chest, the model holds
+finite and bounded to 100), and throws them open: the flow peaks at
+3.5 L/s within 40 ms (people: up to 12 L/s in 30 to 50 ms), the burst's
+loudest 10 ms some 6 dB over the speech of the same voice, then a short
+breathy "uh". Folds pressed shut while the lungs already push are blown
+open and vibrate (a pressed voice at 40 cmH2O); shut at rest first, their
+pressed edges feel none of the pressure, so the closure holds. A **throat
+clearing** is two weaker coughs (16 cmH2O) through a tube narrowed to
+half its width, released into a pressed, creaky voice. A **sigh** draws
+6.5 cmH2O (0.9 L/s inward), then lets out a long breathy voice (the
+glottis held open: noise share 0.31 against 0.10 for a modal /a/) falling
+from 122 to 87 Hz while the mouth relaxes from /ɑ/ towards schwa. None
+clicks more than speech does (largest sample step against its 10 ms's
+RMS: 4.0 to 6.6, speech 4.9). Laying one costs about 1 µs; playing it
+costs what speech costs.
+
+**Hesitation fillers** (`ProsodyConfig::fillers`, `0` off): "uh", "um",
+"hmm", "er" and "mm" (also "uhm", "erm", "hm") are marked by the front end
+and spoken as fillers: a phrase of their own, held `filler_length`
+(0.42 s; "um", "hmm" and "mm" a quarter more, "um" 45 % schwa and the rest
+the hum), at `filler_pitch` (0.86) of the baseline falling a semitone and
+a half (Shriberg & Lickley 1992: clause-internal filled pauses sit low,
+fall a little and linearly), with `filler_pause` (0.3 s; six tenths after
+"uh" and "er") of silence after; "er" is the schwa of "uh" (held as /ɝ/ it
+was heard as "her"). Whisper writes them as "uh", "um" and "hmm" or leaves
+them out. The judge's material has no fillers and no tags: every benchmark
+is the same with them on.
+
 ## A voice that listens
 
 Four tools turn sound back into settings. All of them work on the physical

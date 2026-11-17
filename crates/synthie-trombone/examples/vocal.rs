@@ -163,6 +163,31 @@ fn main() {
             let rate = (c.len() - 1) as f32 / (c[c.len() - 1].0 - c[0].0);
             println!("      {} calls, {rate:.2} per second", c.len());
         }
+        if kind == Vocalization::Cough {
+            let shut: Vec<usize> = (0..r.len())
+                .filter(|&k| r.area[k] < 0.002 && r.sub[k] > 5.0)
+                .collect();
+            if let Some(&last) = shut.last() {
+                let env = envelope(&r.out[last..], 10.0, 1.0);
+                let at = env
+                    .iter()
+                    .enumerate()
+                    .take(150)
+                    .fold((0, 0.0f32), |m, (k, &x)| if x > m.1 { (k, x) } else { m });
+                let flow = &r.flow[last..(last + (0.2 * SR) as usize).min(r.len())];
+                let peak = flow.iter().copied().fold(0.0f32, f32::max);
+                let rise = flow.iter().position(|&f| f >= 0.9 * peak).unwrap_or(0);
+                let from = flow.iter().position(|&f| f >= 0.1 * peak).unwrap_or(0);
+                println!(
+                    "      shut {:.3} s with {:.1} cmH2O behind; burst's loudest 10 ms {} ms after the opening, {:.1} dB; flow peak {peak:.0} cm3/s, 10-90 % in {:.1} ms",
+                    shut.len() as f32 / SR,
+                    shut.iter().map(|&k| r.sub[k]).fold(0.0f32, f32::max),
+                    at.0,
+                    db(at.1),
+                    1000.0 * (rise - from) as f32 / SR
+                );
+            }
+        }
         if kind == Vocalization::Sigh {
             let inward = r.flow.iter().copied().fold(0.0f32, f32::min);
             let outward = r.flow.iter().copied().fold(0.0f32, f32::max);
@@ -170,6 +195,15 @@ fn main() {
             if let Some(&(a, b)) = runs.first() {
                 let q = (b - a) / 4;
                 let hz = median(&r.pitch[a..b]);
+                let mut modal = voice(&deep());
+                modal.articulate_phoneme(synthie_trombone::Phoneme::Aa);
+                modal.set_frequency(100.0);
+                modal.note_on();
+                let m = record(&mut modal, 1.0);
+                println!(
+                    "      a modal /a/ at 100 Hz: noise share {:.2}",
+                    noise_share(&m.out[(0.3 * SR) as usize..], 100.0)
+                );
                 println!(
                     "      flow {inward:.0}..{outward:.0} cm3/s; voice {:.2}-{:.2} s, pitch {:.0} -> {:.0} Hz, noise share {:.2}",
                     a as f32 / SR,

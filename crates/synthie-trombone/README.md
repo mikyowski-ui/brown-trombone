@@ -60,6 +60,26 @@ Tenseness, jitter, vibrato, nasality, speaking rate and intonation range
 complete the character. With the `serde` feature, `VoiceSettings` can live
 in your game's data files.
 
+## Laughs, coughs and fillers
+
+On the physical engine a voice can sigh, laugh, chuckle, clear its throat
+and cough (wave 3; `Vocalization`, `Vocal`): in text as tags, and as a
+call while it speaks; a sentence waits for a call made through the
+`Talker` (or a stream) and carries on after it.
+
+```
+use synthie_trombone::{Engine, Preset, Talker, Vocalization};
+
+let mut npc = Talker::new(44_100.0, Preset::Deep.settings().with_engine(Engine::Physical));
+let line = npc.bake("Well, [sigh] I suppose so. [laugh] That was close.");
+assert!(!line.is_empty());
+npc.say("Shall we go on?");
+npc.vocalize(Vocalization::Cough); // now; a sentence being said waits for it
+```
+
+With `ProsodyConfig::fillers` on, "uh", "um" and "hmm" are spoken as
+hesitation fillers: long, low and level, the hum held, a pause after.
+
 ## Instrument and streaming
 
 ```rust

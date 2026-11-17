@@ -385,7 +385,7 @@ const LUNGS_HELD: f32 = 0.3;
 /// cm (a glottal attack presses them 0.04).
 const COUGH_SEAL: f32 = 0.03;
 /// Glottal opening the folds are thrown to as a cough bursts, cm².
-const COUGH_OPENING: f32 = 0.8;
+const COUGH_OPENING: f32 = 1.0;
 
 /// The gestures of `v` (its numbers clamped) around `pitch` Hz on a voice
 /// of `tuning`, from its start.
@@ -481,11 +481,13 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                 (shut, burst),
                 (0.02, 0.0),
             );
+            // (The tube moves with the tongue body, slowly: it lets go
+            // ahead of the burst so as to be open when the folds part.)
             plan.lay(
                 Tier::LarynxAndPitch,
                 &[(var::larynx::SQUEEZE, 0.5)],
-                (shut, burst),
-                (0.05, 0.03),
+                (shut, burst - 0.05),
+                (0.05, 0.04),
                 STRONG,
             );
             // The lungs build their pressure behind them and keep it through
