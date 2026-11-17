@@ -38,7 +38,7 @@ use branch::{Branch, End, Resonator};
 use core::f32::consts::PI;
 use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
 use noise::{JET_HEADROOM, Turbulence, V_MAX, full_jet, glottal_noise, jet_noise, reynolds};
-use radiation::Radiation;
+use radiation::{Head, PORTS, Radiation};
 use slide::Slide;
 
 /// Seconds over which the share of the glottal jet's breath noise follows
@@ -135,6 +135,10 @@ const FOLD_THICKNESS: f32 = 0.3;
 /// (jaw, palate, teeth) does not move; cheeks and throat do. This is what
 /// is heard during a closed /b/: the voice bar.
 const SKIN_RADIATION: f32 = 0.4;
+
+/// First cell whose walls radiate from the cheeks (and the floor of the
+/// mouth) rather than from the throat: the oral cavity from the velum on.
+const CHEEKS_FROM: usize = NOSE_START;
 
 /// Joint in front of which the upper teeth stand in the air stream.
 pub(crate) const TEETH_AT: usize = 40;
@@ -536,6 +540,17 @@ pub(crate) struct Phys {
     pistons: bool,
 
     pub(crate) gauge: Gauge,
+
+    /// The flows leaving by each port in the last tick, cm³/s (see
+    /// [`radiation::LIPS`] and on): the lips with the edge source, each
+    /// nostril, the throat's walls and each cheek's (with
+    /// [`SKIN_RADIATION`] on them). They sum to what [`Phys::tick`]
+    /// returns.
+    pub(crate) ports: [f32; PORTS],
+    /// The head the ports radiate round (wave 3), and the source tilt's
+    /// state for each of its channels.
+    pub(crate) head: Head,
+    head_tilt: [tilt::Tilt; 3],
 }
 
 impl Phys {
@@ -631,6 +646,9 @@ impl Phys {
             slide_ends: [0.0; 4],
             pistons: true,
             gauge: Gauge::default(),
+            ports: [0.0; PORTS],
+            head: Head::new(),
+            head_tilt: [tilt::Tilt::default(); 3],
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
         p
@@ -676,6 +694,7 @@ impl Phys {
         self.tilt = self.turbulence.tilt(dt, len);
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         self.press_smooth = (dt / PRESSURE_AVERAGING).min(1.0);
+        self.head.set_rate(dt, len);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
     }
@@ -700,6 +719,7 @@ impl Phys {
         }
         self.lip_horn = horn;
         self.larynx_travel = larynx;
+        self.head.set_tuning(tuning);
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
         self.tilt = self.turbulence.tilt(self.dt, self.len);
@@ -713,6 +733,23 @@ impl Phys {
     #[inline]
     pub(crate) fn radiate(&mut self, flow: f32) -> f32 {
         self.radiated.blend(&self.tilt, flow, self.voiced)
+    }
+
+    /// The head's channels for the ports of the tick just run, `[mixdown,
+    /// left ear, right ear]` (see [`Head`]; a channel the head is not
+    /// asked for is `0`), each with the source tilt on as [`Phys::radiate`]
+    /// puts it on the mono sum.
+    #[inline]
+    pub(crate) fn radiate_head(&mut self) -> [f32; 3] {
+        let ch = self.head.tick(&self.ports);
+        let (mix, ears) = self.head.parts();
+        let mut out = [0.0f32; 3];
+        for k in 0..3 {
+            if (k == 0 && mix) || (k > 0 && ears) {
+                out[k] = self.head_tilt[k].blend(&self.tilt, ch[k], self.voiced);
+            }
+        }
+        out
     }
 
     /// Seed the turbulence. Equal seeds give equal sound.
@@ -861,6 +898,9 @@ impl Phys {
         self.turbulence.reset();
         self.radiated = tilt::Tilt::default();
         self.gauge = Gauge::default();
+        self.ports = [0.0; PORTS];
+        self.head.reset();
+        self.head_tilt = [tilt::Tilt::default(); 3];
     }
 
     /// Close the books on the block just played: average what the streams
@@ -1325,6 +1365,9 @@ impl Phys {
         let dt = self.dt;
         let mut u_nose = 0.0;
         let mut u_skin = 0.0;
+        // The same, by port: each nostril, and the walls of the cheeks.
+        let mut nostrils = [0.0f32; 2];
+        let mut u_cheeks = 0.0;
         let (hiss, hiss_teeth) = if self.noisy {
             self.turbulence.tick(self.voiced)
         } else {
@@ -1486,10 +1529,16 @@ impl Phys {
                     self.flow_sum[k] += s.u;
                 }
             }
-            u_skin += self.wall_commit(i, s.p1);
+            let wall = self.wall_commit(i, s.p1);
+            u_skin += wall;
+            if i >= CHEEKS_FROM {
+                u_cheeks += wall;
+            }
             if nose_here {
-                for b in &mut self.nose {
-                    u_nose += b.tick(lambda, s.p1, dt);
+                for (b, side) in self.nose.iter_mut().zip(&mut nostrils) {
+                    let u = b.tick(lambda, s.p1, dt);
+                    *side += u;
+                    u_nose += u;
                 }
             }
             if piriform_here {
@@ -1541,12 +1590,16 @@ impl Phys {
             nl[i] = s.out_left;
             self.lips
                 .commit_through(&load, load.b + s.out_right, s.u, dt);
-            u_skin += self.wall_commit(i, s.p1);
+            let wall = self.wall_commit(i, s.p1);
+            u_skin += wall;
+            u_cheeks += wall;
             u_lips = s.u;
         } else {
             let s = solve(&joint, self.r[i], 0.0);
             nl[i] = s.out_left;
-            u_skin += self.wall_commit(i, s.p1);
+            let wall = self.wall_commit(i, s.p1);
+            u_skin += wall;
+            u_cheeks += wall;
         }
         self.probe.1 = 0.0;
         // The jet of /f v θ ð/ on the edges of the teeth and the lip: out
@@ -1574,6 +1627,13 @@ impl Phys {
         self.flow[N] += (u_lips - self.flow[N]) * self.flow_smooth;
         self.flow_sum[N] += u_lips;
         self.summed += 1.0;
+        let cheek = 0.5 * SKIN_RADIATION * u_cheeks;
+        self.ports[radiation::LIPS] = u_lips + u_edge;
+        self.ports[radiation::NOSTRIL_LEFT] = nostrils[0];
+        self.ports[radiation::NOSTRIL_RIGHT] = nostrils[1];
+        self.ports[radiation::THROAT] = SKIN_RADIATION * (u_skin - u_cheeks);
+        self.ports[radiation::CHEEK_LEFT] = cheek;
+        self.ports[radiation::CHEEK_RIGHT] = cheek;
         let u_skin = SKIN_RADIATION * u_skin;
 
         for i in 0..N {

@@ -1,8 +1,8 @@
 //! [`Talker`]: a voice you tune once and then hand sentences to.
 
-use crate::Trombone;
 use crate::preset::{Preset, VoiceSettings};
 use crate::speech::{Speaker, Utterance};
+use crate::{Listener, Stereo, Trombone};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
@@ -137,6 +137,33 @@ impl Talker {
         }
     }
 
+    /// Hear the talker in two channels (see [`Trombone::set_stereo`]).
+    pub fn set_stereo(&mut self, stereo: Stereo) {
+        self.voice.set_stereo(stereo);
+    }
+
+    /// Move the listener (see [`Trombone::set_listener`]): turn the
+    /// talker's head away with `set_listener(Listener { azimuth: 180.0,
+    /// ..Listener::FRONT })`.
+    pub fn set_listener(&mut self, listener: Listener) {
+        self.voice.set_listener(listener);
+    }
+
+    /// One output frame, `[left, right]`.
+    pub fn process_stereo(&mut self) -> [f32; 2] {
+        self.process();
+        self.voice.frame()
+    }
+
+    /// Fill `out` with interleaved frames, left then right.
+    pub fn render_stereo(&mut self, out: &mut [f32]) {
+        for frame in out.chunks_exact_mut(2) {
+            let [l, r] = self.process_stereo();
+            frame[0] = l;
+            frame[1] = r;
+        }
+    }
+
     /// Render `text` to a mono buffer at [`sample_rate`](Self::sample_rate),
     /// from silence, including a short fade-out tail. Drops anything queued.
     ///
@@ -159,6 +186,33 @@ impl Talker {
         let mut out = alloc::vec![0.0; len];
         self.speaker.speak(utterance);
         self.speaker.render(&mut self.voice, &mut out);
+        out
+    }
+
+    /// [`bake`](Self::bake) in two channels, interleaved left then right
+    /// (see [`set_stereo`](Self::set_stereo)).
+    #[must_use]
+    pub fn bake_stereo(&mut self, text: &str) -> Vec<f32> {
+        let u = self.compile(text);
+        self.bake_utterance_stereo(u)
+    }
+
+    /// [`bake_stereo`](Self::bake_stereo) for a compiled utterance.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn bake_utterance_stereo(&mut self, utterance: Utterance) -> Vec<f32> {
+        self.queue.clear();
+        self.speaker.stop(&mut self.voice);
+        self.voice.reset();
+        let len = ((utterance.duration() + TAIL) * self.sample_rate()) as usize;
+        let mut out = alloc::vec![0.0; 2 * len];
+        self.speaker.speak(utterance);
+        for frame in out.chunks_exact_mut(2) {
+            self.speaker.process(&mut self.voice);
+            let [l, r] = self.voice.frame();
+            frame[0] = l;
+            frame[1] = r;
+        }
         out
     }
 }
