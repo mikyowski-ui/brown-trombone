@@ -405,6 +405,7 @@ bigger tuning split would help more than a longer search.
 | `judge.py` | the judge: `score`, `report`, `items`, and the probes `vowels`, `voicing`, `confusions`, `probe-report`. |
 | `natural.py` | the naturalness measure against the human recordings (`judge.py natural`, `natural-report`). |
 | `prosody.py` | prosody transfer: a recording and its text as a schedule of phone times, pitch and level for `say --match-prosody`; rendering, checks, round trip (below). |
+| `neural.py` | neural prosody: any text as a schedule with tiny-voca's timing, pitch and level (`prosody.py neural`; the `neural` dependency group). |
 | `speaker_voice.py` | the speaker's voice for a schedule: the baseline profile (`match_voice` while the engine follows the schedule), per-phone H1*-H2*, tilt and vowel formants, and the tenseness and formant steps of the transfer loop. |
 | `probes.py` | the probes: slot alignment, CTC forced-choice margins, `ProbeJudge` (the tuner API), cut tokens from the anchors, summaries and Markdown. |
 | `frontend_check.py` | the engine's text-to-phoneme output vs eSpeak's, per word. |
@@ -741,3 +742,110 @@ phone the person did not say gets the 25 ms floor; only pauses at word
 boundaries become phrase breaks (a pause inside a word is shared between
 the phones either side); a voiceless stop's closure keeps its floor (22 ms
 plus 8 ms), so a faster stop than that is drawn out.
+
+## Neural prosody (tiny-voca)
+
+`neural.py` (`prosody.py neural`) gives any text the timing, pitch and
+level of [tiny-voca](https://github.com/n4ze3m/tiny-voca), a small neural
+text-to-speech model (Apache-2.0, 4,537,291 parameters, voices F2 and M2),
+as a schedule `say --match-prosody` follows: no recording needed.
+
+```sh
+uv sync --group neural                       # onnxruntime and onnx, not installed by plain uv sync
+uv run python prosody.py neural "Any text at all." --out s.json [--voice M2|F2] [--speed 0.8] \
+    [--pitch-shift ST] [--pitch-range R] [--breath rules|energy]
+bin/say --engine physical --voice deep --match-prosody s.json --prosody-pitch voice "Any text at all."
+bin/say --engine physical --voice deep --neural M2 --out e.wav "Any text at all."   # both steps in one
+```
+
+On first use it fetches the model (`n4ze3m/tiny-voca` on Hugging Face at a
+pinned revision: `config.json`, `onnx/model.onnx`, the phonemizer data
+and licences, each checked by its SHA-256) and the source of its phonemizer
+dizione (`n4ze3m/dizione` on GitHub at a pinned commit, Apache-2.0, NumPy
+only; only its package files are unpacked, checked by the hashes of its code
+and tables) into `.cache/tiny-voca/` (36 MB; `--model-dir` or
+`TINY_VOCA_DIR` point elsewhere). Anonymous downloads, nothing installed.
+The graph is not used as published: its outputs are the waveform and the
+duration of each token in frames of 256 samples at 24 kHz (10.67 ms, the
+engine's control block of 512 samples at 48 kHz), and the pitch, voicing
+and energy it predicts per frame are inner tensors. `neural.py` cuts the
+graph there (`TAPS`, `.cache/tiny-voca/prosody.onnx`, 10 MB, without the
+acoustic transformer and the waveform head): 3.5 ms a sentence on four
+threads, about 610 times real time (the whole graph 150 times).
+
+- **Phones.** dizione's tokens (IPA, an r-coloured vowel or a syllabic
+  consonant as one) are folded to ARPAbet (`arpabet.fold_token`, a token
+  of two phones shared 1.5 to 1 for the vowel) and aligned to the engine's
+  own phones for the text (`say --engine classic --phone-times`, whose
+  phones are the physical engine's on all 25 sentences tried, in
+  milliseconds; `say --neural` hands its own over with `--phones`) by
+  least cost: 0.45 for two sounds of a kind, 1.3 for any other pair, 0.6
+  for a phone one side lacks. A run of engine phones the model lacks gets
+  their rule durations at the model's tempo from the phones either side
+  (or out of the pause it stands in); a model phone the engine does not say
+  goes to the engine phone before it. On the 30 held-out sentences 730 of
+  731 phones matched, 12 as another vowel (mostly the model's /ɔ/ for the
+  engine's AA in "on"), one model /r/ dropped and one engine IH added.
+- **Pauses** are the frames the model gives punctuation, word gaps and the
+  utterance edges, kept where at least 50 ms; the model reads one sentence
+  per call; between two sentences of the four test sentences 0.27 to
+  0.32 s pass (M2 at 0.8), and M2 makes a 64 ms pause after "dark".
+- **Floors.** A token lasts at least one frame (10.7 ms); every phone gets
+  at least 25 ms (`prosody.enforce_floor`). At `--speed 1` five of the
+  731 phones were under it (21 ms), at 0.8 none.
+- **Speed.** At 1 (as it predicts) the model's phones last 0.77 of the
+  engine's rule durations (M2; F2 0.82; vowels 0.70), faster than the
+  articulators follow (`follow_speed_max` 1.43); the default 0.8 is about
+  the rules' pace.
+- **Pitch** is the model's F0 every frame, a line in semitones through the
+  frames it calls unvoiced. M2 has a median of 170 Hz (75 to 292 Hz), F2
+  273 Hz (177 to 383): `--prosody-pitch voice` (the default of
+  `say --neural`) moves the contour by -7.3 and -15 semitones to the deep
+  voice's own median; then 1.6 to 2.6 % of M2's voiced frames lie below the
+  folds' 56 Hz, where the pulse takes over as vocal fry, and none of F2's
+  outside 56 to 288 Hz (with M2's own pitch 0.7 % lie above 288 Hz).
+- **Level.** The model's energy (log RMS) is written as each phone's
+  `level_db`; `--breath energy` makes each vowel's its breath share
+  (`db_breath`, within `LEVEL_RANGE`), the consonants on the line
+  between. Not by default: the rules' own level already follows the
+  model's (123 vowels of the fast check: r = 0.68, 2.6 dB RMS apart), so
+  shares laid on top doubled the swing (spread 5.0 dB against the model's
+  3.5, 3.1 dB RMS from it) and the phonemes were heard worse each time; the
+  level loop (`transfer --level`) did not help either (20.8 % on the ten
+  held-out sentences).
+
+- **Tags, fillers, breaths, creak** (wave 3). A vocalization tag
+  (`[sigh]`, `[laugh]`, `[chuckle]`, `[clear-throat]`, `[cough]`) is taken
+  out of the text the model reads (dizione would read the word: "S AY") and
+  its pause held open at the rules' length (`vocal_gaps`: the engine's
+  phones for the text before the tag say where; a sigh's pause is 2.9 s,
+  which the model's gap would have squeezed it into). Fillers ("um", "uh")
+  are words to the model and the engine's filler phones, and keep the
+  model's timing. Bracketed phonemes are refused with a message. The
+  engine's breath between sentences is drawn only in a followed pause that
+  leaves 0.22 s before it; the model leaves 0.27 to 0.32 s, so the bridge
+  holds sentence pauses at `--sentence-pause` 0.5 s (default; 0 keeps the
+  model's): measured in the four sentences' pauses, -37 to -46 dB with the
+  breath (the rules' -36 to -46) against -58 to -70 dB with the model's
+  pauses, as with `--no-breath`. The creak at a statement's end is the
+  engine's and stays (`--fry 0` changes the rendering).
+
+On the engine with wave 3 on (main 42e8fae; M2 default, sentence pause 0.5):
+rules 15.1 / 81.2 % on the ten held-out sentences, M2 19.2 / 83.8 %; the
+four listening sentences 16.2 / 87.1 and 15.2 / 87.1 %; the four as one
+clip 12.1 / 77.4 and 9.1 / 90.3 % (8.1 / 90.3 % with the model's own
+pauses); the 30 held-out 21.0 / 77.1 and 22.2 / 72.3 %.
+
+Measured before wave 3 (b176267; deep voice, pitch moved to the voice, single runs):
+
+| | rules | M2 (default) | F2 | M2, speed 1 | M2, energy as breath |
+|---|---:|---:|---:|---:|---:|
+| ten held-out sentences: phoneme error / Whisper words | 15.5 / 83.8 % | 15.5 / 83.8 % | 18.4 / 77.5 % | 18.0 / 75.0 % | 24.9 / 78.8 % |
+| four listening sentences | 17.2 / 83.9 % | 15.2 / 87.1 % | 18.2 / 80.6 % | 14.1 / 80.6 % | 18.2 / 83.9 % |
+| the four as one clip | 11.1 / 74.2 % | 7.1 / 90.3 % | 7.1 / 83.9 % | 7.1 / 83.9 % | 7.1 / 83.9 % |
+| 30 held-out sentences | 20.6 / 75.8 % | 20.6 / 70.6 % | 22.6 / 70.1 % | 24.6 / 70.6 % | 24.6 / 68.8 % |
+
+The engine follows the schedules: phone durations 3.3 ms from the
+schedule's (mean absolute, 95 % within 20 ms), pitch 1.2 semitones RMS on
+the frames voiced in both. Model-free parts are tested in
+`tests/test_neural.py`.

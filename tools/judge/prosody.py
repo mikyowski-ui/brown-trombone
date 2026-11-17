@@ -1417,9 +1417,12 @@ def main(argv: list[str] | None = None) -> int:
     sl = sub.add_parser("slope", help="the engine's level per doubling of its breath")
     sl.add_argument("--text", default=FOUR_SENTENCES)
     sl.add_argument("--voice", default="deep")
+    import neural
+
+    neural.add_parser(sub)
     args = ap.parse_args(argv)
     cmds = {"analyse": cmd_analyse, "render": cmd_render, "check": cmd_check, "roundtrip": cmd_roundtrip,
-            "slope": cmd_slope, "transfer": cmd_transfer}  # fmt: skip
+            "slope": cmd_slope, "transfer": cmd_transfer, "neural": neural.cmd_neural}  # fmt: skip
     return cmds[args.cmd](args)
 
 
