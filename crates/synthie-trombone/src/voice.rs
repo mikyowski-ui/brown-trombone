@@ -245,6 +245,10 @@ pub struct Gauges {
     pub gap_nudge: f32,
     /// How far it is opening a vowel shape that hisses, same units.
     pub vowel_relief: f32,
+    /// Lumen of the ventricular valve's cell (cell 1, just above the folds),
+    /// cm²: the tract's own area there, or what the valve leaves of it (see
+    /// [`Trombone::set_ventricular_valve`]).
+    pub valve_area: f32,
 }
 
 /// One Pink Trombone voice.
@@ -819,6 +823,40 @@ impl Trombone {
         }
     }
 
+    /// Close the ventricular valve above the folds (close-out, c3-valve):
+    /// the false folds, with the aryepiglottic folds over them, `closure`
+    /// (`0‥1`) of the way shut at cell 1 (shut from 0.95), or the tube above
+    /// the folds thrown open (`−1‥0`: every cell of the epilaryngeal tube
+    /// and its flare that far of the way to
+    /// [`AnatomyConfig::valve_open`](crate::AnatomyConfig::valve_open)), as
+    /// in a cough's compressive and expulsive phases. The valve has its own
+    /// speed: it shuts over
+    /// [`ArticulationConfig::valve_closing`](crate::ArticulationConfig::valve_closing),
+    /// holds against any pressure below it, and opens within
+    /// [`ArticulationConfig::valve_opening`](crate::ArticulationConfig::valve_opening).
+    /// `0` (the default) leaves the tube as the articulation model has it.
+    /// While gestures play on the larynx's tier, its `valve` variable
+    /// decides instead. Physical engine only.
+    pub fn set_ventricular_valve(&mut self, closure: f32) {
+        if closure.is_finite() {
+            self.phys.valve.target = closure.clamp(-1.0, 1.0);
+        }
+    }
+
+    /// Set the aryepiglottic folds fluttering in the ventricular valve's
+    /// opening, `depth` (`0‥1`) of it taken away at the bottom of each
+    /// cycle, at [`AnatomyConfig::flutter_rate`](crate::AnatomyConfig::flutter_rate)
+    /// (close-out, c3-valve): the rough scrape of a throat clearing. The
+    /// flutter is prescribed (a raised cosine of the area at that rate); the
+    /// sound is the jet's through the moving opening. `0` (the default)
+    /// stops it. While gestures play on the larynx's tier, its `flutter`
+    /// variable decides instead. Physical engine only.
+    pub fn set_aryepiglottic_flutter(&mut self, depth: f32) {
+        if depth.is_finite() {
+            self.phys.valve.flutter_target = depth.clamp(0.0, 1.0);
+        }
+    }
+
     /// Widen the pharynx actively at `cm3_per_s` (cm³/s at native size,
     /// `0‥500`), as a speaker does to keep the voice going through a voiced
     /// closure: the air the folds send into the shut tract is taken up
@@ -1361,6 +1399,7 @@ impl Trombone {
             Posture::Open => Phoneme::Aa,
             Posture::Mid => Phoneme::Ah,
             Posture::Relaxed => Phoneme::Ax,
+            Posture::Wide => Phoneme::Ae,
             Posture::Hum => Phoneme::M,
         };
         let r = self.resolve(&p.articulation());
@@ -1769,6 +1808,12 @@ impl Trombone {
             if let Some(x) = b.get(var::larynx::SQUEEZE) {
                 self.set_epilarynx_squeeze(x);
             }
+            if let Some(x) = b.get(var::larynx::VALVE) {
+                self.set_ventricular_valve(x);
+            }
+            if let Some(x) = b.get(var::larynx::FLUTTER) {
+                self.set_aryepiglottic_flutter(x);
+            }
             let nominal = self.nominal_stiffness(Tier::LarynxAndPitch);
             self.tract.larynx_speed_ratio = if b.gestures > 0 && nominal > 0.0 {
                 b.stiffness / nominal
@@ -2024,6 +2069,7 @@ impl Trombone {
             mouth_shut: g.shut,
             gap_nudge: self.tract.nudges().0,
             vowel_relief: self.tract.nudges().1,
+            valve_area: g.valve,
         }
     }
 

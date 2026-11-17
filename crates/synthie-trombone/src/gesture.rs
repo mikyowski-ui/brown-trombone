@@ -107,7 +107,7 @@ impl Tier {
                 "push",
                 "seal",
             ],
-            Tier::LarynxAndPitch => &["pitch", "height", "squeeze"],
+            Tier::LarynxAndPitch => &["pitch", "height", "squeeze", "valve", "flutter"],
             Tier::Velum => &["port", "haste"],
             Tier::TongueBody => &[
                 "location",
@@ -164,7 +164,11 @@ impl Tier {
             {
                 Some(0.0)
             }
-            Tier::LarynxAndPitch if v == larynx::SQUEEZE => Some(0.0),
+            Tier::LarynxAndPitch
+                if v == larynx::SQUEEZE || v == larynx::VALVE || v == larynx::FLUTTER =>
+            {
+                Some(0.0)
+            }
             Tier::Velum if v == velum::PORT => Some(0.0),
             Tier::Velum if v == velum::HASTE => Some(1.0),
             Tier::TongueBody if v == body::NARROWING_DEGREE || v == body::DORSAL_DEGREE => {
@@ -259,6 +263,17 @@ pub mod var {
         /// the aryepiglottic folds and the false folds narrowing it, as in a
         /// throat clearing; neutral `0`.
         pub const SQUEEZE: usize = 2;
+        /// How far the ventricular valve above the folds is shut, `0‥1`, or
+        /// the tube above the folds thrown open, `−1‥0` (close-out, c3-valve;
+        /// see
+        /// [`Trombone::set_ventricular_valve`](crate::Trombone::set_ventricular_valve)):
+        /// a cough's compressive and expulsive phases; neutral `0`.
+        pub const VALVE: usize = 3;
+        /// Depth of the aryepiglottic folds' flutter in the valve's opening,
+        /// `0‥1` (close-out, c3-valve; see
+        /// [`Trombone::set_aryepiglottic_flutter`](crate::Trombone::set_aryepiglottic_flutter)):
+        /// a throat clearing's scrape; neutral `0`.
+        pub const FLUTTER: usize = 4;
     }
     /// [`Tier::Velum`](super::Tier::Velum).
     pub mod velum {

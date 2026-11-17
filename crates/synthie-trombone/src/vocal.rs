@@ -212,6 +212,10 @@ pub(crate) enum Posture {
     Mid,
     /// Relaxed, as for schwa: the end of a sigh, a throat clearing.
     Relaxed,
+    /// The tract at its widest, the tongue low and forward as for /æ/: a
+    /// cough (its narrowest section 1.35 cm², where /ʌ/ narrows the
+    /// pharynx to 0.32 and /ɑ/ to 0.45).
+    Wide,
     /// The lips shut and the velum open, as for /m/: a chuckle's hum.
     Hum,
 }
@@ -396,6 +400,15 @@ const LUNGS_HELD: f32 = 0.3;
 const COUGH_SEAL: f32 = 0.03;
 /// Glottal opening the folds are thrown to as a cough bursts, cm².
 const COUGH_OPENING: f32 = 1.0;
+/// Seconds of each scrape of a throat clearing, at length 1.
+const CLEAR_SCRAPE: f32 = 0.16;
+/// The glottis held open behind the valve through a scrape, cm².
+const CLEAR_SPREAD: f32 = 0.25;
+/// How far the ventricular valve is shut through a scrape (of the tube's
+/// area there, drawn in already), and how deep the aryepiglottic folds
+/// flutter in what it leaves.
+const CLEAR_VALVE: f32 = 0.5;
+const CLEAR_FLUTTER: f32 = 0.85;
 
 /// The gestures of `v` (its numbers clamped) around `pitch` Hz on a voice
 /// of `tuning`, from its start.
@@ -500,26 +513,44 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
             let shut = inhale + 0.01;
             let push_from = shut + 0.05;
             let burst = push_from + 0.2 * len;
-            plan.hold(Posture::Mid, (0.0, burst + 0.35), (0.05, 0.1), STRONG);
-            // The folds pressed shut and the tube above them drawn in.
+            // The tract at its widest through the burst, then the "uh" after
+            // it (/ʌ/ narrows the pharynx to 0.32 cm²: through it the burst
+            // peaked at 3.5 L/s).
+            plan.hold(Posture::Wide, (0.0, burst + 0.05), (0.05, 0.06), STRONG);
+            plan.hold(
+                Posture::Mid,
+                (burst + 0.05, burst + 0.35),
+                (0.06, 0.1),
+                STRONG,
+            );
+            // The folds pressed shut and the ventricular valve shut over
+            // them (the false and aryepiglottic folds of the compressive
+            // phase).
             plan.glottis(
                 &[(SEAL, COUGH_SEAL), (VOICING, 0.0), (SPREAD, 0.0)],
                 (shut, burst),
                 (0.02, 0.0),
             );
-            // (The tube moves with the tongue body, slowly: it lets go
-            // ahead of the burst so as to be open when the folds part.)
             plan.lay(
                 Tier::LarynxAndPitch,
-                &[(var::larynx::SQUEEZE, 0.5)],
-                (shut, burst - 0.05),
-                (0.05, 0.04),
+                &[(var::larynx::VALVE, 1.0)],
+                (shut, burst),
+                (0.02, 0.0),
+                STRONG,
+            );
+            // Then the supraglottic larynx thrown wide open with the
+            // glottis through the expulsive phase.
+            plan.lay(
+                Tier::LarynxAndPitch,
+                &[(var::larynx::VALVE, -1.0)],
+                (burst, burst + 0.07),
+                (0.0, 0.05),
                 STRONG,
             );
             // The lungs build their pressure behind them and keep it through
             // the expulsive phase, then let go.
             let peak = tuning.anatomy.cough_pressure * s;
-            plan.push(peak, (push_from, burst + 0.04), (0.12 * len, 0.25 * len));
+            plan.push(peak, (push_from, burst + 0.02), (0.12 * len, 0.12 * len));
             // Thrown open...
             plan.glottis(
                 &[(VOICING, 0.0), (SPREAD, COUGH_OPENING)],
@@ -548,43 +579,61 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
             for k in 0..calls {
                 #[allow(clippy::cast_precision_loss)]
                 let weaker = 1.0 - 0.25 * k as f32;
-                // Shut at rest first (see the cough), then the push, then the
-                // release; the push dies away through the voice, which stops
-                // with it.
+                // Shut at rest first, the folds and the ventricular valve
+                // over them (see the cough), then the push, then the
+                // release; the push dies away through the scrape, which
+                // stops with it.
                 let shut = 0.14 * len;
-                let voice = 0.12 * len;
+                let scrape = CLEAR_SCRAPE * len;
                 plan.glottis(
                     &[(SEAL, COUGH_SEAL), (VOICING, 0.0), (SPREAD, 0.0)],
                     (t, t + shut),
                     (0.015, 0.0),
                 );
+                plan.lay(
+                    Tier::LarynxAndPitch,
+                    &[(var::larynx::VALVE, 1.0)],
+                    (t, t + shut),
+                    (0.015, 0.0),
+                    STRONG,
+                );
                 plan.push(
                     16.0 * s * weaker,
-                    (t + 0.05, t + shut + 0.3 * voice),
-                    (0.05, 0.7 * voice),
+                    (t + 0.05, t + shut + 0.3 * scrape),
+                    (0.05, 0.7 * scrape),
                 );
-                // Released into a pressed, low, creaky voice (Stage 3A's
-                // creak: the cover slack, the folds pressed).
+                // Released through the valve held narrow, the
+                // aryepiglottic folds fluttering in it, the glottis open
+                // behind it and the voice off: a rough, noisy scrape.
                 plan.glottis(
-                    &[
-                        (VOICING, 1.0),
-                        (SPREAD, 0.03),
-                        (TENSENESS, 0.9),
-                        (var::glottis::CREAK, 1.0),
-                    ],
-                    (t + shut, t + shut + voice),
+                    &[(VOICING, 0.0), (SPREAD, CLEAR_SPREAD)],
+                    (t + shut, t + shut + scrape),
                     (0.005, 0.03),
                 );
-                plan.glide((0.95 * p0, 0.82 * p0), (t + shut, t + shut + voice), 0.03);
-                t += shut + voice + 0.08;
+                plan.lay(
+                    Tier::LarynxAndPitch,
+                    &[
+                        (var::larynx::VALVE, CLEAR_VALVE),
+                        (var::larynx::FLUTTER, CLEAR_FLUTTER),
+                    ],
+                    (t + shut, t + shut + scrape),
+                    (0.0, 0.03),
+                    STRONG,
+                );
+                // Shut again as the push dies away (let go at once, the
+                // narrow valve jumped open with air still going through it:
+                // a click), and on until the next or the end.
+                // (Into the next one's ramp: a gap of a block between the two
+                // let the valve open and puff.)
+                plan.lay(
+                    Tier::LarynxAndPitch,
+                    &[(var::larynx::VALVE, 1.0)],
+                    (t + shut + scrape, t + shut + scrape + 0.11),
+                    (0.0, 0.02),
+                    STRONG,
+                );
+                t += shut + scrape + 0.08;
             }
-            plan.lay(
-                Tier::LarynxAndPitch,
-                &[(var::larynx::SQUEEZE, 0.7)],
-                (0.15, t - 0.1),
-                (0.05, 0.05),
-                STRONG,
-            );
             plan.seconds = t + 0.08;
             // Re-hold the posture to the event's end.
             if let Some(Some(h)) = plan.holds.first_mut() {
