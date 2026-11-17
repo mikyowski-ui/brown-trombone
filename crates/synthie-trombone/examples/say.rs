@@ -142,7 +142,9 @@ fn neural_schedule(
     out: &str,
     settings: &synthie_trombone::VoiceSettings,
 ) -> std::io::Result<String> {
-    let (voice, speed) = spec.split_once(':').map_or((spec, None), |(v, s)| (v, Some(s)));
+    let (voice, speed) = spec
+        .split_once(':')
+        .map_or((spec, None), |(v, s)| (v, Some(s)));
     let utterance = Utterance::from_tokens(&speech::phonemize(text), &settings.prosody());
     let spans: Vec<[f32; 2]> = utterance
         .phone_spans()
@@ -175,7 +177,10 @@ fn neural_schedule(
         .stdout(Stdio::from(std::io::stderr()))
         .status()
         .unwrap_or_else(|e| panic!("--neural: cannot run {python}: {e}"));
-    assert!(status.success(), "--neural: prosody.py neural failed ({status})");
+    assert!(
+        status.success(),
+        "--neural: prosody.py neural failed ({status})"
+    );
     std::fs::remove_file(&phones_file)?;
     Ok(schedule_file.to_string_lossy().into_owned())
 }
