@@ -135,19 +135,17 @@ impl Cli {
                 .with_profile(&json)
                 .with_context(|| format!("in {}", path.display()))?;
         }
-<<<<<<< HEAD
         if self.breath_intake {
             base.tuning.prosody.breath_intake = 5.0;
         }
         if let Some(share) = self.fry {
             base.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
-=======
+        }
         if let Some(t) = self.tract {
             base.tuning = base.tuning.with_tract(t);
         }
         if let Some(t) = self.tongue_model {
             base.tuning = base.tuning.with_tongue(t);
->>>>>>> main
         }
         let persona = Persona {
             size: self.size,
