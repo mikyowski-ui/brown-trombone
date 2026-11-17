@@ -830,11 +830,72 @@ threads, about 610 times real time (the whole graph 150 times).
   pauses, as with `--no-breath`. The creak at a statement's end is the
   engine's and stays (`--fry 0` changes the rendering).
 
+- **Floor on consonants, pitch spikes** (close-out of wave 4). Every
+  stop, affricate and sibilant, and every consonant beside another one
+  with no pause between (a cluster, within a word or across two), gets at
+  least `--consonant-floor` 0.85 of the rules' duration for that phone in
+  that place (the rule compile `say --neural` hands over), the time taken
+  from the vowels within `--floor-reach` 2 phones either side (not across
+  a pause), each down to `--floor-keep` 0.6 of its own rule duration;
+  what they cannot give is added (0.2 to 0.5 % of the speech) and the
+  phones after it move later. The model's pitch, voicing and level are
+  carried along phone by phone (`warp_tracks`), so each phone keeps its
+  own. A voiced pitch frame that stands out from its voiced neighbours by
+  more than `--spike` 2 semitones in one direction is replaced by the
+  median of three (`smooth_spikes`). `--consonant-floor 0 --spike 0`
+  gives the schedules of before to the byte. What was measured (deep
+  voice, single runs unless said):
+  - the words lost were lost in the timing: with the rules' timing and the
+    model's pitch carried onto it the 30 held-out sentences gave 76.2 % of
+    Whisper's words with M2 (rules 77.1 %, the model's timing 71.0 %), with
+    the model's timing and the rules' pitch 68.8 %;
+  - not by the shortest stops: those of the words lost lasted a median 0.99
+    of their rule durations (M2; those of the words kept 0.79), and their
+    closures were reached and burst as by the rules (the voiceless stops
+    30 dB under the phones beside them in 93 % or more, a burst in 96 % or
+    more), only shorter: silent a median 39 ms against the rules' 49 on the
+    tuning sentences with M2, 44 ms with the floor;
+  - the model makes almost no pitch spikes: one frame (M2) and five (F2) of
+    about 10,000 stood out by more than 1 semitone, none by 2; the smoother
+    replaced 1 to 6 frames per 30 sentences and changed no score by more
+    than a word; the 1.6 % of M2's voiced frames below the folds' 56 Hz
+    after the move to the voice (sung as fry) cost nothing measurable:
+    raised to 60 Hz the tuning sentences gave the same 177 words;
+  - with M2 the floor held 20 % of the phones and moved the 30 held-out
+    sentences from 71.0 to 77.1 % (phoneme error 22.2 to 20.0 %); with F2
+    from 69.7 to 71.4 % (22.8 to 19.7 %). Single runs of 30 sentences move
+    by 2 to 3 points of words with the pitch jittered by 0.1 semitone; over
+    four such runs M2 went from 73.8 to 77.2 % on the held-out sentences,
+    F2 stayed at 70.7 and 70.6 %, its phoneme error 22.4 to 19.6 %;
+  - F2's own pitch is what keeps its words down: on the tuning sentences
+    F2's timing with M2's pitch carried onto it gave 78.4 % (three runs),
+    with its own 73.5 %; M2's timing with F2's pitch 75.3 % against 79.0 %.
+    F2's contour is not wider than M2's (5 to 95 % of the rendered pitch
+    11.4 semitones against 13.0) and has no spikes;
+  - the four sentences as one clip: with M2 Whisper heard 28 of 31 words
+    before (in all of five runs) and 25 to 27 with the floor ("can use
+    sleet", "the seashore" for "the sea shore"), though the phones of
+    "slid" and "sea shore" keep their durations; the floor lengthens the
+    K of "canoe" (53 to 84 ms) and takes 23 ms from the ER of "birch".
+    With F2 27 or 28 of 31 before and after.
+
 On the engine with wave 3 on (main 42e8fae; M2 default, sentence pause 0.5):
 rules 15.1 / 81.2 % on the ten held-out sentences, M2 19.2 / 83.8 %; the
 four listening sentences 16.2 / 87.1 and 15.2 / 87.1 %; the four as one
 clip 12.1 / 77.4 and 9.1 / 90.3 % (8.1 / 90.3 % with the model's own
-pauses); the 30 held-out 21.0 / 77.1 and 22.2 / 72.3 %.
+pauses); the 30 held-out 21.0 / 77.1 and 22.2 / 72.3 % (22.2 / 71.0 % rendered
+by `say --neural` and scored in other batches, below), before the floor on consonants.
+
+With the floor on consonants (deep voice, single runs; phoneme error / Whisper words):
+
+| | rules | M2 before | M2 with the floor | F2 before | F2 with the floor |
+|---|---:|---:|---:|---:|---:|
+| ten held-out sentences | 15.1 / 81.2 % | 19.2 / 83.8 % | 17.1 / 85.0 % | 16.7 / 78.8 % | 14.3 / 77.5 % |
+| four listening sentences | 16.2 / 87.1 % | 15.2 / 87.1 % | 10.1 / 83.9 % | 15.2 / 80.6 % | 17.2 / 80.6 % |
+| the four as one clip | 12.1 / 77.4 % | 9.1 / 90.3 % | 9.1 / 80.6 % | 9.1 / 87.1 % | 7.1 / 90.3 % |
+| 30 tuning sentences | 16.5 / 74.5 % | 20.1 / 75.3 % | 16.1 / 79.6 % | 21.1 / 71.9 % | 18.6 / 74.0 % |
+| 30 held-out sentences | 21.0 / 77.1 % | 22.2 / 71.0 % | 20.0 / 77.1 % | 22.8 / 69.7 % | 19.7 / 71.4 % |
+
 
 Measured before wave 3 (b176267; deep voice, pitch moved to the voice, single runs):
 

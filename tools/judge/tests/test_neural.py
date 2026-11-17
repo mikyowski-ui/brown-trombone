@@ -154,6 +154,17 @@ def test_breath_shares_follow_the_vowels_and_the_consonants_lie_between():
     assert br[1] == pytest.approx(float(Pr.db_breath(0.5 * (lv[0] + lv[2]))), abs=1e-6)
 
 
+def _schedule_inputs():
+    symbols = ["<bos>", "ð", "ə", "<sp>", "k", "æ", "t", ",", "<sp>", "s", "æ", "t", ".", "<eos>"]
+    durations = [20, 4, 6, 0, 5, 12, 1, 25, 0, 9, 14, 6, 0, 3]
+    n = sum(durations)
+    run = _run(symbols, durations, np.linspace(130, 90, n))
+    run["voiced"] = np.array([symbols[k] in ("ð", "ə", "æ") for k in np.repeat(np.arange(len(symbols)), durations)])
+    run["energy"] = np.linspace(1.0, -1.0, n)
+    engine = ["DH", "AX", "K", "AE", "T", "S", "AE", "T"]
+    return N.lay_out([run]), engine, np.array([0.05, 0.06, 0.07, 0.12, 0.08, 0.1, 0.13, 0.08])
+
+
 def _schedule(breath=False):
     fr = N.frame_seconds()
     symbols = ["<bos>", "ð", "ə", "<sp>", "k", "æ", "t", ",", "<sp>", "s", "æ", "t", ".", "<eos>"]
@@ -182,12 +193,174 @@ def test_the_schedule_has_the_shape_say_reads():
     # the comma's pause is kept, on the model's clock
     assert len(sched["pauses"]) == 1 and sched["pauses"][0]["after"] == 4
     assert sched["pauses"][0]["end"] - sched["pauses"][0]["start"] == pytest.approx(25 * fr, abs=0.03)
-    assert sched["pitch"]["hop"] == pytest.approx(fr) and len(sched["pitch"]["hz"]) == n
+    # the frames of the model, and those the floor on consonants added
+    assert rep["floored"] >= 1 and rep["floor_added_s"] >= 0
+    assert sched["pitch"]["hop"] == pytest.approx(fr)
+    assert len(sched["pitch"]["hz"]) == n + round(rep["floor_added_s"] / fr)
     assert all(h > 0 for h in sched["pitch"]["hz"])
     assert 90 <= sched["median_hz"] <= 130
     assert all(p["breath"] == 1.0 for p in ph)
     (sched2, _), _, _ = _schedule(breath=True)
     assert sched2["phones"][1]["breath"] > sched2["phones"][-2]["breath"]
+
+
+# --------------------------------------------------------------------------
+# The floor on consonants and the pitch spikes
+# --------------------------------------------------------------------------
+
+
+def test_the_floor_holds_stops_affricates_sibilants_and_clusters():
+    phones = ["S", "T", "R", "AA", "M", "AA", "N", "F", "AA", "L", "JH", "AA", "W", "AA", "V", "N"]
+    start = np.arange(len(phones)) * 0.1
+    end = start + 0.1
+    # a pause after the F: the V N after it stay a cluster, the F and the AA do not
+    start[8:] += 0.2
+    end[8:] += 0.2
+    held = N.floored(phones, start, end)
+    assert held == [True, True, True, False, False, False, True, True, False, True, True, False, False, False,
+                    True, True]  # fmt: skip
+    # a lone nasal, glide or weak fricative between vowels is not held
+    lone = N.floored(["AA", "M", "AA", "W", "AA", "F", "AA"], np.arange(7) * 0.1, np.arange(7) * 0.1 + 0.1)
+    assert not any(lone)
+    # nor one beside a consonant across a pause
+    assert N.floored(["AA", "N", "F", "AA"], np.array([0, 0.1, 0.4, 0.5]), np.array([0.1, 0.2, 0.5, 0.6])) == [
+        False, False, False, False]  # fmt: skip
+
+
+def test_a_short_stop_is_lengthened_from_the_vowels_beside_it_and_the_total_is_kept():
+    phones = ["AA", "T", "IY"]
+    start, end = np.array([0.0, 0.2, 0.22]), np.array([0.2, 0.22, 0.42])
+    rule = np.array([0.15, 0.08, 0.15])
+    s, e, n, added = N.floor_consonants(phones, start, end, rule, share=0.85, keep=0.6)
+    assert n == 1 and added == pytest.approx(0.0, abs=1e-12)
+    assert e[1] - s[1] == pytest.approx(0.85 * 0.08)
+    # the vowels gave the 48 ms in proportion to what they had above 60 % of their rule durations (equal here)
+    assert e[0] - s[0] == pytest.approx(0.2 - 0.024) and e[2] - s[2] == pytest.approx(0.2 - 0.024)
+    assert s[0] == 0.0 and e[-1] == pytest.approx(0.42)
+    assert np.allclose(e[:-1], s[1:])
+
+
+def test_what_the_vowels_cannot_give_is_added_and_the_pauses_keep_their_length():
+    # the vowel before has 10 ms above 60 % of its rule duration, the one after is across a pause
+    phones = ["AA", "K", "IY", "S"]
+    start, end = np.array([0.0, 0.1, 0.4, 0.6]), np.array([0.1, 0.12, 0.6, 0.7])
+    rule = np.array([0.15, 0.1, 0.15, 0.1])
+    s, e, n, added = N.floor_consonants(phones, start, end, rule, share=0.85, keep=0.6)
+    assert n == 1
+    assert e[0] - s[0] == pytest.approx(0.09)
+    assert e[1] - s[1] == pytest.approx(0.085)
+    assert added == pytest.approx(0.085 - 0.02 - 0.01)
+    # the pause after the K keeps its 0.28 s, the vowel after it its length; the phones after move later
+    assert s[2] - e[1] == pytest.approx(0.28) and e[2] - s[2] == pytest.approx(0.2)
+    assert e[-1] == pytest.approx(0.7 + added)
+
+
+def test_a_vowel_gives_no_more_than_down_to_its_keep():
+    phones = ["AH", "P", "AH"]
+    start, end = np.array([0.0, 0.07, 0.08]), np.array([0.07, 0.08, 0.15])
+    rule = np.array([0.1, 0.075, 0.1])
+    s, e, _, added = N.floor_consonants(phones, start, end, rule, share=0.85, keep=0.6)
+    d = e - s
+    assert d[0] == pytest.approx(0.06) and d[2] == pytest.approx(0.06)
+    assert d[1] == pytest.approx(0.85 * 0.075)
+    assert added == pytest.approx(0.85 * 0.075 - 0.01 - 0.02)
+
+
+def test_a_long_enough_consonant_or_a_floor_of_zero_changes_nothing():
+    phones = ["AA", "T", "S", "IY", "N"]
+    start = np.array([0.0, 0.15, 0.22, 0.32, 0.5])
+    end = np.array([0.15, 0.22, 0.32, 0.5, 0.55])
+    rule = np.array([0.15, 0.08, 0.1, 0.15, 0.1])
+    s, e, n, added = N.floor_consonants(phones, start, end, rule)
+    assert n == 0 and added == 0.0 and np.array_equal(s, start) and np.array_equal(e, end)
+    short = end.copy()
+    short[1] = 0.17
+    s, e, n, _ = N.floor_consonants(phones, start, short, rule, share=0.0)
+    assert n == 0 and np.array_equal(e, short)
+
+
+def test_the_tracks_stay_with_their_phones_when_the_floor_moves_them():
+    fr = N.frame_seconds()
+    mp = N.ModelPhones()
+    m = 40
+    # pitch 100 Hz in the first phone, 200 Hz in the second, a sentence piece over both
+    mp.f0 = np.where(np.arange(m) < 20, 100.0, 200.0)
+    mp.voiced = np.arange(m) < 30
+    mp.energy_db = np.where(np.arange(m) < 20, -20.0, -30.0)
+    mp.pieces = [(0.0, 40 * fr)]
+    start, end = np.array([0.0, 20 * fr]), np.array([20 * fr, 40 * fr])
+    new_start, new_end = np.array([0.0, 10 * fr]), np.array([10 * fr, 44 * fr])
+    out = N.warp_tracks(mp, start, end, new_start, new_end, fr)
+    assert len(out.f0) == m + 4 and len(out.voiced) == m + 4 and len(out.energy_db) == m + 4
+    assert np.all(out.f0[:10] < 150) and np.all(out.f0[11:] > 150)
+    assert out.energy_db[5] == pytest.approx(-20.0) and out.energy_db[30] == pytest.approx(-30.0)
+    # the voicing stops halfway into the second phone, as before
+    assert out.voiced[:27].all() and not out.voiced[27:].any()
+    assert out.pieces == [(0.0, pytest.approx(44 * fr))]
+
+
+def test_a_single_frame_pitch_spike_is_replaced_by_the_median_of_three():
+    f0 = 100.0 * 2 ** (np.arange(20) * 0.2 / 12)  # a rise of 0.2 semitones a frame
+    voiced = np.ones(20, bool)
+    voiced[12:14] = False
+    spiky = f0.copy()
+    spiky[5] *= 2 ** (4 / 12)  # 4 semitones up, one frame
+    spiky[11] *= 2 ** (-3 / 12)  # the last voiced frame before a gap, 3 semitones down
+    out, n = N.smooth_spikes(spiky, voiced, spike=2.0)
+    assert n == 2
+    assert out[5] == pytest.approx(f0[6], rel=1e-9)  # the median of 4.8, 1.0 + 4, 1.2 semitones
+    assert out[11] == pytest.approx(f0[9], rel=1e-9)  # of the frames 9 and 10 inside and itself, the middle
+    others = [k for k in range(20) if k not in (5, 11)]
+    assert np.allclose(out[others], spiky[others])
+
+
+def test_a_smooth_contour_and_the_unvoiced_frames_pass_the_smoother_unchanged():
+    f0 = 120.0 * 2 ** (np.sin(np.arange(60) / 6.0) * 3 / 12)  # +-3 semitones, at most 0.5 a frame
+    voiced = np.ones(60, bool)
+    voiced[20:30] = False
+    f0[25] = 400.0  # unvoiced: not the model's pitch
+    voiced[40] = True
+    voiced[39] = voiced[41] = False  # a single voiced frame: no neighbours to judge it by
+    f0[40] = 300.0
+    out, n = N.smooth_spikes(f0, voiced, spike=2.0)
+    assert n == 0 and np.array_equal(out, f0)
+    spiky = f0.copy()
+    spiky[10] *= 2.0
+    out, n = N.smooth_spikes(spiky, voiced, spike=0.0)
+    assert n == 0 and np.array_equal(out, spiky)
+
+
+def _schedule_long_enough(floor):
+    """The fixture of `_schedule` with every consonant at least 0.85 of its rule duration."""
+    symbols = ["<bos>", "ð", "ə", "<sp>", "k", "æ", "t", ",", "<sp>", "s", "æ", "t", ".", "<eos>"]
+    durations = [20, 5, 6, 0, 7, 12, 8, 25, 0, 9, 14, 8, 0, 3]
+    n = sum(durations)
+    run = _run(symbols, durations, np.linspace(130, 90, n))
+    run["voiced"] = np.array([symbols[k] in ("ð", "ə", "æ") for k in np.repeat(np.arange(len(symbols)), durations)])
+    run["energy"] = np.linspace(1.0, -1.0, n)
+    engine = ["DH", "AX", "K", "AE", "T", "S", "AE", "T"]
+    rule = np.array([0.05, 0.06, 0.07, 0.12, 0.08, 0.1, 0.13, 0.08])
+    return N.build_schedule("The cat, sat.", N.lay_out([run]), engine, rule, floor=floor)
+
+
+def test_a_schedule_without_short_consonants_passes_through_unchanged():
+    (on, rep_on), (off, rep_off) = _schedule_long_enough(N.CONSONANT_FLOOR), _schedule_long_enough(0.0)
+    assert rep_on["floored"] == 0 and rep_on["floor_added_s"] == 0.0 and rep_on["spikes"] == 0
+    assert on == off
+
+
+def test_the_floor_in_the_schedule_takes_from_the_vowels_and_keeps_the_pitch_with_its_phones():
+    (sched, rep), fr, n = _schedule()
+    (bare, _) = N.build_schedule("The cat, sat.", *_schedule_inputs(), floor=0.0)
+    on = {k: p for k, p in enumerate(sched["phones"])}
+    off = {k: p for k, p in enumerate(bare["phones"])}
+    d = lambda p: p["end"] - p["start"]  # noqa: E731
+    # the K (5 frames, 53 ms of 70) is given 85 % of its rule duration, the vowel after it gives the time
+    assert d(on[2]) == pytest.approx(0.85 * 0.07, abs=1e-4) and d(off[2]) < 0.85 * 0.07
+    assert d(on[3]) < d(off[3])
+    # each phone keeps its pitch: the K's middle sounds where it did
+    assert on[2]["pitch"][2] == pytest.approx(off[2]["pitch"][2], abs=1.5)
+
 
 
 def test_the_pitch_is_bridged_through_unvoiced_frames():
