@@ -192,20 +192,29 @@ const NARROWING_AT: (f32, f32) = (10.0, 38.0);
 /// small back cavity down by a quarter otherwise).
 const MODAL_NARROWING_AT: (f32, f32) = (7.0, 38.0);
 
-/// The same on the cosine body of the anatomical tract
-/// (`vowel_targets::lengthened`): from cell 8, as in the babble map, where
-/// the tube above the folds (four cells) has flared (over the next four).
-/// The measured speaker's open vowels have a narrow lower pharynx from just
-/// above the flare (/ɑ/ 0.45 to 0.55 cm² at 3.5 to 3.9 cm above the
-/// folds, /æ/ 0.63 to 0.85), where the tract's flare is 1.52 cm² for every
+/// The same for an open vowel (F1 of [`THROAT_F1`] or more) on the cosine
+/// body of the anatomical tract (`vowel_targets::lengthened`): from cell 8,
+/// as in the babble map, where the tube above the folds (four cells) has
+/// flared (over the next four). The measured speaker's open vowels have a
+/// narrow lower pharynx from just above the flare (/ɑ/ 0.45 to 0.55 cm² at
+/// 3.5 to 3.9 cm above the folds), where the tract's is 1.52 cm² for every
 /// vowel; with the narrowing no lower than cell 10, /ɑ/ fell 3.4 % short of
-/// its F1 at length 0.6 with the narrowing there.
-const LENGTHENED_NARROWING_AT: (f32, f32) = (8.0, 38.0);
+/// its F1 at length 0.6 with the narrowing there. (The other vowels keep
+/// the range of [`NARROWING_AT`], and so the coordinates they are solved
+/// in: on the wider range the solver took another schwa, its tongue back
+/// at 15.8 and a narrowing of 0.74 at the palate, and the /ð/ after it had
+/// a labial's F2.)
+const THROAT_NARROWING_AT: (f32, f32) = (8.0, 38.0);
 
-/// Where the narrowing may sit for `model` on the tract being solved.
-fn narrowing_at(model: Model) -> (f32, f32) {
+/// Where the narrowing of target `t` may sit on `model` on the tract being
+/// solved.
+fn narrowing_at(model: Model, t: &Target) -> (f32, f32) {
     match model {
-        Model::Cosine if vowel_targets::lengthened(&survey::base()) => LENGTHENED_NARROWING_AT,
+        Model::Cosine
+            if t.formants[0] >= THROAT_F1 && vowel_targets::lengthened(&survey::base()) =>
+        {
+            THROAT_NARROWING_AT
+        }
         Model::Cosine => NARROWING_AT,
         Model::Modal => MODAL_NARROWING_AT,
     }
@@ -251,6 +260,8 @@ enum Model {
 #[derive(Clone, Copy)]
 struct Kind {
     model: Model,
+    /// Where its narrowing may sit ([`narrowing_at`]).
+    places: (f32, f32),
     /// Rounded lips (else spread).
     rounded: bool,
     /// A narrowing along the tongue of its own (the modal body: only /ɚ/,
@@ -262,6 +273,7 @@ impl Kind {
     fn of(model: Model, t: &Target) -> Self {
         Self {
             model,
+            places: narrowing_at(model, t),
             rounded: t.lips == Lips::Rounded,
             narrowed: model == Model::Cosine || t.key == VowelKey::Vowel(Phoneme::Er),
         }
@@ -357,7 +369,7 @@ const MODE_AT: [usize; 3] = [0, 1, 5];
 /// numbers, lips, narrowing place and opening, its third number (see
 /// [`MODE_AT`]). Openings are on a logarithmic scale. Spread lips are `1`,
 /// no narrowing the widest one.
-fn to_x(s: &Shape) -> [f32; D] {
+fn to_x(s: &Shape, t: &Target) -> [f32; D] {
     let lin = |v: f32, r: (f32, f32)| (v - r.0) / (r.1 - r.0);
     let log = |v: f32, r: (f32, f32)| {
         ((v - TOUCH).ln() - (r.0 - TOUCH).ln()) / ((r.1 - TOUCH).ln() - (r.0 - TOUCH).ln())
@@ -369,11 +381,14 @@ fn to_x(s: &Shape) -> [f32; D] {
         s.lips.map_or(1.0, |l| log(l, LIPS)),
         lin(
             at,
-            narrowing_at(if s.modes.is_some() {
-                Model::Modal
-            } else {
-                Model::Cosine
-            }),
+            narrowing_at(
+                if s.modes.is_some() {
+                    Model::Modal
+                } else {
+                    Model::Cosine
+                },
+                t,
+            ),
         ),
         log(narrow, NARROWING),
         lin(s.pharynx, PHARYNX),
@@ -396,7 +411,7 @@ fn from_x(x: &[f32; D], kind: Kind) -> Shape {
     let lips = kind.rounded.then(|| log(x[2], LIPS));
     let narrowing = kind
         .narrowed
-        .then(|| (lin(x[3], narrowing_at(kind.model)), log(x[4], NARROWING)));
+        .then(|| (lin(x[3], kind.places), log(x[4], NARROWING)));
     if kind.model == Model::Modal {
         let q = [0, 1, 2].map(|k| lin(x[MODE_AT[k]], inverse::mode_range(k)));
         // The cosine tongue is not used by a modal tract; the projection's
@@ -423,14 +438,17 @@ fn from_x(x: &[f32; D], kind: Kind) -> Shape {
 /// A start for target `t` from shape `s`: lips made to agree with the
 /// target's.
 fn start_from(s: &Shape, t: &Target) -> [f32; D] {
-    let mut x = to_x(s);
+    let mut x = to_x(s, t);
     match t.lips {
         Lips::Spread => x[2] = 1.0,
         Lips::Rounded if s.lips.is_none_or(|l| l > LIPS.1) => {
-            x[2] = to_x(&Shape {
-                lips: Some(START_LIPS),
-                ..*s
-            })[2];
+            x[2] = to_x(
+                &Shape {
+                    lips: Some(START_LIPS),
+                    ..*s
+                },
+                t,
+            )[2];
         }
         Lips::Rounded => {}
     }
@@ -632,7 +650,7 @@ fn prior(kind: Kind, t: &Target) -> [f32; D] {
     let mut x = cosine_prior(t);
     if kind.model == Model::Modal {
         // The cosine prior's narrowing place, on the modal range of places.
-        let (a, b) = narrowing_at(Model::Cosine);
+        let (a, b) = narrowing_at(Model::Cosine, t);
         let at = a + (b - a) * x[3];
         x[3] = ((at - MODAL_NARROWING_AT.0) / (MODAL_NARROWING_AT.1 - MODAL_NARROWING_AT.0))
             .clamp(0.0, 1.0);
@@ -651,10 +669,13 @@ fn prior(kind: Kind, t: &Target) -> [f32; D] {
                 .physical_shape(1.0)
                 .expect("a vowel shape");
             // (Read as a modal shape: the modal range of places.)
-            let n = to_x(&Shape {
-                modes: Some([0.0; 3]),
-                ..s
-            });
+            let n = to_x(
+                &Shape {
+                    modes: Some([0.0; 3]),
+                    ..s
+                },
+                t,
+            );
             x[3] = n[3];
             x[4] = n[4];
         }
@@ -724,18 +745,21 @@ fn cosine_prior(t: &Target) -> [f32; D] {
         Lips::Rounded => Some(a.lips.map_or(START_LIPS, |c| c.diameter).min(LIPS.1)),
     };
     let narrowing = a.constriction.map(|c| (c.index, c.diameter));
-    let mut x = to_x(&Shape {
-        tongue_index: index,
-        tongue_diameter: diameter,
-        lips,
-        narrowing,
-        pharynx: if root_free(t.key) {
-            natural_root(t.key)
-        } else {
-            0.0
+    let mut x = to_x(
+        &Shape {
+            tongue_index: index,
+            tongue_diameter: diameter,
+            lips,
+            narrowing,
+            pharynx: if root_free(t.key) {
+                natural_root(t.key)
+            } else {
+                0.0
+            },
+            modes: None,
         },
-        modes: None,
-    });
+        t,
+    );
     if narrowing.is_none() {
         x[3] = 0.5;
         x[4] = 1.0;
@@ -764,7 +788,7 @@ fn natural_root(key: VowelKey) -> f32 {
 fn lowest(model: Model, t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
-        let (a, b) = narrowing_at(model);
+        let (a, b) = narrowing_at(model, t);
         lo[3] = (ORAL - a) / (b - a);
     }
     if model == Model::Cosine {
