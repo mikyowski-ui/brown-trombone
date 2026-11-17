@@ -3534,8 +3534,8 @@ fn breathe_in(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], ti
 /// the last [`ProsodyConfig::fry_time`](crate::ProsodyConfig::fry_time) of
 /// the voice in a phrase that ends in a fall (`.` `!`), the folds go
 /// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry) of the way
-/// into creak (see [`Trombone::set_fold_creak`]); questions and commas end
-/// in modal voice. The consonants after the last voiced sound keep it, and
+/// into creak (see [`Trombone::set_fold_creak`]), never from before the
+/// middle of its last vowel; questions and commas end in modal voice. The consonants after the last voiced sound keep it, and
 /// the next phrase starts without.
 fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], timing: &Tuning) {
     for &(a, b, brk) in phrases {
@@ -3546,7 +3546,18 @@ fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], ti
             continue;
         };
         let end: f32 = drafts[a..=a + last].iter().map(|d| d.duration).sum();
-        let from = end - timing.prosody.fry_time;
+        // Never before the middle of the last vowel: the consonant before it
+        // and the vowel's onset keep their modal voice (the pitch raised
+        // after a voiceless stop is heard in the first cycles; in "a ta" the
+        // whole vowel creaked and its onset pitch could not be read).
+        let phrase = &drafts[a..b];
+        let middle = phrase.iter().rposition(|d| d.vowel).map_or(0.0, |v| {
+            let head = vowel_head(phrase, v);
+            let start: f32 = phrase[..head].iter().map(|d| d.duration).sum();
+            let length: f32 = phrase[head..=v].iter().map(|d| d.duration).sum();
+            start + 0.5 * length
+        });
+        let from = (end - timing.prosody.fry_time).max(middle);
         let mut t = 0.0;
         for d in &mut drafts[a..b] {
             let start = t;

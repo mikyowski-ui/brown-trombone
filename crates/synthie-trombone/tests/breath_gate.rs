@@ -16,7 +16,7 @@ mod breath;
 
 use breath::{SR, breaths, creak, db, largest_step, phrase_ends, phrase_vowels, rms, take};
 use synthie_trombone::speech::Utterance;
-use synthie_trombone::{Engine, Phoneme, Preset, Trombone, Tuning, VoiceSettings};
+use synthie_trombone::{Engine, Phoneme, Preset, Stereo, Talker, Trombone, Tuning, VoiceSettings};
 
 const TEXT: &str =
     "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.";
@@ -245,5 +245,37 @@ fn a_breath_taken_with_the_api_comes_and_goes() {
         assert!(inflow < -100.0);
         assert!(after > -0.1, "still drawing at {after}");
         assert!(v.inhalation().abs() < f32::EPSILON);
+    }
+}
+
+#[test]
+fn a_breath_stays_finite_and_click_free_in_stereo() {
+    // The inward stream reaches the lips' port and the nostrils': through
+    // the head's paths to two ears (and a microphone pair) a breath and its
+    // turn stay as quiet and smooth as in mono. The breaths' times are the
+    // mono take's (the same utterance, the same clock).
+    let t = take(&living(), TEXT);
+    let found = breaths(&t);
+    for stereo in [Stereo::Binaural, Stereo::Pair] {
+        let mut talker = Talker::new(SR, living());
+        talker.set_stereo(stereo);
+        let out = talker.bake_stereo(TEXT);
+        assert!(out.iter().all(|s| s.is_finite()), "{stereo:?}: not finite");
+        for ch in 0..2 {
+            let x: Vec<f32> = out.iter().skip(ch).step_by(2).copied().collect();
+            for &(a, b) in &found {
+                let turn = (b..t.lung.len()).find(|&k| t.lung[k] >= 0.0).unwrap_or(b);
+                let w = (0.04 * SR) as usize;
+                let (first, last) = breath::vowel_after(&t, b).expect("a vowel after the breath");
+                let vowel = largest_step(&x[first..last]);
+                let step = largest_step(&x[a..(turn + w).min(x.len())]);
+                println!(
+                    "{stereo:?} channel {ch}: breath at {:.2} s, {:.2} x the vowel's largest step",
+                    a as f32 / SR,
+                    step / vowel
+                );
+                assert!(step <= 0.5 * vowel, "{stereo:?} {ch}: {:.2}", step / vowel);
+            }
+        }
     }
 }
