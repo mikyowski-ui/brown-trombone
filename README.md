@@ -1383,10 +1383,10 @@ pressed edges feel none of the pressure, so the closure holds. A **throat
 clearing** is two weaker coughs (16 cmH2O) through a tube narrowed to
 half its width, released into a pressed, creaky voice. A **sigh** draws
 6.5 cmH2O (0.9 L/s inward), then lets out a long breathy voice (the
-glottis held open: noise share 0.31 against 0.10 for a modal /a/) falling
-from 122 to 87 Hz while the mouth relaxes from /ɑ/ towards schwa. None
+glottis held open: noise share 0.32 against 0.10 for a modal /a/) falling
+from 120 to 90 Hz while the mouth relaxes from /ɑ/ towards schwa. None
 clicks more than speech does (largest sample step against its 10 ms's
-RMS: 4.0 to 6.6, speech 4.9). Laying one costs about 1 µs; playing it
+RMS: 4.6 to 6.6, speech 5.3). Laying one costs about 1 µs; playing it
 costs what speech costs.
 
 **Hesitation fillers** (`ProsodyConfig::fillers`, `0` off): "uh", "um",
