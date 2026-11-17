@@ -861,10 +861,12 @@ impl Utterance {
                 else {
                     continue;
                 };
-                let Some(native) = inverse::predict(&own) else {
+                // The babble map of the tract the voice speaks with.
+                let map = inverse::Map::for_tuning(&options.tract);
+                let Some(native) = map.predict(&own) else {
                     continue;
                 };
-                let at = inverse::formants_at_length(native, length);
+                let at = map.formants_at_length(native, length);
                 let clip = |r: f32| {
                     let r = if r.is_finite() && r > 0.0 { r } else { 1.0 };
                     let c = r.clamp(1.0 - range, 1.0 + range);
@@ -872,8 +874,7 @@ impl Utterance {
                 };
                 let ((l1, r1), (l2, r2)) = (clip(r1), clip(r2));
                 limited += usize::from(l1 || l2);
-                let shape =
-                    inverse::solve_for(at[0] * r1, at[1] * r2, Some(at[2]), Some(&own), length);
+                let shape = map.solve_for(at[0] * r1, at[1] * r2, Some(at[2]), Some(&own), length);
                 solved[p as usize] = Some((key, shape));
                 report.shaped += usize::from(first);
             }

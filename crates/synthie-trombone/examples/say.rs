@@ -168,9 +168,13 @@ fn take_vowels(json: &str) -> (String, Vec<(VowelKey, [f32; 3])>) {
 fn hold_vowels(voice: &mut Trombone, targets: &[(VowelKey, [f32; 3])]) {
     let length = voice.tract_length();
     let scale = vowel_targets::ADULT_MALE_LENGTH / length;
+    let tuning = *voice.tuning();
+    let map = inverse::Map::for_tuning(&tuning);
     for &(key, f) in targets {
-        let near = key.articulation().and_then(|a| a.physical_shape(length));
-        let shape = inverse::solve_for(
+        let near = key
+            .articulation()
+            .and_then(|a| a.physical_shape_with(length, &tuning));
+        let shape = map.solve_for(
             f[0] * scale,
             f[1] * scale,
             Some(f[2] * scale),

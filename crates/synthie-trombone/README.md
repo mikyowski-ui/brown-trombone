@@ -180,10 +180,19 @@ formants; and breath and intonation shaped per phrase. Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
-`AnatomyConfig::epilarynx_*` (the original's tube by default); after
-changing them, solve the vowel shapes again
-(`cargo run -p synthie-trombone --example vowel_size --release`, after
-`examples/babble.rs` for the babble map).
+`AnatomyConfig::epilarynx_*` (the original's tube by default). There are
+two tracts, `TractModel::Original` and `TractModel::Anatomical` (a lip horn,
+a larynx that moves, a tube of four cells above the folds flaring over
+four more; `Tuning::with_tract` sets their numbers), and each has its own
+vowel tables and babble map (`inverse::Map::for_tuning`). After changing
+the tract's acoustics, solve them again, the map first:
+
+```sh
+cargo run -p synthie-trombone --example babble --release -- --lengthened      # the anatomical tract's map
+cargo run -p synthie-trombone --example vowel_size --release -- --lengthened --both
+cargo run -p synthie-trombone --example babble --release -- --original        # the original tract's
+cargo run -p synthie-trombone --example vowel_size --release -- --original --both
+```
 
 An utterance can also be spoken with a person's prosody:
 `speech::Schedule` holds a recording's phone times, pitch track and

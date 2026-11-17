@@ -2,7 +2,9 @@
 //! vowel, glide and diphthong end must land on the formants of its target
 //! (`src/vowel_targets.rs`), scaled to the voice's size as a smaller or
 //! larger person's are. Shapes are measured through the real engine, after
-//! `articulate` and `settle`.
+//! `articulate` and `settle`. Each tract has tables of its own
+//! (`TractModel`), and each test names the tract it holds: the cosine
+//! body's gates hold both.
 //!
 //! ```sh
 //! cargo test -p synthie-trombone --release --test vowel_size_gate -- --nocapture
@@ -21,7 +23,17 @@ mod survey;
 
 use survey::Meter;
 use synthie_trombone::vowel_targets::{self, Lips, TARGETS, VowelKey};
-use synthie_trombone::{Articulation, Engine, Phoneme, SLOT_LIPS, Trombone, Tuning};
+use synthie_trombone::{Articulation, Engine, Phoneme, SLOT_LIPS, TractModel, Trombone, Tuning};
+
+/// The default tuning with the numbers of `tract` (the cosine body).
+fn on(tract: TractModel) -> Tuning {
+    Tuning::DEFAULT.with_tract(tract)
+}
+
+/// Both tracts, as tunings.
+fn both() -> [(TractModel, Tuning); 2] {
+    [TractModel::Original, TractModel::Anatomical].map(|t| (t, on(t)))
+}
 
 /// Every vowel the physical engine shapes, glides included.
 const VOWELS: [Phoneme; 14] = [
@@ -69,14 +81,9 @@ fn articulation(key: VowelKey) -> Articulation {
     key.articulation().expect("a vowel shape")
 }
 
-/// A physical voice of `length` holding `a`, settled.
-fn holding_articulation(a: &Articulation, length: f32) -> Trombone {
-    holding_on(a, length, &Tuning::DEFAULT)
-}
-
-/// [`holding_articulation`] for a voice of `tuning` (its tongue model and
-/// tract choose the table); a rounded vowel with the larynx lowered by
-/// `rounded_larynx`, as speech lowers it.
+/// A physical voice of `length` and `tuning` holding `a`, settled (its
+/// tongue model and tract choose the table); a rounded vowel with the
+/// larynx lowered by `rounded_larynx`, as speech lowers it.
 fn holding_on(a: &Articulation, length: f32, tuning: &Tuning) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
@@ -96,17 +103,13 @@ fn holding_on(a: &Articulation, length: f32, tuning: &Tuning) -> Trombone {
     t
 }
 
-/// A physical voice of `length` holding phoneme `p`, settled.
-fn holding(p: Phoneme, length: f32) -> Trombone {
-    holding_articulation(&p.articulation(), length)
+/// A physical voice of `length` and `tuning` holding phoneme `p`, settled.
+fn holding(p: Phoneme, length: f32, tuning: &Tuning) -> Trombone {
+    holding_on(&p.articulation(), length, tuning)
 }
 
-/// F1..F3 of every `(shape, length)`, measured on all threads.
-fn measure_all(jobs: &[(VowelKey, f32)]) -> Vec<[f32; 3]> {
-    measure_on(jobs, &Tuning::DEFAULT)
-}
-
-/// [`measure_all`] for a voice of `tuning`.
+/// F1..F3 of every `(shape, length)` on a voice of `tuning`, measured on
+/// all threads.
 fn measure_on(jobs: &[(VowelKey, f32)], tuning: &Tuning) -> Vec<[f32; 3]> {
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let chunk = jobs.len().div_ceil(threads).max(1);
@@ -132,14 +135,9 @@ fn measure_on(jobs: &[(VowelKey, f32)], tuning: &Tuning) -> Vec<[f32; 3]> {
     })
 }
 
-/// Measure every vowel shape at `lengths` and hold F1 and F2 to [`LIMIT`]
-/// of its target for that size; report F3 too.
-fn gate(name: &str, lengths: &[f32]) {
-    gate_on(name, lengths, &Tuning::DEFAULT);
-}
-
-/// [`gate`] for a voice of `tuning` (the table its tongue model and tract
-/// choose).
+/// Measure every vowel shape at `lengths` on a voice of `tuning` (the table
+/// its tongue model and tract choose) and hold F1 and F2 to [`LIMIT`] of
+/// its target for that size; report F3 too.
 fn gate_on(name: &str, lengths: &[f32], tuning: &Tuning) {
     let jobs: Vec<(VowelKey, f32)> = lengths
         .iter()
@@ -186,23 +184,36 @@ fn gate_on(name: &str, lengths: &[f32], tuning: &Tuning) {
 
 #[test]
 fn every_vowel_meets_its_target_at_every_size() {
-    gate(
-        "table lengths",
-        &[0.6, 0.7, 0.8, 0.85, 1.0, 1.15, 1.2, 1.3, 1.4],
-    );
+    for (tract, tuning) in both() {
+        gate_on(
+            &format!("{tract:?} tract, table lengths"),
+            &[0.6, 0.7, 0.8, 0.85, 1.0, 1.15, 1.2, 1.3, 1.4],
+            &tuning,
+        );
+    }
 }
 
 #[test]
 fn lengths_between_table_rows_meet_it_too() {
     // The table has a row every 0.1; these fall between rows.
-    gate(
-        "between rows",
-        &[0.55, 0.65, 0.75, 0.93, 0.97, 1.03, 1.25, 1.35],
-    );
+    for (tract, tuning) in both() {
+        gate_on(
+            &format!("{tract:?} tract, between rows"),
+            &[0.55, 0.65, 0.75, 0.93, 0.97, 1.03, 1.25, 1.35],
+            &tuning,
+        );
+    }
 }
 
 #[test]
 fn lax_and_tense_vowels_stay_apart() {
+    for (tract, tuning) in both() {
+        println!("{tract:?} tract:");
+        lax_and_tense_vowels_apart(&tuning);
+    }
+}
+
+fn lax_and_tense_vowels_apart(tuning: &Tuning) {
     // The pairs a listener most easily confuses must be as far apart as
     // their targets are (distance in ln F1 and ln F2), at every size.
     let pairs = [
@@ -220,7 +231,7 @@ fn lax_and_tense_vowels_stay_apart() {
                 .flat_map(move |&(a, b)| [(VowelKey::Vowel(a), l), (VowelKey::Vowel(b), l)])
         })
         .collect();
-    let got = measure_all(&jobs);
+    let got = measure_on(&jobs, tuning);
     let distance = |a: [f32; 3], b: [f32; 3]| {
         let d1 = (b[0] / a[0]).ln();
         let d2 = (b[1] / a[1]).ln();
@@ -250,20 +261,35 @@ fn lax_and_tense_vowels_stay_apart() {
 fn the_native_length_is_unchanged() {
     // A voice that was never resized and one resized back to 1.0 hold
     // every phoneme in exactly the same tract, which is exactly the
-    // fitted vowel shape.
+    // fitted vowel shape, on either tract.
+    for (tract, tuning) in both() {
+        for &p in Phoneme::ALL {
+            let voice = || {
+                let mut t = Trombone::new(48_000.0);
+                t.set_tuning(&tuning);
+                t.set_engine(Engine::Physical);
+                t
+            };
+            let mut a = voice();
+            a.articulate_phoneme(p);
+            a.settle();
+            let mut b = voice();
+            b.set_tract_length(0.7);
+            b.set_tract_length(1.0);
+            b.articulate_phoneme(p);
+            b.settle();
+            let bits = |t: &Trombone| t.target_diameters().map(f32::to_bits);
+            assert_eq!(bits(&a), bits(&b), "{tract:?} {p}");
+            if let Some(shape) = p.articulation().physical_shape_with(1.0, &tuning) {
+                let mut c = voice();
+                c.set_shape(&shape);
+                c.settle();
+                assert_eq!(bits(&a), bits(&c), "{tract:?} {p}");
+            }
+        }
+    }
+    // The tongue the default voice gives a phoneme is that of its size.
     for &p in Phoneme::ALL {
-        let mut a = Trombone::new(48_000.0);
-        a.set_engine(Engine::Physical);
-        a.articulate_phoneme(p);
-        a.settle();
-        let mut b = Trombone::new(48_000.0);
-        b.set_engine(Engine::Physical);
-        b.set_tract_length(0.7);
-        b.set_tract_length(1.0);
-        b.articulate_phoneme(p);
-        b.settle();
-        let bits = |t: &Trombone| t.target_diameters().map(f32::to_bits);
-        assert_eq!(bits(&a), bits(&b), "{p}");
         assert_eq!(
             p.tongue(Engine::Physical)
                 .map(|(i, d)| (i.to_bits(), d.to_bits())),
@@ -271,13 +297,6 @@ fn the_native_length_is_unchanged() {
                 .map(|(i, d)| (i.to_bits(), d.to_bits())),
             "{p}"
         );
-        if let Some(shape) = p.physical_shape(1.0) {
-            let mut c = Trombone::new(48_000.0);
-            c.set_engine(Engine::Physical);
-            c.set_shape(&shape);
-            c.settle();
-            assert_eq!(bits(&a), bits(&c), "{p}");
-        }
     }
     // And the default voice still sounds the same, sample for sample.
     let speak = |resized: bool| {
@@ -300,23 +319,37 @@ fn the_native_length_is_unchanged() {
     assert_eq!(speak(false), speak(true));
 }
 
-/// Settled tract of `key` at `length`.
-fn tract(key: VowelKey, length: f32) -> Vec<f32> {
-    holding_articulation(&articulation(key), length)
+/// Settled tract of `key` at `length` on a voice of `tuning`.
+fn tract(key: VowelKey, length: f32, tuning: &Tuning) -> Vec<f32> {
+    holding_on(&articulation(key), length, tuning)
         .target_diameters()
         .to_vec()
 }
 
 #[test]
 fn shapes_vary_smoothly_with_length() {
+    // On the anatomical tract /w/'s lips are as tight as a vowel's may be
+    // (0.65) from the native length up, and its tongue goes back by 0.84
+    // cells per 0.1 of length there: 0.032 per step between 1.0 and 1.01, a
+    // steep stretch, not a jump; the original tract's /w/ keeps its lips
+    // free and moves at most 0.016.
+    for (tract, tuning, most) in [
+        (TractModel::Original, on(TractModel::Original), 0.025),
+        (TractModel::Anatomical, on(TractModel::Anatomical), 0.035),
+    ] {
+        println!("{tract:?} tract:");
+        shapes_vary_smoothly(&tuning, most);
+    }
+}
+
+fn shapes_vary_smoothly(tuning: &Tuning, most: f32) {
     // Step the length by 0.01 from 0.5 to 1.6. A smooth path changes the
     // tract a little per step, never by a jump: the cells move by at most
-    // 0.025 per step (about 0.016 is the most they do), where a different
-    // vowel moves some by 1 or more.
+    // `most` per step, where a different vowel moves some by 1 or more.
     let lengths: Vec<f32> = (0..=110).map(|k| 0.5 + 0.01 * k as f32).collect();
     let mut worst = (0.0f32, TARGETS[0].key, 0.0f32);
     for p in TARGETS.iter().map(|t| t.key) {
-        let tracts: Vec<Vec<f32>> = lengths.iter().map(|&l| tract(p, l)).collect();
+        let tracts: Vec<Vec<f32>> = lengths.iter().map(|&l| tract(p, l, tuning)).collect();
         let steps: Vec<f32> = tracts
             .windows(2)
             .map(|w| {
@@ -330,14 +363,18 @@ fn shapes_vary_smoothly_with_length() {
                 worst = (s, p, lengths[k]);
             }
             assert!(
-                s < 0.025,
+                s < most,
                 "{p}: the tract moves by {s} between lengths {} and {}",
                 lengths[k],
                 lengths[k + 1]
             );
         }
         // Across the native length too.
-        let shape = |l: f32| articulation(p).physical_shape(l).expect("a vowel shape");
+        let shape = |l: f32| {
+            articulation(p)
+                .physical_shape_with(l, tuning)
+                .expect("a vowel shape")
+        };
         let (below, at, above) = (shape(0.999), shape(1.0), shape(1.001));
         for s in [below, above] {
             assert!(
@@ -360,11 +397,13 @@ fn shapes_vary_smoothly_with_length() {
 fn no_shape_hisses_or_leaves_the_engine_range() {
     // Never tighter than the tightest vowels may be without hissing: lips
     // 0.65 and narrowing 0.7.
-    for t in TARGETS {
+    for (t, (_, tuning)) in TARGETS.iter().flat_map(|t| both().map(move |b| (t, b))) {
         for k in 0..=110 {
             let l = 0.5 + 0.01 * k as f32;
             let p = t.key;
-            let s = articulation(p).physical_shape(l).expect("a vowel shape");
+            let s = articulation(p)
+                .physical_shape_with(l, &tuning)
+                .expect("a vowel shape");
             assert!(
                 synthie_trombone::TONGUE_INDEX.contains(&s.tongue_index),
                 "{p} at {l}: {s:?}"
@@ -384,14 +423,33 @@ fn no_shape_hisses_or_leaves_the_engine_range() {
 
 #[test]
 fn consonants_diphthongs_and_the_tongue_handle_agree() {
+    for (tract, tuning) in both() {
+        println!("{tract:?} tract");
+        consonants_diphthongs_and_tongue(&tuning);
+    }
+    // Where the app puts the tongue handle: the default voice's tongue.
     for l in [0.6, 0.85, 1.0, 1.3] {
         for p in VOWELS {
             let shape = p.physical_shape(l).expect("a vowel shape");
             let tongue = Some((shape.tongue_index, shape.tongue_diameter));
-            // Where the app puts the tongue handle.
             assert_eq!(p.tongue_for(Engine::Physical, l), tongue, "{p} at {l}");
+        }
+        let er = Phoneme::Er.physical_shape(l).expect("ER");
+        assert_eq!(
+            Phoneme::R.tongue_for(Engine::Physical, l),
+            Some((er.tongue_index, er.tongue_diameter))
+        );
+    }
+}
+
+fn consonants_diphthongs_and_tongue(tuning: &Tuning) {
+    let shape_of = |a: Articulation, l: f32| a.physical_shape_with(l, tuning);
+    for l in [0.6, 0.85, 1.0, 1.3] {
+        for p in VOWELS {
+            let shape = shape_of(p.articulation(), l).expect("a vowel shape");
+            let tongue = Some((shape.tongue_index, shape.tongue_diameter));
             // What the voice does.
-            let t = holding(p, l);
+            let t = holding(p, l, tuning);
             assert_eq!(Some(t.tongue()), tongue, "{p} at {l}");
             assert_eq!(
                 t.constriction(SLOT_LIPS).map(|c| c.diameter),
@@ -408,6 +466,7 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
                 let mut a = q.articulation();
                 a.tongue = p.articulation().tongue;
                 let mut c = Trombone::new(48_000.0);
+                c.set_tuning(tuning);
                 c.set_engine(Engine::Physical);
                 c.set_tract_length(l);
                 c.articulate(&a);
@@ -434,15 +493,15 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
             Phoneme::Ow,
             Phoneme::Oy,
         ] {
-            let start = p.physical_shape(l).expect("a start shape");
+            let start = shape_of(p.articulation(), l).expect("a start shape");
             assert_eq!(
                 Some(start),
-                articulation(VowelKey::Start(p)).physical_shape(l),
+                shape_of(articulation(VowelKey::Start(p)), l),
                 "{p} at {l}"
             );
             let end = articulation(VowelKey::End(p));
-            let v = holding_articulation(&end, l);
-            let shape = end.physical_shape(l).expect("an end shape");
+            let v = holding_on(&end, l, tuning);
+            let shape = shape_of(end, l).expect("an end shape");
             assert_eq!(
                 v.tongue(),
                 (shape.tongue_index, shape.tongue_diameter),
@@ -456,45 +515,38 @@ fn consonants_diphthongs_and_the_tongue_handle_agree() {
         }
         // /w/ is rounded, and so protrudes, as /u/ does.
         for p in [Phoneme::W, Phoneme::Uw] {
-            let lips = p.physical_shape(l).and_then(|s| s.lips).expect("rounded");
+            let lips = shape_of(p.articulation(), l)
+                .and_then(|s| s.lips)
+                .expect("rounded");
             assert!(lips < 1.0, "{p} at {l}: {lips}");
         }
         // /r/ borrows the tongue of /er/.
-        let er = Phoneme::Er.physical_shape(l).expect("ER");
+        let er = shape_of(Phoneme::Er.articulation(), l).expect("ER");
         assert_eq!(
-            Phoneme::R.tongue_for(Engine::Physical, l),
+            Some(holding(Phoneme::R, l, tuning).tongue()),
             Some((er.tongue_index, er.tongue_diameter))
         );
     }
 }
 
-// ----- the modal tongue body and the lengthened tract -----------------------
+// ----- the modal tongue body ------------------------------------------------
 //
-// The modal body (`AnatomyConfig::tongue_model` 1) reads its own table,
-// `src/vowel_modes_table.rs`; a voice with the tract whose length changes
-// (`lip_horn`, `larynx_travel`; `vowel_targets::lengthened`) reads the
-// tables solved for it, `src/vowel_size_wave_table.rs` and
-// `src/vowel_modes_wave_table.rs`, here with the numbers they are solved for.
+// The modal body (`AnatomyConfig::tongue_model` 1) reads its own tables,
+// `src/vowel_modes_table.rs` on the original tract and
+// `src/vowel_modes_wave_table.rs` on the anatomical one
+// (`vowel_targets::lengthened`).
 
-/// The modal body on the default tract.
+/// The modal body on the original tract.
 fn modal() -> Tuning {
-    let mut t = Tuning::DEFAULT;
+    let mut t = on(TractModel::Original);
     t.anatomy.tongue_model = 1.0;
     t
 }
 
-/// The lengthened tract the wave is switched on with (the lip horn 1.2 cm,
-/// the larynx's full travel, rounded vowels' larynx lowered 0.5 cm, four cells of tube
-/// above the folds), the
-/// body modal if `modal`.
-fn lengthened(modal: bool) -> Tuning {
-    let mut t = Tuning::DEFAULT;
-    t.anatomy.lip_horn = 1.2;
-    t.anatomy.larynx_travel = 1.0;
-    t.articulation.rounded_larynx = 0.5;
-    t.articulation.voiced_stop_larynx = 0.0;
-    t.anatomy.epilarynx_cells = 4.0;
-    t.anatomy.tongue_model = if modal { 1.0 } else { 0.0 };
+/// The modal body on the anatomical tract.
+fn anatomical_modal() -> Tuning {
+    let mut t = on(TractModel::Anatomical);
+    t.anatomy.tongue_model = 1.0;
     t
 }
 
@@ -516,32 +568,23 @@ fn modal_lengths_between_table_rows_meet_it_too() {
     );
 }
 
-// The tract the wave is switched on with misses these: with four cells of
-// tube above the folds the lower pharynx is wider and the open vowels' F1
-// falls short (/ɑ æ aɪ aʊ ɔ ɔɪ/ on the cosine body by up to 5 %, /ɔ ɔɪ/
-// on the modal one by up to 4.7 %, at the small sizes), and /æ/ comes
-// closer to /ɛ/ than their targets at length 0.6. Run with `--ignored`.
+// The modal body on the anatomical tract misses these: /ɔ ɔɪ/ fall up to
+// 4.7 % short of their F1 at the small sizes, and /æ/ comes closer to /ɛ/
+// than their targets at length 0.6. Run with `--ignored`. (The cosine body
+// on the same tract missed the open vowels' F1 by up to 5 % with the tube
+// above the folds opening into the lower pharynx in a step; it flares over
+// four cells since, as the measured speaker's does, and is held above.)
 
-/// The lengths the lengthened tract's tables are held to.
-const LENGTHENED_LENGTHS: [f32; 7] = [0.6, 0.75, 0.85, 1.0, 1.15, 1.3, 1.4];
-
-#[test]
-#[ignore = "the wave tract's open vowels miss F1 at small sizes (see above)"]
-fn cosine_vowels_of_the_lengthened_tract_meet_their_targets() {
-    gate_on(
-        "lengthened tract, cosine body",
-        &LENGTHENED_LENGTHS,
-        &lengthened(false),
-    );
-}
+/// The lengths the anatomical tract's modal table is held to.
+const ANATOMICAL_LENGTHS: [f32; 7] = [0.6, 0.75, 0.85, 1.0, 1.15, 1.3, 1.4];
 
 #[test]
-#[ignore = "the wave tract's open vowels miss F1 at small sizes (see above)"]
-fn modal_vowels_of_the_lengthened_tract_meet_their_targets() {
+#[ignore = "the modal body's /ɔ ɔɪ/ miss F1 at small sizes on the anatomical tract (see above)"]
+fn modal_vowels_of_the_anatomical_tract_meet_their_targets() {
     gate_on(
-        "lengthened tract, modal body",
-        &LENGTHENED_LENGTHS,
-        &lengthened(true),
+        "anatomical tract, modal body",
+        &ANATOMICAL_LENGTHS,
+        &anatomical_modal(),
     );
 }
 
@@ -551,10 +594,9 @@ fn modal_lax_and_tense_vowels_stay_apart() {
 }
 
 #[test]
-#[ignore = "the wave tract's /æ/ comes too close to /ɛ/ at length 0.6 (see above)"]
-fn lengthened_lax_and_tense_vowels_stay_apart() {
-    lax_and_tense_apart(&lengthened(false));
-    lax_and_tense_apart(&lengthened(true));
+#[ignore = "the modal body's /æ/ comes too close to /ɛ/ at length 0.6 on the anatomical tract (see above)"]
+fn modal_lax_and_tense_vowels_of_the_anatomical_tract_stay_apart() {
+    lax_and_tense_apart(&anatomical_modal());
 }
 
 /// The pairs a listener most easily confuses as far apart as their
@@ -592,7 +634,7 @@ fn modal_shapes_stay_inside_the_body_and_do_not_hiss() {
     // The body's numbers inside what the tract takes, lips and narrowing
     // never tighter than the tightest vowels may be, rounded vowels
     // rounded; and a held vowel is the shape the table gives.
-    for tuning in [modal(), lengthened(true)] {
+    for tuning in [modal(), anatomical_modal()] {
         for t in TARGETS {
             for k in 0..=110 {
                 let l = 0.5 + 0.01 * k as f32;

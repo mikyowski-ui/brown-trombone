@@ -1640,7 +1640,9 @@ impl Trombone {
     /// place of the built-in shape solved for its
     /// [target](crate::vowel_targets); `None` returns to the built-in one.
     /// For trying out other vowel targets: solve the shape for the voice's
-    /// size with [`inverse::solve_for`](crate::inverse::solve_for), and
+    /// size with [`inverse::Map::solve_for`](crate::inverse::Map::solve_for)
+    /// on the map of the voice's tract
+    /// ([`inverse::Map::for_tuning`](crate::inverse::Map::for_tuning)), and
     /// set it again after [`set_tract_length`](Self::set_tract_length).
     /// Returns `false` (and changes nothing) for a key with no target.
     pub fn set_vowel_shape(

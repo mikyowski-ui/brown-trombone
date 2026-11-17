@@ -1,5 +1,7 @@
 //! Gate for mimic mode: a voice heard through the [`Listener`] is copied by
-//! a second voice, vowel for vowel and hiss for hiss.
+//! a second voice, vowel for vowel and hiss for hiss, on each tract
+//! ([`TractModel`]: the singer, the copy and the babble map the mimic
+//! solves on are all of that tract).
 //!
 //! ```sh
 //! cargo test -p synthie-trombone --release --test mimic_gate -- --nocapture
@@ -18,13 +20,22 @@ mod survey;
 
 use synthie_trombone::listen::Listener;
 use synthie_trombone::mimic::Mimic;
-use synthie_trombone::{Engine, Phoneme, Trombone};
+use synthie_trombone::{Engine, Phoneme, TractModel, Trombone, Tuning};
 
 const SR: f32 = 48_000.0;
 
+/// The tracts the gates are held on.
+const TRACTS: [TractModel; 2] = [TractModel::Original, TractModel::Anatomical];
+
+/// The default tuning with the numbers of `tract`.
+fn tuning(tract: TractModel) -> Tuning {
+    Tuning::DEFAULT.with_tract(tract)
+}
+
 /// The voice that is listened to: a steady sung note.
-fn singer(hz: f32) -> Trombone {
+fn singer(hz: f32, tract: TractModel) -> Trombone {
     let mut t = Trombone::new(SR);
+    t.set_tuning(&tuning(tract));
     t.set_engine(Engine::Physical);
     t.set_vibrato(0.0, 0.0);
     t.set_jitter(0.0);
@@ -37,8 +48,9 @@ fn singer(hz: f32) -> Trombone {
 
 /// The voice that copies. Its articulators are quick: the person it
 /// follows has already taken the time to move theirs.
-fn copier() -> Trombone {
+fn copier(tract: TractModel) -> Trombone {
     let mut t = Trombone::new(SR);
+    t.set_tuning(&tuning(tract));
     t.set_engine(Engine::Physical);
     t.set_vibrato(0.0, 0.0);
     t.set_jitter(0.0);
@@ -56,6 +68,12 @@ fn within(f: Option<[f32; 3]>, truth: [f32; 3], percent: f32) -> bool {
 
 #[test]
 fn a_sung_vowel_sequence_is_followed() {
+    for tract in TRACTS {
+        sung_vowels(tract);
+    }
+}
+
+fn sung_vowels(tract: TractModel) {
     // A voice sings six vowels on one note, changing abruptly every half
     // second. The copy, fed only the sound, must make each vowel with F1
     // and F2 within 10% of the singer's, and be there within 60 ms of the
@@ -68,10 +86,15 @@ fn a_sung_vowel_sequence_is_followed() {
         Phoneme::Ao,
         Phoneme::Ae,
     ];
-    let mut a = singer(110.0);
-    let mut b = copier();
+    let mut a = singer(110.0, tract);
+    let mut b = copier(tract);
     let mut listener = Listener::new(SR);
     let mut mimic = Mimic::new(1.0);
+    mimic.set_tract(tract);
+    // The shapes the mimic asks for, measured as the copy holds them
+    // (`Trombone::set_shape` leaves the larynx at rest).
+    let mut held = tuning(tract);
+    held.articulation.rounded_larynx = 0.0;
     for _ in 0..(0.3 * SR) as usize {
         if let Some(h) = listener.push(a.process()) {
             mimic.follow(&h).apply(&mut b);
@@ -106,7 +129,9 @@ fn a_sung_vowel_sequence_is_followed() {
             if n % every == 0 && n < (0.2 * SR) as usize {
                 let ms = 1000.0 * n as f32 / SR;
                 // The time from which the copy stays within 10%.
-                let asked = mimic.shape().and_then(|s| survey::measure(s, 1.0));
+                let asked = mimic
+                    .shape()
+                    .and_then(|s| survey::formants(&survey::voice_on(s, 1.0, &held)));
                 if within(asked, truth, tolerance) {
                     told.get_or_insert(ms);
                 } else {
@@ -122,7 +147,7 @@ fn a_sung_vowel_sequence_is_followed() {
         let got = survey::formants(&b).expect("the copy's formants");
         let (e1, e2) = (off(got[0], truth[0]), off(got[1], truth[1]));
         println!(
-            "{p}: singer {:.0}/{:.0} Hz, copy {:.0}/{:.0} Hz ({e1:+.1}%, {e2:+.1}%); told after {told:?} ms, tract there after {there:?} ms; voiced {}, pitch {:.1} Hz",
+            "{tract:?} {p}: singer {:.0}/{:.0} Hz, copy {:.0}/{:.0} Hz ({e1:+.1}%, {e2:+.1}%); told after {told:?} ms, tract there after {there:?} ms; voiced {}, pitch {:.1} Hz",
             truth[0],
             truth[1],
             got[0],
@@ -131,7 +156,7 @@ fn a_sung_vowel_sequence_is_followed() {
             b.target_frequency()
         );
         if e1.abs() > tolerance || e2.abs() > tolerance {
-            failures.push(format!("{p}: F1 {e1:+.1}%, F2 {e2:+.1}%"));
+            failures.push(format!("{tract:?} {p}: F1 {e1:+.1}%, F2 {e2:+.1}%"));
         }
         // Since round 9 the singer's voice is as dark as a speaker's (2-4
         // kHz 29 dB under 0-1 kHz; 16 dB before). With one stage of
@@ -139,7 +164,7 @@ fn a_sung_vowel_sequence_is_followed() {
         // in ten of /æ/ (told after 198 ms) and heard /i/ 15 % high; with
         // two (round 10) every vowel is told within 38 ms.
         if told.is_none_or(|ms| ms > 60.0) {
-            failures.push(format!("{p}: told after {told:?} ms"));
+            failures.push(format!("{tract:?} {p}: told after {told:?} ms"));
         }
         // The copy's tongue body has the inertia of a real one (a time
         // constant of about 40 ms in speech, a quarter of that at the
@@ -149,7 +174,7 @@ fn a_sung_vowel_sequence_is_followed() {
         // 47 to 88 with the heavy body, which made in-sentence consonants
         // 56 % → 74 % right for the speech judge).
         if there.is_none_or(|ms| ms > 95.0) {
-            failures.push(format!("{p}: tract there after {there:?} ms"));
+            failures.push(format!("{tract:?} {p}: tract there after {there:?} ms"));
         }
         assert!(b.is_voiced());
         assert!((b.target_frequency() / 110.0 - 1.0).abs() < 0.03);
@@ -159,14 +184,22 @@ fn a_sung_vowel_sequence_is_followed() {
 
 #[test]
 fn hiss_and_silence_are_followed() {
+    for tract in TRACTS {
+        hiss_and_silence(tract);
+    }
+}
+
+fn hiss_and_silence(tract: TractModel) {
     // An /s/ and a /sh/ are copied as a gap at the right place, with the
     // voice off; silence stops everything.
-    let mut b = copier();
+    let mut b = copier(tract);
     let mut listener = Listener::new(SR);
     let mut mimic = Mimic::new(1.0);
+    mimic.set_tract(tract);
     let mut places = Vec::new();
     for p in [Phoneme::S, Phoneme::Sh] {
         let mut a = Trombone::new(SR);
+        a.set_tuning(&tuning(tract));
         a.set_engine(Engine::Physical);
         a.articulate_phoneme(Phoneme::Aa);
         a.settle();
@@ -178,9 +211,9 @@ fn hiss_and_silence_are_followed() {
             b.process();
         }
         let gap = b.constriction(synthie_trombone::SLOT_MAIN);
-        println!("{p}: copied as {gap:?}, voiced {}", b.is_voiced());
+        println!("{tract:?} {p}: copied as {gap:?}, voiced {}", b.is_voiced());
         assert!(!b.is_voiced());
-        assert_eq!(gap, p.articulation().constriction, "{p}");
+        assert_eq!(gap, p.articulation().constriction, "{tract:?} {p}");
         places.push(gap);
     }
     for _ in 0..(0.3 * SR) as usize {

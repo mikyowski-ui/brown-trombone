@@ -106,7 +106,8 @@ pub use tract::{
     TIP_START, TONGUE_DIAMETER, TONGUE_INDEX,
 };
 pub use tuning::{
-    AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, Tuning,
+    AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, TractModel,
+    Tuning,
 };
 pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
