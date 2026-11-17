@@ -1466,7 +1466,75 @@ impl TractModel {
     }
 }
 
+impl TractModel {
+    /// The tract a name gives (any case): `anatomical` or `original`, as
+    /// `say --tract` and the app's `--tract` take it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Anatomical, Self::Original]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
+    }
+
+    /// The name [`from_name`](Self::from_name) reads.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Anatomical => "anatomical",
+            Self::Original => "original",
+        }
+    }
+}
+
+/// The two tongue bodies of the physical engine, as
+/// [`AnatomyConfig::tongue_model`] chooses them (see
+/// [`Tuning::with_tongue`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TongueModel {
+    /// Pink Trombone's cosine hump, slid along the tube by its place and
+    /// height (`tongue_model` 0, [`Tuning::DEFAULT`]'s).
+    Cosine,
+    /// A measured neutral shape and three principal modes of one man's
+    /// vowels from MRI (Story 2008; `tongue_model` 1).
+    Measured,
+}
+
+impl TongueModel {
+    /// The tongue a name gives (any case): `cosine`, or `mri` (also
+    /// `measured`) for the measured modes, as `say --tongue-model` and
+    /// the app's `--tongue-model` take it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("measured") {
+            return Some(Self::Measured);
+        }
+        [Self::Cosine, Self::Measured]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
+    }
+
+    /// The name [`from_name`](Self::from_name) reads first.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Cosine => "cosine",
+            Self::Measured => "mri",
+        }
+    }
+}
+
 impl Tuning {
+    /// This tuning with the tongue body `tongue` (`anatomy.tongue_model`;
+    /// every other number as it is).
+    #[must_use]
+    pub const fn with_tongue(mut self, tongue: TongueModel) -> Self {
+        self.anatomy.tongue_model = match tongue {
+            TongueModel::Cosine => 0.0,
+            TongueModel::Measured => 1.0,
+        };
+        self
+    }
+
     /// This tuning with the numbers of `tract` (the tract's length, its
     /// larynx and the tube above the folds; every other number as it is).
     #[must_use]

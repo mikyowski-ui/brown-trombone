@@ -1,0 +1,18 @@
+{
+  "tuning": {
+    "anatomy": {
+      "lip_horn": 0.0,
+      "larynx_travel": 0.0,
+      "epilarynx_cells": 7.0,
+      "epilarynx_flare_cells": 0.0,
+      "epilarynx_diameter": 0.6,
+      "epilarynx_flare": 1.1,
+      "epilarynx_effort": 0.0,
+      "tongue_model": 1.0
+    },
+    "articulation": {
+      "rounded_larynx": 0.0,
+      "voiced_stop_larynx": 0.0
+    }
+  }
+}
