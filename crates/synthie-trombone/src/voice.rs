@@ -1972,7 +1972,7 @@ impl Trombone {
     }
 
     /// One output sample.
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, clippy::needless_range_loop)]
     pub fn process(&mut self) -> f32 {
         let ears = self.ears_on();
         while self.frac >= 1.0 {
@@ -2074,10 +2074,8 @@ impl Trombone {
     /// Fill `out` with interleaved frames, left then right (an odd last
     /// sample is left alone).
     pub fn render_stereo(&mut self, out: &mut [f32]) {
-        for frame in out.chunks_exact_mut(2) {
-            let [l, r] = self.process_stereo();
-            frame[0] = l;
-            frame[1] = r;
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo();
         }
     }
 
@@ -2182,18 +2180,18 @@ impl Trombone {
     /// leaving the mouth and nose.
     fn physical_sample(&mut self, tract: [f32; 2], folds: [f32; 2]) -> f32 {
         let dt = 0.5 / self.internal_rate;
-        let head = self.phys.head.on();
+        let head_on = self.phys.head.on();
         let (area, lung) = self.source.tick(folds[0], dt);
         let flow = self.phys.tick(tract[0], Drive::Glottis { area, lung });
         self.phys.radiate(flow);
-        if head {
+        if head_on {
             self.phys.radiate_head();
         }
         self.source.react(&self.phys.gauge, folds[0], dt);
         let (area, lung) = self.source.tick(folds[1], dt);
         let flow = self.phys.tick(tract[1], Drive::Glottis { area, lung });
         let mut flow = self.phys.radiate(flow);
-        let heard = if head {
+        let channels = if head_on {
             self.phys.radiate_head()
         } else {
             [0.0; 3]
@@ -2204,7 +2202,7 @@ impl Trombone {
         // `Tuning::head_mixdown` says the head's mixdown of them.
         let mixdown = self.tuning.anatomy.head_mixdown;
         if mixdown > 0.0 {
-            flow += (heard[0] - flow) * mixdown;
+            flow += (channels[0] - flow) * mixdown;
         }
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;
@@ -2222,8 +2220,8 @@ impl Trombone {
             // The ears' flows to sound, as the mono one above.
             let e = &mut self.ears;
             for k in 0..2 {
-                let o = (heard[1 + k] - e.flow[k]) * (0.5 / dt) * PHYSICAL_GAIN;
-                e.flow[k] = heard[1 + k];
+                let o = (channels[1 + k] - e.flow[k]) * (0.5 / dt) * PHYSICAL_GAIN;
+                e.flow[k] = channels[1 + k];
                 e.soft[k] += (o - e.soft[k]) * pass;
                 ears_finite &= e.soft[k].is_finite();
             }

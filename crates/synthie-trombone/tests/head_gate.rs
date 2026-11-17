@@ -10,7 +10,10 @@
 #![allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names,
+    clippy::needless_range_loop
 )]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -164,7 +167,7 @@ fn to_one_side_the_far_ear_is_later_and_duller() {
             "{p}: the far ear {late:.3} ms later, {dull:.1} dB duller at 2 to 6 kHz, {low:.1} dB below 500 Hz"
         );
         assert!((0.6..=0.9).contains(&late), "{p}: {late} ms");
-        assert!(dull >= 10.0 && dull <= 20.0, "{p}: {dull} dB");
+        assert!((10.0..=20.0).contains(&dull), "{p}: {dull} dB");
         assert!(low.abs() <= 4.0, "{p}: {low} dB");
     }
     // The plain pair: time and level differences of two cardioids 17 cm

@@ -157,10 +157,8 @@ impl Talker {
 
     /// Fill `out` with interleaved frames, left then right.
     pub fn render_stereo(&mut self, out: &mut [f32]) {
-        for frame in out.chunks_exact_mut(2) {
-            let [l, r] = self.process_stereo();
-            frame[0] = l;
-            frame[1] = r;
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo();
         }
     }
 
@@ -207,11 +205,9 @@ impl Talker {
         let len = ((utterance.duration() + TAIL) * self.sample_rate()) as usize;
         let mut out = alloc::vec![0.0; 2 * len];
         self.speaker.speak(utterance);
-        for frame in out.chunks_exact_mut(2) {
+        for frame in out.as_chunks_mut::<2>().0 {
             self.speaker.process(&mut self.voice);
-            let [l, r] = self.voice.frame();
-            frame[0] = l;
-            frame[1] = r;
+            *frame = self.voice.frame();
         }
         out
     }

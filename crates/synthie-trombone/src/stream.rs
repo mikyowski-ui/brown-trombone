@@ -304,6 +304,7 @@ impl Reader<'_> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn encode(event: &Event, at: Option<u64>) -> Message {
     let tag = match event {
         Event::NoteOn(_) => TAG_NOTE_ON,
@@ -1204,10 +1205,8 @@ impl<'a> VoicePlayer<'a> {
     /// [`process_stereo`](Self::process_stereo); an odd last sample is
     /// left alone).
     pub fn render_stereo(&mut self, voice: &mut Trombone, out: &mut [f32]) {
-        for frame in out.chunks_exact_mut(2) {
-            let [l, r] = self.process_stereo(voice);
-            frame[0] = l;
-            frame[1] = r;
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo(voice);
         }
     }
 

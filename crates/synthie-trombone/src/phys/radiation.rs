@@ -612,10 +612,8 @@ impl Head {
         self.chest_pole = exp(-2.0 * PI * self.chest[2] * self.dt);
         self.glide_k = (self.dt / GLIDE).min(1.0);
         let ahead = [1.0, 0.0, 0.0];
-        for p in 0..PORTS {
-            let [az, el] = PORT_AXIS[p];
-            let a = alpha(angle(direction(az, el), ahead));
-            self.mix_c[p] = shelf(a, 2.0, self.k_talker);
+        for (c, [az, el]) in self.mix_c.iter_mut().zip(PORT_AXIS) {
+            *c = shelf(alpha(angle(direction(az, el), ahead)), 2.0, self.k_talker);
         }
         self.ear_ref = alpha(0.5 * PI);
         self.aim(true);
@@ -623,7 +621,11 @@ impl Head {
 
     /// Work out where every path is going for the listener; `snap` puts
     /// them there at once, else they glide.
-    #[allow(clippy::many_single_char_names, clippy::too_many_lines)]
+    #[allow(
+        clippy::many_single_char_names,
+        clippy::too_many_lines,
+        clippy::needless_range_loop
+    )]
     fn aim(&mut self, snap: bool) {
         let l = self.listener;
         let pair = self.stereo == Stereo::Pair;
@@ -769,6 +771,7 @@ impl Head {
     /// One tick: the ports' flows in, `[mixdown, left ear, right ear]` out
     /// (a part not asked for is `0`).
     #[inline]
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn tick(&mut self, ports: &[f32; PORTS]) -> [f32; 3] {
         let mut out = [0.0f32; 3];
         if self.mixdown {
