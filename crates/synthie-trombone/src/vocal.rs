@@ -524,7 +524,7 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                 // release; the push dies away through the voice, which stops
                 // with it.
                 let shut = 0.14 * len;
-                let voice = 0.15 * len;
+                let voice = 0.12 * len;
                 plan.glottis(
                     &[(SEAL, COUGH_SEAL), (VOICING, 0.0), (SPREAD, 0.0)],
                     (t, t + shut),
@@ -535,9 +535,15 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                     (t + 0.05, t + shut + 0.3 * voice),
                     (0.05, 0.7 * voice),
                 );
-                // Released into a pressed, low voice.
+                // Released into a pressed, low, creaky voice (Stage 3A's
+                // creak: the cover slack, the folds pressed).
                 plan.glottis(
-                    &[(VOICING, 1.0), (SPREAD, 0.03), (TENSENESS, 0.9)],
+                    &[
+                        (VOICING, 1.0),
+                        (SPREAD, 0.03),
+                        (TENSENESS, 0.9),
+                        (var::glottis::CREAK, 1.0),
+                    ],
                     (t + shut, t + shut + voice),
                     (0.005, 0.03),
                 );

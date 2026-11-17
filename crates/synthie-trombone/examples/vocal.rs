@@ -24,10 +24,65 @@ use vocal::{SR, calls, db, deep, envelope, largest_step, median, noise_share, re
 #[allow(clippy::too_many_lines)] // one report per vocalization
 fn main() {
     let dir = std::env::args().nth(1);
+    {
+        // The same voice speaking, for comparison.
+        use synthie_trombone::speech::{Speaker, Utterance};
+        let settings = deep().with_engine(synthie_trombone::Engine::Physical);
+        let mut t = voice(&settings);
+        let mut s = Speaker::new();
+        s.speak(Utterance::from_text(
+            "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.",
+            &settings.prosody(),
+        ));
+        let mut out = Vec::new();
+        while s.is_speaking() {
+            out.push(s.process(&mut t));
+        }
+        println!(
+            "speech        loudest 10 ms {:.1} dB, click ratio {:.1}",
+            db(envelope(&out, 10.0, 5.0).into_iter().fold(0.0, f32::max)),
+            vocal::click_ratio(&out, 50.0)
+        );
+    }
     let strength: f32 = std::env::var("STRENGTH")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(1.0);
+    {
+        // What a vocalization costs: the call that lays its gestures, and
+        // rendering it against rendering speech.
+        use std::time::Instant;
+        let mut voices: Vec<_> = (0..100).map(|_| voice(&deep())).collect();
+        let (mut total, mut longest) = (0.0f64, 0.0f64);
+        for (v, kind) in voices.iter_mut().zip(Vocalization::ALL.iter().cycle()) {
+            let t0 = Instant::now();
+            assert!(v.vocalize(*kind).is_some());
+            let took = t0.elapsed().as_secs_f64();
+            total += took;
+            longest = longest.max(took);
+        }
+        println!(
+            "vocalize()    {:.1} us a call on average, {:.1} us at most",
+            1e6 * total / 100.0,
+            1e6 * longest
+        );
+        let mut v = voice(&deep());
+        let seconds = v.vocalize(Vocalization::Laugh).unwrap() + 2.0;
+        let t0 = Instant::now();
+        let r = record(&mut v, seconds);
+        let laugh = t0.elapsed().as_secs_f64() / f64::from(seconds);
+        let _ = r;
+        let mut v = voice(&deep());
+        v.articulate_phoneme(synthie_trombone::Phoneme::Aa);
+        v.note_on();
+        let t0 = Instant::now();
+        record(&mut v, seconds);
+        let vowel = t0.elapsed().as_secs_f64() / f64::from(seconds);
+        println!(
+            "rendering     {:.3} s a second of audio with a laugh playing (then silence), {:.3} s for a held vowel",
+            laugh, vowel
+        );
+    }
     for kind in Vocalization::ALL {
         let mut v = voice(&deep());
         v.set_frequency(100.0);
@@ -93,6 +148,10 @@ fn main() {
                 }
             }
         }
+        println!(
+            "      click ratio {:.1} (within 50 dB of the loudest 10 ms)",
+            vocal::click_ratio(&r.out, 50.0)
+        );
         let c = calls(&r);
         for (t, l, hz, level) in &c {
             println!(

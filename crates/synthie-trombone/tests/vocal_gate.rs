@@ -292,6 +292,34 @@ fn every_vocalization_stays_finite_at_the_highest_pressure() {
 }
 
 #[test]
+fn no_vocalization_clicks_more_than_speech_does() {
+    // The largest step from one sample to the next against the sound
+    // around it: the voice's own closures make steps of some 5 times the
+    // RMS of their 10 ms; a click (a gap closing in a stream, a handover)
+    // makes many times that.
+    let settings = deep().with_engine(Engine::Physical);
+    let mut t = voice(&settings);
+    let mut speaker = Speaker::new();
+    speaker.speak(Utterance::from_text(
+        "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.",
+        &settings.prosody(),
+    ));
+    let mut out = Vec::new();
+    while speaker.is_speaking() {
+        out.push(speaker.process(&mut t));
+    }
+    let speech = vocal::click_ratio(&out, 50.0);
+    for kind in Vocalization::ALL {
+        let (r, _) = alone(Vocal::new(kind));
+        let ratio = vocal::click_ratio(&r.out, 50.0);
+        assert!(
+            ratio < 1.6 * speech,
+            "{kind:?}: {ratio:.1} against speech's {speech:.1}"
+        );
+    }
+}
+
+#[test]
 fn tags_parse_and_bracketed_phonemes_stay_phonemes() {
     let tokens = phonemize("[laugh] [HH AX L OW1] [clear-throat] world [cough]");
     assert_eq!(tokens[0], Token::Vocal(Vocalization::Laugh));
@@ -485,6 +513,66 @@ fn tags_in_text_play_without_allocating_and_the_speech_goes_on() {
         .count();
     assert!(after >= 2, "{after} voiced runs after the laugh");
     assert!((r.len() as f32 / SR - total).abs() < 0.1);
+}
+
+#[test]
+fn the_stream_carries_a_cough_into_the_speech_it_plays() {
+    use synthie_trombone::stream::{When, voice_stream};
+    let settings = deep().with_engine(Engine::Physical);
+    let run = |cough: bool| {
+        let (mut stream, mut player) = voice_stream(4096);
+        stream.set_prosody(settings.prosody());
+        let mut t = voice(&settings);
+        stream.push_text("The birch canoe slid on the smooth planks.");
+        stream.flush_text();
+        let mut out = Vec::new();
+        let at = (0.8 * SR) as u64;
+        if cough {
+            stream
+                .vocalize(
+                    Vocal::new(Vocalization::Cough).with_strength(0.8),
+                    When::At(at),
+                )
+                .unwrap();
+        }
+        let mut quiet = 0;
+        while quiet < (0.3 * SR) as usize && out.len() < (8.0 * SR) as usize {
+            out.push(player.process(&mut t));
+            stream.collect();
+            quiet = if player.is_idle() { quiet + 1 } else { 0 };
+        }
+        out
+    };
+    let plain = run(false);
+    let with = run(true);
+    let cough = Vocal::new(Vocalization::Cough)
+        .with_strength(0.8)
+        .seconds(&settings.tuning);
+    let grown = (with.len() as f32 - plain.len() as f32) / SR;
+    assert!(
+        (grown - cough).abs() < 0.02,
+        "{grown:.3} s against {cough:.3}"
+    );
+    // The burst is in it.
+    let peak = |x: &[f32]| x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(peak(&with) > 1.5 * peak(&plain));
+}
+
+#[test]
+fn a_vocalization_can_be_started_again_and_again() {
+    let mut t = voice(&deep());
+    for k in 0..200 {
+        let kind = Vocalization::ALL[k % Vocalization::ALL.len()];
+        assert!(t.vocalize(kind).is_some(), "refused at {k}");
+        for _ in 0..(k % 7) * 480 {
+            t.process();
+        }
+    }
+    assert!(t.is_vocalizing());
+    t.stop_vocalizing();
+    assert!(!t.is_vocalizing());
+    let r = record(&mut t, 0.5);
+    assert!(r.finite);
 }
 
 #[test]

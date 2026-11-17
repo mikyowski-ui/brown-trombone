@@ -1474,8 +1474,8 @@ tuning! {
         /// and the nasal hummed, with a pause after; `0` speaks them as words.
         fillers = 0.0, 0.0..=1.0, A;
         /// Seconds a filler is held at the speaking rate 1: its vowel, or its
-        /// vowel and nasal together ("um" a fifth of it the schwa, the rest
-        /// the hum). Filled pauses run from 0.2 to over a second in
+        /// vowel and nasal together ("um" 45 % of it the schwa, the rest the
+        /// hum). Filled pauses run from 0.2 to over a second in
         /// conversation, "um" longer than "uh" (Clark & Fox Tree 2002); here
         /// "uh" and "er" take this, "um", "hmm" and "mm" a quarter more.
         filler_length = 0.42, 0.2..=1.0, B;

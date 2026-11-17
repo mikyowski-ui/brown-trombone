@@ -1300,7 +1300,7 @@ impl Trombone {
         }
         let hz = self.glottis.target_frequency;
         let plan = crate::vocal::plan(&v.into(), hz, &self.tuning);
-        self.score.clear_layer(LAYER_VOCAL);
+        self.score.drop_layer(LAYER_VOCAL);
         let holds = plan.holds().count();
         if self.score.len() + plan.len() + 4 * holds + 2 > Score::CAPACITY {
             return None;
@@ -1345,7 +1345,7 @@ impl Trombone {
 
     /// Stop the vocalization playing, at once.
     pub fn stop_vocalizing(&mut self) {
-        self.score.clear_layer(gesture::LAYER_VOCAL);
+        self.score.drop_layer(gesture::LAYER_VOCAL);
         self.vocal_end = self.score.clock();
         self.apply_score(self.score.engaged_tiers());
     }

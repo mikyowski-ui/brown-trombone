@@ -204,6 +204,19 @@ pub fn noise_share(x: &[f32], hz: f32) -> f32 {
     shares.iter().sum::<f32>() / shares.len() as f32
 }
 
+/// The largest step from one sample to the next in each 10 ms frame of
+/// `x` against the frame's RMS, over the frames within `floor` dB of the
+/// loudest frame: a click stands out as a step many times the sound
+/// around it. (The voice's own closures make steps of a few times its RMS.)
+pub fn click_ratio(x: &[f32], floor: f32) -> f32 {
+    let n = (0.01 * SR) as usize;
+    let loudest = x.chunks(n).map(rms).fold(0.0, f32::max);
+    x.chunks(n)
+        .filter(|c| c.len() > 1 && db(rms(c)) > db(loudest) - floor)
+        .map(|c| largest_step(c) / rms(c).max(1e-9))
+        .fold(0.0, f32::max)
+}
+
 /// Largest sample-to-sample step of `x`.
 pub fn largest_step(x: &[f32]) -> f32 {
     x.windows(2)

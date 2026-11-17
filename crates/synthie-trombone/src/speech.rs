@@ -2573,7 +2573,16 @@ fn mark_fillers(tokens: &[Token], on: bool) -> (Vec<Token>, Vec<(u32, u32, Fille
                     .iter()
                     .take_while(|t| matches!(t, Token::Phone { .. }))
                     .count();
-                out.extend_from_slice(&tokens[k..k + n]);
+                // Its vowel the schwa of "uh" ("er" is the same hesitation,
+                // spelt as non-rhotic speakers say it: held as /ɝ/ it was
+                // heard as "her"), unaccented.
+                out.extend(tokens[k..k + n].iter().map(|&t| match t {
+                    Token::Phone { phoneme, .. } if is_vowel(phoneme) => Token::Phone {
+                        phoneme: Phoneme::Ah,
+                        stressed: false,
+                    },
+                    t => t,
+                }));
                 #[allow(clippy::cast_possible_truncation)]
                 found.push((phone, n as u32, f));
                 #[allow(clippy::cast_possible_truncation)]
@@ -2603,7 +2612,8 @@ fn mark_fillers(tokens: &[Token], on: bool) -> (Vec<Token>, Vec<(u32, u32, Fille
 
 /// The drafts of each filler (see [`mark_fillers`]) held for
 /// [`ProsodyConfig::filler_length`](crate::ProsodyConfig::filler_length)
-/// (a quarter more for one that hums, its vowel a fifth of that), unaccented,
+/// (a quarter more for one that hums, its vowel a little under half of
+/// that), unaccented,
 /// and the pause after it at least
 /// [`ProsodyConfig::filler_pause`](crate::ProsodyConfig::filler_pause)
 /// (six tenths of it after "uh" and "er").
@@ -2616,7 +2626,8 @@ fn hold_fillers(drafts: &mut [Draft], fillers: &[(u32, u32, Filler)], timing: &T
         };
         let b = a + drafts[a..].iter().take_while(|d| mine(d)).count();
         let total = p.filler_length * if f.hums() { 1.25 } else { 1.0 } / rate;
-        // How the length is shared: a hum's vowel a fifth, the rest the hum.
+        // How the length is shared: a hum's vowel a little under half, the
+        // rest the hum (with a fifth, "um" was heard as "hmm").
         let vowels: f32 = drafts[a..b]
             .iter()
             .filter(|d| d.vowel)
@@ -2628,7 +2639,7 @@ fn hold_fillers(drafts: &mut [Draft], fillers: &[(u32, u32, Filler)], timing: &T
             .map(|d| d.duration)
             .sum();
         let (to_vowels, to_others) = match (vowels > 0.0, others > 0.0) {
-            (true, true) => (0.2 * total, 0.8 * total),
+            (true, true) => (0.45 * total, 0.55 * total),
             (true, false) => (total, 0.0),
             _ => (0.0, total),
         };

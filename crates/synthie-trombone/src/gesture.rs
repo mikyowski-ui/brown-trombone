@@ -886,6 +886,29 @@ impl Score {
         self.end_where(|g| g.layer == layer);
     }
 
+    /// Drop every gesture on `layer` that has not started yet, and let go at
+    /// once of those that have (see [`clear_layer`](Self::clear_layer), which
+    /// keeps the ones not started until their start has passed): a voice
+    /// can start a vocalization again and again without the score filling
+    /// up with the ones it replaced.
+    pub fn drop_layer(&mut self, layer: u8) {
+        let now = self.clock;
+        let mut kept = 0;
+        for k in 0..self.len {
+            if let Some(e) = self.entries[k]
+                && !(e.gesture.layer == layer && e.start > now)
+            {
+                self.entries[kept] = Some(e);
+                kept += 1;
+            }
+        }
+        for e in &mut self.entries[kept..self.len] {
+            *e = None;
+        }
+        self.len = kept;
+        self.clear_layer(layer);
+    }
+
     fn end_where(&mut self, which: impl Fn(&Gesture) -> bool) {
         let now = self.clock;
         for e in self.entries[..self.len].iter_mut().flatten() {
