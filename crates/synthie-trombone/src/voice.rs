@@ -28,6 +28,9 @@ pub const SLOT_LIPS: usize = crate::tract::ROUNDING_SLOT;
 /// Output level of the physical engine: radiated flow derivative
 /// (cm³/s²) to sample units, set so both engines are about equally loud.
 const PHYSICAL_GAIN: f32 = 2.5e-7;
+/// Seconds over which a breath taken with [`Trombone::breathe_in`] comes and
+/// goes.
+const BREATH_RAMP: f32 = 0.03;
 
 /// Widest opening (touch-diameter units) that still counts as a fricative;
 /// wider consonant openings are approximants.
@@ -198,6 +201,9 @@ pub struct Gauges {
     pub glottal_flow: f32,
     /// Pressure just below the vocal folds, cmH2O.
     pub subglottal_pressure: f32,
+    /// Pressure in the lungs, cmH2O: negative while breathing in (see
+    /// [`Trombone::set_inhalation`]).
+    pub lung_pressure: f32,
     /// Pressure just above the vocal folds, cmH2O.
     pub supraglottal_pressure: f32,
     /// Air flow out of the lips, cm³/s.
@@ -523,6 +529,14 @@ impl Trombone {
         self.source.set_size(self.tract_length);
     }
 
+    /// Hold the coupling between the two cover pieces of the folds at
+    /// `share` of its standard value (`None`: as creak sets it, see
+    /// [`set_fold_creak`](Self::set_fold_creak)). For measuring the folds.
+    #[doc(hidden)]
+    pub fn override_fold_coupling(&mut self, share: Option<f32>) {
+        self.source.coupling_override = share;
+    }
+
     /// Switch parts of the fold control off, to find out which of them a
     /// behaviour comes from: the pitch trim, the stall watch, and the
     /// pressure the tract above and the trachea below send back to the
@@ -672,6 +686,59 @@ impl Trombone {
         if share.is_finite() {
             self.source.soft_target = share.clamp(0.0, 1.0);
         }
+    }
+
+    /// Take the folds into creak, `0` (modal, the default) to `1`, as a
+    /// speaker's voice does at the end of a statement: the cover of the
+    /// folds slackens, so that its lower and upper margins move more apart
+    /// from each other (their coupling falls to
+    /// [`AnatomyConfig::creak_coupling`](crate::AnatomyConfig::creak_coupling)
+    /// of itself), and the folds are pressed together
+    /// ([`AnatomyConfig::creak_press`](crate::AnatomyConfig::creak_press)).
+    /// What they then do is their own: blown at 4 to 6 cmH2O they alternate
+    /// strong and weak pulses (energy at half the pitch), below that they
+    /// stop. It takes some 30 ms. Physical engine only.
+    pub fn set_fold_creak(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.creak_target = share.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Breathe in: the lungs draw `cm_h2o` (`0‥8`) below the air's pressure
+    /// and the glottis is held open behind the folds
+    /// ([`ArticulationConfig::breath_opening`](crate::ArticulationConfig::breath_opening)),
+    /// so the air goes in through the mouth and the nose as the tract and
+    /// the velum are shaped, and the noise it makes is that of its own jets
+    /// (at the glottis, into the trachea, and behind every narrowing of the
+    /// tract); the pressure follows within some 30 ms. The voicing gate is
+    /// left alone (the folds vibrate in the inward stream if it is on). `0`
+    /// (the default) stops drawing: the lungs go back to what the voice
+    /// asks. While gestures play on the glottal tier, its `inhale`
+    /// variable (`0` unless a breath gesture sets it) decides instead (see
+    /// [`breathe_in`](Self::breathe_in)). Physical engine only.
+    pub fn set_inhalation(&mut self, cm_h2o: f32) {
+        if cm_h2o.is_finite() {
+            self.source.intake = cm_h2o.clamp(0.0, 8.0);
+        }
+    }
+
+    /// Lungs drawing, cmH2O (see [`set_inhalation`](Self::set_inhalation)).
+    #[must_use]
+    pub fn inhalation(&self) -> f32 {
+        self.source.intake
+    }
+
+    /// Take a breath now: a [`Gesture::inhalation`] of `cm_h2o` for
+    /// `seconds` (ramps of 30 ms in and out) on the glottal tier, on the
+    /// external layer. Returns its handle (`None` if the score is full).
+    /// The lungs draw and the glottis opens for that long, then the lungs
+    /// stop drawing; the voicing gate, the tract and the velum are left as
+    /// they are (shape the mouth first, with
+    /// [`articulate`](Self::articulate) or a tract gesture, for the vowel
+    /// the breath should sound of, and keep the voice off). After it the
+    /// lungs are back at the breath share and lung pressure the voice had.
+    pub fn breathe_in(&mut self, cm_h2o: f32, seconds: f32) -> Option<GestureId> {
+        self.push_gesture_tracked(Gesture::inhalation(cm_h2o, seconds, BREATH_RAMP))
     }
 
     /// Widen the pharynx actively at `cm3_per_s` (cm³/s at native size,
@@ -1475,6 +1542,12 @@ impl Trombone {
             if let Some(x) = b.get(var::glottis::SOFTNESS) {
                 self.set_fold_softness(x);
             }
+            if let Some(x) = b.get(var::glottis::CREAK) {
+                self.set_fold_creak(x);
+            }
+            if let Some(x) = b.get(var::glottis::INHALE) {
+                self.set_inhalation(x);
+            }
         }
         if has(Tier::LarynxAndPitch) {
             let b = self.score.blend(Tier::LarynxAndPitch);
@@ -1720,6 +1793,7 @@ impl Trombone {
         Gauges {
             glottal_flow: g.u_glottis,
             subglottal_pressure: g.p_sub / CM_H2O,
+            lung_pressure: self.source.lung_now() / CM_H2O,
             supraglottal_pressure: g.p_supra / CM_H2O,
             lip_flow: g.u_lips,
             nose_flow: g.u_nose,
