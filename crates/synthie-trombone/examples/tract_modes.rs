@@ -646,7 +646,14 @@ fn main() {
     let back = [solve4(ata, atb[0]), solve4(ata, atb[1])];
     println!(
         "Cosine tongue from the three numbers: place {:.3} {:+.3} {:+.3} {:+.3}, height {:.3} {:+.3} {:+.3} {:+.3}",
-        back[0][0], back[0][1], back[0][2], back[0][3], back[1][0], back[1][1], back[1][2], back[1][3]
+        back[0][0],
+        back[0][1],
+        back[0][2],
+        back[0][3],
+        back[1][0],
+        back[1][1],
+        back[1][2],
+        back[1][3]
     );
 
     // Write the table.
@@ -735,7 +742,14 @@ fn main() {
          /// `TONGUE[k][0] + Σ TONGUE[k][m + 1]·q_m` (a least-squares fit over\n\
          /// the projections of cosine tongues): what the jaw follows.\n\
          pub(crate) const TONGUE: [[f32; 4]; 2] = [[{:.5}, {:.5}, {:.5}, {:.5}], [{:.5}, {:.5}, {:.5}, {:.5}]];",
-        back[0][0], back[0][1], back[0][2], back[0][3], back[1][0], back[1][1], back[1][2], back[1][3]
+        back[0][0],
+        back[0][1],
+        back[0][2],
+        back[0][3],
+        back[1][0],
+        back[1][1],
+        back[1][2],
+        back[1][3]
     );
     let _ = writeln!(
         src,

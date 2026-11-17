@@ -892,7 +892,8 @@ as the model goes:
   `examples/tract_length.rs` measures all of this.
 - **The tongue body from measured modes (Wave 2C, off).** With
   `tongue_model` 1 the physical tract's body, from the top of the tube
-  above the folds (cell 7) to where the lips begin (cell 38), is a measured
+  above the folds (`epilarynx_cells`: cell 7 by default, 4 with four cells
+  of tube) to where the lips begin (cell 38), is a measured
   neutral shape plus three principal modes, weighted by three numbers
   (`Shape::modes`, the `TongueBody` tier's `mode_1..3`), in place of the
   cosine hump. `examples/tract_modes.rs` computes them from Story's (2008)
@@ -901,7 +902,7 @@ as the model goes:
   the lips' radiation inertance, gives the paper's calculated F3 within
   0.4 % and F2 within 2.4 %): over all 44 sections the mean and four modes
   carry 74.3, 14.7, 5.8 and 3.8 % of the variance, over the body's cells
-  79.5, 13.5, 5.1 and 1.2 % (98.1 % with three; the fourth, over all
+  (4 to 38) 78.1, 13.7, 6.0 and 1.2 % (97.8 % with three; the fourth, over all
   sections the lips' and the front of the mouth's opening, is gone once the
   lips are left out, and the lips stay the `LipsAndJaw` tier's so that a
   vowel's rounding can span a consonant). Mode 1 is the pharynx wide and the
@@ -910,16 +911,19 @@ as the model goes:
   mode 2 a narrowing at the soft palate against an open middle (/u ʊ o/
   −1.3 to −1.9 against the rest: the front–back of the dorsum, as far as it
   is a separate thing in this speaker); mode 3 the whole lower tract wider,
-  the lower pharynx most (/i/ +1.9, /ɑ u/ +1.1 to +1.3 against /æ ɛ ɪ/
-  −0.9 to −1.2: the tongue root, which puts /i u/ against /ɪ ʊ/ and /ɑ/
+  the lower pharynx most (/i/ +2.0, /ɑ u/ +1.0 to +1.2 against /æ ɛ ɪ/
+  −0.8 to −1.2: the tongue root, which puts /i u/ against /ɪ ʊ/ and /ɑ/
   against /ʌ/, but /e o/ on the lax side). His shapes are scaled to the
   native tract as a similar tube (0.749 × the equivalent diameter; his own
   areas or a wider scale change the engine's formants of his vowels by
   about a point: a lossless tube depends on area ratios alone). His own
-  epilarynx is four sections (1.5 cm), and the body taken from the fifth
-  put the tract's fourth formant at 3.8 to 4.3 kHz and the 4 to 8 kHz band
-  5 to 12 dB higher in every vowel: the body begins where the engine's tube
-  above the folds ends. A tongue set by place and height (the app's
+  epilarynx is four sections (1.5 cm) of diameters 0.51 to 0.61 (a uniform
+  tube of the same air 0.56, the engine's 0.6); the body taken from the
+  fifth over the original seven cells of tube put the tract's fourth
+  formant at 3.8 to 4.3 kHz and the 4 to 8 kHz band 5 to 12 dB higher in
+  every vowel, as four cells of tube do: the body begins where the tube
+  above the folds ends (`Tract::modal_from`), and its measured lower
+  pharynx takes the place of the epilarynx's flare. A tongue set by place and height (the app's
   handle, the consonants with a body of their own) is projected onto the
   modes (least squares over the cosine's cells); a consonant's tip draws
   the body by as much as it changes the vowel's cosine tongue (drawn
