@@ -47,15 +47,14 @@ use std::fmt::Write as _;
 
 /// Sections (and cells) of a tract.
 const N: usize = 44;
-/// First body cell: the top of the tube above the folds as the engine has
-/// it (cells 0 to 6 at diameter 0.6, 2.55 cm at the native size). The
-/// speaker's own tube is his first four sections (1.5 cm), and with it as
-/// the epilarynx (the body from cell 4) the tract's fourth formant stood at
-/// 3.8 to 4.3 kHz instead of 3.3 to 3.6 and its 4 to 8 kHz band 5 to 12 dB
-/// louder against 0 to 1 kHz in every vowel but /ʌ ɑ ɔ/: the tube's length
-/// is the epilarynx's to set (`AnatomyConfig`'s, wave 2B), the body starts
-/// where it ends.
-const FROM: usize = 7;
+/// First body cell: above the speaker's own epilarynx (his first four
+/// sections, 1.5 cm). The tract applies the modes from the top of its own
+/// tube above the folds (`AnatomyConfig::epilarynx_cells`; `Tract::modal_from`):
+/// with the original's seven cells the tract's fourth formant stays at 3.3 to
+/// 3.6 kHz; with the body from cell 4 over the original epilarynx's cells it
+/// stood at 3.8 to 4.3 kHz and the 4 to 8 kHz band 5 to 12 dB louder, as
+/// with four cells of tube.
+const FROM: usize = 4;
 /// First lip cell (`tract::LIP_START`): the body ends before it.
 const TO: usize = 39;
 /// First cell of the cosine tongue (`tract::BLADE_START`): a cosine shape
@@ -459,6 +458,24 @@ fn main() {
         "Speaker's mean unrounded tract {speaker:.2} cm; engine diameter = {k:.4} × equivalent diameter"
     );
     let neutral: Vec<f64> = p.mean.iter().map(|v| v * k).collect();
+    // His own epilarynx in engine units: the mean diameter of each of his
+    // first sections over the eleven vowels, and the diameter of their mean
+    // area (what a uniform tube of the same air would be).
+    let tube: Vec<f64> = (0..FROM)
+        .map(|j| k * all.iter().map(|r| r[j]).sum::<f64>() / all.len() as f64)
+        .collect();
+    let mean_area: f64 = (0..FROM)
+        .map(|j| all.iter().map(|r| r[j] * r[j]).sum::<f64>() / all.len() as f64)
+        .sum::<f64>()
+        / FROM as f64;
+    println!(
+        "His epilarynx (sections 1..{FROM}), engine diameters: {} (uniform of the same area {:.3})",
+        tube.iter()
+            .map(|d| format!("{d:.3}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        k * mean_area.sqrt()
+    );
     let modes: Vec<Vec<f64>> = p.modes[..MODES]
         .iter()
         .map(|m| m.iter().map(|v| v * k).collect())

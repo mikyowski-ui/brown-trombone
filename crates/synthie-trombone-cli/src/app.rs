@@ -78,6 +78,15 @@ const QUOTE_CHARS: usize = 40;
 
 /// The key that starts and stops recording a take, in either mode.
 pub const RECORD_KEY: KeyCode = KeyCode::F(5);
+/// How far `{` and `}` move the lips, cm.
+const PROTRUSION_STEP: f32 = 0.2;
+/// The farthest the hand pushes them, cm (`Trombone::set_lip_protrusion`).
+const PROTRUSION_MAX: f32 = 2.0;
+/// How far `<` and `>` move the larynx, cm, and its range: lowered 0.8 cm,
+/// raised by at most one tick of the slide (0.36 cm at native size).
+const LARYNX_STEP: f32 = 0.2;
+const LARYNX_LOWEST: f32 = -0.8;
+const LARYNX_HIGHEST: f32 = 0.4;
 /// The key that switches speech between the gesture score and the old
 /// path (`ArticulationConfig::gesture_score`), in either mode.
 pub const SCORE_KEY: KeyCode = KeyCode::F(6);
@@ -214,6 +223,11 @@ pub struct App {
     pub tenseness: f32,
     pub vibrato: f32,
     pub wobble: bool,
+    /// Lip protrusion set by hand, cm (`None`: the lips follow the
+    /// rounding); see [`App::push_lips`].
+    pub protrusion: Option<f32>,
+    /// Larynx height set by hand, cm above rest; see [`App::move_larynx`].
+    pub larynx: f32,
     pub nasal: bool,
     pub drone: bool,
     pub reverb: f32,
@@ -297,6 +311,8 @@ impl App {
             tenseness: 0.6,
             vibrato: 0.005,
             wobble: false,
+            protrusion: None,
+            larynx: 0.0,
             nasal: false,
             drone: false,
             reverb: 0.18,
@@ -754,6 +770,10 @@ impl App {
             ',' => self.rate = (self.rate - 0.1).max(0.4),
             '.' => self.rate = (self.rate + 0.1).min(2.5),
             '/' => self.toggle_lock(),
+            '}' => self.push_lips(PROTRUSION_STEP),
+            '{' => self.push_lips(-PROTRUSION_STEP),
+            '<' => self.move_larynx(-LARYNX_STEP),
+            '>' => self.move_larynx(LARYNX_STEP),
             _ => {}
         }
         false
@@ -1056,6 +1076,36 @@ impl App {
         self.tenseness = t.clamp(0.0, 1.0);
         self.send(Cmd::Tenseness(self.tenseness));
         self.preview();
+    }
+
+    /// Push the lips forward by `by` cm from where the hand left them
+    /// (from `0` the first time); back past `0` they follow the rounding
+    /// again. Heard only with `AnatomyConfig::lip_horn` on.
+    pub fn push_lips(&mut self, by: f32) {
+        let now = self.protrusion.unwrap_or(0.0) + by;
+        self.protrusion = (now > 1e-3).then(|| now.min(PROTRUSION_MAX));
+        self.send(Cmd::Protrusion(self.protrusion));
+        self.status = match self.protrusion {
+            Some(cm) => format!("lips pushed forward {cm:.1} cm  ·  {{ }} move them"),
+            None => "lips follow the rounding  ·  } pushes them forward".into(),
+        };
+        if self.snap.lip_horn <= 0.0 {
+            self.status += "  (lip horn off: lip_horn 0)";
+        }
+    }
+
+    /// Raise (`by` > 0) or lower the larynx by `by` cm. Heard only with
+    /// `AnatomyConfig::larynx_travel` on.
+    pub fn move_larynx(&mut self, by: f32) {
+        self.larynx = (self.larynx + by).clamp(LARYNX_LOWEST, LARYNX_HIGHEST);
+        if self.larynx.abs() < 1e-3 {
+            self.larynx = 0.0;
+        }
+        self.send(Cmd::Larynx(self.larynx));
+        self.status = format!("larynx {:+.1} cm  ·  < lowers, > raises", self.larynx);
+        if self.snap.larynx_travel <= 0.0 {
+            self.status += "  (larynx slide off: larynx_travel 0)";
+        }
     }
 
     fn set_vibrato(&mut self, v: f32) {
@@ -1520,6 +1570,8 @@ impl App {
             "tenseness": self.tenseness,
             "vibrato": self.vibrato,
             "wobble": self.wobble,
+            "protrusion": self.protrusion,
+            "larynx": self.larynx,
             "drone": self.drone,
             "nasal": self.nasal,
             "reverb": self.reverb,
@@ -1965,6 +2017,43 @@ mod tests {
 
     fn sent(rx: &Receiver<Cmd>) -> Vec<Cmd> {
         rx.try_iter().collect()
+    }
+
+    /// `{ }` push the lips out and back, `< >` lower and raise the larynx,
+    /// each within its range; back past rest the lips follow the rounding
+    /// again. With the lip horn and the larynx slide off the status line
+    /// says so.
+    #[test]
+    fn braces_move_the_lips_and_angles_the_larynx() {
+        let (mut app, rx) = app(false);
+        app.key(key('}', KeyKind::Press));
+        app.key(key('}', KeyKind::Press));
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Protrusion(Some(a)), Cmd::Protrusion(Some(b))]
+                if (a - 0.2).abs() < 1e-6 && (b - 0.4).abs() < 1e-6),
+            "{cmds:?}"
+        );
+        assert!(app.status.contains("lip_horn 0"), "{}", app.status);
+        app.key(key('{', KeyKind::Press));
+        app.key(key('{', KeyKind::Press));
+        assert!(matches!(sent(&rx).last(), Some(Cmd::Protrusion(None))));
+        assert_eq!(app.protrusion, None);
+        for _ in 0..20 {
+            app.key(key('}', KeyKind::Press));
+        }
+        assert_eq!(app.protrusion, Some(PROTRUSION_MAX));
+        for _ in 0..10 {
+            app.key(key('<', KeyKind::Press));
+        }
+        assert!(
+            matches!(sent(&rx).last(), Some(Cmd::Larynx(h)) if (h - LARYNX_LOWEST).abs() < 1e-6)
+        );
+        assert!(app.status.contains("larynx_travel 0"), "{}", app.status);
+        for _ in 0..10 {
+            app.key(key('>', KeyKind::Press));
+        }
+        assert!((app.larynx - LARYNX_HIGHEST).abs() < 1e-6);
     }
 
     #[test]

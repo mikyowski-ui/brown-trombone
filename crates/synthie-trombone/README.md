@@ -178,7 +178,12 @@ actually shuts (`Trombone::mouth_shut`, `Gauges::mouth_shut`); a slow
 tongue body and jaw under quick tip and lips; vowels from published
 formants; and breath and intonation shaped per phrase. Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
-`set_engine`.
+`set_engine`. The physical tract's lowest cells, the epilaryngeal tube
+above the folds and its flare into the pharynx, are shaped by
+`AnatomyConfig::epilarynx_*` (the original's tube by default); after
+changing them, solve the vowel shapes again
+(`cargo run -p synthie-trombone --example vowel_size --release`, after
+`examples/babble.rs` for the babble map).
 
 An utterance can also be spoken with a person's prosody:
 `speech::Schedule` holds a recording's phone times, pitch track and
@@ -199,7 +204,7 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 28 numbers),
+`AnatomyConfig` (the body, its tissues and sources: 33 numbers),
 `ArticulationConfig` (how sounds are made and joined: 71, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
@@ -222,6 +227,8 @@ cargo run -p synthie-trombone --example say --release -- --engine physical \
     # (--prosody-voice / -tenseness / -speed off leave a part out; --prosody-formants on adds the speaker's vowels)
 cargo run -p synthie-trombone --example ab --release                           # both engines → report/
 cargo run -p synthie-trombone --example probe --release                        # measurements of both
+cargo run -p synthie-trombone --example epilarynx --release                    # the tube above the folds: F3-F5, the 3 kHz band
+cargo run -p synthie-trombone --example epilarynx --release -- --coupling      # ... and what it does to the folds
 echo "Text to say." | cargo run -p synthie-trombone --example stream --release -- --engine physical  # → stream.wav
 ```
 

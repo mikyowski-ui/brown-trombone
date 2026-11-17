@@ -1128,6 +1128,12 @@ impl Phys {
         self.r[i] + self.l[i]
     }
 
+    /// Acoustic energy stored in cell `i` now (arbitrary units, those of
+    /// [`energy`](Self::energy)).
+    pub(crate) fn cell_energy(&self, i: usize) -> f32 {
+        self.a1[i] * (self.r[i] * self.r[i] + self.l[i] * self.l[i])
+    }
+
     /// The slides' lengths this tick, ticks: `(horn, larynx)` (the lips'
     /// cell and the protrusion; the three cells of the lower pharynx and
     /// the lengthening).

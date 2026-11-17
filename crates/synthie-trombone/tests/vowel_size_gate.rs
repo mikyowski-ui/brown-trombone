@@ -484,7 +484,8 @@ fn modal() -> Tuning {
 }
 
 /// The lengthened tract the wave is switched on with (the lip horn 1.2 cm,
-/// the larynx's full travel, rounded vowels' larynx lowered 0.5 cm), the
+/// the larynx's full travel, rounded vowels' larynx lowered 0.5 cm, four cells of tube
+/// above the folds), the
 /// body modal if `modal`.
 fn lengthened(modal: bool) -> Tuning {
     let mut t = Tuning::DEFAULT;
@@ -492,6 +493,7 @@ fn lengthened(modal: bool) -> Tuning {
     t.anatomy.larynx_travel = 1.0;
     t.articulation.rounded_larynx = 0.5;
     t.articulation.voiced_stop_larynx = 0.0;
+    t.anatomy.epilarynx_cells = 4.0;
     t.anatomy.tongue_model = if modal { 1.0 } else { 0.0 };
     t
 }

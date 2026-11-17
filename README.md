@@ -56,6 +56,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `m`, `r`, `c` | pitch wobble, reverb amount, clear constrictions |
 | `\` | switch between the classic and the physical engine |
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
+| `{` `}`, `<` `>` | lips back / forward by 0.2 cm (back past rest they follow the rounding again), larynx lower / higher by 0.2 cm (physical engine; heard with `lip_horn` and `larynx_travel` on) |
 | `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
 | `F5` | start or stop recording a take (see below) |
 | `F6` | speech through the gesture score or the old path (A/B them by ear; see the instrument panel below) |
@@ -106,13 +107,14 @@ what the voice is doing inside:
 │ ΔP 10.1 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
 │ shut ██████···········  35% folds│  closed quotient, and what is sounding
 │ gap  0.005‥0.191 cm²             │  smallest and largest glottal area
+│ horn 1.2  larynx -0.6 cm         │  lips out, larynx above rest ("off")
 │ tiers: score · controls          │  cyan names: the score; white: controls
 │ glottis ██████████████████████┃ 1│  one row per tier of the gesture score:
-│ larynx  ████████████████┃······ 1│  the bar is where it is now, ┃ its
+│ larynx  ████████████████┃·· 1 h-0.6│  the bar is where it is now, ┃ its
 │ velum   ██████████████████████┃ 1│  target, the number its gestures;
-│ body    █████┃················· 1│  a tier nothing drives is dimmed
-│ tip     ┃······················ ·│
-│ lips    ┃······················ ·│
+│ body    █████┃················· 1│  a tier nothing drives is dimmed;
+│ tip     ┃······················ ·│  h the larynx's height, p the lips'
+│ lips    ┃················· · p1.2│  protrusion, cm
 ╰──────────────────────────────────╯
 ```
 
@@ -136,6 +138,13 @@ what the voice is doing inside:
   folds' vibrating edges are closed while the voice sounds, and whether the
   folds, the pulse source or nothing is sounding. The classic engine has no
   air: it shows `classic: no air` and its LF pulse.
+- **horn** and **larynx** are how far the lips are pushed forward and the
+  larynx stands above its rest, cm (`Trombone::tract_lengths`); `off`
+  while `AnatomyConfig::lip_horn` or `larynx_travel` is `0` and the voice
+  does not hear them (the tract's state still moves). The tract view draws
+  the horn past the lips (yellow), a lowered larynx as the tube carried on
+  below the glottis (orange), both faint while off, and the epilaryngeal
+  tube's walls in green as far as `epilarynx_cells` reaches.
 - **The tiers** are the gesture score's (glottal adduction, larynx and
   pitch, velum, tongue body, tongue tip, lips and jaw), on the score's
   scales (pitch 50 to 400 Hz, logarithmic; the tip's and the lips'
@@ -296,7 +305,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 28 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 33 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 71) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 43) is the rhythm and melody of a phrase. The classic engine reads twelve
@@ -312,6 +321,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | jets and hiss | `jet_efficiency`, `teeth_gain`, `hiss_corner`, `hiss_floor`, `teeth_corner`, `labial_edge`, `dental_edge` |
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
 | anatomy | the tract's length (wave 2A; each `0` off) | `lip_horn`, `larynx_travel` |
+| anatomy | the epilarynx (wave 2B; the original's tube by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
@@ -425,6 +435,20 @@ against. A few of the figures:
 - The walls resonate against the enclosed air near 190 Hz and give about
   2.7 cm³ per cmH2O, as measured in vivo (Hanna, Smith & Wolfe 2016).
 - The piriform sinuses cut a notch near 4.4 kHz (Dang & Honda 1997).
+- The narrow tube above the folds, the epilaryngeal tube, has numbers of
+  its own (`AnatomyConfig::epilarynx_*`: its length in cells, its width,
+  the width of the lower pharynx it opens into, a step or a ramp, and how
+  far it narrows as the folds press together). The default is the
+  original's: seven cells of 0.45 cm² (2.55 cm) opening into 1.52 cm².
+  Its own resonance is F4, at 3.3 to 3.9 kHz in every vowel shape, with
+  F3 near 2.6 kHz: no cluster at 3 kHz but in /i/. Eight cells (2.9 cm)
+  of 0.25 cm² opening into 3.6 cm² ring at 2.9 to 3.2 kHz (as F3 in the
+  front vowels, F4 in the others) and lift the transfer function's 2.8 to
+  3.2 kHz band by 8 dB against 0 to 1 kHz; four cells (1.46 cm) put the
+  tube's resonance near 4 kHz. Both are off: measured in speech, the
+  cluster cost words and the four cells gained vowels but left open
+  vowels short of their F1 (`examples/epilarynx.rs`,
+  `tests/epilarynx_gate.rs`).
 - The folds sing within a cent of the requested note over every preset's
   range, stop below about 3.4 cmH2O of lung pressure, and keep voicing for
   some 40 ms into a /b/ before the mouth fills.

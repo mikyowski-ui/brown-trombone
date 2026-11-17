@@ -241,14 +241,23 @@ pub const TARGETS: &[Target] = &[
 ];
 
 /// Whether a voice of `tuning` speaks with the vowel shapes solved for the
-/// tract whose length changes (wave 2A: `AnatomyConfig::lip_horn` or
-/// `larynx_travel` above `0`; `src/vowel_size_wave_table.rs` and
+/// tract of wave 2 (`src/vowel_size_wave_table.rs` and
 /// `src/vowel_modes_wave_table.rs`, solved for the values written in their
-/// headers) rather than for the default tract. A voice with only some of
-/// those numbers on, or other values, reads the same lengthened tables.
+/// headers) rather than for the default tract: a tract whose length changes
+/// (`AnatomyConfig::lip_horn` or `larynx_travel` above `0`) or whose tube
+/// above the folds is not the original's (`epilarynx_cells`,
+/// `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells` off
+/// their defaults). A voice with only some of those numbers changed, or to
+/// other values, reads the same tables.
 #[must_use]
 pub fn lengthened(tuning: &crate::Tuning) -> bool {
-    tuning.anatomy.lip_horn > 0.0 || tuning.anatomy.larynx_travel > 0.0
+    let (a, d) = (&tuning.anatomy, &crate::Tuning::DEFAULT.anatomy);
+    a.lip_horn > 0.0
+        || a.larynx_travel > 0.0
+        || a.epilarynx_cells.to_bits() != d.epilarynx_cells.to_bits()
+        || a.epilarynx_diameter.to_bits() != d.epilarynx_diameter.to_bits()
+        || a.epilarynx_flare.to_bits() != d.epilarynx_flare.to_bits()
+        || a.epilarynx_flare_cells.to_bits() != d.epilarynx_flare_cells.to_bits()
 }
 
 /// How many vowel shapes there are (the length of [`TARGETS`]).

@@ -324,6 +324,7 @@ fn measure_modal(jobs: &[(Shape, f32)]) -> Vec<Option<[f32; 3]>> {
     tuning.anatomy.lip_horn = 1.2;
     tuning.anatomy.larynx_travel = 1.0;
     tuning.articulation.rounded_larynx = 0.5;
+    tuning.anatomy.epilarynx_cells = 4.0;
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
     let chunk = jobs.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {

@@ -61,12 +61,13 @@ pub fn set_base(tuning: synthie_trombone::Tuning) {
 
 /// The tract the wave is switched on with (`--lengthened`): the lip horn
 /// 1.2 cm, the larynx's full travel, a rounded vowel's larynx lowered
-/// 0.5 cm, none for a voiced stop.
+/// 0.5 cm, none for a voiced stop, a tube of four cells above the folds.
 pub fn lengthened(mut tuning: synthie_trombone::Tuning) -> synthie_trombone::Tuning {
     tuning.anatomy.lip_horn = 1.2;
     tuning.anatomy.larynx_travel = 1.0;
     tuning.articulation.rounded_larynx = 0.5;
     tuning.articulation.voiced_stop_larynx = 0.0;
+    tuning.anatomy.epilarynx_cells = 4.0;
     tuning
 }
 
