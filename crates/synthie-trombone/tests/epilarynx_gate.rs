@@ -10,8 +10,10 @@
 //! kHz that holds at least half its energy in the tube (its F3 in the front
 //! vowels, F4 in the others), and the band must be lifted; the original's
 //! tube ([`ORIGINAL`], today's default) is held to what it does, ringing
-//! above the cluster. The vowel shapes are the table's, solved for the
-//! default tube.
+//! above the cluster. The vowel shapes are the original tract's table's
+//! (`TractModel::Original`), solved for the original tube, held on every
+//! tube: a tube off the original's reads the anatomical tract's table, solved
+//! for another tube again.
 //!
 //! ```sh
 //! cargo test -p synthie-trombone --release --test epilarynx_gate -- --nocapture
@@ -27,7 +29,7 @@
 mod spectrum;
 
 use synthie_trombone::vowel_targets::TARGETS;
-use synthie_trombone::{Engine, Trombone, Tuning};
+use synthie_trombone::{Engine, TractModel, Trombone, Tuning};
 
 /// The tube that gives the cluster: eight cells (2.92 cm), 0.25 cm²
 /// (diameter 0.45), opening in a step into 3.6 cm² (diameter 1.7), not
@@ -41,7 +43,7 @@ const CLUSTER: [(&str, f32); 5] = [
 ];
 
 /// The original's tube: seven cells of 0.45 cm² (diameter 0.6), a step
-/// to 1.52 cm² (1.1); today's defaults, set by name.
+/// to 1.52 cm² (1.1); the original tract's, set by name.
 const ORIGINAL: [(&str, f32); 5] = [
     ("epilarynx_cells", 7.0),
     ("epilarynx_diameter", 0.6),
@@ -50,8 +52,9 @@ const ORIGINAL: [(&str, f32); 5] = [
     ("epilarynx_effort", 0.0),
 ];
 
+/// The original tract with the tube of `fields`.
 fn tuning(fields: &[(&str, f32)]) -> Tuning {
-    let mut t = Tuning::DEFAULT;
+    let mut t = Tuning::DEFAULT.with_tract(TractModel::Original);
     for &(name, value) in fields {
         assert!(t.set(name, value), "{name}");
     }
@@ -111,7 +114,13 @@ fn measure(tuning: &Tuning, key: usize) -> Shape {
     t.set_engine(Engine::Physical);
     t.set_tuning(tuning);
     t.set_tenseness(0.65);
-    t.articulate(&target.key.articulation().expect("a vowel shape"));
+    let original = Tuning::DEFAULT.with_tract(TractModel::Original);
+    let shape = target
+        .key
+        .articulation()
+        .and_then(|a| a.physical_shape_with(1.0, &original))
+        .expect("a vowel shape");
+    t.set_shape(&shape);
     t.settle();
     let rate = t.tick_rate();
     let mut x = vec![0.0f32; (0.2 * rate) as usize];

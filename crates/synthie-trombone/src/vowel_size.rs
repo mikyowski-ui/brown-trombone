@@ -69,7 +69,7 @@ pub(crate) enum Table {
 
 impl Table {
     /// The table a voice of `tuning` reads, its body modal if `modal`.
-    pub(crate) fn of(tuning: &crate::Tuning, modal: bool) -> Self {
+    pub(crate) const fn of(tuning: &crate::Tuning, modal: bool) -> Self {
         match (modal, crate::vowel_targets::lengthened(tuning)) {
             (false, false) => Self::Cosine,
             (false, true) => Self::CosineLengthened,
@@ -197,8 +197,12 @@ impl Rows {
 pub(crate) struct OwnShapes([Option<VowelShape>; TARGET_COUNT], pub(crate) Table);
 
 impl OwnShapes {
-    /// Every shape from the cosine body's table for the default tract.
-    pub(crate) const NONE: Self = Self([None; TARGET_COUNT], Table::Cosine);
+    /// Every shape from the cosine body's table for the tract of
+    /// [`Tuning::DEFAULT`](crate::Tuning::DEFAULT).
+    pub(crate) const NONE: Self = Self(
+        [None; TARGET_COUNT],
+        Table::of(&crate::Tuning::DEFAULT, false),
+    );
 
     /// The same shapes, the others from `table`.
     pub(crate) const fn on(mut self, table: Table) -> Self {

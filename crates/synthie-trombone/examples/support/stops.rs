@@ -487,6 +487,12 @@ pub struct Burst {
 /// far above its neighbours. Zero if there is none.
 #[must_use]
 pub fn largest_click(r: &Recording) -> f32 {
+    largest_click_at(r).0
+}
+
+/// [`largest_click`] and the sample it is at.
+#[must_use]
+pub fn largest_click_at(r: &Recording) -> (f32, usize) {
     const AROUND: usize = 240;
     let d: Vec<f32> = r.out.windows(2).map(|w| w[1] - w[0]).collect();
     // Running sum of squares for the neighbourhood RMS.
@@ -494,7 +500,7 @@ pub fn largest_click(r: &Recording) -> f32 {
     for (k, v) in d.iter().enumerate() {
         sum[k + 1] = sum[k] + f64::from(*v) * f64::from(*v);
     }
-    let mut worst = 0.0f32;
+    let mut worst = (0.0f32, 0);
     for k in 0..d.len() {
         let lo = k.saturating_sub(AROUND);
         let hi = (k + AROUND + 1).min(d.len());
@@ -502,8 +508,8 @@ pub fn largest_click(r: &Recording) -> f32 {
         let energy = (sum[hi] - sum[lo]) - (sum[b] - sum[a]);
         let n = (hi - lo) - (b - a);
         let rms = (energy / n.max(1) as f64).sqrt() as f32;
-        if d[k].abs() > CLICK_CONTRAST * rms {
-            worst = worst.max(d[k].abs());
+        if d[k].abs() > CLICK_CONTRAST * rms && d[k].abs() > worst.0 {
+            worst = (d[k].abs(), k);
         }
     }
     worst

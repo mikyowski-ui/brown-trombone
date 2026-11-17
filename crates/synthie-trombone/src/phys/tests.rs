@@ -11,7 +11,7 @@ use std::vec::Vec;
 const TICK: f32 = 1.0 / 96_000.0;
 
 fn uniform(diameter: f32) -> Phys {
-    let mut p = Phys::new();
+    let mut p = original();
     p.snap(&[diameter; N], 0.0);
     p
 }
@@ -120,7 +120,7 @@ fn energy_never_grows_without_a_source() {
         for v in &mut d {
             *v = 0.2 + 3.0 * rnd();
         }
-        let mut p = Phys::new();
+        let mut p = original();
         p.set_ideal(true);
         p.snap(&d, 0.0);
         p.reset();
@@ -161,7 +161,7 @@ fn closed_tract_rings_on_its_walls() {
     let mut d = [1.8f32; N];
     d[N - 1] = 0.0;
     d[N - 2] = 0.0;
-    let mut p = Phys::new();
+    let mut p = original();
     p.snap(&d, 0.0);
     p.reset();
     // Listen to the pressure behind the closure.
@@ -187,7 +187,7 @@ fn sealed_mouth_fills_slowly() {
     let mut d = [1.8f32; N];
     d[N - 1] = 0.0;
     d[N - 2] = 0.0;
-    let mut p = Phys::new();
+    let mut p = original();
     p.snap(&d, 0.0);
     p.reset();
     let mut reached = None;
@@ -219,7 +219,7 @@ fn every_cell_can_seal_without_nan() {
     for shut in 0..N {
         let mut d = [1.5f32; N];
         d[shut] = 0.0;
-        let mut p = Phys::new();
+        let mut p = original();
         p.snap(&d, 1.0);
         p.reset();
         for n in 0..3000 {
@@ -266,9 +266,9 @@ fn piriform_sinuses_carve_a_notch() {
     // they take 10–25 dB out of the spectrum between 4 and 5 kHz and nudge
     // the lower formants down a little (Dang & Honda 1997).
     let d = [1.8f32; N];
-    let mut with = Phys::new();
+    let mut with = original();
     with.snap(&d, 0.0);
-    let mut without = Phys::new();
+    let mut without = original();
     without.set_side_cavities(false);
     without.snap(&d, 0.0);
     let a = impulse(&mut with, 30_000);
@@ -312,7 +312,7 @@ fn nasal_murmur_is_low_and_has_an_antiresonance() {
     let mut d = [1.8f32; N];
     d[N - 1] = 0.0;
     d[N - 2] = 0.0;
-    let mut p = Phys::new();
+    let mut p = original();
     p.snap(&d, 1.0);
     let x = impulse(&mut p, 40_000);
     let f = peaks(&x, 3000.0);
@@ -345,12 +345,17 @@ fn nasal_murmur_is_low_and_has_an_antiresonance() {
 /// A tract with the lip horn and the larynx slide as given
 /// (`AnatomyConfig::lip_horn`, `AnatomyConfig::larynx_travel`).
 fn with_slides(horn: f32, travel: f32) -> Phys {
-    let mut t = crate::Tuning::DEFAULT;
+    let mut t = crate::Tuning::DEFAULT.with_tract(crate::TractModel::Original);
     t.anatomy.lip_horn = horn;
     t.anatomy.larynx_travel = travel;
     let mut p = Phys::new();
     p.set_tuning(&t);
     p
+}
+
+/// A tube of the original tract: no slides, whatever the default tuning.
+fn original() -> Phys {
+    with_slides(0.0, 0.0)
 }
 
 /// Ticks in a control block of the physical engine (128 internal samples).
@@ -410,7 +415,7 @@ fn slides_at_rest_change_nothing() {
             }
         }
         let velum = if case % 2 == 0 { 0.0 } else { 0.6 };
-        let mut plain = Phys::new();
+        let mut plain = original();
         let mut horn = with_slides(1.2, 0.0);
         plain.snap(&d, velum);
         horn.set_lengths(([0.0; 2], [0.0; 2]));
@@ -435,7 +440,7 @@ fn the_larynx_slide_at_rest_is_the_cells_it_replaces() {
     // Uniform and lossless, two cells and a slide two ticks long are
     // the same tube (but for the rounding at the joint inside).
     let d = [1.8f32; N];
-    let mut cells = Phys::new();
+    let mut cells = original();
     cells.set_ideal(true);
     cells.snap(&d, 0.0);
     let mut slide = with_slides(0.0, 1.0);
@@ -764,7 +769,7 @@ fn epilarynx_tube_resonates_where_theory_says() {
         for (i, v) in d.iter_mut().enumerate().take(crate::tract::BLADE_START) {
             *v = t.epilarynx(i).unwrap();
         }
-        let mut p = Phys::new();
+        let mut p = original();
         p.set_ideal(true);
         p.snap(&d, 0.0);
         let x = impulse(&mut p, 40_000);

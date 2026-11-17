@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use synthie_trombone::inverse::{self, Shape};
 use synthie_trombone::speech::{Prosody, Utterance};
 use synthie_trombone::{
-    Constriction, Engine, N, Persona, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, VoiceSettings,
+    Constriction, Engine, N, Persona, Phoneme, Preset, TONGUE_DIAMETER, TONGUE_INDEX, Tuning,
+    VoiceSettings,
 };
 use synthie_ui::{Key, KeyCode, KeyKind};
 
@@ -1585,50 +1586,47 @@ impl App {
 
 // ----- Formant Lock -------------------------------------------------------
 
-/// A vowel shape of the physical engine.
-const fn shape(index: f32, height: f32, lips: Option<f32>, narrowing: (f32, f32)) -> Shape {
-    Shape {
-        tongue_index: index,
-        tongue_diameter: height,
-        lips,
-        narrowing: Some(narrowing),
-        pharynx: 0.0,
-        modes: None,
-    }
-}
-
-/// Vowels marked on the vowel chart: IPA letter, phoneme, and the shape the
-/// physical engine gives it (the library's physical vowel shapes; a test
-/// checks that they still agree). Where two marks share a cell the first
-/// is shown, so the corner vowels come first.
-#[rustfmt::skip]
-pub const CHART_VOWELS: [(&str, Phoneme, Shape); 11] = [
-    ("i", Phoneme::Iy, shape(29.0, 2.257, None, (21.649, 0.858))),
-    ("u", Phoneme::Uw, shape(26.181, 2.05, Some(0.733), (14.0, 1.203))),
-    ("ɑ", Phoneme::Aa, shape(16.513, 3.165, None, (10.0, 0.927))),
-    ("æ", Phoneme::Ae, shape(19.852, 3.321, None, (28.611, 1.314))),
-    ("ɪ", Phoneme::Ih, shape(25.685, 2.293, None, (24.0, 3.0))),
-    ("ɛ", Phoneme::Eh, shape(24.3, 2.811, None, (14.0, 1.483))),
-    ("ʌ", Phoneme::Ah, shape(16.588, 2.269, None, (30.423, 1.46))),
-    ("ɔ", Phoneme::Ao, shape(12.0, 2.219, None, (23.828, 1.8))),
-    ("ʊ", Phoneme::Uh, shape(19.945, 2.387, Some(1.004), (32.018, 1.022))),
-    ("o", Phoneme::Ow, shape(15.494, 2.345, Some(0.989), (30.201, 1.519))),
-    ("ɝ", Phoneme::Er, shape(15.234, 2.777, Some(1.242), (30.498, 0.7))),
+/// Vowels marked on the vowel chart: IPA letter and phoneme. Where two
+/// marks share a cell the first is shown, so the corner vowels come first.
+/// Their shapes are the library's physical vowel shapes for the voice in
+/// use ([`chart_vowels`]), solved for its tract.
+pub const CHART_LETTERS: [(&str, Phoneme); 11] = [
+    ("i", Phoneme::Iy),
+    ("u", Phoneme::Uw),
+    ("ɑ", Phoneme::Aa),
+    ("æ", Phoneme::Ae),
+    ("ɪ", Phoneme::Ih),
+    ("ɛ", Phoneme::Eh),
+    ("ʌ", Phoneme::Ah),
+    ("ɔ", Phoneme::Ao),
+    ("ʊ", Phoneme::Uh),
+    ("o", Phoneme::Ow),
+    ("ɝ", Phoneme::Er),
 ];
 
-/// The chart vowel `v`: its IPA letter and shape.
-fn chart_vowel(v: Phoneme) -> Option<(&'static str, Shape)> {
-    CHART_VOWELS
+/// The chart's vowels with the shapes the physical engine gives them in a
+/// voice of `tuning` at the native length (the vowel table of its tongue
+/// body and tract), in the order of [`CHART_LETTERS`].
+pub fn chart_vowels(tuning: &Tuning) -> Vec<(&'static str, Phoneme, Shape)> {
+    CHART_LETTERS
         .iter()
-        .find(|(_, p, _)| *p == v)
-        .map(|&(name, _, s)| (name, s))
+        .filter_map(|&(name, v)| {
+            Some((name, v, v.articulation().physical_shape_with(1.0, tuning)?))
+        })
+        .collect()
+}
+
+/// The chart vowel `v` in a voice of `tuning`: its IPA letter and shape.
+fn chart_vowel(v: Phoneme, tuning: &Tuning) -> Option<(&'static str, Shape)> {
+    let name = CHART_LETTERS.iter().find(|(_, p)| *p == v)?.0;
+    Some((name, v.articulation().physical_shape_with(1.0, tuning)?))
 }
 
 /// The babble map's formants for `shape` at the native length; where the
 /// map has no data for the shape itself (a few extreme ones, among them
 /// the physical /ʊ/), its formants a hair away from it.
-fn predict_near(shape: &Shape) -> Option<[f32; 3]> {
-    if let Some(f) = inverse::predict(shape) {
+fn predict_near(map: &inverse::Map, shape: &Shape) -> Option<[f32; 3]> {
+    if let Some(f) = map.predict(shape) {
         return Some(f);
     }
     if shape.modes.is_some() {
@@ -1639,7 +1637,7 @@ fn predict_near(shape: &Shape) -> Option<[f32; 3]> {
                 for sign in [-1.0, 1.0] {
                     let mut y = x;
                     y[k] = (y[k] + sign * step).clamp(0.0, 1.0);
-                    if let Some(f) = inverse::predict(&inverse::modal::from_coordinates(y)) {
+                    if let Some(f) = map.predict(&inverse::modal::from_coordinates(y)) {
                         return Some(f);
                     }
                 }
@@ -1653,7 +1651,7 @@ fn predict_near(shape: &Shape) -> Option<[f32; 3]> {
             for sign in [-1.0, 1.0] {
                 let mut y = x;
                 y[k] = (y[k] + sign * step).clamp(0.0, 1.0);
-                if let Some(f) = inverse::predict(&Shape::from_coordinates(y)) {
+                if let Some(f) = map.predict(&Shape::from_coordinates(y)) {
                     return Some(f);
                 }
             }
@@ -1680,12 +1678,12 @@ pub struct ChartRange {
 }
 
 impl ChartRange {
-    /// The babble map's extent for a tract of `length`, with a margin.
-    pub fn for_length(length: f32) -> Self {
-        let lo =
-            inverse::formants_at_length([inverse::F1_RANGE.0, inverse::F2_RANGE.0, 2500.0], length);
-        let hi =
-            inverse::formants_at_length([inverse::F1_RANGE.1, inverse::F2_RANGE.1, 2500.0], length);
+    /// The extent of babble map `map` for a tract of `length`, with a
+    /// margin.
+    pub fn for_length(map: &inverse::Map, length: f32) -> Self {
+        let (r1, r2) = (map.f1_range(), map.f2_range());
+        let lo = map.formants_at_length([r1.0, r2.0, 2500.0], length);
+        let hi = map.formants_at_length([r1.1, r2.1, 2500.0], length);
         Self {
             f1: (lo[0] / CHART_MARGIN, hi[0] * CHART_MARGIN),
             f2: (lo[1] / CHART_MARGIN, hi[1] * CHART_MARGIN),
@@ -1715,9 +1713,14 @@ impl App {
         self.settings.tuning.anatomy.tongue_model >= 0.5
     }
 
+    /// The babble map of the voice's tract (`inverse::Map::for_tuning`).
+    pub fn map(&self) -> &'static inverse::Map {
+        inverse::Map::for_tuning(&self.settings.tuning)
+    }
+
     /// The vowel chart's extent for the voice in use.
     pub fn chart_range(&self) -> ChartRange {
-        ChartRange::for_length(self.settings.tract_length)
+        ChartRange::for_length(self.map(), self.settings.tract_length)
     }
 
     /// F1 and F2 (Hz) of a shape for the voice in use, as the babble map
@@ -1730,11 +1733,11 @@ impl App {
     /// F1, F2 and F3 (Hz) of a shape for the voice in use (see
     /// [`predict_near`]).
     fn shape_formants3(&self, shape: &Shape) -> Option<[f32; 3]> {
-        let native = predict_near(shape)?;
-        Some(inverse::formants_at_length(
-            native,
-            self.settings.tract_length,
-        ))
+        let native = predict_near(self.map(), shape)?;
+        Some(
+            self.map()
+                .formants_at_length(native, self.settings.tract_length),
+        )
     }
 
     /// Where the voice is on the vowel chart, `(F1, F2)` in Hz, while
@@ -1773,7 +1776,7 @@ impl App {
     /// The vowel marks on the chart and their cells, one per cell.
     pub fn chart_marks(&self) -> Vec<(&'static str, Phoneme, (u16, u16))> {
         let mut marks: Vec<(&'static str, Phoneme, (u16, u16))> = Vec::new();
-        for &(name, v, s) in &CHART_VOWELS {
+        for (name, v, s) in chart_vowels(&self.settings.tuning) {
             let Some(at) = self
                 .shape_formants(&s)
                 .and_then(|(f1, f2)| self.chart_cell(f1, f2))
@@ -1807,7 +1810,10 @@ impl App {
             tongue_diameter: d,
             ..s
         };
-        let last = self.last_vowel.and_then(chart_vowel).map(|(_, s)| s);
+        let last = self
+            .last_vowel
+            .and_then(|v| chart_vowel(v, &self.settings.tuning))
+            .map(|(_, s)| s);
         let start = match last {
             Some(s) if switched => s,
             Some(s) => tongue(s, self.tongue),
@@ -1873,10 +1879,11 @@ impl App {
         let (a, b) = if self.modal_body() {
             inverse::modal::nearest_reachable_for(f1, f2, length)
         } else {
-            inverse::nearest_reachable_for(f1, f2, length)
+            self.map().nearest_reachable_for(f1, f2, length)
         };
         let near = self.formant_lock;
-        let plain = || inverse::solve_for(a, b, None, near.as_ref(), length);
+        let map = self.map();
+        let plain = || map.solve_for(a, b, None, near.as_ref(), length);
         // F1 and F2 leave the shape a degree of freedom, and the solver's
         // pull towards the previous shape is weak: off a vowel's own
         // shape it would take a different one at once. While gliding,
@@ -1885,7 +1892,7 @@ impl App {
         let f3 = near.and_then(|s| self.shape_formants3(&s)).map(|f| f[2]);
         let shape = match f3 {
             Some(f3) if glide => {
-                let held = inverse::solve_for(a, b, Some(f3), near.as_ref(), length);
+                let held = map.solve_for(a, b, Some(f3), near.as_ref(), length);
                 let close = self.shape_formants(&held).is_some_and(|(g1, g2)| {
                     (g1 / a - 1.0).abs().max((g2 / b - 1.0).abs()) < GLIDE_SLACK
                 });
@@ -1955,7 +1962,7 @@ impl App {
         if self.formant_lock.is_none() {
             return;
         }
-        if let Some((name, s)) = chart_vowel(v) {
+        if let Some((name, s)) = chart_vowel(v, &self.settings.tuning) {
             self.formant_lock = Some(s);
             if let Some((f1, f2)) = self.shape_formants(&s) {
                 self.status = format!("{name} ({}) · F1 {f1:.0} Hz · F2 {f2:.0} Hz", v.symbol());
@@ -2025,7 +2032,13 @@ mod tests {
     /// says so.
     #[test]
     fn braces_move_the_lips_and_angles_the_larynx() {
+        // On the original tract the status says the lip horn and the larynx
+        // slide are off, as they are there.
         let (mut app, rx) = app(false);
+        let original = Tuning::DEFAULT.with_tract(TractModel::Original);
+        app.settings.tuning = original;
+        app.snap.lip_horn = original.anatomy.lip_horn;
+        app.snap.larynx_travel = original.anatomy.larynx_travel;
         app.key(key('}', KeyKind::Press));
         app.key(key('}', KeyKind::Press));
         let cmds = sent(&rx);
@@ -2054,6 +2067,17 @@ mod tests {
             app.key(key('>', KeyKind::Press));
         }
         assert!((app.larynx - LARYNX_HIGHEST).abs() < 1e-6);
+        // On the anatomical tract they are on.
+        let (mut on, rx) = self::app(false);
+        let anatomical = Tuning::DEFAULT.with_tract(TractModel::Anatomical);
+        on.settings.tuning = anatomical;
+        on.snap.lip_horn = anatomical.anatomy.lip_horn;
+        on.snap.larynx_travel = anatomical.anatomy.larynx_travel;
+        on.key(key('}', KeyKind::Press));
+        assert!(matches!(sent(&rx)[..], [Cmd::Protrusion(Some(_))]));
+        assert!(!on.status.contains("lip_horn 0"), "{}", on.status);
+        on.key(key('<', KeyKind::Press));
+        assert!(!on.status.contains("larynx_travel 0"), "{}", on.status);
     }
 
     #[test]
@@ -2762,7 +2786,7 @@ mod tests {
 
     // ----- Formant Lock -------------------------------------------------
 
-    use synthie_trombone::Trombone;
+    use synthie_trombone::{TractModel, Trombone};
 
     /// `laid_out()` with Formant Lock on and a vowel chart the size a
     /// 120×34 terminal draws it (26×9 cells), clear of the other areas.
@@ -2859,7 +2883,7 @@ mod tests {
         let (mut worst, mut pressed) = (0.0f32, 0);
         for at in chart_cells(&app) {
             let target = app.chart_point(at.0, at.1).unwrap();
-            if !inverse::reachable_for(target.0, target.1, length) {
+            if !app.map().reachable_for(target.0, target.1, length) {
                 continue;
             }
             let cmds = click_at(&mut app, &rx, at);
@@ -2960,8 +2984,8 @@ mod tests {
         let a = app.chart_area;
         let at = (a.right() - 1, a.bottom() - 1);
         let target = app.chart_point(at.0, at.1).unwrap();
-        assert!(!inverse::reachable_for(target.0, target.1, length));
-        let edge = inverse::nearest_reachable_for(target.0, target.1, length);
+        assert!(!app.map().reachable_for(target.0, target.1, length));
+        let edge = app.map().nearest_reachable_for(target.0, target.1, length);
         assert!(error(edge, target) > 0.05, "{edge:?} {target:?}");
         let cmds = click_at(&mut app, &rx, at);
         let [Cmd::Shape(s)] = cmds[..] else {
@@ -2990,14 +3014,14 @@ mod tests {
         assert!(app.formant_lock.is_some());
         sent(&rx);
         let small = app.chart_range();
-        assert_eq!(small, ChartRange::for_length(length));
+        assert_eq!(small, ChartRange::for_length(app.map(), length));
         assert!(small.f2.1 > native.f2.1 * 1.15, "{small:?} {native:?}");
         assert!(small.f1.0 > native.f1.0 * 1.1, "{small:?} {native:?}");
         // A press lands where it was made, in this voice's Hz…
         let a = app.chart_area;
         let at = (a.x + 12, a.y + 4);
         let target = app.chart_point(at.0, at.1).unwrap();
-        assert!(inverse::reachable_for(target.0, target.1, length));
+        assert!(app.map().reachable_for(target.0, target.1, length));
         let cmds = click_at(&mut app, &rx, at);
         let [Cmd::Shape(s)] = cmds[..] else {
             panic!("{cmds:?}");
@@ -3005,10 +3029,10 @@ mod tests {
         let got = heard(&app, &s);
         assert!(error(got, target) < 0.03, "{got:?} vs {target:?}");
         // …which a tract of native length would not make.
-        let n = inverse::predict(&s).unwrap();
+        let n = app.map().predict(&s).unwrap();
         assert!(error((n[0], n[1]), target) > 0.12, "{n:?} vs {target:?}");
         // The vowels move with the voice: /i/ sits further left.
-        let iy = CHART_VOWELS[0].2;
+        let iy = chart_vowels(&app.settings.tuning)[0].2;
         let small_i = heard(&app, &iy);
         app.set_dial(0, 1.0);
         let native_i = heard(&app, &iy);
@@ -3049,12 +3073,18 @@ mod tests {
         let &(_, v, at) = marks.iter().find(|m| m.1 == Phoneme::Uw).unwrap();
         let cmds = click_at(&mut app, &rx, at);
         assert!(matches!(cmds[..], [Cmd::Vowel(Phoneme::Uw)]), "{cmds:?}");
-        assert_eq!(app.formant_lock, chart_vowel(v).map(|(_, s)| s));
+        assert_eq!(
+            app.formant_lock,
+            chart_vowel(v, &app.settings.tuning).map(|(_, s)| s)
+        );
         let (f1, f2) = app.lock_formants().unwrap();
         assert_eq!(app.chart_cell(f1, f2), Some(at));
         // A number key is a vowel too: the chart follows.
         app.key(key('5', KeyKind::Press));
-        assert_eq!(app.formant_lock, chart_vowel(Phoneme::Aa).map(|(_, s)| s));
+        assert_eq!(
+            app.formant_lock,
+            chart_vowel(Phoneme::Aa, &app.settings.tuning).map(|(_, s)| s)
+        );
         // So does the tongue, moved by its meter.
         sent(&rx);
         let r = app
@@ -3073,27 +3103,38 @@ mod tests {
 
     #[test]
     fn chart_vowels_are_the_physical_engines_vowels() {
-        for (name, v, s) in CHART_VOWELS {
-            let mut said = Trombone::new(48_000.0);
-            let mut held = Trombone::new(48_000.0);
-            for voice in [&mut said, &mut held] {
-                voice.set_engine(Engine::Physical);
+        // On each tract, from its own vowel table and babble map.
+        for tract in [TractModel::Original, TractModel::Anatomical] {
+            let tuning = Tuning::DEFAULT.with_tract(tract);
+            let marks = chart_vowels(&tuning);
+            assert_eq!(marks.len(), CHART_LETTERS.len());
+            for (name, v, s) in marks {
+                let mut said = Trombone::new(48_000.0);
+                let mut held = Trombone::new(48_000.0);
+                for voice in [&mut said, &mut held] {
+                    voice.set_engine(Engine::Physical);
+                    voice.set_tuning(&tuning);
+                }
+                said.articulate_phoneme(v);
+                held.set_shape(&s);
+                let mut buf = [0.0; 256];
+                said.render(&mut buf);
+                held.render(&mut buf);
+                assert_eq!(said.tongue(), held.tongue(), "{tract:?} {name}");
+                for (k, (a, b)) in said
+                    .target_diameters()
+                    .iter()
+                    .zip(held.target_diameters())
+                    .enumerate()
+                {
+                    assert!(
+                        (a - b).abs() < 1e-4,
+                        "{tract:?} {name} cell {k}: {a} vs {b}"
+                    );
+                }
+                let map = inverse::Map::for_tuning(&tuning);
+                assert!(predict_near(map, &s).is_some(), "{tract:?} {name}");
             }
-            said.articulate_phoneme(v);
-            held.set_shape(&s);
-            let mut buf = [0.0; 256];
-            said.render(&mut buf);
-            held.render(&mut buf);
-            assert_eq!(said.tongue(), held.tongue(), "{name}");
-            for (k, (a, b)) in said
-                .target_diameters()
-                .iter()
-                .zip(held.target_diameters())
-                .enumerate()
-            {
-                assert!((a - b).abs() < 1e-4, "{name} cell {k}: {a} vs {b}");
-            }
-            assert!(predict_near(&s).is_some(), "{name}");
         }
     }
 

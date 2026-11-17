@@ -32,9 +32,14 @@ const NATIVE_RATE: f32 = 96_000.0;
 /// (lips set) with the larynx lowered by `rounded_larynx`, as speech lowers
 /// it for a rounded vowel.
 pub fn voice(shape: &Shape, tract_length: f32) -> Trombone {
+    voice_on(shape, tract_length, &base())
+}
+
+/// [`voice`] with `tuning` in place of the [`base`].
+pub fn voice_on(shape: &Shape, tract_length: f32, tuning: &synthie_trombone::Tuning) -> Trombone {
     let mut t = Trombone::new(48_000.0);
     t.set_engine(Engine::Physical);
-    let mut tuning = base();
+    let mut tuning = *tuning;
     if shape.modes.is_some() {
         tuning.anatomy.tongue_model = 1.0;
     }
@@ -59,26 +64,31 @@ pub fn set_base(tuning: synthie_trombone::Tuning) {
     let _ = BASE.set(tuning);
 }
 
-/// The tract the wave is switched on with (`--lengthened`): the lip horn
-/// 1.2 cm, the larynx's full travel, a rounded vowel's larynx lowered
-/// 0.5 cm, none for a voiced stop, a tube of four cells above the folds.
-pub fn lengthened(mut tuning: synthie_trombone::Tuning) -> synthie_trombone::Tuning {
-    tuning.anatomy.lip_horn = 1.2;
-    tuning.anatomy.larynx_travel = 1.0;
-    tuning.articulation.rounded_larynx = 0.5;
-    tuning.articulation.voiced_stop_larynx = 0.0;
-    tuning.anatomy.epilarynx_cells = 4.0;
-    tuning
+/// The anatomical tract of wave 2 (`--lengthened`,
+/// `TractModel::Anatomical`): the lip horn 1.2 cm, the larynx's full
+/// travel, a rounded vowel's larynx lowered 0.5 cm, none for a voiced stop,
+/// a tube of four cells above the folds flaring over the next four.
+pub fn lengthened(tuning: synthie_trombone::Tuning) -> synthie_trombone::Tuning {
+    tuning.with_tract(synthie_trombone::TractModel::Anatomical)
+}
+
+/// The original tract (`--original`, `TractModel::Original`).
+pub fn original(tuning: synthie_trombone::Tuning) -> synthie_trombone::Tuning {
+    tuning.with_tract(synthie_trombone::TractModel::Original)
 }
 
 /// The tract the command line asks for, made the [`base`]: the default,
-/// with `--lengthened` [`lengthened`], and then `--profile FILE` laid on
-/// top (a voice profile's `tuning`, as `say --profile` reads it).
+/// with `--lengthened` [`lengthened`] or with `--original` [`original`],
+/// and then `--profile FILE` laid on top (a voice profile's `tuning`, as
+/// `say --profile` reads it).
 pub fn base_from_args() -> synthie_trombone::Tuning {
     let args: Vec<String> = std::env::args().collect();
     let mut tuning = synthie_trombone::Tuning::DEFAULT;
     if args.iter().any(|a| a == "--lengthened") {
         tuning = lengthened(tuning);
+    }
+    if args.iter().any(|a| a == "--original") {
+        tuning = original(tuning);
     }
     if let Some(path) = args
         .iter()
@@ -250,6 +260,16 @@ impl Meter {
     /// F1, F2 and F3 of `shape` at `tract_length`, Hz.
     pub fn measure(&mut self, shape: &Shape, tract_length: f32) -> Option<[f32; 3]> {
         self.formants(&voice(shape, tract_length))
+    }
+
+    /// [`measure`](Self::measure) on a voice of `tuning` (see [`voice_on`]).
+    pub fn measure_on(
+        &mut self,
+        shape: &Shape,
+        tract_length: f32,
+        tuning: &synthie_trombone::Tuning,
+    ) -> Option<[f32; 3]> {
+        self.formants(&voice_on(shape, tract_length, tuning))
     }
 }
 

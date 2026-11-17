@@ -1,4 +1,5 @@
-//! Generate `src/vowel_size_table.rs`: the shape of every physical vowel,
+//! Generate the vowel tables (`src/vowel_size_table.rs` and the others
+//! below): the shape of every physical vowel,
 //! glide and diphthong end, for every body size, solved from the formant
 //! targets in `src/vowel_targets.rs`.
 //!
@@ -11,31 +12,36 @@
 //! then check with `cargo test -p synthie-trombone --release --test
 //! vowel_size_gate`.
 //!
-//! There are four tables, by tongue body and tract
-//! (`vowel_targets::lengthened`), each one command:
+//! There are four tables, by tongue body and tract (`TractModel`,
+//! `vowel_targets::lengthened`), each one command:
 //!
 //! ```sh
-//! cargo run -p synthie-trombone --example vowel_size --release                  # cosine, default tract
-//! cargo run -p synthie-trombone --example vowel_size --release -- --modal       # modal body (tongue_model 1)
+//! cargo run -p synthie-trombone --example vowel_size --release -- --original --both
+//! #   both bodies for the original tract (src/vowel_size_table.rs, src/vowel_modes_table.rs)
 //! cargo run -p synthie-trombone --example vowel_size --release -- --lengthened --both
-//! #   both bodies for the tract the wave is switched on with (lip_horn 1.2,
-//! #   larynx_travel 1, rounded_larynx 0.5); `--profile FILE` lays a voice
-//! #   profile's tuning on top (the epilarynx's numbers, say), and the table
-//! #   is written where a voice of that tuning reads it
+//! #   both bodies for the anatomical tract (lip_horn 1.2, larynx_travel 1,
+//! #   rounded_larynx 0.5, four cells of tube flaring over four more;
+//! #   src/vowel_size_wave_table.rs, src/vowel_modes_wave_table.rs)
 //! ```
 //!
-//! `--both` solves the cosine and the modal table in one run. Solve the
-//! modal babble map for the same tract first (`examples/babble.rs --modal`):
-//! the modal solver starts from its answers. Uses every CPU thread; takes a minute or two. The babble
-//! map (`examples/babble.rs`) only needs regenerating when the engine's
-//! acoustics change, not when a target does.
+//! Without `--original` or `--lengthened` the default tract is solved; `--modal`
+//! solves the modal body alone, neither flag the cosine body alone. `--profile
+//! FILE` lays a voice profile's tuning on top (the epilarynx's numbers, say),
+//! and the table is written where a voice of that tuning reads it.
+//!
+//! Solve the tract's babble maps first (`examples/babble.rs` with the same
+//! flag, and `--modal` for the modal body): the solvers start from their
+//! answers. Uses every CPU thread; takes a minute or two. The babble maps
+//! only need regenerating when the engine's acoustics change, not when a
+//! target does.
 //!
 //! For every target this
 //!
 //! 1. solves the shape at the native tract length (1.0): starts from the
 //!    articulators' natural place for the sound (the classic engine's
-//!    tongue and lips) and from the babble map's answers (`inverse::solve`,
-//!    with and without F3), refines each against the real
+//!    tongue and lips) and from the babble map's answers (the map of the
+//!    tract solved for, `inverse::Map::solve`, with and without F3),
+//!    refines each against the real
 //!    engine (damped Gauss-Newton on measured formants, derivatives by
 //!    finite differences) until F1 and F2 are on the target and F3 as near
 //!    as the other two allow, and keeps the best. Rounded targets keep
@@ -45,7 +51,7 @@
 //!    starting from the row next to it nearer to 1.0, stepped on along the
 //!    way the shape has been moving, and staying close to it so that the
 //!    rows make a smooth path. If that misses, it also tries the babble
-//!    map's answer (`inverse::solve_for`) and keeps the better one;
+//!    map's answer (`inverse::Map::solve_for`) and keeps the better one;
 //! 3. verifies the table as the library will read it (quantised, and
 //!    interpolated between rows) at the rows, between them, and at the
 //!    lengths the tests use, measuring each shape through the engine, and
@@ -72,7 +78,7 @@ use std::time::Instant;
 use survey::Meter;
 use synthie_trombone::inverse::{self, Shape};
 use synthie_trombone::vowel_targets::{self, Lips, TARGETS, Target, VowelKey};
-use synthie_trombone::{Articulation, Phoneme};
+use synthie_trombone::{Articulation, Phoneme, TractModel};
 
 /// Tract length of the first table row...
 const FIRST: f32 = 0.5;
@@ -186,9 +192,29 @@ const NARROWING_AT: (f32, f32) = (10.0, 38.0);
 /// small back cavity down by a quarter otherwise).
 const MODAL_NARROWING_AT: (f32, f32) = (7.0, 38.0);
 
-/// Where the narrowing may sit for `model`.
-fn narrowing_at(model: Model) -> (f32, f32) {
+/// The same for an open vowel (F1 of [`THROAT_F1`] or more) on the cosine
+/// body of the anatomical tract (`vowel_targets::lengthened`): from cell 8,
+/// as in the babble map, where the tube above the folds (four cells) has
+/// flared (over the next four). The measured speaker's open vowels have a
+/// narrow lower pharynx from just above the flare (/ɑ/ 0.45 to 0.55 cm² at
+/// 3.5 to 3.9 cm above the folds), where the tract's is 1.52 cm² for every
+/// vowel; with the narrowing no lower than cell 10, /ɑ/ fell 3.4 % short of
+/// its F1 at length 0.6 with the narrowing there. (The other vowels keep
+/// the range of [`NARROWING_AT`], and so the coordinates they are solved
+/// in: on the wider range the solver took another schwa, its tongue back
+/// at 15.8 and a narrowing of 0.74 at the palate, and the /ð/ after it had
+/// a labial's F2.)
+const THROAT_NARROWING_AT: (f32, f32) = (8.0, 38.0);
+
+/// Where the narrowing of target `t` may sit on `model` on the tract being
+/// solved.
+fn narrowing_at(model: Model, t: &Target) -> (f32, f32) {
     match model {
+        Model::Cosine
+            if t.formants[0] >= THROAT_F1 && vowel_targets::lengthened(&survey::base()) =>
+        {
+            THROAT_NARROWING_AT
+        }
         Model::Cosine => NARROWING_AT,
         Model::Modal => MODAL_NARROWING_AT,
     }
@@ -234,6 +260,8 @@ enum Model {
 #[derive(Clone, Copy)]
 struct Kind {
     model: Model,
+    /// Where its narrowing may sit ([`narrowing_at`]).
+    places: (f32, f32),
     /// Rounded lips (else spread).
     rounded: bool,
     /// A narrowing along the tongue of its own (the modal body: only /ɚ/,
@@ -245,6 +273,7 @@ impl Kind {
     fn of(model: Model, t: &Target) -> Self {
         Self {
             model,
+            places: narrowing_at(model, t),
             rounded: t.lips == Lips::Rounded,
             narrowed: model == Model::Cosine || t.key == VowelKey::Vowel(Phoneme::Er),
         }
@@ -340,7 +369,7 @@ const MODE_AT: [usize; 3] = [0, 1, 5];
 /// numbers, lips, narrowing place and opening, its third number (see
 /// [`MODE_AT`]). Openings are on a logarithmic scale. Spread lips are `1`,
 /// no narrowing the widest one.
-fn to_x(s: &Shape) -> [f32; D] {
+fn to_x(s: &Shape, t: &Target) -> [f32; D] {
     let lin = |v: f32, r: (f32, f32)| (v - r.0) / (r.1 - r.0);
     let log = |v: f32, r: (f32, f32)| {
         ((v - TOUCH).ln() - (r.0 - TOUCH).ln()) / ((r.1 - TOUCH).ln() - (r.0 - TOUCH).ln())
@@ -352,11 +381,14 @@ fn to_x(s: &Shape) -> [f32; D] {
         s.lips.map_or(1.0, |l| log(l, LIPS)),
         lin(
             at,
-            narrowing_at(if s.modes.is_some() {
-                Model::Modal
-            } else {
-                Model::Cosine
-            }),
+            narrowing_at(
+                if s.modes.is_some() {
+                    Model::Modal
+                } else {
+                    Model::Cosine
+                },
+                t,
+            ),
         ),
         log(narrow, NARROWING),
         lin(s.pharynx, PHARYNX),
@@ -379,7 +411,7 @@ fn from_x(x: &[f32; D], kind: Kind) -> Shape {
     let lips = kind.rounded.then(|| log(x[2], LIPS));
     let narrowing = kind
         .narrowed
-        .then(|| (lin(x[3], narrowing_at(kind.model)), log(x[4], NARROWING)));
+        .then(|| (lin(x[3], kind.places), log(x[4], NARROWING)));
     if kind.model == Model::Modal {
         let q = [0, 1, 2].map(|k| lin(x[MODE_AT[k]], inverse::mode_range(k)));
         // The cosine tongue is not used by a modal tract; the projection's
@@ -406,14 +438,17 @@ fn from_x(x: &[f32; D], kind: Kind) -> Shape {
 /// A start for target `t` from shape `s`: lips made to agree with the
 /// target's.
 fn start_from(s: &Shape, t: &Target) -> [f32; D] {
-    let mut x = to_x(s);
+    let mut x = to_x(s, t);
     match t.lips {
         Lips::Spread => x[2] = 1.0,
         Lips::Rounded if s.lips.is_none_or(|l| l > LIPS.1) => {
-            x[2] = to_x(&Shape {
-                lips: Some(START_LIPS),
-                ..*s
-            })[2];
+            x[2] = to_x(
+                &Shape {
+                    lips: Some(START_LIPS),
+                    ..*s
+                },
+                t,
+            )[2];
         }
         Lips::Rounded => {}
     }
@@ -615,7 +650,8 @@ fn prior(kind: Kind, t: &Target) -> [f32; D] {
     let mut x = cosine_prior(t);
     if kind.model == Model::Modal {
         // The cosine prior's narrowing place, on the modal range of places.
-        let at = NARROWING_AT.0 + (NARROWING_AT.1 - NARROWING_AT.0) * x[3];
+        let (a, b) = narrowing_at(Model::Cosine, t);
+        let at = a + (b - a) * x[3];
         x[3] = ((at - MODAL_NARROWING_AT.0) / (MODAL_NARROWING_AT.1 - MODAL_NARROWING_AT.0))
             .clamp(0.0, 1.0);
         let q = measured_prior(t);
@@ -633,10 +669,13 @@ fn prior(kind: Kind, t: &Target) -> [f32; D] {
                 .physical_shape(1.0)
                 .expect("a vowel shape");
             // (Read as a modal shape: the modal range of places.)
-            let n = to_x(&Shape {
-                modes: Some([0.0; 3]),
-                ..s
-            });
+            let n = to_x(
+                &Shape {
+                    modes: Some([0.0; 3]),
+                    ..s
+                },
+                t,
+            );
             x[3] = n[3];
             x[4] = n[4];
         }
@@ -706,18 +745,21 @@ fn cosine_prior(t: &Target) -> [f32; D] {
         Lips::Rounded => Some(a.lips.map_or(START_LIPS, |c| c.diameter).min(LIPS.1)),
     };
     let narrowing = a.constriction.map(|c| (c.index, c.diameter));
-    let mut x = to_x(&Shape {
-        tongue_index: index,
-        tongue_diameter: diameter,
-        lips,
-        narrowing,
-        pharynx: if root_free(t.key) {
-            natural_root(t.key)
-        } else {
-            0.0
+    let mut x = to_x(
+        &Shape {
+            tongue_index: index,
+            tongue_diameter: diameter,
+            lips,
+            narrowing,
+            pharynx: if root_free(t.key) {
+                natural_root(t.key)
+            } else {
+                0.0
+            },
+            modes: None,
         },
-        modes: None,
-    });
+        t,
+    );
     if narrowing.is_none() {
         x[3] = 0.5;
         x[4] = 1.0;
@@ -746,7 +788,7 @@ fn natural_root(key: VowelKey) -> f32 {
 fn lowest(model: Model, t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
-        let (a, b) = narrowing_at(model);
+        let (a, b) = narrowing_at(model, t);
         lo[3] = (ORAL - a) / (b - a);
     }
     if model == Model::Cosine {
@@ -761,9 +803,22 @@ fn highest(model: Model, t: &Target) -> [f32; D] {
     let mut hi = [1.0; D];
     if model == Model::Cosine {
         hi[5] = root_x(root_range(t.key).1);
+        if vowel_targets::lengthened(&survey::base()) {
+            hi[1] =
+                (LENGTHENED_LOWEST - TONGUE_DIAMETER.0) / (TONGUE_DIAMETER.1 - TONGUE_DIAMETER.0);
+        }
     }
     hi
 }
+
+/// The lowest tongue (largest diameter) a cosine shape of the anatomical
+/// tract may have, short of the engine's 3.5. Solved down to 3.5, /æ/'s
+/// tongue stood at 3.5 up to length 0.8 and at 3.48 at 0.9, and the
+/// whisper (0.9) shut its tongue tip onto the /n/ of "and" with a click 6.6
+/// times its loudest vowel sample (the bound is 6; on the original tract
+/// /æ/ stands at 3.36 there and the worst click is 1.3); with its tongue at
+/// 3.3 the worst click was 1.55.
+const LENGTHENED_LOWEST: f32 = 3.4;
 
 /// Which coordinates of target `t` are solved.
 fn free(kind: Kind, key: VowelKey) -> [bool; D] {
@@ -794,8 +849,8 @@ fn native_row(m: &mut Meter, kind: Kind, t: &Target) -> Solved {
         let near = from_x(&home, kind);
         let (a, b) = match model {
             Model::Cosine => (
-                inverse::solve(f[0], f[1], f3, Some(&near)),
-                inverse::solve(f[0], f[1], f3, None),
+                inverse::Map::for_tuning(&survey::base()).solve(f[0], f[1], f3, Some(&near)),
+                inverse::Map::for_tuning(&survey::base()).solve(f[0], f[1], f3, None),
             ),
             Model::Modal => (
                 inverse::modal::solve(f[0], f[1], f3, Some(&near)),
@@ -917,8 +972,13 @@ fn chain(m: &mut Meter, kind: Kind, t: &Target, x0: [f32; D], up: bool) -> Vec<(
         if best.is_none_or(|b| miss(&b.1) > TRY_MAP) {
             // (A modal `near` solves on the modal map.)
             let near = from_x(&last, kind);
-            let guess =
-                inverse::solve_for(target[0], target[1], Some(target[2]), Some(&near), length);
+            let guess = inverse::Map::for_tuning(&survey::base()).solve_for(
+                target[0],
+                target[1],
+                Some(target[2]),
+                Some(&near),
+                length,
+            );
             let mut g = start_from(&guess, t);
             for d in 0..D {
                 if !free[d] || (model == Model::Modal && (d == 3 || d == 4)) {
@@ -1380,23 +1440,32 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
     for line in summary.lines() {
         let _ = writeln!(src, "//! {line}");
     }
-    // The numbers of the tract it is solved for, where they are not the
-    // defaults (the default tract's table has none).
+    // The tract it is solved for, and any number of the tuning that is not
+    // that tract's default.
+    let (tract, name, flag) = if vowel_targets::lengthened(base) {
+        (TractModel::Anatomical, "anatomical", "--lengthened")
+    } else {
+        (TractModel::Original, "original", "--original")
+    };
+    let reference = synthie_trombone::Tuning::DEFAULT.with_tract(tract);
     let changed: Vec<String> = synthie_trombone::Tuning::FIELDS
         .iter()
         .filter(|f| f.name != "tongue_model")
         .filter_map(|f| {
             let v = base.get(f.name)?;
-            (v.to_bits() != f.default.to_bits()).then(|| format!("`{}` {v}", f.name))
+            let r = reference.get(f.name)?;
+            (v.to_bits() != r.to_bits()).then(|| format!("`{}` {v}", f.name))
         })
         .collect();
-    if !changed.is_empty() {
-        let _ = writeln!(
-            src,
-            "//! Solved for: {} (`-- --lengthened --both`, with `--profile` for\n//! any other of these numbers).",
-            changed.join(", ")
-        );
-    }
+    let _ = writeln!(
+        src,
+        "//! Solved for the {name} tract (`TractModel::{tract:?}`, `-- {flag}`){}.",
+        if changed.is_empty() {
+            String::new()
+        } else {
+            format!(", with {} (`--profile`)", changed.join(", "))
+        }
+    );
     let _ = writeln!(
         src,
         "//! ```\n\n\

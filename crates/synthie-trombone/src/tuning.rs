@@ -1348,6 +1348,87 @@ impl Default for Tuning {
     }
 }
 
+/// The two vocal tracts of the physical engine, as the numbers of a
+/// [`Tuning`] that make them (see [`Tuning::with_tract`]). Every vowel
+/// shape and the babble map are solved for one of them, so a test, a table
+/// or a solver run names the one it is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TractModel {
+    /// Pink Trombone's tube in real units: seven cells of epilaryngeal tube
+    /// (0.45 cm², 2.55 cm) opening in a step into 1.52 cm², the lips a lumped
+    /// tube, the larynx fixed.
+    Original,
+    /// The anatomical tract of wave 2: a lip horn of up to 1.2 cm
+    /// (`lip_horn`), the larynx's full travel (`larynx_travel`; lowered
+    /// 0.5 cm in rounded vowels, `rounded_larynx`), and a tube of four cells
+    /// (1.46 cm) above the folds that flares over the next four
+    /// (`epilarynx_flare_cells`), as the measured speaker's first four
+    /// sections are a narrow tube that flares over sections 5 to 8 (Story
+    /// 2008).
+    Anatomical,
+}
+
+/// Whether two numbers differ in any bit.
+const fn differs(x: f32, y: f32) -> bool {
+    x.to_bits() != y.to_bits()
+}
+
+impl TractModel {
+    /// The tract whose vowel shapes and babble map a voice of `tuning`
+    /// reads: [`Anatomical`](Self::Anatomical) for a tract whose length
+    /// changes (`lip_horn` or `larynx_travel` above `0`) or whose tube above
+    /// the folds is not the original's (`epilarynx_cells`,
+    /// `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`),
+    /// whatever the values; else [`Original`](Self::Original).
+    #[must_use]
+    pub const fn of(tuning: &Tuning) -> Self {
+        let a = &tuning.anatomy;
+        let original = Tuning::DEFAULT.with_tract(TractModel::Original);
+        let o = &original.anatomy;
+        if a.lip_horn > 0.0
+            || a.larynx_travel > 0.0
+            || differs(a.epilarynx_cells, o.epilarynx_cells)
+            || differs(a.epilarynx_diameter, o.epilarynx_diameter)
+            || differs(a.epilarynx_flare, o.epilarynx_flare)
+            || differs(a.epilarynx_flare_cells, o.epilarynx_flare_cells)
+        {
+            TractModel::Anatomical
+        } else {
+            TractModel::Original
+        }
+    }
+}
+
+impl Tuning {
+    /// This tuning with the numbers of `tract` (the tract's length, its
+    /// larynx and the tube above the folds; every other number as it is).
+    #[must_use]
+    pub const fn with_tract(mut self, tract: TractModel) -> Self {
+        let (a, r) = (&mut self.anatomy, &mut self.articulation);
+        a.epilarynx_diameter = 0.6;
+        a.epilarynx_flare = 1.1;
+        a.epilarynx_effort = 0.0;
+        r.voiced_stop_larynx = 0.0;
+        match tract {
+            TractModel::Original => {
+                a.lip_horn = 0.0;
+                a.larynx_travel = 0.0;
+                a.epilarynx_cells = 7.0;
+                a.epilarynx_flare_cells = 0.0;
+                r.rounded_larynx = 0.0;
+            }
+            TractModel::Anatomical => {
+                a.lip_horn = 1.2;
+                a.larynx_travel = 1.0;
+                a.epilarynx_cells = 4.0;
+                a.epilarynx_flare_cells = 4.0;
+                r.rounded_larynx = 0.5;
+            }
+        }
+        self
+    }
+}
+
 /// The JSON (or any serde) form of a [`Tuning`]: written nested, one object
 /// per part (`{"anatomy": {"lung_pressure": 8, ..}, "articulation": {..},
 /// "prosody": {..}}`, every field of [`Tuning::FIELDS`] under its name);

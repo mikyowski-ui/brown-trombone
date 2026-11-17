@@ -90,6 +90,9 @@ pub struct Mimic {
     /// Whether the voice has the modal tongue body (shapes are solved on its
     /// babble map, `inverse::modal`).
     modal: bool,
+    /// The voice's tract, whose babble map the cosine body's shapes are
+    /// solved on.
+    tract: crate::TractModel,
 }
 
 impl Mimic {
@@ -104,6 +107,17 @@ impl Mimic {
             solved: [0.0; 2],
             loudest_hiss: 0.0,
             modal: false,
+            tract: crate::TractModel::of(&crate::Tuning::DEFAULT),
+        }
+    }
+
+    /// Solve shapes on the babble map of `tract` (by default that of the
+    /// default tract): the tract of the voice being driven
+    /// ([`TractModel::of`](crate::TractModel::of) its tuning).
+    pub fn set_tract(&mut self, tract: crate::TractModel) {
+        if tract != self.tract {
+            self.tract = tract;
+            self.shape = None;
         }
     }
 
@@ -177,7 +191,13 @@ impl Mimic {
             let found = if self.modal {
                 inverse::modal::solve_for(f1, f2, f3, self.shape.as_ref(), self.tract_length)
             } else {
-                inverse::solve_for(f1, f2, f3, self.shape.as_ref(), self.tract_length)
+                inverse::Map::of(self.tract).solve_for(
+                    f1,
+                    f2,
+                    f3,
+                    self.shape.as_ref(),
+                    self.tract_length,
+                )
             };
             self.shape = Some(found);
             self.solved = [f1, f2];

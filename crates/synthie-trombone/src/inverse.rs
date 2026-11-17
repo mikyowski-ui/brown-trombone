@@ -40,6 +40,9 @@ use crate::math::{exp, ln};
 #[path = "inverse_table.rs"]
 mod table;
 
+#[path = "inverse_wave_table.rs"]
+mod wave_table;
+
 #[path = "inverse_modal.rs"]
 pub mod modal;
 
@@ -73,10 +76,12 @@ const TOUCH: f32 = 0.3;
 /// Coordinates this close to `1` mean "no rounding" or "no narrowing".
 const OPEN: f32 = 1.0 - 1.0e-4;
 
-/// Range of F1, Hz, that the babble map covers (see [`reachable`]).
-pub const F1_RANGE: (f32, f32) = table::REACH_F1;
-/// Range of F2, Hz, that the babble map covers (see [`reachable`]).
-pub const F2_RANGE: (f32, f32) = table::REACH_F2;
+/// Range of F1, Hz, that the babble map of the default tract covers (see
+/// [`reachable`] and [`Map::f1_range`]).
+pub const F1_RANGE: (f32, f32) = Map::DEFAULT.f1_range();
+/// Range of F2, Hz, that the babble map of the default tract covers (see
+/// [`reachable`] and [`Map::f2_range`]).
+pub const F2_RANGE: (f32, f32) = Map::DEFAULT.f2_range();
 
 /// A vowel shape of the physical engine; hold it with
 /// [`Trombone::set_shape`](crate::Trombone::set_shape).
@@ -239,34 +244,138 @@ const INVALID: u32 = 1023;
 /// Largest code of a measured formant.
 const TOP: f32 = 1022.0;
 
+/// Grid nodes along each shape coordinate, the same in both maps.
+const DIMS: [usize; 5] = table::DIMS;
+const _: () = {
+    let mut k = 0;
+    while k < 5 {
+        assert!(wave_table::DIMS[k] == DIMS[k]);
+        k += 1;
+    }
+};
+
 /// Nodes along the narrowing place and opening together: the last opening
 /// is "no narrowing", where the place does not matter, stored once.
-const JOINT: usize = table::DIMS[3] * (table::DIMS[4] - 1) + 1;
+const JOINT: usize = DIMS[3] * (DIMS[4] - 1) + 1;
 
-/// `ln` of F1, F2 and F3 at a grid node, or `None` if it was not measured.
-#[allow(clippy::cast_precision_loss)]
-fn node(i: [usize; 5]) -> Option<[f32; 3]> {
-    let [_, n1, n2, _, n4] = table::DIMS;
-    let j = if i[4] == n4 - 1 {
-        JOINT - 1
-    } else {
-        i[3] * (n4 - 1) + i[4]
+/// The babble map of the cosine tongue body on one tract
+/// ([`TractModel`](crate::TractModel)): the formants measured over the grid
+/// of shapes, the rough cells, the reachable region and the size
+/// correction, as `examples/babble.rs` measured them on that tract
+/// (`src/inverse_table.rs` for the original tract, `src/inverse_wave_table.rs`
+/// for the anatomical one). Every vowel shape is solved against the tract it
+/// is made on, so a voice reads the map of its own tract
+/// ([`Map::for_tuning`]); the free functions of this module read that of
+/// the default tract ([`Map::DEFAULT`]).
+#[derive(Debug)]
+pub struct Map {
+    f_lo: [f32; 3],
+    f_hi: [f32; 3],
+    nodes: &'static [u8],
+    rough: &'static [u8],
+    reach_f1: (f32, f32),
+    reach_f2: (f32, f32),
+    reach_size: [usize; 2],
+    reach: &'static [u8],
+    size_lengths: &'static [f32; 9],
+    size_correction: &'static [[[f32; 10]; 9]; 3],
+}
+
+impl Map {
+    /// The map of the original tract (`TractModel::Original`).
+    pub const ORIGINAL: Map = Map {
+        f_lo: table::F_LO,
+        f_hi: table::F_HI,
+        nodes: table::NODES,
+        rough: table::ROUGH,
+        reach_f1: table::REACH_F1,
+        reach_f2: table::REACH_F2,
+        reach_size: table::REACH_SIZE,
+        reach: table::REACH,
+        size_lengths: &table::SIZE_LENGTHS,
+        size_correction: &table::SIZE_CORRECTION,
     };
-    let at = 5 * (((i[0] * n1 + i[1]) * n2 + i[2]) * JOINT + j);
-    let bytes = table::NODES.get(at..at + 5)?;
-    let v = bytes
-        .iter()
-        .rev()
-        .fold(0u32, |acc, &c| (acc << 6) | sextet(c));
-    if v & 1023 == INVALID {
-        return None;
+
+    /// The map of the anatomical tract (`TractModel::Anatomical`).
+    pub const ANATOMICAL: Map = Map {
+        f_lo: wave_table::F_LO,
+        f_hi: wave_table::F_HI,
+        nodes: wave_table::NODES,
+        rough: wave_table::ROUGH,
+        reach_f1: wave_table::REACH_F1,
+        reach_f2: wave_table::REACH_F2,
+        reach_size: wave_table::REACH_SIZE,
+        reach: wave_table::REACH,
+        size_lengths: &wave_table::SIZE_LENGTHS,
+        size_correction: &wave_table::SIZE_CORRECTION,
+    };
+
+    /// The map of the tract of [`Tuning::DEFAULT`](crate::Tuning::DEFAULT).
+    pub const DEFAULT: &'static Map = Map::of(crate::TractModel::of(&crate::Tuning::DEFAULT));
+
+    /// The map of `tract`.
+    #[must_use]
+    pub const fn of(tract: crate::TractModel) -> &'static Map {
+        match tract {
+            crate::TractModel::Original => &Map::ORIGINAL,
+            crate::TractModel::Anatomical => &Map::ANATOMICAL,
+        }
     }
-    let mut f = [0.0f32; 3];
-    for (k, f) in f.iter_mut().enumerate() {
-        let q = ((v >> (10 * k)) & 1023) as f32;
-        *f = table::F_LO[k] + (table::F_HI[k] - table::F_LO[k]) * q / TOP;
+
+    /// The map of the tract a voice of `tuning` has
+    /// ([`TractModel::of`](crate::TractModel::of)).
+    #[must_use]
+    pub const fn for_tuning(tuning: &crate::Tuning) -> &'static Map {
+        Map::of(crate::TractModel::of(tuning))
     }
-    Some(f)
+
+    /// Range of F1, Hz, that the map covers (see [`Map::reachable`]).
+    #[must_use]
+    pub const fn f1_range(&self) -> (f32, f32) {
+        self.reach_f1
+    }
+
+    /// Range of F2, Hz, that the map covers (see [`Map::reachable`]).
+    #[must_use]
+    pub const fn f2_range(&self) -> (f32, f32) {
+        self.reach_f2
+    }
+
+    /// `ln` of F1, F2 and F3 at a grid node, or `None` if it was not
+    /// measured.
+    #[allow(clippy::cast_precision_loss)]
+    fn node(&self, i: [usize; 5]) -> Option<[f32; 3]> {
+        let [_, n1, n2, _, n4] = DIMS;
+        let j = if i[4] == n4 - 1 {
+            JOINT - 1
+        } else {
+            i[3] * (n4 - 1) + i[4]
+        };
+        let at = 5 * (((i[0] * n1 + i[1]) * n2 + i[2]) * JOINT + j);
+        let bytes = self.nodes.get(at..at + 5)?;
+        let v = bytes
+            .iter()
+            .rev()
+            .fold(0u32, |acc, &c| (acc << 6) | sextet(c));
+        if v & 1023 == INVALID {
+            return None;
+        }
+        let mut f = [0.0f32; 3];
+        for (k, f) in f.iter_mut().enumerate() {
+            let q = ((v >> (10 * k)) & 1023) as f32;
+            *f = self.f_lo[k] + (self.f_hi[k] - self.f_lo[k]) * q / TOP;
+        }
+        Some(f)
+    }
+
+    /// Whether a grid cell's interior disagrees with its corners (the
+    /// formants jump or bend there), so it is not used.
+    fn rough(&self, c: [usize; 5]) -> bool {
+        let d = DIMS;
+        let n = (((c[0] * (d[1] - 1) + c[1]) * (d[2] - 1) + c[2]) * (d[3] - 1) + c[3]) * (d[4] - 1)
+            + c[4];
+        bit(self.rough, n)
+    }
 }
 
 /// Bit `n` of a base-64 bit field.
@@ -274,15 +383,6 @@ fn bit(field: &[u8], n: usize) -> bool {
     field
         .get(n / 6)
         .is_some_and(|&c| (sextet(c) >> (n % 6)) & 1 == 1)
-}
-
-/// Whether a grid cell's interior disagrees with its corners (the
-/// formants jump or bend there), so it is not used.
-fn rough(c: [usize; 5]) -> bool {
-    let d = table::DIMS;
-    let n =
-        (((c[0] * (d[1] - 1) + c[1]) * (d[2] - 1) + c[2]) * (d[3] - 1) + c[3]) * (d[4] - 1) + c[4];
-    bit(table::ROUGH, n)
 }
 
 /// Interpolated `ln` formants at a point and their derivatives with respect
@@ -308,13 +408,13 @@ fn locate(x: f32, n: usize) -> (usize, f32) {
 /// The table's formants at `x`, interpolated between the 32 corners of the
 /// cell holding it; `None` in an unmeasured or rough cell.
 #[allow(clippy::cast_precision_loss)]
-fn eval(x: &[f32; 5]) -> Option<Eval> {
+fn eval(map: &Map, x: &[f32; 5]) -> Option<Eval> {
     let mut base = [0usize; 5];
     let mut frac = [0.0f32; 5];
     for d in 0..5 {
-        (base[d], frac[d]) = locate(x[d], table::DIMS[d]);
+        (base[d], frac[d]) = locate(x[d], DIMS[d]);
     }
-    if rough(base) {
+    if map.rough(base) {
         return None;
     }
     let mut out = Eval {
@@ -337,12 +437,12 @@ fn eval(x: &[f32; 5]) -> Option<Eval> {
                 }
             }
         }
-        let f = node(i)?;
+        let f = map.node(i)?;
         for k in 0..3 {
             out.f[k] += w * f[k];
             for d in 0..5 {
                 let sign = if (corner >> d) & 1 == 1 { 1.0 } else { -1.0 };
-                out.g[k][d] += sign * part[d] * f[k] * (table::DIMS[d] - 1) as f32;
+                out.g[k][d] += sign * part[d] * f[k] * (DIMS[d] - 1) as f32;
             }
         }
     }
@@ -353,16 +453,26 @@ fn eval(x: &[f32; 5]) -> Option<Eval> {
 /// tract length; `None` where the map has no data (a few extreme shapes)
 /// and for a shape whose tongue root is not at rest (the map is measured
 /// with it at rest, and what the root does depends on the whole shape).
+///
+/// On the default tract's map ([`Map::predict`]).
 #[must_use]
 pub fn predict(shape: &Shape) -> Option<[f32; 3]> {
-    if shape.modes.is_some() {
-        // A shape of the modal body: its own map.
-        return modal::predict(shape);
+    Map::DEFAULT.predict(shape)
+}
+
+impl Map {
+    /// [`predict`] on this map.
+    #[must_use]
+    pub fn predict(&self, shape: &Shape) -> Option<[f32; 3]> {
+        if shape.modes.is_some() {
+            // A shape of the modal body: its own map.
+            return modal::predict(shape);
+        }
+        if shape.pharynx.abs() > f32::EPSILON {
+            return None;
+        }
+        eval(self, &shape.coordinates()).map(|e| e.f.map(exp))
     }
-    if shape.pharynx.abs() > f32::EPSILON {
-        return None;
-    }
-    eval(&shape.coordinates()).map(|e| e.f.map(exp))
 }
 
 // ----- solving -----------------------------------------------------------
@@ -387,13 +497,14 @@ const STARTS: usize = 8;
 
 /// What the solver aims for: `ln` formants, their weights, and the shape to
 /// stay near.
-struct Goal {
+struct Goal<'a> {
+    map: &'a Map,
     t: [f32; 3],
     w: [f32; 3],
     near: Option<[f32; 5]>,
 }
 
-impl Goal {
+impl Goal<'_> {
     /// Cost of shape `x` with interpolated formants `f`.
     fn cost(&self, x: &[f32; 5], f: &[f32; 3]) -> f32 {
         let mut c = 0.0;
@@ -415,7 +526,7 @@ impl Goal {
     /// Damped Gauss-Newton descent from `x`, kept inside `0‥1` and out of
     /// rough cells. Returns the shape reached and its cost.
     fn refine(&self, mut x: [f32; 5]) -> Option<([f32; 5], f32)> {
-        let mut e = eval(&x)?;
+        let mut e = eval(self.map, &x)?;
         let mut cost = self.cost(&x, &e.f);
         let mut damping = 1.0e-3f32;
         let pull = EASE + if self.near.is_some() { STAY } else { 0.0 };
@@ -460,7 +571,7 @@ impl Goal {
                 for d in 0..5 {
                     y[d] = (x[d] + step[d]).clamp(0.0, 1.0);
                 }
-                if let Some(ey) = eval(&y) {
+                if let Some(ey) = eval(self.map, &y) {
                     let cy = self.cost(&y, &ey.f);
                     if cy < cost {
                         let size = (0..5).fold(0.0f32, |m, d| m.max((y[d] - x[d]).abs()));
@@ -511,8 +622,8 @@ fn solve5(mut a: [[f32; 5]; 5], mut b: [f32; 5]) -> Option<[f32; 5]> {
 /// A point just inside a cell next to grid node `i`, in the first cell
 /// around it that is not rough; `None` if all of them are.
 #[allow(clippy::cast_precision_loss)]
-fn start_at(i: [usize; 5]) -> Option<[f32; 5]> {
-    let d = table::DIMS;
+fn start_at(map: &Map, i: [usize; 5]) -> Option<[f32; 5]> {
+    let d = DIMS;
     for around in 0..32usize {
         let mut cell = [0usize; 5];
         let mut x = [0.0f32; 5];
@@ -527,7 +638,7 @@ fn start_at(i: [usize; 5]) -> Option<[f32; 5]> {
             let nudge = if below { -0.01 } else { 0.01 };
             x[k] = ((i[k] as f32 + nudge) / (d[k] - 1) as f32).clamp(0.0, 1.0);
         }
-        if fits && !rough(cell) && eval(&x).is_some() {
+        if fits && !map.rough(cell) && eval(map, &x).is_some() {
             return Some(x);
         }
     }
@@ -537,7 +648,7 @@ fn start_at(i: [usize; 5]) -> Option<[f32; 5]> {
 /// Grid nodes with the lowest cost, at most one per neighbourhood.
 #[allow(clippy::cast_precision_loss)]
 fn candidates(goal: &Goal) -> [Option<(f32, [usize; 5])>; STARTS] {
-    let d = table::DIMS;
+    let d = DIMS;
     let mut best: [Option<(f32, [usize; 5])>; STARTS] = [None; STARTS];
     let coord = |k: usize, i: usize| i as f32 / (d[k] - 1) as f32;
     for i0 in 0..d[0] {
@@ -550,7 +661,7 @@ fn candidates(goal: &Goal) -> [Option<(f32, [usize; 5])>; STARTS] {
                             continue;
                         }
                         let i = [i0, i1, i2, i3, i4];
-                        let Some(f) = node(i) else { continue };
+                        let Some(f) = goal.map.node(i) else { continue };
                         let x = [0, 1, 2, 3, 4].map(|k| coord(k, i[k]));
                         let c = goal.cost(&x, &f);
                         offer(&mut best, c, i);
@@ -605,21 +716,36 @@ fn finite_or(v: f32, fallback: f32) -> f32 {
 ///
 /// A `near` shape of the modal body ([`Shape::modes`]) solves on the modal
 /// body ([`modal::solve`]).
+///
+/// On the default tract's map ([`Map::solve`]).
 #[must_use]
 pub fn solve(f1: f32, f2: f32, f3: Option<f32>, near: Option<&Shape>) -> Shape {
+    Map::DEFAULT.solve(f1, f2, f3, near)
+}
+
+impl Map {
+    /// [`solve`] on this map.
+    #[must_use]
+    pub fn solve(&self, f1: f32, f2: f32, f3: Option<f32>, near: Option<&Shape>) -> Shape {
+        solve_on(self, f1, f2, f3, near)
+    }
+}
+
+fn solve_on(map: &Map, f1: f32, f2: f32, f3: Option<f32>, near: Option<&Shape>) -> Shape {
     if near.is_some_and(|s| s.modes.is_some()) {
         return modal::solve(f1, f2, f3, near);
     }
-    let (f1, f2) = nearest_reachable(finite_or(f1, 500.0), finite_or(f2, 1500.0));
+    let (f1, f2) = map.nearest_reachable(finite_or(f1, 500.0), finite_or(f2, 1500.0));
     let f3 = f3.filter(|v| v.is_finite() && *v > 0.0);
     let goal = Goal {
+        map,
         t: [ln(f1), ln(f2), ln(f3.unwrap_or(2500.0))],
         w: [1.0, 1.0, if f3.is_some() { F3_WEIGHT } else { 0.0 }],
         near: near.map(Shape::coordinates),
     };
     let mut best: Option<([f32; 5], f32)> = goal.near.and_then(|n| goal.refine(n));
     for (_, i) in candidates(&goal).into_iter().flatten() {
-        let Some(found) = start_at(i).and_then(|x| goal.refine(x)) else {
+        let Some(found) = start_at(map, i).and_then(|x| goal.refine(x)) else {
             continue;
         };
         if best.is_none_or(|b| found.1 < b.1) {
@@ -652,8 +778,8 @@ fn sane_length(length: f32) -> f32 {
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn correction(k: usize, ln_native: f32, length: f32) -> f32 {
-    let lengths = &table::SIZE_LENGTHS;
+fn correction(map: &Map, k: usize, ln_native: f32, length: f32) -> f32 {
+    let lengths = map.size_lengths;
     let n = lengths.len();
     let l = length.clamp(lengths[0], lengths[n - 1]);
     let a = lengths
@@ -662,9 +788,9 @@ fn correction(k: usize, ln_native: f32, length: f32) -> f32 {
         .unwrap_or(0)
         .min(n - 2);
     let s = (l - lengths[a]) / (lengths[a + 1] - lengths[a]);
-    let row = &table::SIZE_CORRECTION[k];
+    let row = &map.size_correction[k];
     let bins = row[0].len();
-    let t = ((ln_native - table::F_LO[k]) / (table::F_HI[k] - table::F_LO[k])).clamp(0.0, 1.0)
+    let t = ((ln_native - map.f_lo[k]) / (map.f_hi[k] - map.f_lo[k])).clamp(0.0, 1.0)
         * (bins - 1) as f32;
     let b = (t as usize).min(bins - 2);
     let u = t - b as f32;
@@ -673,18 +799,32 @@ fn correction(k: usize, ln_native: f32, length: f32) -> f32 {
 }
 
 /// Formant `k` (0 for F1) of a tract of `length`, Hz, for a shape whose
-/// formant at the native length is `native`.
-fn from_native(k: usize, native: f32, length: f32) -> f32 {
-    native / length * exp(correction(k, ln(native), length))
+/// formant at the native length is `native`, with the size correction of
+/// `map`.
+fn from_native_on(map: &Map, k: usize, native: f32, length: f32) -> f32 {
+    native / length * exp(correction(map, k, ln(native), length))
 }
 
 /// The native-length formant `k` that becomes `hz` at `length`.
-fn to_native(k: usize, hz: f32, length: f32) -> f32 {
+fn to_native_on(map: &Map, k: usize, hz: f32, length: f32) -> f32 {
     let mut native = hz * length;
     for _ in 0..4 {
-        native = hz * length * exp(-correction(k, ln(native), length));
+        native = hz * length * exp(-correction(map, k, ln(native), length));
     }
     native
+}
+
+/// [`from_native_on`] with the original tract's size correction, which the
+/// modal map uses (`inverse::modal`, measured on modal shapes by the run
+/// that made it).
+fn from_native(k: usize, native: f32, length: f32) -> f32 {
+    from_native_on(&Map::ORIGINAL, k, native, length)
+}
+
+/// [`to_native_on`] with the original tract's size correction (see
+/// [`from_native`]).
+fn to_native(k: usize, hz: f32, length: f32) -> f32 {
+    to_native_on(&Map::ORIGINAL, k, hz, length)
 }
 
 /// Formants of a tract of `length`, Hz, for a shape whose formants at the
@@ -693,17 +833,18 @@ fn to_native(k: usize, hz: f32, length: f32) -> f32 {
 /// Formants scale nearly as `1 / length`; the yielding walls of the
 /// physical tract add a resonance that does not scale, which lifts low
 /// formants of short tracts and lowers those of long ones by a few per
-/// cent. This includes that correction, measured by `examples/babble.rs`.
+/// cent. This includes that correction, measured by `examples/babble.rs`
+/// on the default tract ([`Map::formants_at_length`]).
 #[must_use]
 pub fn formants_at_length(native: [f32; 3], tract_length: f32) -> [f32; 3] {
-    let l = sane_length(tract_length);
-    [0, 1, 2].map(|k| from_native(k, native[k], l))
+    Map::DEFAULT.formants_at_length(native, tract_length)
 }
 
 /// [`solve`] for a voice whose tract length is `tract_length` (as given to
 /// [`Trombone::set_tract_length`](crate::Trombone::set_tract_length)):
 /// the formants are converted to the native length first, with the
-/// correction described at [`formants_at_length`].
+/// correction described at [`formants_at_length`]. On the default tract's
+/// map ([`Map::solve_for`]).
 #[must_use]
 pub fn solve_for(
     f1: f32,
@@ -712,13 +853,7 @@ pub fn solve_for(
     near: Option<&Shape>,
     tract_length: f32,
 ) -> Shape {
-    let l = sane_length(tract_length);
-    let f1 = to_native(0, finite_or(f1, 500.0 / l), l);
-    let f2 = to_native(1, finite_or(f2, 1500.0 / l), l);
-    let f3 = f3
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .map(|v| to_native(2, v, l));
-    solve(f1, f2, f3, near)
+    Map::DEFAULT.solve_for(f1, f2, f3, near, tract_length)
 }
 
 // ----- reachability ------------------------------------------------------
@@ -737,82 +872,136 @@ fn axis_hz(pos: f32, range: (f32, f32), cells: usize) -> f32 {
     exp(ln(range.0) + (ln(range.1) - ln(range.0)) * pos / n)
 }
 
-/// Whether reachability cell `(a, b)` (F1, F2) is reachable.
-fn reach_cell(a: usize, b: usize) -> bool {
-    bit(table::REACH, a * table::REACH_SIZE[1] + b)
-}
-
 /// Whether the physical engine can make F1 `f1` and F2 `f2` (Hz) at the
 /// native tract length, so that [`solve`] meets them.
 ///
 /// The reachable region lies inside [`F1_RANGE`] × [`F2_RANGE`]; it is
 /// stored as a grid of about 2.5 % per cell, a little inside the edge of
-/// what the engine can do.
+/// what the engine can do. On the default tract's map ([`Map::reachable`]).
 #[must_use]
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn reachable(f1: f32, f2: f32) -> bool {
-    if !(f1.is_finite() && f2.is_finite() && f1 > 0.0 && f2 > 0.0) {
-        return false;
-    }
-    let [na, nb] = table::REACH_SIZE;
-    let a = axis(f1, F1_RANGE, na);
-    let b = axis(f2, F2_RANGE, nb);
-    #[allow(clippy::cast_precision_loss)]
-    let inside = (0.0..na as f32).contains(&a) && (0.0..nb as f32).contains(&b);
-    inside && reach_cell(a as usize, b as usize)
+    Map::DEFAULT.reachable(f1, f2)
 }
 
 /// The reachable point (see [`reachable`]) nearest to F1 `f1` and F2 `f2`,
 /// Hz, with distance measured on a logarithmic frequency scale; the target
-/// itself if it is reachable.
+/// itself if it is reachable. On the default tract's map
+/// ([`Map::nearest_reachable`]).
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn nearest_reachable(f1: f32, f2: f32) -> (f32, f32) {
-    let f1 = finite_or(f1, 500.0);
-    let f2 = finite_or(f2, 1500.0);
-    if reachable(f1, f2) {
-        return (f1, f2);
-    }
-    let [na, nb] = table::REACH_SIZE;
-    let a = axis(f1, F1_RANGE, na);
-    let b = axis(f2, F2_RANGE, nb);
-    // Cells per unit of ln frequency, to measure distance in ln Hz.
-    let sa = (ln(F1_RANGE.1) - ln(F1_RANGE.0)) / na as f32;
-    let sb = (ln(F2_RANGE.1) - ln(F2_RANGE.0)) / nb as f32;
-    let mut best: Option<(f32, f32, f32)> = None;
-    for i in 0..na {
-        for j in 0..nb {
-            if !reach_cell(i, j) {
-                continue;
-            }
-            // Nearest point of the cell, a hair inside it.
-            let pa = a.clamp(i as f32 + 0.02, i as f32 + 0.98);
-            let pb = b.clamp(j as f32 + 0.02, j as f32 + 0.98);
-            let dist = ((pa - a) * sa) * ((pa - a) * sa) + ((pb - b) * sb) * ((pb - b) * sb);
-            if best.is_none_or(|(d, _, _)| dist < d) {
-                best = Some((dist, pa, pb));
-            }
-        }
-    }
-    best.map_or((f1, f2), |(_, pa, pb)| {
-        (axis_hz(pa, F1_RANGE, na), axis_hz(pb, F2_RANGE, nb))
-    })
+    Map::DEFAULT.nearest_reachable(f1, f2)
 }
 
 /// [`reachable`] for a voice whose tract length is `tract_length`.
 #[must_use]
 pub fn reachable_for(f1: f32, f2: f32, tract_length: f32) -> bool {
-    let l = sane_length(tract_length);
-    reachable(to_native(0, f1, l), to_native(1, f2, l))
+    Map::DEFAULT.reachable_for(f1, f2, tract_length)
 }
 
 /// [`nearest_reachable`] for a voice whose tract length is `tract_length`.
 #[must_use]
 pub fn nearest_reachable_for(f1: f32, f2: f32, tract_length: f32) -> (f32, f32) {
-    let l = sane_length(tract_length);
-    let (a, b) = nearest_reachable(
-        to_native(0, finite_or(f1, 500.0 / l), l),
-        to_native(1, finite_or(f2, 1500.0 / l), l),
-    );
-    (from_native(0, a, l), from_native(1, b, l))
+    Map::DEFAULT.nearest_reachable_for(f1, f2, tract_length)
+}
+
+impl Map {
+    /// [`formants_at_length`] with this map's size correction.
+    #[must_use]
+    pub fn formants_at_length(&self, native: [f32; 3], tract_length: f32) -> [f32; 3] {
+        let l = sane_length(tract_length);
+        [0, 1, 2].map(|k| from_native_on(self, k, native[k], l))
+    }
+
+    /// [`solve_for`] on this map.
+    #[must_use]
+    pub fn solve_for(
+        &self,
+        f1: f32,
+        f2: f32,
+        f3: Option<f32>,
+        near: Option<&Shape>,
+        tract_length: f32,
+    ) -> Shape {
+        let l = sane_length(tract_length);
+        let f1 = to_native_on(self, 0, finite_or(f1, 500.0 / l), l);
+        let f2 = to_native_on(self, 1, finite_or(f2, 1500.0 / l), l);
+        let f3 = f3
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| to_native_on(self, 2, v, l));
+        self.solve(f1, f2, f3, near)
+    }
+
+    /// Whether reachability cell `(a, b)` (F1, F2) is reachable.
+    fn reach_cell(&self, a: usize, b: usize) -> bool {
+        bit(self.reach, a * self.reach_size[1] + b)
+    }
+
+    /// [`reachable`] on this map.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn reachable(&self, f1: f32, f2: f32) -> bool {
+        if !(f1.is_finite() && f2.is_finite() && f1 > 0.0 && f2 > 0.0) {
+            return false;
+        }
+        let [na, nb] = self.reach_size;
+        let a = axis(f1, self.reach_f1, na);
+        let b = axis(f2, self.reach_f2, nb);
+        #[allow(clippy::cast_precision_loss)]
+        let inside = (0.0..na as f32).contains(&a) && (0.0..nb as f32).contains(&b);
+        inside && self.reach_cell(a as usize, b as usize)
+    }
+
+    /// [`nearest_reachable`] on this map.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn nearest_reachable(&self, f1: f32, f2: f32) -> (f32, f32) {
+        let f1 = finite_or(f1, 500.0);
+        let f2 = finite_or(f2, 1500.0);
+        if self.reachable(f1, f2) {
+            return (f1, f2);
+        }
+        let (r1, r2) = (self.reach_f1, self.reach_f2);
+        let [na, nb] = self.reach_size;
+        let a = axis(f1, r1, na);
+        let b = axis(f2, r2, nb);
+        // Cells per unit of ln frequency, to measure distance in ln Hz.
+        let sa = (ln(r1.1) - ln(r1.0)) / na as f32;
+        let sb = (ln(r2.1) - ln(r2.0)) / nb as f32;
+        let mut best: Option<(f32, f32, f32)> = None;
+        for i in 0..na {
+            for j in 0..nb {
+                if !self.reach_cell(i, j) {
+                    continue;
+                }
+                // Nearest point of the cell, a hair inside it.
+                let pa = a.clamp(i as f32 + 0.02, i as f32 + 0.98);
+                let pb = b.clamp(j as f32 + 0.02, j as f32 + 0.98);
+                let dist = ((pa - a) * sa) * ((pa - a) * sa) + ((pb - b) * sb) * ((pb - b) * sb);
+                if best.is_none_or(|(d, _, _)| dist < d) {
+                    best = Some((dist, pa, pb));
+                }
+            }
+        }
+        best.map_or((f1, f2), |(_, pa, pb)| {
+            (axis_hz(pa, r1, na), axis_hz(pb, r2, nb))
+        })
+    }
+
+    /// [`reachable_for`] on this map.
+    #[must_use]
+    pub fn reachable_for(&self, f1: f32, f2: f32, tract_length: f32) -> bool {
+        let l = sane_length(tract_length);
+        self.reachable(to_native_on(self, 0, f1, l), to_native_on(self, 1, f2, l))
+    }
+
+    /// [`nearest_reachable_for`] on this map.
+    #[must_use]
+    pub fn nearest_reachable_for(&self, f1: f32, f2: f32, tract_length: f32) -> (f32, f32) {
+        let l = sane_length(tract_length);
+        let (a, b) = self.nearest_reachable(
+            to_native_on(self, 0, finite_or(f1, 500.0 / l), l),
+            to_native_on(self, 1, finite_or(f2, 1500.0 / l), l),
+        );
+        (from_native_on(self, 0, a, l), from_native_on(self, 1, b, l))
+    }
 }

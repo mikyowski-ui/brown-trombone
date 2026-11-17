@@ -744,17 +744,19 @@ impl Tract {
         self.jaw && self.motion.anatomy.tongue_model >= 0.5
     }
 
-    /// First cell the modal body shapes: above the tube over the folds and
-    /// its ramp (`AnatomyConfig::epilarynx_cells`, `epilarynx_flare_cells`;
-    /// a cell the tube's top falls in is the tube's), never below the first
-    /// cell the modes are measured over. The measured body has a lower
-    /// pharynx of its own, which takes the place of the epilarynx's uniform
-    /// flare; the larynx slide (cells 8 and 9, `larynx_travel`) takes their
-    /// mean area.
+    /// First cell the modal body shapes: above the tube over the folds
+    /// (`AnatomyConfig::epilarynx_cells`; a cell the tube's top falls in is
+    /// the tube's), never below the first cell the modes are measured over.
+    /// The measured body has a lower pharynx of its own, flare included
+    /// (the speaker's tube flares over sections 5 to 8), which takes the
+    /// place of the epilarynx's flare and its ramp
+    /// (`epilarynx_flare_cells`): a ramp does not change the modal body;
+    /// the larynx slide (cells 8 and 9, `larynx_travel`) takes their mean
+    /// area.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn modal_from(&self) -> usize {
         let a = &self.motion.anatomy;
-        let end = a.epilarynx_cells.max(0.0) + a.epilarynx_flare_cells.max(0.0);
+        let end = a.epilarynx_cells.max(0.0);
         // Rounded up (no `ceil` without `std`).
         let whole = end as usize;
         #[allow(clippy::cast_precision_loss)]

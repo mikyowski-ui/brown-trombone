@@ -432,10 +432,7 @@ fn mimic_gestures_replay_too() {
     let ear = rig.ear.clone().unwrap();
     let shapes = [Phoneme::Aa, Phoneme::Iy, Phoneme::Uw];
     for k in 0..60 {
-        let shape = crate::app::CHART_VOWELS
-            .iter()
-            .find(|v| v.1 == shapes[k / 20])
-            .map(|v| v.2);
+        let shape = shapes[k / 20].physical_shape(1.0);
         #[allow(clippy::cast_precision_loss)]
         let gesture = Gesture {
             voiced: k % 20 < 16,

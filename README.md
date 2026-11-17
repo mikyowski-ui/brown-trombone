@@ -967,13 +967,38 @@ as the model goes:
   wrong vowels; most are /ə/ heard as /ɪ æ/ and /ɔ ɑ/ heard as /ɑ æ/).
   The tables are solved per tract as well: a voice with the
   lengthened tract (`lip_horn` or `larynx_travel` above 0, or the tube
-  above the folds off its defaults) reads
+  above the folds off the original's) reads
   `src/vowel_size_wave_table.rs` or `src/vowel_modes_wave_table.rs`
-  (`vowel_targets::lengthened`), solved by
+  (`vowel_targets::lengthened`, `TractModel::of`), solved by
   `vowel_size -- --lengthened --both`; `babble -- --modal --lengthened`
   measures the modal body's babble map (`inverse::modal`), used by `mimic`
   (`Mimic::set_modal`), Formant Lock and a followed speaker's vowels on a
   modal voice.
+- **Two tracts, each with its own tables and map (wave 2).**
+  `TractModel::Original` is the tract above; `TractModel::Anatomical`
+  (`Tuning::with_tract`) is the lip horn of 1.2 cm, the larynx's full
+  travel lowered 0.5 cm in rounded vowels, and a tube of four cells above
+  the folds that flares over the next four (`epilarynx_flare_cells` 4), as
+  the measured speaker's narrow first four sections flare over sections 5
+  to 8 (Story 2008; the mean of his eleven vowels there, scaled to the
+  engine, is 0.63, 0.90, 1.08 and 1.05 cm², the ramp's 0.58, 0.85, 1.12
+  and 1.39). Opening in a step into the 1.52 cm² of the original's lower
+  pharynx, the four-cell tube put 1.2 cm³ under the open vowels' tongue
+  and their F1 fell 3 to 6 % on the same shapes (/ɑ/ 780 Hz with seven
+  cells of tube, 757 with four, 771 with the ramp); moving the piriform
+  sinuses to the tube's top did not help (/ɑ/ 741 Hz: their 2.5 cm³ is
+  as much compliance there). Solved again on that tract, with an open
+  vowel's narrowing allowed down to cell 8 and the tongue no lower than
+  3.4, every vowel meets its F1 and F2 within 3 % at every size (/ɑ/ was
+  up to 5 % short, /ɔ ɔɪ aɪ aʊ/ 3 to 4 %), and the whisper's click into
+  the /n/ of "British and", 6.6 times its loudest vowel sample with /æ/'s
+  tongue at its lowest, is gone (1.6, as the original tract's 1.3). Each
+  tract has a babble map of the cosine body (`inverse::Map::for_tuning`;
+  `babble -- --lengthened` writes `src/inverse_wave_table.rs`, measured
+  with the larynx at rest as `Trombone::set_shape` holds a shape), which
+  `Mimic::set_tract`, a followed speaker's vowels, `say --vowels` and the
+  app read; the free functions of `inverse` read the default tract's.
+  The gates name the tract they hold.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 

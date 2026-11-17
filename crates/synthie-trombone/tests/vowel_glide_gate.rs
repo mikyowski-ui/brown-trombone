@@ -419,11 +419,20 @@ fn the_tongue_root_shapes_the_pharynx_and_stays_with_the_body() {
     println!("pharynx (cell 13) under /s/ after IH: {with:.3} with its root, {without:.3} at rest");
     assert!(with < 0.95 * without);
     // A widened pharynx lowers F1 and a narrowed one raises it, as an
-    // advanced and a retracted tongue root do.
+    // advanced and a retracted tongue root do: on the original tract's /ɪ/,
+    // which has no narrowing along the tongue (the anatomical tract's /ɪ/
+    // narrows the pharynx at cell 14, where the root's widening is fullest,
+    // and the root moves its F1 by 15 Hz either way).
+    let original =
+        synthie_trombone::Tuning::DEFAULT.with_tract(synthie_trombone::TractModel::Original);
     let f1 = |pharynx: f32| {
-        let mut shape = Phoneme::Ih.physical_shape(1.0).expect("a shape");
+        let mut shape = Phoneme::Ih
+            .articulation()
+            .physical_shape_with(1.0, &original)
+            .expect("a shape");
         shape.pharynx = pharynx;
         let mut t = Trombone::new(SR);
+        t.set_tuning(&original);
         t.set_engine(Engine::Physical);
         t.set_shape(&shape);
         t.settle();

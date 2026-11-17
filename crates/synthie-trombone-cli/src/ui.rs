@@ -15,7 +15,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
 use ratatui::widgets::{Padding, Paragraph};
-use synthie_trombone::inverse;
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
 use synthie_trombone::{Tier, TierActivity};
 use synthie_ui::theme::{
@@ -757,6 +756,7 @@ fn short_hz(hz: f32) -> String {
 fn draw_chart(frame: &mut Frame, area: Rect, app: &mut App) {
     let range = app.chart_range();
     let length = app.settings.tract_length;
+    let map = app.map();
     let now = app.lock_formants();
     // The longest title that fits between the corners, glyph and padding.
     let room = usize::from(area.width.saturating_sub(6));
@@ -795,7 +795,7 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &mut App) {
     for j in 0..h {
         for i in 0..w {
             let (f1, f2) = range.hz((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32);
-            reach[j * w + i] = inverse::reachable_for(f1, f2, length);
+            reach[j * w + i] = map.reachable_for(f1, f2, length);
         }
     }
     let at = |i: isize, j: isize| {
