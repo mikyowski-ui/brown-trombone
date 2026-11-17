@@ -368,6 +368,8 @@ fn fillers_are_words_to_the_front_end_and_hold_low_and_level() {
     assert_eq!(Filler::from_word("hmm"), Some(Filler::Hmm));
     assert_eq!(Filler::from_word("umbrella"), None);
     let mut settings = deep().with_engine(Engine::Physical);
+    assert_eq!(settings.tuning.prosody.fillers, 1.0, "on by default");
+    settings.tuning.prosody.fillers = 0.0;
     let off = Utterance::from_text("I think um we should.", &settings.prosody());
     settings.tuning.prosody.fillers = 1.0;
     let on = Utterance::from_text("I think um we should.", &settings.prosody());

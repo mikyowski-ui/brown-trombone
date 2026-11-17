@@ -169,7 +169,7 @@
     "breath_time": {"lo": 0.08, "hi": 0.3, "default": 0.15, "pass": "b"},
     "final_fry": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
     "fry_time": {"lo": 0.05, "hi": 0.25, "default": 0.08, "pass": "b"},
-    "fillers": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+    "fillers": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
     "filler_length": {"lo": 0.2, "hi": 1, "default": 0.42, "pass": "b"},
     "filler_pause": {"lo": 0, "hi": 1, "default": 0.3, "pass": "b"},
     "filler_pitch": {"lo": 0.6, "hi": 1, "default": 0.86, "pass": "a"}

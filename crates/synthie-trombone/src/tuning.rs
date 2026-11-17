@@ -1477,12 +1477,15 @@ tuning! {
         /// single sentences.
         fry_time = 0.08, 0.05..=0.25, B;
 
-        // ----- hesitation fillers (wave 3, w3-vocal; `fillers` 0 off) ---------------
+        // ----- hesitation fillers (wave 3, w3-vocal; on by default, `fillers` 0 off) ---
 
         /// Whether "uh", "um", "hmm", "er" and "mm" are spoken as hesitation
-        /// fillers (`1`, physical engine): long, low and level, the schwa held
-        /// and the nasal hummed, with a pause after; `0` speaks them as words.
-        fillers = 0.0, 0.0..=1.0, A;
+        /// fillers (`1`, the default; physical engine): long, low and level,
+        /// the schwa held and the nasal hummed, with a pause after; `0` speaks
+        /// them as words (with fillers, Whisper wrote "um" and "uh" where the
+        /// text has them; spoken as words, it left "um" out and ran "we, uh,
+        /// go" into other words).
+        fillers = 1.0, 0.0..=1.0, A;
         /// Seconds a filler is held at the speaking rate 1: its vowel, or its
         /// vowel and nasal together ("um" 45 % of it the schwa, the rest the
         /// hum). Filled pauses run from 0.2 to over a second in
@@ -1664,9 +1667,11 @@ impl Tuning {
     /// the pauses between sentences but not before the utterance
     /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
     /// in creak over their last 0.08 s of voice (`final_fry` 1, `fry_time`
-    /// 0.08). Off: the five numbers as they were before wave 3 (the plain
-    /// sum of the ports, no breaths, modal voice to the end; `breath_first`
-    /// 1 and `fry_time` 0.12, read only when their switch is on).
+    /// 0.08), and "uh", "um" and "hmm" are spoken as hesitation fillers
+    /// (`prosody.fillers` 1). Off: the six numbers as they were before wave 3
+    /// (the plain sum of the ports, no breaths, modal voice to the end, the
+    /// fillers spoken as words; `breath_first` 1 and `fry_time` 0.12, read
+    /// only when their switch is on).
     #[must_use]
     pub const fn with_living_voice(mut self, on: bool) -> Self {
         let p = &mut self.prosody;
@@ -1676,12 +1681,14 @@ impl Tuning {
             p.breath_first = 0.0;
             p.final_fry = 1.0;
             p.fry_time = 0.08;
+            p.fillers = 1.0;
         } else {
             self.anatomy.head_mixdown = 0.0;
             p.breath_intake = 0.0;
             p.breath_first = 1.0;
             p.final_fry = 0.0;
             p.fry_time = 0.12;
+            p.fillers = 0.0;
         }
         self
     }

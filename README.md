@@ -344,7 +344,7 @@ breath after a burst); the physical engine reads the rest as well.
 | prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
 | prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
 | prosody | breaths and creak (wave 3; on by default, `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
-| prosody | hesitation fillers (wave 3B; `fillers` `0` off) | `fillers`, `filler_length`, `filler_pause`, `filler_pitch` |
+| prosody | hesitation fillers (wave 3B; on by default, `fillers` `0` off) | `fillers`, `filler_length`, `filler_pause`, `filler_pitch` |
 
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score
@@ -1244,7 +1244,7 @@ flag of the same name) takes the breath before the utterance as well,
 `--no-breath` takes none, `--fry 0` ends statements in modal voice;
 `VoiceSettings::with_breath(0.0, 0.0)` switches both off for a `Talker`
 or the stream, `Tuning::with_living_voice(false)` all of wave 3 (the
-head's mixdown too). The stream, which compiles a sentence at a time,
+head's mixdown and the hesitation fillers too). The stream, which compiles a sentence at a time,
 opens a sentence with the breath the text's pause would have taken.
 
 **Breathing in.** The lungs may draw below the air's pressure
@@ -1328,7 +1328,7 @@ with wave 3 off) and one lost ("reef", now "cliff").
 With creak, probes creaked too at first and the consonant probe went to
 64.0 %: they no longer do.
 
-### Laughs, sighs, coughs and fillers (wave 3, stage 3B; off by default)
+### Laughs, sighs, coughs and fillers (wave 3, stage 3B)
 
 The physical engine can sigh, laugh, chuckle, clear its throat and cough
 (`Vocalization`; `src/vocal.rs`). Each is a macro that lays gestures on
@@ -1389,7 +1389,8 @@ clicks more than speech does (largest sample step against its 10 ms's
 RMS: 4.6 to 6.6, speech 5.3). Laying one costs about 1 µs; playing it
 costs what speech costs.
 
-**Hesitation fillers** (`ProsodyConfig::fillers`, `0` off): "uh", "um",
+**Hesitation fillers** (`ProsodyConfig::fillers`, on by default; `0` speaks
+them as words, as does `Tuning::with_living_voice(false)`): "uh", "um",
 "hmm", "er" and "mm" (also "uhm", "erm", "hm") are marked by the front end
 and spoken as fillers: a phrase of their own, held `filler_length`
 (0.42 s; "um", "hmm" and "mm" a quarter more, "um" 45 % schwa and the rest
@@ -1398,8 +1399,8 @@ a half (Shriberg & Lickley 1992: clause-internal filled pauses sit low,
 fall a little and linearly), with `filler_pause` (0.3 s; six tenths after
 "uh" and "er") of silence after; "er" is the schwa of "uh" (held as /ɝ/ it
 was heard as "her"). Whisper writes them as "uh", "um" and "hmm" or leaves
-them out. The judge's material has no fillers and no tags: every benchmark
-is the same with them on.
+them out. The judge's material has no fillers and no tags (none of its
+words outside brackets is one): every benchmark is the same with them on.
 
 ## A voice that listens
 

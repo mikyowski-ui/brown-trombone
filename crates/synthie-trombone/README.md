@@ -77,8 +77,9 @@ npc.say("Shall we go on?");
 npc.vocalize(Vocalization::Cough); // now; a sentence being said waits for it
 ```
 
-With `ProsodyConfig::fillers` on, "uh", "um" and "hmm" are spoken as
-hesitation fillers: long, low and level, the hum held, a pause after.
+By default (`ProsodyConfig::fillers` 1) "uh", "um" and "hmm" are spoken
+as hesitation fillers: long, low and level, the hum held, a pause after;
+`fillers` 0 speaks them as words.
 
 ## Instrument and streaming
 
@@ -228,7 +229,8 @@ tongue body and jaw under quick tip and lips; vowels from published
 formants; breath and intonation shaped per phrase; and, since wave 3, a
 breath drawn in the pauses between sentences, creak at the end of a
 statement and the sound of the ports as a head beams them
-(`Tuning::with_living_voice(false)` switches the three off). Choose it per
+(`Tuning::with_living_voice(false)` switches the three off, and the
+hesitation fillers too). Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
