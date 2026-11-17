@@ -605,6 +605,22 @@ tuning! {
         /// cm: at 0.005 the alternation holds from 4 cmH2O; pressed at 0.01 the
         /// folds need 6.
         creak_press = 0.005, 0.0..=0.01, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Peak pressure the lungs build behind the shut folds in a cough, cmH2O
+        /// (physical engine; see `Trombone::vocalize`). People reach 50 to 100
+        /// and more in the chest in a voluntary cough (58 to 214 cmH2O
+        /// intrathoracic); this model holds finite and its output bounded to
+        /// 100 (`tests/vocal_gate.rs`), and at 40, the most a voice's lung
+        /// pressure is ever set to, the burst after the release is some 10 dB
+        /// over the speech around it.
+        cough_pressure = 40.0, 10.0..=100.0, A;
+        /// Peak of each pulse of pressure the lungs push a laugh's call with,
+        /// cmH2O (physical engine): laughter is made by pulses of subglottal
+        /// pressure at some 4 to 5 per second (Luschei et al. 2006), here
+        /// falling to seven tenths of this along the bout as the lungs empty.
+        laugh_pressure = 12.0, 4.0..=30.0, A;
     } tiers {
     } aliases {
     }
@@ -1062,6 +1078,22 @@ tuning! {
         /// 1.4 L/s, as in a quick breath between sentences. A shallower breath
         /// than 3 cmH2O opens it in proportion.
         breath_opening = 0.35, 0.1..=1.0, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Calls per second in a laugh (physical engine; see
+        /// `Trombone::vocalize`): 4.37 in 1,024 bouts of 97 young adults
+        /// (Bachorowski, Smoski & Owren 2001), the intervals between them
+        /// growing towards the end of the bout (here by a fifth).
+        laugh_rate = 4.4, 3.0..=6.0, B;
+        /// Seconds of each call of a laugh after the first (voiced, open-mouth
+        /// calls 0.11 s, with 0.12 s between them, in the same study); the
+        /// first is longer (0.28 against 0.13 s there; here 1.4 times this).
+        /// The lungs' pulse holds for half of it and lets go through the rest,
+        /// the adductors narrowing the glottis with it; the folds sound while
+        /// it blows them and stop by themselves after it, and the breath goes
+        /// out between.
+        laugh_voiced = 0.11, 0.05..=0.2, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1444,6 +1476,32 @@ tuning! {
         /// stage 3A's 0.12 creaks longer at about a point of phoneme error on
         /// single sentences.
         fry_time = 0.08, 0.05..=0.25, B;
+
+        // ----- hesitation fillers (wave 3, w3-vocal; on by default, `fillers` 0 off) ---
+
+        /// Whether "uh", "um", "hmm", "er" and "mm" are spoken as hesitation
+        /// fillers (`1`, the default; physical engine): long, low and level,
+        /// the schwa held and the nasal hummed, with a pause after; `0` speaks
+        /// them as words (with fillers, Whisper wrote "um" and "uh" where the
+        /// text has them; spoken as words, it left "um" out and ran "we, uh,
+        /// go" into other words).
+        fillers = 1.0, 0.0..=1.0, A;
+        /// Seconds a filler is held at the speaking rate 1: its vowel, or its
+        /// vowel and nasal together ("um" 45 % of it the schwa, the rest the
+        /// hum). Filled pauses run from 0.2 to over a second in
+        /// conversation, "um" longer than "uh" (Clark & Fox Tree 2002); here
+        /// "uh" and "er" take this, "um", "hmm" and "mm" a quarter more.
+        filler_length = 0.42, 0.2..=1.0, B;
+        /// Seconds of silence after a filler before the speech goes on ("um"
+        /// leaves a longer delay after it than "uh", Clark & Fox Tree 2002:
+        /// "uh" takes six tenths of this), unless a pause is there already.
+        filler_pause = 0.3, 0.0..=1.0, B;
+        /// Pitch of a filler as a share of the voice's baseline, at its start;
+        /// it falls a semitone and a half to its end. Clause-internal filled
+        /// pauses lie a fixed share (0.6) of the way down from the peak before
+        /// them to the speaker's lowest pitch, and fall a little and linearly
+        /// (Shriberg & Lickley 1992).
+        filler_pitch = 0.86, 0.6..=1.0, A;
     } tiers {
     } aliases {
     }
@@ -1609,9 +1667,11 @@ impl Tuning {
     /// the pauses between sentences but not before the utterance
     /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
     /// in creak over their last 0.08 s of voice (`final_fry` 1, `fry_time`
-    /// 0.08). Off: the five numbers as they were before wave 3 (the plain
-    /// sum of the ports, no breaths, modal voice to the end; `breath_first`
-    /// 1 and `fry_time` 0.12, read only when their switch is on).
+    /// 0.08), and "uh", "um" and "hmm" are spoken as hesitation fillers
+    /// (`prosody.fillers` 1). Off: the six numbers as they were before wave 3
+    /// (the plain sum of the ports, no breaths, modal voice to the end, the
+    /// fillers spoken as words; `breath_first` 1 and `fry_time` 0.12, read
+    /// only when their switch is on).
     #[must_use]
     pub const fn with_living_voice(mut self, on: bool) -> Self {
         let p = &mut self.prosody;
@@ -1621,12 +1681,14 @@ impl Tuning {
             p.breath_first = 0.0;
             p.final_fry = 1.0;
             p.fry_time = 0.08;
+            p.fillers = 1.0;
         } else {
             self.anatomy.head_mixdown = 0.0;
             p.breath_intake = 0.0;
             p.breath_first = 1.0;
             p.final_fry = 0.0;
             p.fry_time = 0.12;
+            p.fillers = 0.0;
         }
         self
     }
@@ -1799,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_forty_seventy_two_and_forty_nine() {
+    fn three_parts_of_forty_two_seventy_four_and_fifty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1807,9 +1869,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (40, 72, 49)
+            (42, 74, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 161);
+        assert_eq!(Tuning::FIELDS.len(), 169);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1824,10 +1886,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_seventy_seven_and_sixty_nine() {
+    fn two_passes_of_eighty_one_and_seventy_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (77, 69));
+        assert_eq!((a, b), (81, 73));
     }
 
     #[test]

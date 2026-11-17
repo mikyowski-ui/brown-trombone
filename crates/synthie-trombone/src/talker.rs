@@ -108,6 +108,15 @@ impl Talker {
         }
     }
 
+    /// Make a vocalization now (wave 3; see [`Trombone::vocalize`]): a
+    /// sentence being said waits for it and carries on after it (see
+    /// [`Speaker::interject`]). Returns its length in seconds (`None` on
+    /// the classic engine). Tags in text (`"[laugh] That was close."`) do
+    /// the same within a sentence.
+    pub fn vocalize(&mut self, v: impl Into<crate::Vocal>) -> Option<f32> {
+        self.speaker.interject(&mut self.voice, v)
+    }
+
     /// Stop now and forget the queue; the voice fades out.
     pub fn interrupt(&mut self) {
         self.queue.clear();

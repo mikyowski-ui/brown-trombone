@@ -84,6 +84,7 @@ mod talker;
 mod tract;
 mod tract_modes;
 mod tuning;
+pub mod vocal;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;
@@ -110,6 +111,7 @@ pub use tuning::{
     AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, TongueModel,
     TractModel, Tuning,
 };
+pub use vocal::{Vocal, Vocalization};
 pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
 /// Rate at which the glottis runs; the tract runs at twice this.

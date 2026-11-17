@@ -60,6 +60,27 @@ Tenseness, jitter, vibrato, nasality, speaking rate and intonation range
 complete the character. With the `serde` feature, `VoiceSettings` can live
 in your game's data files.
 
+## Laughs, coughs and fillers
+
+On the physical engine a voice can sigh, laugh, chuckle, clear its throat
+and cough (wave 3; `Vocalization`, `Vocal`): in text as tags, and as a
+call while it speaks; a sentence waits for a call made through the
+`Talker` (or a stream) and carries on after it.
+
+```
+use synthie_trombone::{Engine, Preset, Talker, Vocalization};
+
+let mut npc = Talker::new(44_100.0, Preset::Deep.settings().with_engine(Engine::Physical));
+let line = npc.bake("Well, [sigh] I suppose so. [laugh] That was close.");
+assert!(!line.is_empty());
+npc.say("Shall we go on?");
+npc.vocalize(Vocalization::Cough); // now; a sentence being said waits for it
+```
+
+By default (`ProsodyConfig::fillers` 1) "uh", "um" and "hmm" are spoken
+as hesitation fillers: long, low and level, the hum held, a pause after;
+`fillers` 0 speaks them as words.
+
 ## Instrument and streaming
 
 ```rust
@@ -208,7 +229,8 @@ tongue body and jaw under quick tip and lips; vowels from published
 formants; breath and intonation shaped per phrase; and, since wave 3, a
 breath drawn in the pauses between sentences, creak at the end of a
 statement and the sound of the ports as a head beams them
-(`Tuning::with_living_voice(false)` switches the three off). Choose it per
+(`Tuning::with_living_voice(false)` switches the three off, and the
+hesitation fillers too). Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
@@ -246,10 +268,10 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 40 numbers),
-`ArticulationConfig` (how sounds are made and joined: 72, with a
+`AnatomyConfig` (the body, its tissues and sources: 42 numbers),
+`ArticulationConfig` (how sounds are made and joined: 74, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
-`ProsodyConfig` (the rhythm and melody of a phrase: 49), each number with
+`ProsodyConfig` (the rhythm and melody of a phrase: 53), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine
 reads twelve of them). A JSON profile can set them by name, flat or by
 part (`profile` feature, `VoiceSettings::with_profile`). The repository README has the details,

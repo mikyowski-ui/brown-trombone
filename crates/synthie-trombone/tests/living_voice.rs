@@ -25,7 +25,7 @@ fn voice(on: bool) -> VoiceSettings {
 }
 
 #[test]
-fn the_living_voice_switches_five_numbers_and_nothing_else() {
+fn the_living_voice_switches_six_numbers_and_nothing_else() {
     let on = Tuning::DEFAULT.with_living_voice(true);
     let off = Tuning::DEFAULT.with_living_voice(false);
     assert_eq!(on.anatomy.head_mixdown, 1.0);
@@ -33,11 +33,13 @@ fn the_living_voice_switches_five_numbers_and_nothing_else() {
     assert_eq!(on.prosody.breath_first, 0.0);
     assert_eq!(on.prosody.final_fry, 1.0);
     assert_eq!(on.prosody.fry_time, 0.08);
+    assert_eq!(on.prosody.fillers, 1.0);
     assert_eq!(off.anatomy.head_mixdown, 0.0);
     assert_eq!(off.prosody.breath_intake, 0.0);
     assert_eq!(off.prosody.breath_first, 1.0);
     assert_eq!(off.prosody.final_fry, 0.0);
     assert_eq!(off.prosody.fry_time, 0.12);
+    assert_eq!(off.prosody.fillers, 0.0);
     // Every other number is the default's.
     let mut back = on;
     back.anatomy.head_mixdown = off.anatomy.head_mixdown;
@@ -45,6 +47,7 @@ fn the_living_voice_switches_five_numbers_and_nothing_else() {
     back.prosody.breath_first = off.prosody.breath_first;
     back.prosody.final_fry = off.prosody.final_fry;
     back.prosody.fry_time = off.prosody.fry_time;
+    back.prosody.fillers = off.prosody.fillers;
     assert_eq!(back, off);
     assert_eq!(off.with_living_voice(true), on);
 }

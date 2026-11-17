@@ -305,10 +305,10 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 40 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 42 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-72) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
-49) is the rhythm and melody of a phrase. The classic engine reads twelve
+74) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+53) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
 
@@ -325,6 +325,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
 | anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, on by default; `head_mixdown` `0` the plain sum) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | anatomy | creak (wave 3; heard only where creak is asked for) | `creak_coupling`, `creak_press` |
+| anatomy | non-verbal sounds (wave 3B; heard only where one is asked for) | `cough_pressure`, `laugh_pressure` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -335,6 +336,7 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
 | articulation | who lowers the larynx (wave 2A; `rounded_larynx` 0.5 by default, `voiced_stop_larynx` `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
 | articulation | breathing in (wave 3; heard only where a breath is asked for) | `breath_opening` |
+| articulation | non-verbal sounds (wave 3B; heard only where one is asked for) | `laugh_rate`, `laugh_voiced` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -342,6 +344,7 @@ breath after a burst); the physical engine reads the rest as well.
 | prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
 | prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
 | prosody | breaths and creak (wave 3; on by default, `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
+| prosody | hesitation fillers (wave 3B; on by default, `fillers` `0` off) | `fillers`, `filler_length`, `filler_pause`, `filler_pitch` |
 
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score
@@ -1241,7 +1244,7 @@ flag of the same name) takes the breath before the utterance as well,
 `--no-breath` takes none, `--fry 0` ends statements in modal voice;
 `VoiceSettings::with_breath(0.0, 0.0)` switches both off for a `Talker`
 or the stream, `Tuning::with_living_voice(false)` all of wave 3 (the
-head's mixdown too). The stream, which compiles a sentence at a time,
+head's mixdown and the hesitation fillers too). The stream, which compiles a sentence at a time,
 opens a sentence with the breath the text's pause would have taken.
 
 **Breathing in.** The lungs may draw below the air's pressure
@@ -1324,6 +1327,80 @@ words of the 30 held-out sentences one is gained ("boards", heard "bars"
 with wave 3 off) and one lost ("reef", now "cliff").
 With creak, probes creaked too at first and the consonant probe went to
 64.0 %: they no longer do.
+
+### Laughs, sighs, coughs and fillers (wave 3, stage 3B)
+
+The physical engine can sigh, laugh, chuckle, clear its throat and cough
+(`Vocalization`; `src/vocal.rs`). Each is a macro that lays gestures on
+the tiers of the gesture score for one event, with the lungs' push as a
+gesture of its own: the glottal tier has a `push` (cmH2O, in place of the
+voice's own breath while above 0; `Trombone::set_lung_push`) and a `seal`
+(the folds pressed shut, cm past touching; `Trombone::set_fold_seal`), the
+larynx's tier a `squeeze` (the epilaryngeal tube drawn in;
+`Trombone::set_epilarynx_squeeze`), and a vocalization's breaths in are
+Stage 3A's. Text takes them as tags, `"Well, [sigh] I suppose so.
+[laugh]"` (exactly `[sigh]`, `[laugh]`, `[chuckle]`, `[clear-throat]`,
+`[cough]`; anything else in brackets is phonemes as before), and a voice
+as a call that can be made while it speaks: `Trombone::vocalize` (laid
+over whatever plays), `Speaker::interject` and `Talker::vocalize` (the
+sentence waits for it and carries on from where it was),
+`VoiceStream::vocalize` / `Event::Vocalize` (wire tag 30). A tag ends the
+phrase before it as a comma does (the voice held up), takes its own time,
+and is followed by 0.15 s in which the mouth is readied for the next
+phrase; the classic engine leaves a comma's pause. With the living voice's
+breaths and creak (on by default since `w3-switch`) a tag is not
+bracketed phonemes: the sentences around it breathe and creak as ever, but
+no breath is taken in the pauses on either side of a tag (a sigh, a laugh
+and a cough draw their own), and a statement before it creaks at its end
+while a phrase cut by a tag mid-sentence ends as at a comma. A filler is a
+phrase of its own ended as at a comma, so it creaks only where it ends a
+statement ("Hmm."). `Vocal` sets how long
+(`length`), how strong (`strength`: the lungs' pressure) and around what
+pitch.
+
+Measured on the deep voice at 100 Hz (`examples/vocal.rs`,
+`tests/vocal_gate.rs`): a **laugh** is a breath in and five calls at 4.4 a
+second (Bachorowski, Smoski & Owren 2001: 4.37), each made by a pulse of
+the lungs of up to `laugh_pressure` (12 cmH2O, falling to seven tenths)
+and a burst of the folds' adductors in time with it (Luschei et al. 2006),
+on an open mouth held still: the voicing gate stays on through the bout,
+each pulse blows the narrowed glottis into a call of some 0.13 to 0.18 s,
+and between the pulses the folds stop by themselves and the breath goes
+out through the glottis as it opens again (0.22 cm²). Pulses alone, the
+glottis held at one opening, made the calls on a voice by itself (with
+none, one long call), but in a sentence's pause the folds kept going
+between some of them. The calls fall from 176 to 147 Hz and by 6 dB along
+the bout. A **chuckle** is three such calls with the lips shut,
+the voice out of the nose. A **cough** draws a breath, shuts the folds for
+0.19 s while the pressure behind them builds to `cough_pressure` (40
+cmH2O; people reach 50 to 100 and more in the chest, the model holds
+finite and bounded to 100), and throws them open: the flow peaks at
+3.5 L/s within 40 ms (people: up to 12 L/s in 30 to 50 ms), the burst's
+loudest 10 ms some 6 dB over the speech of the same voice, then a short
+breathy "uh". Folds pressed shut while the lungs already push are blown
+open and vibrate (a pressed voice at 40 cmH2O); shut at rest first, their
+pressed edges feel none of the pressure, so the closure holds. A **throat
+clearing** is two weaker coughs (16 cmH2O) through a tube narrowed to
+half its width, released into a pressed, creaky voice. A **sigh** draws
+6.5 cmH2O (0.9 L/s inward), then lets out a long breathy voice (the
+glottis held open: noise share 0.32 against 0.10 for a modal /a/) falling
+from 120 to 90 Hz while the mouth relaxes from /ɑ/ towards schwa. None
+clicks more than speech does (largest sample step against its 10 ms's
+RMS: 4.6 to 6.6, speech 5.3). Laying one costs about 1 µs; playing it
+costs what speech costs.
+
+**Hesitation fillers** (`ProsodyConfig::fillers`, on by default; `0` speaks
+them as words, as does `Tuning::with_living_voice(false)`): "uh", "um",
+"hmm", "er" and "mm" (also "uhm", "erm", "hm") are marked by the front end
+and spoken as fillers: a phrase of their own, held `filler_length`
+(0.42 s; "um", "hmm" and "mm" a quarter more, "um" 45 % schwa and the rest
+the hum), at `filler_pitch` (0.86) of the baseline falling a semitone and
+a half (Shriberg & Lickley 1992: clause-internal filled pauses sit low,
+fall a little and linearly), with `filler_pause` (0.3 s; six tenths after
+"uh" and "er") of silence after; "er" is the schwa of "uh" (held as /ɝ/ it
+was heard as "her"). Whisper writes them as "uh", "um" and "hmm" or leaves
+them out. The judge's material has no fillers and no tags (none of its
+words outside brackets is one): every benchmark is the same with them on.
 
 ## A voice that listens
 
