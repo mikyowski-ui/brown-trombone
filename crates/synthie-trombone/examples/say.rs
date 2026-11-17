@@ -46,6 +46,16 @@
 //! speaker's, the vowels were heard wrong more often: 29.0 against 26.6 %
 //! on the LibriSpeech texts). `--phone-times file.json` writes where each
 //! phone starts and ends in the output.
+//!
+//! `--neural VOICE` (or `VOICE:SPEED`) speaks any text with the timing,
+//! pitch and level of tiny-voca, a small neural text-to-speech model, in
+//! its voice `F2` or `M2`: the engine's phones for the text go to
+//! `tools/judge/prosody.py neural`, which writes the schedule beside the
+//! output (`out.neural.json`), and the text is spoken following it as with
+//! `--match-prosody` (the `--prosody-*` flags apply). The bridge runs in
+//! the Python of `SYNTHIE_NEURAL_PYTHON` (default: `tools/judge/.venv`,
+//! with the judge's `neural` dependency group installed) from the judge
+//! folder `SYNTHIE_JUDGE_DIR` (default: this checkout's).
 
 #![allow(
     clippy::cast_precision_loss,
@@ -56,6 +66,8 @@
 #[path = "support/wav.rs"]
 mod wav;
 
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
@@ -102,6 +114,65 @@ fn read_schedule(json: &str) -> Schedule {
             .collect(),
         median_hz: num(&v["median_hz"], "median_hz"),
     }
+}
+
+/// The phones of `utterance` as `--phone-times` names them: each by the
+/// segment that starts it.
+fn phone_names(utterance: &Utterance) -> Vec<String> {
+    let mut phones = vec![String::new(); utterance.phone_spans().len()];
+    for (i, s) in utterance.segments().iter().enumerate() {
+        if let Some(p) = utterance.phone_of(i)
+            && phones[p].is_empty()
+        {
+            phones[p] = s.phoneme.to_string();
+        }
+    }
+    phones
+}
+
+/// `--neural VOICE[:SPEED]`: the engine's phones for `text` (by the
+/// rules, with `settings`) handed to `prosody.py neural`, which writes a
+/// schedule with tiny-voca's prosody beside `out`. Returns its path.
+fn neural_schedule(
+    spec: &str,
+    text: &str,
+    out: &str,
+    settings: &synthie_trombone::VoiceSettings,
+) -> std::io::Result<String> {
+    let (voice, speed) = spec.split_once(':').unwrap_or((spec, "1"));
+    let utterance = Utterance::from_tokens(&speech::phonemize(text), &settings.prosody());
+    let spans: Vec<[f32; 2]> = utterance
+        .phone_spans()
+        .iter()
+        .map(|&(a, b)| [a, b])
+        .collect();
+    let phones_file = Path::new(out).with_extension("phones.json");
+    let schedule_file = Path::new(out).with_extension("neural.json");
+    std::fs::write(
+        &phones_file,
+        serde_json::json!({ "phones": phone_names(&utterance), "spans": spans }).to_string(),
+    )?;
+    let judge = std::env::var("SYNTHIE_JUDGE_DIR")
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/judge").to_string());
+    let python = std::env::var("SYNTHIE_NEURAL_PYTHON")
+        .unwrap_or_else(|_| format!("{judge}/.venv/bin/python"));
+    // The bridge's report goes to stderr: the first line of stdout is the
+    // phones, which the judge reads.
+    let status = Command::new(&python)
+        .arg(format!("{judge}/prosody.py"))
+        .arg("neural")
+        .args(["--voice", voice, "--speed", speed, "--phones"])
+        .arg(&phones_file)
+        .arg("--out")
+        .arg(&schedule_file)
+        .arg(text)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(std::io::stderr()))
+        .status()
+        .unwrap_or_else(|e| panic!("--neural: cannot run {python}: {e}"));
+    assert!(status.success(), "--neural: prosody.py neural failed ({status})");
+    std::fs::remove_file(&phones_file)?;
+    Ok(schedule_file.to_string_lossy().into_owned())
 }
 
 /// A schedule's `"voice"` object (a profile: the speaker's tract length,
@@ -203,6 +274,7 @@ fn main() -> std::io::Result<()> {
     let mut follow_tenseness = true;
     let mut follow_formants = false;
     let mut follow_speed = true;
+    let mut neural: Option<String> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -263,6 +335,7 @@ fn main() -> std::io::Result<()> {
             "--prosody-tenseness" => follow_tenseness = value("--prosody-tenseness") != "off",
             "--prosody-formants" => follow_formants = value("--prosody-formants") == "on",
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
+            "--neural" => neural = Some(value("--neural")),
             "--dump-profile" => dump = true,
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
@@ -283,6 +356,9 @@ fn main() -> std::io::Result<()> {
     };
 
     let mut settings = settings.with_engine(engine).with_persona(&persona);
+    if let Some(spec) = &neural {
+        schedule = Some(neural_schedule(spec, &text, &path, &settings)?);
+    }
     // A schedule's own voice: the speaker's tract length, voice quality and
     // pitch, as a profile laid over the preset (a --profile goes on top).
     let schedule_json = match &schedule {
@@ -349,15 +425,7 @@ fn main() -> std::io::Result<()> {
         talker.compile(&text)
     };
     let spans = utterance.phone_spans();
-    // Each phone of the text, by the segment that starts it.
-    let mut phones = vec![String::new(); spans.len()];
-    for (i, s) in utterance.segments().iter().enumerate() {
-        if let Some(p) = utterance.phone_of(i)
-            && phones[p].is_empty()
-        {
-            phones[p] = s.phoneme.to_string();
-        }
-    }
+    let phones = phone_names(&utterance);
     // One symbol per segment, as the judge reads it; a vowel's glide on
     // another shape than its own (a lax vowel's towards schwa, a vowel's
     // towards the dark /l/ after it) is part of the vowel, not a segment of
