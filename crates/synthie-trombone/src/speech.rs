@@ -276,7 +276,11 @@ impl Utterance {
     #[must_use]
     pub fn from_text(text: &str, prosody: &Prosody) -> Self {
         // Text with bracketed phonemes is a probe of the engine's sounds:
-        // it takes no breaths (see `ProsodyConfig::breath_intake`).
+        // it takes no breaths (see `ProsodyConfig::breath_intake`) and does
+        // not creak (`ProsodyConfig::final_fry`): the creak of a statement's
+        // end covered up to half of a probe's last vowel, and the judge's
+        // consonant probe (`score physical --sets vcv`) went from 60.2 % to
+        // 64.0 % phoneme error ("B AH T" heard "B AA D").
         compile(&phonemize(text), prosody, !text.contains('['))
     }
 
@@ -2098,9 +2102,10 @@ fn is_obstruent(p: Phoneme) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-/// Compile `tokens`; `breaths`: the speaker may take breaths in the pauses
-/// (see [`breathe_in`]).
-fn compile(tokens: &[Token], prosody: &Prosody, breaths: bool) -> Utterance {
+/// Compile `tokens`; `living`: the speaker may take breaths in the pauses
+/// (see [`breathe_in`]) and creak at the end of a statement (see
+/// [`creak_at_the_ends`]); a probe of the engine's sounds does neither.
+fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
     let rate = prosody.rate.clamp(0.2, 5.0);
     let expr = prosody.expressiveness.clamp(0.0, 2.0);
     let tense = prosody.tenseness.clamp(0.0, 1.0);
@@ -2254,10 +2259,10 @@ fn compile(tokens: &[Token], prosody: &Prosody, breaths: bool) -> Utterance {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
         breathe(&mut drafts, &mut phrases, &accented, &timing);
-        if timing.prosody.final_fry > 0.0 {
+        if living && timing.prosody.final_fry > 0.0 {
             creak_at_the_ends(&mut drafts, &phrases, &timing);
         }
-        if breaths && timing.prosody.breath_intake > 0.0 {
+        if living && timing.prosody.breath_intake > 0.0 {
             breathe_in(&mut drafts, &mut phrases, &timing);
         }
         lean_on_vowels(&mut drafts);

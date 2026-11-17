@@ -105,6 +105,10 @@ fn probes_and_songs_take_no_breath_and_no_creak() {
         &on.prosody(),
     );
     assert_eq!(breaths(&probe), 0, "a probe took a breath");
+    assert!(
+        probe.segments().iter().all(|s| s.gesture.creak == 0.0),
+        "a probe creaked"
+    );
     // A song: its segments are made by hand, with neither.
     let notes: Vec<SungNote> = ["la", "la", "la"]
         .iter()
