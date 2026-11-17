@@ -266,6 +266,29 @@ def test_a_vowel_gives_no_more_than_down_to_its_keep():
     assert added == pytest.approx(0.85 * 0.075 - 0.01 - 0.02)
 
 
+def test_with_words_only_the_vowels_of_the_consonants_own_word_give_it_time():
+    # "birch canoe": ER CH | K AX: the K may take from the AX of its word, not the ER of "birch"
+    phones = ["ER", "CH", "K", "AX"]
+    start, end = np.array([0.0, 0.16, 0.29, 0.34]), np.array([0.16, 0.29, 0.34, 0.425])
+    rule = np.array([0.139, 0.116, 0.099, 0.1])
+    s, e, _, added = N.floor_consonants(phones, start, end, rule, words=[0, 0, 1, 1])
+    d = e - s
+    assert d[0] == pytest.approx(0.16) and d[2] == pytest.approx(0.85 * 0.099)
+    assert d[3] == pytest.approx(0.06)  # the AX gave down to 60 % of its rule duration
+    assert added == pytest.approx(0.85 * 0.099 - 0.05 - 0.025)
+    s, e, _, added = N.floor_consonants(phones, start, end, rule)
+    assert (e - s)[0] < 0.16 and added == pytest.approx(0.0, abs=1e-12)
+
+
+def test_the_model_phones_are_numbered_by_word_and_the_engine_phones_take_theirs():
+    symbols = ["<bos>", "k", "æ", "t", "<sp>", "s", "æ", "t", ".", "<eos>"]
+    mp = N.lay_out([_run(symbols, [2, 3, 6, 3, 1, 4, 6, 3, 2, 1])])
+    assert mp.word[:3] == [mp.word[0]] * 3 and mp.word[3:] == [mp.word[3]] * 3 and mp.word[3] > mp.word[0]
+    # an engine phone the model has no token for takes the word of the phone before it
+    pl = N.place(mp, ["K", "AE", "T", "S", "T", "AE", "T"], np.full(7, 0.08))
+    assert pl.added == ["T"] and pl.word[:3] == [mp.word[0]] * 3 and pl.word[3:] == [mp.word[3]] * 4
+
+
 def test_a_long_enough_consonant_or_a_floor_of_zero_changes_nothing():
     phones = ["AA", "T", "S", "IY", "N"]
     start = np.array([0.0, 0.15, 0.22, 0.32, 0.5])

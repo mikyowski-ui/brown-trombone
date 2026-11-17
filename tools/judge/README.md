@@ -835,8 +835,10 @@ threads, about 610 times real time (the whole graph 150 times).
   with no pause between (a cluster, within a word or across two), gets at
   least `--consonant-floor` 0.85 of the rules' duration for that phone in
   that place (the rule compile `say --neural` hands over), the time taken
-  from the vowels within `--floor-reach` 2 phones either side (not across
-  a pause), each down to `--floor-keep` 0.6 of its own rule duration;
+  from the vowels within `--floor-reach` 2 phones either side in its own
+  word (the model's word gaps; not across a pause; `--floor-across-words`
+  lets those of the words either side give too), each down to
+  `--floor-keep` 0.6 of its own rule duration;
   what they cannot give is added (0.2 to 0.5 % of the speech) and the
   phones after it move later. The model's pitch, voicing and level are
   carried along phone by phone (`warp_tracks`), so each phone keeps its
@@ -873,11 +875,34 @@ threads, about 610 times real time (the whole graph 150 times).
     F2's contour is not wider than M2's (5 to 95 % of the rendered pitch
     11.4 semitones against 13.0) and has no spikes;
   - the four sentences as one clip: with M2 Whisper heard 28 of 31 words
-    before (in all of five runs) and 25 to 27 with the floor ("can use
-    sleet", "the seashore" for "the sea shore"), though the phones of
-    "slid" and "sea shore" keep their durations; the floor lengthens the
-    K of "canoe" (53 to 84 ms) and takes 23 ms from the ER of "birch".
-    With F2 27 or 28 of 31 before and after.
+    before the floor (in all of five renders) and 25 to 28 with a floor
+    that took time across words ("can use sleet" or "lead" for "canoe
+    slid"). That was the borrowing, not the stop: the K of "canoe"
+    lengthened alone (53 to 84 ms) gave 28 in all five, the 23 ms taken
+    from the stressed ER of "birch" alone 24 to 27. Taking time only within
+    the word, 28 in all five; the three words missed are "canoe" ("can
+    use") and "sea shells", which Whisper spells "seashells", so one real
+    loss. With F2 27 or 28 of 31 before and after ("slit" for "slid");
+  - four-run means, Whisper's words (phoneme error), across words / within
+    the word: 30 tuning sentences M2 79.0 / 77.7 % (16.2 / 14.7 %), F2
+    73.5 / 74.6 % (19.0 / 19.5 %); 30 held-out M2 77.2 / 78.1 % (19.4 /
+    18.9 %), F2 70.6 / 71.2 % (19.6 / 20.8 %);
+  - what F2's contour does wrong, after the move to the deep voice (30
+    tuning sentences): it marks the stressed syllables less. Its stressed
+    vowels lie 2.9 semitones above the unstressed (M2 4.5), 79 % of its
+    local pitch peaks fall on a stressed vowel (M2 93 %), its pitch from
+    vowel to vowel follows the rules' accents with r = 0.48 (M2 0.78), and
+    it falls less into a sentence end (6.5 semitones over the last 250 ms,
+    M2 9.8). Neither range nor speed nor the folds: its movement inside a
+    vowel is M2's (median 2.1 against 1.9 semitones), its steps at voicing
+    onsets are smaller (0.46 against 0.67), none of its frames falls below
+    56 Hz (M2 1.3 %), and its 5 to 95 % span is 80 Hz against M2's 101.
+    Tried on the tuning sentences (four-run means of words / phoneme
+    error; F2 as it is 74.6 / 19.5 %): the model's `--pitch-range` 0.7
+    73.6 / 20.9 %, 1.3 72.9 / 20.3 %, the track smoothed over a 120 ms
+    window 75.2 / 20.3 %. None helps, so F2 keeps its own contour: what
+    it lacks is where its accents are, which a scale or a smoothing of the
+    whole contour does not move.
 
 On the engine with wave 3 on (main 42e8fae; M2 default, sentence pause 0.5):
 rules 15.1 / 81.2 % on the ten held-out sentences, M2 19.2 / 83.8 %; the
@@ -886,15 +911,17 @@ clip 12.1 / 77.4 and 9.1 / 90.3 % (8.1 / 90.3 % with the model's own
 pauses); the 30 held-out 21.0 / 77.1 and 22.2 / 72.3 % (22.2 / 71.0 % rendered
 by `say --neural` and scored in other batches, below), before the floor on consonants.
 
-With the floor on consonants (deep voice, single runs; phoneme error / Whisper words):
+With the floor on consonants, taking time within the word (deep voice; phoneme error / Whisper words; single runs, and the means of four renders with the pitch jittered by 0.1 semitone):
 
 | | rules | M2 before | M2 with the floor | F2 before | F2 with the floor |
 |---|---:|---:|---:|---:|---:|
-| ten held-out sentences | 15.1 / 81.2 % | 19.2 / 83.8 % | 17.1 / 85.0 % | 16.7 / 78.8 % | 14.3 / 77.5 % |
-| four listening sentences | 16.2 / 87.1 % | 15.2 / 87.1 % | 10.1 / 83.9 % | 15.2 / 80.6 % | 17.2 / 80.6 % |
-| the four as one clip | 12.1 / 77.4 % | 9.1 / 90.3 % | 9.1 / 80.6 % | 9.1 / 87.1 % | 7.1 / 90.3 % |
-| 30 tuning sentences | 16.5 / 74.5 % | 20.1 / 75.3 % | 16.1 / 79.6 % | 21.1 / 71.9 % | 18.6 / 74.0 % |
-| 30 held-out sentences | 21.0 / 77.1 % | 22.2 / 71.0 % | 20.0 / 77.1 % | 22.8 / 69.7 % | 19.7 / 71.4 % |
+| ten held-out sentences | 15.1 / 81.2 % | 19.2 / 83.8 % | 13.5 / 90.0 % | 16.7 / 78.8 % | 20.8 / 68.8 % |
+| four listening sentences | 16.2 / 87.1 % | 15.2 / 87.1 % | 12.1 / 83.9 % | 15.2 / 80.6 % | 15.2 / 83.9 % |
+| the four as one clip (five renders) | 12.1 / 77.4 % (24) | 28, 28, 28, 28, 28 | 28, 28, 28, 28, 28 | 27, 28, 27, 27, 27 | 27, 27, 27, 28, 27 |
+| 30 tuning sentences | 16.5 / 74.5 % | 20.1 / 75.3 % | 14.8 / 75.7 % | 21.1 / 71.9 % | 19.3 / 76.2 % |
+| 30 tuning, four-run mean | | 19.4 / 74.6 % | 14.7 / 77.7 % | 22.9 / 68.6 % | 19.5 / 74.6 % |
+| 30 held-out sentences | 21.0 / 77.1 % | 22.2 / 71.0 % | 18.3 / 78.4 % | 22.8 / 69.7 % | 22.2 / 69.7 % |
+| 30 held-out, four-run mean | | 22.9 / 73.8 % | 18.9 / 78.1 % | 22.4 / 70.7 % | 20.8 / 71.2 % |
 
 
 Measured before wave 3 (b176267; deep voice, pitch moved to the voice, single runs):
