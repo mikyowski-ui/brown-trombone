@@ -416,8 +416,11 @@ pub(crate) fn plan(v: &Vocal, pitch: f32, tuning: &Tuning) -> Plan {
                 let length = if k == 0 && laugh { 1.4 * voice } else { voice };
                 let push = tuning.anatomy.laugh_pressure * pressure * s * (1.0 - 0.4 * along);
                 let hz = p0 * rise * (1.0 - 0.125 * along);
-                // The pressure leads the voice by the lungs' own time.
-                plan.push(push, (t - 0.04, t + length - 0.02), (0.03, 0.05));
+                // The pressure leads the voice by the lungs' own time, and
+                // lets go through its second half, so the call dies away
+                // with it and the breath between the calls is let out at
+                // the floor's pressure.
+                plan.push(push, (t - 0.03, t + 0.55 * length), (0.025, 0.04));
                 plan.glottis(
                     &[(VOICING, 1.0), (SPREAD, LAUGH_SPREAD), (TENSENESS, 0.55)],
                     (t, t + length),
