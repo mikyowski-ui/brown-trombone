@@ -1071,7 +1071,7 @@ impl VoiceStream<'_> {
             self.text.drain(..end);
             return true;
         }
-        let u = Utterance::from_text(piece, &self.prosody);
+        let mut u = Utterance::from_text(piece, &self.prosody);
         if u.is_empty() {
             self.text.drain(..end);
             return true;
@@ -1079,11 +1079,22 @@ impl VoiceStream<'_> {
         // The pause the compiler leaves between this piece and the one
         // before, had they come as one text; less what the two leave on
         // their own (the end of the one, the start of the other).
-        let gap = self.last_piece.as_ref().map_or(0.0, |last| {
+        let mut gap = 0.0;
+        if let Some(last) = &self.last_piece {
             let both = Utterance::from_text(&(last.text.clone() + piece), &self.prosody);
-            pause_between(&both, last.phones)
-                .map_or(0.0, |between| between - last.trailing - silence(&u, false))
-        });
+            // Had they come as one text, the lungs would draw a breath in
+            // the pause between them (wave 3: between sentences, where the
+            // utterance itself opens without one, `breath_first` 0): the
+            // piece takes it before itself, and the gap is what is left of
+            // the pause.
+            if breath_between(&both, last.phones) && !breath_before(&u) {
+                let mut first = self.prosody;
+                first.tuning.prosody.breath_first = 1.0;
+                u = Utterance::from_text(piece, &first);
+            }
+            gap = pause_between(&both, last.phones)
+                .map_or(0.0, |between| between - last.trailing - silence(&u, false));
+        }
         let last = Piece {
             text: piece.into(),
             phones: phones(&u),
@@ -1142,6 +1153,28 @@ fn silence(u: &Utterance, end: bool) -> f32 {
     } else {
         (0..s.len()).take_while(quiet).map(|k| s[k].duration).sum()
     }
+}
+
+/// Whether `u` draws a breath between its phone `phones − 1` and its
+/// phone `phones`.
+#[cfg(feature = "std")]
+fn breath_between(u: &Utterance, phones: usize) -> bool {
+    let s = u.segments();
+    let before = (0..s.len()).rfind(|&k| u.phone_of(k).is_some_and(|p| p < phones));
+    let after = (0..s.len()).find(|&k| u.phone_of(k).is_some_and(|p| p >= phones));
+    match (before, after) {
+        (Some(b), Some(a)) => s[b + 1..a].iter().any(|x| x.gesture.intake > 0.0),
+        _ => false,
+    }
+}
+
+/// Whether `u` draws a breath before its first phone.
+#[cfg(feature = "std")]
+fn breath_before(u: &Utterance) -> bool {
+    let s = u.segments();
+    (0..s.len())
+        .take_while(|&k| u.phone_of(k).is_none())
+        .any(|k| s[k].gesture.intake > 0.0)
 }
 
 /// Seconds of silence in `u` between its phone `phones − 1` and its phone

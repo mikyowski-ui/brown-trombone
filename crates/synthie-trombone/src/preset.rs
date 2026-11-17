@@ -198,11 +198,18 @@ impl VoiceSettings {
     }
 
     /// The same voice with the living voice's breath and creak (wave 3,
-    /// physical engine): breaths drawn `intake` cmH2O deep before an
-    /// utterance and in the pauses between its sentences
+    /// physical engine) set: breaths drawn `intake` cmH2O deep in the
+    /// pauses between its sentences, and before the utterance too where
+    /// [`ProsodyConfig::breath_first`](crate::ProsodyConfig::breath_first)
+    /// is on
     /// ([`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake);
-    /// `0` none), and statements ending `fry` (`0‥1`) of the way into creak
-    /// ([`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry)). For a
+    /// `0` switches the breaths off), and statements ending `fry` (`0‥1`) of
+    /// the way into creak
+    /// ([`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry); `0`
+    /// ends them in modal voice). `with_breath(0.0, 0.0)` switches both off,
+    /// `with_breath(5.0, 1.0)` is the depth and share
+    /// [`Tuning::with_living_voice`](crate::Tuning::with_living_voice) sets.
+    /// Text with bracketed phonemes and songs never take a breath. For a
     /// [`Talker`](crate::Talker) and the stream's text
     /// ([`VoiceStream::set_prosody`](crate::stream::VoiceStream::set_prosody)
     /// with [`prosody`](Self::prosody)).

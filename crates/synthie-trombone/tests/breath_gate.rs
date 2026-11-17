@@ -3,7 +3,7 @@
 //! the voice speaks, the lungs reach the pressure asked for, a breath is
 //! heard at the level speech breaths have, the turn from breathing in to
 //! speaking does not click, statements end in creak (alternating strong
-//! and weak pulses) and questions do not, and all of it is off by default.
+//! and weak pulses) and questions do not, and none of it with wave 3 off.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -25,28 +25,38 @@ const TEXT: &str =
 /// owner asked for (3 to 5).
 const DEPTH: f32 = 5.0;
 
-/// The owner's voice with breaths and creak on.
+/// The owner's voice with breaths and creak on as stage 3A measured them:
+/// a breath before the utterance as well as between its sentences, creak
+/// over the last 0.12 s of a statement's voice, the plain sum of the ports.
 fn living() -> VoiceSettings {
-    let mut s = Preset::Deep.settings().with_engine(Engine::Physical);
+    let mut s = plain();
     s.tuning.prosody.breath_intake = DEPTH;
+    s.tuning.prosody.breath_first = 1.0;
     s.tuning.prosody.final_fry = 1.0;
+    s.tuning.prosody.fry_time = 0.12;
     s
 }
 
+/// The same voice with wave 3 off.
 fn plain() -> VoiceSettings {
-    Preset::Deep.settings().with_engine(Engine::Physical)
+    let mut s = Preset::Deep.settings().with_engine(Engine::Physical);
+    s.tuning = s.tuning.with_living_voice(false);
+    s
 }
 
 #[test]
-fn breaths_and_creak_are_off_by_default() {
-    assert_eq!(Tuning::DEFAULT.prosody.breath_intake, 0.0);
-    assert_eq!(Tuning::DEFAULT.prosody.final_fry, 0.0);
+fn with_wave_3_off_there_is_no_breath_and_no_creak() {
+    // On by default since `w3-switch` (`tests/living_voice.rs`).
+    let off = plain().tuning;
+    assert_eq!(off.prosody.breath_intake, 0.0);
+    assert_eq!(off.prosody.final_fry, 0.0);
+    assert_eq!(Tuning::DEFAULT.with_living_voice(true), Tuning::DEFAULT);
     let u = Utterance::from_text(TEXT, &plain().prosody());
     assert!(
         u.segments()
             .iter()
             .all(|s| s.gesture.intake == 0.0 && s.gesture.creak == 0.0),
-        "a breath or a creak in a default utterance"
+        "a breath or a creak with wave 3 off"
     );
 }
 

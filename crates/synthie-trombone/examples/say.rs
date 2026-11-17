@@ -69,10 +69,12 @@
 //! bringing the loudest to 0.89 (for comparing levels between files).
 //!
 //! The living voice (wave 3, physical engine): `--breath-intake` takes a
-//! breath before the text and in the pauses between its sentences (the
-//! lungs drawing up to 5 cmH2O; `ProsodyConfig::breath_intake`), `--fry 0.8`
-//! takes the end of every statement that far into creak
-//! (`ProsodyConfig::final_fry`). Both go on top of a `--profile`.
+//! breath before the text as well as in the pauses between its sentences
+//! (the lungs drawing 5 cmH2O; `ProsodyConfig::breath_intake` and
+//! `breath_first`), `--no-breath` takes none; `--fry 0.8` takes the end of
+//! every statement that far into creak (`ProsodyConfig::final_fry`; `--fry
+//! 0` ends them in modal voice). All go on top of a `--profile`. Text with
+//! bracketed phonemes (the judge's probes) never takes a breath.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -245,7 +247,7 @@ fn main() -> std::io::Result<()> {
     let mut follow_tenseness = true;
     let mut follow_formants = false;
     let mut follow_speed = true;
-    let mut breath_intake: Option<f32> = None;
+    let mut breath: Option<bool> = None;
     let mut fry: Option<f32> = None;
     let mut stereo = Stereo::Off;
     let mut listener = Listener::FRONT;
@@ -329,7 +331,8 @@ fn main() -> std::io::Result<()> {
             "--prosody-formants" => follow_formants = value("--prosody-formants") == "on",
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--dump-profile" => dump = true,
-            "--breath-intake" => breath_intake = Some(5.0),
+            "--breath-intake" => breath = Some(true),
+            "--no-breath" => breath = Some(false),
             "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
             "--raw" => raw = true,
             "--stereo" => stereo = Stereo::Binaural,
@@ -396,8 +399,13 @@ fn main() -> std::io::Result<()> {
             .with_profile(&json)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
     }
-    if let Some(depth) = breath_intake {
-        settings.tuning.prosody.breath_intake = depth;
+    match breath {
+        Some(true) => {
+            settings.tuning.prosody.breath_intake = 5.0;
+            settings.tuning.prosody.breath_first = 1.0;
+        }
+        Some(false) => settings.tuning.prosody.breath_intake = 0.0,
+        None => {}
     }
     if let Some(share) = fry {
         settings.tuning.prosody.final_fry = share.clamp(0.0, 1.0);

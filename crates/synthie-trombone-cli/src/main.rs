@@ -83,13 +83,17 @@ struct Cli {
     /// Clarity of articulation, 0 (casual) to 1 (careful).
     #[arg(long, default_value_t = Persona::NEUTRAL.clarity)]
     clarity: f32,
-    /// Take a breath before what is typed and in the pauses between its
-    /// sentences (physical engine): the lungs draw up to 5 cmH2O and the
-    /// air goes in through the mouth, shaped for the vowel ahead.
-    #[arg(long)]
+    /// Take a breath before what is typed as well as in the pauses between
+    /// its sentences (physical engine): the lungs draw 5 cmH2O and the air
+    /// goes in through the mouth, shaped for the vowel ahead.
+    #[arg(long, conflicts_with = "no_breath")]
     breath_intake: bool,
+    /// Take no breaths at all, not even between sentences (physical engine).
+    #[arg(long)]
+    no_breath: bool,
     /// Take the end of every statement this far into creak, 0 to 1
-    /// (physical engine): the folds alternate strong and weak pulses.
+    /// (physical engine): the folds alternate strong and weak pulses. `0`
+    /// ends every statement in modal voice.
     #[arg(long, value_name = "SHARE")]
     fry: Option<f32>,
     /// Copy what the microphone hears: pitch, vowels and hiss (physical
@@ -143,6 +147,10 @@ impl Cli {
         }
         if self.breath_intake {
             base.tuning.prosody.breath_intake = 5.0;
+            base.tuning.prosody.breath_first = 1.0;
+        }
+        if self.no_breath {
+            base.tuning.prosody.breath_intake = 0.0;
         }
         if let Some(share) = self.fry {
             base.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
@@ -459,6 +467,29 @@ mod tests {
                 "mri"
             ]),
             voice(&["--engine", "physical", "--profile", PROFILE])
+        );
+    }
+
+    #[test]
+    fn the_breath_and_creak_flags_switch_them_on_and_off() {
+        // `--breath-intake` asks for the breath before the utterance as
+        // well; `--no-breath` takes none; `--fry 0` ends in modal voice.
+        let all = voice(&["--engine", "physical", "--breath-intake"]).tuning;
+        assert_eq!(all.prosody.breath_intake, 5.0);
+        assert_eq!(all.prosody.breath_first, 1.0);
+        let none = voice(&["--engine", "physical", "--no-breath"]).tuning;
+        assert_eq!(none.prosody.breath_intake, 0.0);
+        let modal = voice(&["--engine", "physical", "--fry", "0"]).tuning;
+        assert_eq!(modal.prosody.final_fry, 0.0);
+        let creak = voice(&["--engine", "physical", "--fry", "1"]).tuning;
+        assert_eq!(creak.prosody.final_fry, 1.0);
+        // Everything else as the default's.
+        let off = Tuning::DEFAULT;
+        let mut back = none;
+        back.prosody.breath_intake = off.prosody.breath_intake;
+        assert_eq!(back, off);
+        assert!(
+            Cli::try_parse_from(["synthie-trombone", "--breath-intake", "--no-breath"]).is_err()
         );
     }
 }

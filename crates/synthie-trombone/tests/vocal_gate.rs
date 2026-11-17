@@ -402,6 +402,48 @@ fn fillers_are_words_to_the_front_end_and_hold_low_and_level() {
 }
 
 #[test]
+fn tags_and_fillers_sit_with_the_breaths_and_the_creak() {
+    // The living voice's defaults: a breath between sentences, a statement
+    // creaking at its end.
+    let mut settings = deep().with_engine(Engine::Physical);
+    settings.tuning.prosody.fillers = 1.0;
+    assert!(settings.tuning.prosody.breath_intake > 0.0 && settings.tuning.prosody.final_fry > 0.0);
+    let u = Utterance::from_text(
+        "I suppose so. [sigh] That was fine, um, I think. And then we left.",
+        &settings.prosody(),
+    );
+    let s = u.segments();
+    let sigh = (0..s.len()).find(|&k| u.vocal_at(k).is_some()).unwrap();
+    // The sigh brings its own breath in: no breath of the speech's in the
+    // pauses on either side of it, up to the phones around it.
+    let before = (0..sigh)
+        .rev()
+        .find(|&k| s[k].phoneme != Phoneme::Sil)
+        .unwrap();
+    let after = (sigh..s.len())
+        .find(|&k| s[k].phoneme != Phoneme::Sil)
+        .unwrap();
+    assert!((before..after).all(|k| s[k].gesture.intake == 0.0));
+    // The sentences around it breathe still: a breath before the last.
+    assert!(s[after..].iter().any(|x| x.gesture.intake > 0.0));
+    // The statement before the tag creaks at its end; the filler does not
+    // (it ends no statement).
+    assert!(s[..before + 1].iter().any(|x| x.gesture.creak > 0.0));
+    let um = (1..s.len())
+        .find(|&k| s[k].phoneme == Phoneme::M && s[k - 1].phoneme == Phoneme::Ah)
+        .unwrap();
+    assert_eq!(s[um].gesture.creak, 0.0);
+    assert_eq!(s[um - 1].gesture.creak, 0.0);
+    // A filler that ends a statement creaks with it.
+    let hmm = Utterance::from_text("Hmm.", &settings.prosody());
+    assert!(
+        hmm.segments()
+            .iter()
+            .any(|x| x.phoneme == Phoneme::M && x.gesture.creak > 0.0)
+    );
+}
+
+#[test]
 fn hmm_is_hummed_through_the_nose_with_the_mouth_shut() {
     let mut settings = deep().with_engine(Engine::Physical);
     settings.tuning.prosody.fillers = 1.0;

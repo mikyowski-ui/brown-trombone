@@ -225,7 +225,10 @@ singing. Its speech has a voiced/voiceless contrast made by the larynx
 a voice that lasts through /b d g/), timed from the moment the mouth
 actually shuts (`Trombone::mouth_shut`, `Gauges::mouth_shut`); a slow
 tongue body and jaw under quick tip and lips; vowels from published
-formants; and breath and intonation shaped per phrase. Choose it per
+formants; breath and intonation shaped per phrase; and, since wave 3, a
+breath drawn in the pauses between sentences, creak at the end of a
+statement and the sound of the ports as a head beams them
+(`Tuning::with_living_voice(false)` switches the three off). Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
