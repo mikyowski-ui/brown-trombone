@@ -22,6 +22,11 @@ From the text:
   takes their rule durations at the model's tempo from the phones either
   side; a model phone the engine does not say gives its time to the engine
   phone before it. Every phone gets at least ``prosody.FLOOR``.
+* **the floor on consonants** -- a stop, an affricate, a sibilant or a
+  consonant of a cluster gets at least ``CONSONANT_FLOOR`` of the rules'
+  duration for it in that place, taken from the vowels beside it
+  (``floor_consonants``); the pitch and level go with their phones
+  (``warp_tracks``).
 * **pauses** -- the frames the model gives punctuation, word gaps and the
   utterance edges, where they are at least ``KEEP_PAUSE`` long; shorter ones
   go to the phones either side. The model reads one sentence per call; the
@@ -33,7 +38,8 @@ From the text:
   pause, the vocalization's own length, held open at the rules' length
   (``vocal_gaps``); a filler ("um", "uh") is a word to the model and phones to
   the engine and keeps the model's timing. Bracketed phonemes are refused.
-* **pitch** -- the model's F0 every frame; through the frames it calls
+* **pitch** -- the model's F0 every frame, a single-frame spike replaced by
+  the median of three (``smooth_spikes``); through the frames it calls
   unvoiced a line in semitones (``prosody.fill_pitch``).
 * **level** -- the model's energy (log RMS of its recordings) as dB, each
   phone's mean against the mean of the vowels (``level_db`` in the schedule).
@@ -150,6 +156,58 @@ SENTENCE_PAUSE = 0.5
 #: Where the breath shares come from: ``"rules"`` (a share of 1, the rules'
 #: level) or ``"energy"`` (the model's level, see the module).
 BREATH = "rules"
+
+# The floor on consonants and the pitch spikes. On the 30 held-out
+# sentences the model's timing lost 14 (M2) and 17 (F2) of the rules'
+# Whisper words: spoken with the rules' timing and the model's pitch carried
+# phone by phone onto it, M2 lost 2 and F2 9; with the model's timing and the
+# rules' pitch, M2 lost 19 and F2 17. The stops of the words lost were not
+# the model's shortest (median 0.99 of their rule duration for M2, those of
+# the words kept 0.79), and their closures were reached and burst (93 % or
+# more of the voiceless stops 30 dB under the phones beside them, a burst in
+# 96 % or more; the rules' alike) but were shorter: silent for a median 39 ms against the
+# rules' 49 (M2, tuning sentences), with the floor 44. A floor on the
+# consonants that close, burst or hiss and on those of clusters, at a share
+# of what the rules give the same phone in the same place and taken from the
+# vowels beside them, brought the 30 tuning sentences from 75.3 to 79.6 %
+# (M2) and from 71.9 to 74.0 % (F2) of Whisper's words, the phoneme error
+# from 20.1 to 16.1 and 21.1 to 18.6 %. Single runs of 30 sentences move by
+# 2 to 3 points with the pitch jittered by 0.1 semitone; over four such runs
+# the floor gained 4.4 (M2) and 4.9 (F2) points of words there.
+
+#: The least a stop, an affricate, a sibilant or a consonant of a cluster
+#: (one beside another consonant, no pause between) is given, a share of
+#: the rules' duration for that phone in that place (the rule compile of
+#: the text the bridge is given, `--phones`). Compared on the 30 tuning
+#: sentences in single runs (Whisper's words M2 / F2; without the floor
+#: 75.3 / 71.9 %) of a first version, whose durations were these to 0.1 ms
+#: but whose pitch was carried over from the filled track rather than the
+#: model's frames (which alone moved F2 at the default from 79.6 to 74.0 %,
+#: the spread of single runs): on the stops, affricates and sibilants only,
+#: 0.7 gave 71.9 / 74.9 %, 0.85 77.4 / 77.9 %, 1.0 77.9 / 73.2 %; at 0.85
+#: the stops and affricates alone 75.3 / 74.5 %, with the consonants of
+#: clusters 79.1 / 79.6 %. `0` leaves the model's durations.
+CONSONANT_FLOOR = 0.85
+#: How far the vowels beside a floored consonant give it their time: down
+#: to this share of their own rule duration (in the same comparison 0.7
+#: gave 80.0 / 78.3 %, 0.6 79.1 / 79.6 %); what they cannot give is added
+#: and the phones after it move later. The vowels are those within
+#: `FLOOR_REACH` phones either side, not across a pause (1: 81.3 / 74.0 %
+#: in this version, 2: 79.6 / 74.0 %; the four sentences as one clip 26 and
+#: 27 of 31 words against 25 and 28).
+FLOOR_KEEP = 0.6
+FLOOR_REACH = 2
+#: The consonants the floor holds besides those of clusters.
+FLOORED = frozenset(A.STOPS + A.AFFRICATES + ["S", "Z", "SH", "ZH"])
+#: A voiced frame of the model's pitch that stands out from its voiced
+#: neighbours (both, or at the edge of a voiced run the one inside) by more
+#: than this, in semitones and in the same direction, is a spike and is
+#: replaced by the median of three frames (`smooth_spikes`). The model makes
+#: almost none: on the 60 tuning and held-out sentences one (M2) and five
+#: (F2) of about 10,000 voiced frames stood out by more than 1 semitone,
+#: none by 2; of the 710 and 726 edges of voiced runs 0.6 and 1.2 % by more
+#: than 2 (median 0.4). `0` leaves the track.
+SPIKE_ST = 2.0
 
 
 def frame_seconds(hop: int = HOP, rate: int = SAMPLE_RATE) -> float:
@@ -577,6 +635,131 @@ def close_short_pauses(start: np.ndarray, end: np.ndarray, keep: float = KEEP_PA
     return closed
 
 
+def floored(phones: list[str], start, end) -> list[bool]:
+    """The phones `CONSONANT_FLOOR` holds: the stops, affricates and
+    sibilants (`FLOORED`) and every consonant beside another one with no
+    pause between (a cluster, within a word or across two)."""
+    start, end = np.asarray(start, float), np.asarray(end, float)
+    cons = [p not in A.VOCALIC for p in phones]
+    out = []
+    for k, p in enumerate(phones):
+        left = k > 0 and cons[k - 1] and start[k] - end[k - 1] <= 1e-6
+        right = k + 1 < len(phones) and cons[k + 1] and start[k + 1] - end[k] <= 1e-6
+        out.append(p in FLOORED or (cons[k] and (left or right)))
+    return out
+
+
+def floor_consonants(phones: list[str], start, end, rule, share: float = CONSONANT_FLOOR, keep: float = FLOOR_KEEP,
+                     reach: int = FLOOR_REACH) -> tuple[np.ndarray, np.ndarray, int, float]:  # fmt: skip
+    """Each phone of `floored` given at least `share` of its rule duration
+    (`rule`), the time taken from the vowels within `reach` phones either
+    side (not across a pause), each down to `keep` of its own rule duration
+    and in proportion to what it has above that; what they cannot give is
+    added. The pauses keep their lengths; the phones after an addition move
+    later. Returns the new starts and ends, how many phones were lengthened
+    and the seconds added in all."""
+    start, end = np.asarray(start, float), np.asarray(end, float)
+    rule = np.asarray(rule, float)
+    n = len(phones)
+    if share <= 0 or n == 0:
+        return start.copy(), end.copy(), 0, 0.0
+    d = end - start
+    gaps = start[1:] - end[:-1]
+    hold = floored(phones, start, end)
+    lengthened = 0
+    for k in range(n):
+        need = share * rule[k] - d[k]
+        if not hold[k] or need <= 1e-9:
+            continue
+        lengthened += 1
+        near = []
+        for j in range(k - 1, max(-1, k - reach - 1), -1):
+            if gaps[j] > 1e-6:
+                break
+            near.append(j)
+        for j in range(k + 1, min(n, k + reach + 1)):
+            if gaps[j - 1] > 1e-6:
+                break
+            near.append(j)
+        near = [j for j in near if phones[j] in A.VOCALIC]
+        spare = np.array([max(0.0, d[j] - keep * rule[j]) for j in near])
+        if near and spare.sum() > 1e-9:
+            take = min(need, float(spare.sum()))
+            for j, s in zip(near, spare):
+                d[j] -= take * s / spare.sum()
+        d[k] += need
+    new_start, new_end = np.empty(n), np.empty(n)
+    t = start[0]
+    for k in range(n):
+        new_start[k], new_end[k] = t, t + d[k]
+        t = new_end[k] + (gaps[k] if k + 1 < n else 0.0)
+    return new_start, new_end, lengthened, float(new_end[-1] - end[-1])
+
+
+def warp_tracks(mp: ModelPhones, start, end, new_start, new_end, frame: float | None = None) -> ModelPhones:
+    """The model's frame tracks (pitch, voicing, level) and its sentence
+    pieces carried from phones at `start` .. `end` onto the same phones at
+    `new_start` .. `new_end`, linearly within each phone and pause, so that
+    each phone keeps its own pitch and level; after the last phone the
+    tracks move by what it moved."""
+    frame = frame or frame_seconds()
+    if len(mp.f0) == 0:
+        return mp
+    old = np.ravel(np.column_stack([start, end]))
+    new = np.ravel(np.column_stack([new_start, new_end]))
+    m = len(mp.f0)
+    shift = float(new[-1] - old[-1])
+    count = max(0, m + int(round(shift / frame)))
+    t = np.arange(count) * frame
+    src = np.interp(t, new, old)
+    src = np.where(t < new[0], t - (new[0] - old[0]), src)
+    src = np.where(t > new[-1], t - shift, src)
+    told = np.arange(m) * frame
+    at = np.clip(np.round(src / frame).astype(int), 0, max(0, m - 1))
+    pieces = [(float(np.interp(a, old, new)), float(np.interp(b, old, new))) for a, b in mp.pieces]
+    return ModelPhones(mp.symbols, mp.token, mp.start, mp.end, np.interp(src, told, mp.f0),
+                       mp.voiced[at] if m else mp.voiced, np.interp(src, told, mp.energy_db), pieces,
+                       mp.unknown)  # fmt: skip
+
+
+def smooth_spikes(f0, voiced, spike: float = SPIKE_ST) -> tuple[np.ndarray, int]:
+    """The model's pitch with each spike (`SPIKE_ST`) replaced by the median
+    of three frames: itself and its two voiced neighbours, or at the edge of
+    a voiced run the two inside it. Returns the track and how many frames
+    were replaced."""
+    f = np.asarray(f0, float).copy()
+    v = np.asarray(voiced, bool)
+    if spike <= 0:
+        return f, 0
+    st = 12 * np.log2(np.maximum(f, 1e-6))
+    out = st.copy()
+    n, done = len(f), 0
+    for k in range(n):
+        if not v[k]:
+            continue
+        lv = k > 0 and v[k - 1]
+        rv = k + 1 < n and v[k + 1]
+        if lv and rv:
+            trio = [k - 1, k, k + 1]
+            a, b = st[k] - st[k - 1], st[k] - st[k + 1]
+            hit = abs(a) > spike and abs(b) > spike and a * b > 0
+        elif lv or rv:
+            j = k - 1 if lv else k + 1
+            jj = j - 1 if lv else j + 1
+            if not (0 <= jj < n and v[jj]):
+                continue
+            trio = [k, j, jj]
+            hit = abs(st[k] - st[j]) > spike
+        else:
+            continue
+        if hit:
+            out[k] = float(np.median(st[trio]))
+            done += 1
+    changed = out != st
+    f[changed] = 2 ** (out[changed] / 12)
+    return f, done
+
+
 # --------------------------------------------------------------------------
 # The schedule
 # --------------------------------------------------------------------------
@@ -644,12 +827,15 @@ def open_gaps(mp: ModelPhones, start, end, want: dict[int, float], frame: float 
 
 def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: bool = False,
                    meta: dict | None = None, gaps: dict[int, float] | None = None,
-                   sentence_pause: float = 0.0) -> tuple[dict, dict]:  # fmt: skip
+                   sentence_pause: float = 0.0, floor: float = CONSONANT_FLOOR, keep: float = FLOOR_KEEP,
+                   spike: float = SPIKE_ST, reach: int = FLOOR_REACH) -> tuple[dict, dict]:  # fmt: skip
     """The schedule (``prosody.analyse_audio``'s format) of the engine's phones on
     the model's timing, pitch and level, and a report of the mapping;
     ``gaps`` (phone -> seconds) are pauses held open at least that long (a
     vocalization's, see ``vocal_gaps``), ``sentence_pause`` the least pause
-    between two sentences (0: the model's)."""
+    between two sentences (0: the model's); ``floor`` and ``keep`` the floor on
+    consonants (``floor_consonants``, 0: none), ``spike`` the pitch spikes
+    smoothed (``smooth_spikes``, 0: none)."""
     import prosody as Pr
 
     frame = frame_seconds()
@@ -658,6 +844,13 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
     closed = close_short_pauses(start, end)
     short = [(engine[k], round(float(end[k] - start[k]), 4)) for k in range(len(engine))
              if end[k] - start[k] < Pr.FLOOR - 1e-9]  # fmt: skip
+    placed = start.copy(), end.copy()
+    start, end, lengthened, added = floor_consonants(engine, start, end, rule, floor, keep, reach)
+    if lengthened:
+        mp = warp_tracks(mp, *placed, start, end, frame)
+    f0, spikes = smooth_spikes(mp.f0, mp.voiced, spike)
+    if spikes:
+        mp = ModelPhones(mp.symbols, mp.token, mp.start, mp.end, f0, mp.voiced, mp.energy_db, mp.pieces, mp.unknown)
     al = Pr.Aligned(list(engine), start, end, 0.5 * (start + end))
     Pr.enforce_floor(al)
     start, end = al.start, al.end
@@ -691,7 +884,8 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
         "phones": len(engine), "model_phones": len(mp.symbols), "matched": pl.matched,
         "substituted": pl.substituted, "dropped": pl.dropped, "added": pl.added,
         "below_floor": short, "pauses_closed": closed, "pauses": len(pauses), "unknown": mp.unknown,
-        "held_open_s": round(opened, 4),
+        "held_open_s": round(opened, 4), "floored": lengthened, "floor_added_s": round(added, 4),
+        "spikes": spikes,
     }  # fmt: skip
     sched = {
         "format": "synthie-prosody-1",
@@ -796,7 +990,9 @@ def vocal_gaps(text: str, tags: list[int], engine: list[str], spans, say: Path |
 def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float = SPEED, pitch_shift_st: float = 0.0,
                     pitch_range: float = 1.0, breath: bool = BREATH == "energy",
                     phones: tuple[list[str], np.ndarray] | None = None, say: Path | None = None,
-                    sentence_pause: float = SENTENCE_PAUSE) -> tuple[dict, dict]:  # fmt: skip
+                    sentence_pause: float = SENTENCE_PAUSE, floor: float = CONSONANT_FLOOR,
+                    keep: float = FLOOR_KEEP, spike: float = SPIKE_ST,
+                    reach: int = FLOOR_REACH) -> tuple[dict, dict]:  # fmt: skip
     """The schedule for ``text`` with the model's prosody, and a report (the
     mapping, the time the model took). ``phones``: the engine's phones and
     their rule spans, if known (``say --neural`` passes them). Fillers ("um")
@@ -820,8 +1016,10 @@ def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float 
             "speed": speed, "pitch_shift_st": pitch_shift_st, "pitch_range": pitch_range,
             "frame_s": frame_seconds(), "frames": int(len(mp.f0)), "sentences": len(runs),
             "tokens": [" ".join(r["symbols"]) for r in runs], "sentence_pause": sentence_pause,
-            "vocal_gaps": {str(k): round(v, 4) for k, v in gaps.items()}}  # fmt: skip
-    sched, report = build_schedule(text, mp, engine, rule, breath, meta, gaps, sentence_pause)
+            "vocal_gaps": {str(k): round(v, 4) for k, v in gaps.items()}, "consonant_floor": floor,
+            "floor_keep": keep, "floor_reach": reach, "spike_st": spike}  # fmt: skip
+    sched, report = build_schedule(text, mp, engine, rule, breath, meta, gaps, sentence_pause, floor, keep, spike,
+                                   reach)  # fmt: skip
     v = mp.f0[mp.voiced]
     report.update({
         "model_s": t_model, "speech_s": len(mp.f0) * frame_seconds(), "total_s": time.perf_counter() - t0,
@@ -836,7 +1034,8 @@ def cmd_neural(args) -> int:
     phones = read_spans(Path(args.phones)) if args.phones else None
     sched, rep = neural_schedule(model, args.text, args.voice, args.speed, args.pitch_shift, args.pitch_range,
                                  args.breath == "energy", phones, Path(args.say) if args.say else None,
-                                 args.sentence_pause)  # fmt: skip
+                                 args.sentence_pause, args.consonant_floor, args.floor_keep, args.spike,
+                                 args.floor_reach)  # fmt: skip
     Path(args.out).write_text(json.dumps(sched, indent=1, ensure_ascii=False), encoding="utf-8")
     f0 = rep["f0"]
     print(f"{args.out}: {rep['phones']} phones, {rep['pauses']} pauses, {rep['speech_s']:.2f} s of speech; the model "
@@ -845,7 +1044,8 @@ def cmd_neural(args) -> int:
     print(f"  mapping: {rep['matched']} matched ({len(rep['substituted'])} as another sound), "
           f"{len(rep['dropped'])} model phones dropped, {len(rep['added'])} engine phones added, "
           f"{len(rep['below_floor'])} below the floor, {rep['pauses_closed']} short pauses closed, "
-          f"{rep['held_open_s']:.2f} s of pauses held open")  # fmt: skip
+          f"{rep['held_open_s']:.2f} s of pauses held open, {rep['floored']} consonants lengthened to the floor "
+          f"(+{1000 * rep['floor_added_s']:.0f} ms in all), {rep['spikes']} pitch spikes smoothed")  # fmt: skip
     for a, b in rep["substituted"]:
         print(f"    the model's {a} for the engine's {b}")
     if rep["dropped"]:
@@ -871,6 +1071,18 @@ def add_parser(sub) -> None:
     n.add_argument("--sentence-pause", type=float, default=SENTENCE_PAUSE,
                    help="the least pause between two sentences, s, room for the engine's breath "
                    "(default: %(default)s; 0 keeps the model's own)")
+    n.add_argument("--consonant-floor", type=float, default=CONSONANT_FLOOR,
+                   help="the least a stop, affricate, sibilant or consonant of a cluster is given, a share of the "
+                   "rules' duration for it there, taken from the vowels beside it (default: %(default)s; 0 leaves "
+                   "the model's)")
+    n.add_argument("--floor-keep", type=float, default=FLOOR_KEEP,
+                   help="the share of their rule duration the vowels keep when they give time to the floor "
+                   "(default: %(default)s)")
+    n.add_argument("--floor-reach", type=int, default=FLOOR_REACH,
+                   help="how many phones either side of a floored consonant its vowels may be (default: %(default)s)")
+    n.add_argument("--spike", type=float, default=SPIKE_ST,
+                   help="a pitch frame standing out from its neighbours by more than this many semitones is "
+                   "replaced by the median of three (default: %(default)s; 0 leaves the track)")
     n.add_argument("--phones", help="the engine's phones and rule spans as JSON (as say --phone-times writes them)")
     n.add_argument("--say", help="the say binary for the engine's phones (default: bin/say, or SAY_BIN)")
     n.add_argument("--model-dir", help="where the model is (default: TINY_VOCA_DIR, else .cache/tiny-voca)")

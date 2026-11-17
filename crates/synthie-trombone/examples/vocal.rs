@@ -81,6 +81,33 @@ fn main() {
         println!(
             "rendering     {laugh:.3} s a second of audio with a laugh playing (then silence), {vowel:.3} s for a held vowel"
         );
+        // The ventricular valve's cost: a held vowel with it shut a third
+        // and fluttering the whole time, against the same vowel with it at
+        // rest (the best of five of each, taken in turn).
+        let held = |engaged: bool| {
+            let mut v = voice(&deep());
+            v.articulate_phoneme(synthie_trombone::Phoneme::Aa);
+            v.note_on();
+            if engaged {
+                v.set_ventricular_valve(0.3);
+                v.set_aryepiglottic_flutter(0.5);
+            }
+            let mut buf = [0.0f32; 256];
+            let t0 = Instant::now();
+            for _ in 0..(2.0 * SR / 256.0) as usize {
+                v.render(&mut buf);
+            }
+            t0.elapsed().as_secs_f64() / 2.0
+        };
+        let (mut rest, mut engaged) = (f64::MAX, f64::MAX);
+        for _ in 0..5 {
+            rest = rest.min(held(false));
+            engaged = engaged.min(held(true));
+        }
+        println!(
+            "valve         {engaged:.3} s a second of audio with it shut a third and fluttering, {rest:.3} s at rest ({:+.1} %)",
+            100.0 * (engaged / rest - 1.0)
+        );
     }
     for kind in Vocalization::ALL {
         let mut v = voice(&deep());
@@ -186,6 +213,45 @@ fn main() {
                     1000.0 * (rise - from) as f32 / SR
                 );
             }
+        }
+        if kind == Vocalization::Cough || kind == Vocalization::ClearThroat {
+            // The ventricular valve: how long it was shut, how fast it
+            // opened (to 90 % of its rest area), how wide it went, and the
+            // rate of its flutter where it was narrowed.
+            let rest = r.valve[0];
+            let shut = r.valve.iter().filter(|&&a| a == 0.0).count();
+            let last = r.valve.iter().rposition(|&a| a == 0.0).unwrap_or(0);
+            let opened = r.valve[last..].iter().position(|&a| a >= 0.9 * rest);
+            let widest = r.valve.iter().copied().fold(0.0f32, f32::max);
+            let narrowed: Vec<usize> = (0..r.len())
+                .filter(|&k| r.valve[k] > 0.0 && r.valve[k] < 0.7 * rest)
+                .collect();
+            let troughs: Vec<usize> = (1..narrowed.len().saturating_sub(1))
+                .map(|i| narrowed[i])
+                .filter(|&k| r.valve[k] < r.valve[k - 1] && r.valve[k] <= r.valve[k + 1])
+                .collect();
+            // The mean period between troughs within a scrape.
+            let periods: Vec<usize> = troughs
+                .windows(2)
+                .map(|w| w[1] - w[0])
+                .filter(|&d| (d as f32) < 0.03 * SR)
+                .collect();
+            let hz = if periods.is_empty() {
+                0.0
+            } else {
+                SR * periods.len() as f32 / periods.iter().sum::<usize>() as f32
+            };
+            let peak = r.flow.iter().copied().fold(0.0f32, f32::max);
+            println!(
+                "      valve shut {:.3} s, then {} ms to 90 % of its rest area {rest:.2} cm2, widest {widest:.2} cm2; narrowed {:.3} s, fluttering at {:.0} Hz; peak flow {peak:.0} cm3/s",
+                shut as f32 / SR,
+                opened.map_or_else(
+                    || "-".to_string(),
+                    |k| format!("{:.1}", 1000.0 * k as f32 / SR)
+                ),
+                narrowed.len() as f32 / SR,
+                hz
+            );
         }
         if kind == Vocalization::Sigh {
             let inward = r.flow.iter().copied().fold(0.0f32, f32::min);

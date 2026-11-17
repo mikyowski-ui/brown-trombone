@@ -305,9 +305,9 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 42 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 44 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-74) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+76) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 53) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
@@ -326,6 +326,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, on by default; `head_mixdown` `0` the plain sum) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | anatomy | creak (wave 3; heard only where creak is asked for) | `creak_coupling`, `creak_press` |
 | anatomy | non-verbal sounds (wave 3B; heard only where one is asked for) | `cough_pressure`, `laugh_pressure` |
+| anatomy | the ventricular valve (c3-valve; heard only in a cough or a throat clearing) | `valve_open`, `flutter_rate` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -337,6 +338,7 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | who lowers the larynx (wave 2A; `rounded_larynx` 0.5 by default, `voiced_stop_larynx` `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
 | articulation | breathing in (wave 3; heard only where a breath is asked for) | `breath_opening` |
 | articulation | non-verbal sounds (wave 3B; heard only where one is asked for) | `laugh_rate`, `laugh_voiced` |
+| articulation | the ventricular valve (c3-valve; heard only in a cough or a throat clearing) | `valve_closing`, `valve_opening` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -1257,19 +1259,31 @@ laid on the breath by default (the rules' level already follows it, r =
 the rules' pause for its vocalization, a filler the model's timing; the
 sentence pauses are held at 0.5 s so that the breath between sentences is
 drawn (in the model's 0.27 to 0.32 s it fell out), and the creak at a
-statement's end stays. Measured on the deep voice with wave 3 on
-(phoneme error / Whisper words; F2 before wave 3):
+statement's end stays. A floor on consonants (close-out of wave 4, on by
+default; `prosody.py neural --consonant-floor 0 --spike 0` gives the
+schedules of before to the byte) gives every stop, affricate, sibilant and
+consonant of a cluster at least 0.85 of the rules' duration for it in that
+place, taken from the vowels beside it, the model's pitch and level carried
+along with each phone, and replaces single-frame pitch spikes by the median
+of three (`tools/judge/README.md`, "Floor on consonants, pitch spikes").
+Measured on the deep voice (phoneme error / Whisper words, single runs):
 
-| | rules | M2 | F2 (before wave 3) |
+| | rules | M2 | F2 |
 |---|---:|---:|---:|
-| ten held-out sentences | 15.1 / 81.2 % | 19.2 / 83.8 % | 18.4 / 77.5 % |
-| four listening sentences | 16.2 / 87.1 % | 15.2 / 87.1 % | 18.2 / 80.6 % |
-| the four as one clip | 12.1 / 77.4 % | 9.1 / 90.3 % | 7.1 / 83.9 % |
-| 30 held-out sentences | 21.0 / 77.1 % | 22.2 / 72.3 % | 22.6 / 70.1 % |
+| ten held-out sentences | 15.1 / 81.2 % | 17.1 / 85.0 % | 14.3 / 77.5 % |
+| four listening sentences | 16.2 / 87.1 % | 10.1 / 83.9 % | 17.2 / 80.6 % |
+| the four as one clip | 12.1 / 77.4 % | 9.1 / 80.6 % | 7.1 / 90.3 % |
+| 30 tuning sentences | 16.5 / 74.5 % | 16.1 / 79.6 % | 18.6 / 74.0 % |
+| 30 held-out sentences | 21.0 / 77.1 % | 20.0 / 77.1 % | 19.7 / 71.4 % |
 
-With M2 Whisper writes the clip "The birch can use slid on the smooth
-planks. Glue the sheet to the dark blue background. She sells seashells by
-the sea shore. The juice of lemons makes fine punch." (28 of 31 words).
+Before the floor M2 gave 22.2 / 71.0 % on the 30 held-out sentences and F2
+22.8 / 69.7 %. With F2 Whisper writes the clip "The birch can be slid on
+the smooth planks. Glue the sheet to the dark blue background. She sells
+seashells by the sea shore. The juice of lemons makes fine punch." (28 of
+31 words); with M2 "The birch can use sleet on the smooth planks. ... She
+sells seashells by the seashore. ..." (25; 28 before the floor: the
+phones of "slid" and "sea shore" keep their durations, the floor lengthens
+the K of "canoe" from 53 to 84 ms).
 A real-time path would put the `ort` crate in a std crate beside the
 library (the CLI, not `synthie-trombone`), run the cut graph on a worker
 thread once per sentence before it is spoken and hand the stream a
@@ -1378,7 +1392,8 @@ gesture of its own: the glottal tier has a `push` (cmH2O, in place of the
 voice's own breath while above 0; `Trombone::set_lung_push`) and a `seal`
 (the folds pressed shut, cm past touching; `Trombone::set_fold_seal`), the
 larynx's tier a `squeeze` (the epilaryngeal tube drawn in;
-`Trombone::set_epilarynx_squeeze`), and a vocalization's breaths in are
+`Trombone::set_epilarynx_squeeze`) and, since c3-valve, a `valve` and a
+`flutter` (the ventricular valve, below), and a vocalization's breaths in are
 Stage 3A's. Text takes them as tags, `"Well, [sigh] I suppose so.
 [laugh]"` (exactly `[sigh]`, `[laugh]`, `[chuckle]`, `[clear-throat]`,
 `[cough]`; anything else in brackets is phonemes as before), and a voice
@@ -1415,19 +1430,21 @@ the bout. A **chuckle** is three such calls with the lips shut,
 the voice out of the nose. A **cough** draws a breath, shuts the folds for
 0.19 s while the pressure behind them builds to `cough_pressure` (40
 cmH2O; people reach 50 to 100 and more in the chest, the model holds
-finite and bounded to 100), and throws them open: the flow peaks at
-3.5 L/s within 40 ms (people: up to 12 L/s in 30 to 50 ms), the burst's
-loudest 10 ms some 6 dB over the speech of the same voice, then a short
-breathy "uh". Folds pressed shut while the lungs already push are blown
+finite and bounded to 100), and throws them open with the ventricular
+valve above them (below): the flow peaks at 6.2 L/s 40 ms after the
+opening (people: 6 to 12 L/s in 30 to 50 ms; 3.5 L/s before the valve),
+the burst's loudest 10 ms some 11 dB over the speech of the same voice,
+then a short breathy "uh". Folds pressed shut while the lungs already push are blown
 open and vibrate (a pressed voice at 40 cmH2O); shut at rest first, their
 pressed edges feel none of the pressure, so the closure holds. A **throat
-clearing** is two weaker coughs (16 cmH2O) through a tube narrowed to
-half its width, released into a pressed, creaky voice. A **sigh** draws
+clearing** is two weaker pushes (16 cmH2O), each held behind the shut
+folds and valve and let out through the valve held narrow, its
+aryepiglottic folds fluttering (below). A **sigh** draws
 6.5 cmH2O (0.9 L/s inward), then lets out a long breathy voice (the
 glottis held open: noise share 0.32 against 0.10 for a modal /a/) falling
 from 120 to 90 Hz while the mouth relaxes from /ɑ/ towards schwa. None
 clicks more than speech does (largest sample step against its 10 ms's
-RMS: 4.6 to 6.6, speech 5.3). Laying one costs about 1 µs; playing it
+RMS: 4.6 to 7.5, speech 5.3). Laying one costs about 1 µs; playing it
 costs what speech costs.
 
 **Hesitation fillers** (`ProsodyConfig::fillers`, on by default; `0` speaks
@@ -1442,6 +1459,100 @@ fall a little and linearly), with `filler_pause` (0.3 s; six tenths after
 was heard as "her"). Whisper writes them as "uh", "um" and "hmm" or leaves
 them out. The judge's material has no fillers and no tags (none of its
 words outside brackets is one): every benchmark is the same with them on.
+
+### The ventricular valve (close-out, c3-valve)
+
+A cough and a throat clearing are made with a valve of their own above the
+folds (`src/phys/valve.rs`): the false folds, with the aryepiglottic folds
+over them, at cell 1 (0.36 to 0.73 cm above the glottis, the lower end of
+the four-cell epilaryngeal tube). It acts on the physical tract's areas
+tick by tick, after the articulation model's shape, with its own state and
+speed (the tube's own `squeeze` moves with the tongue body, at some 25
+rad/s): `Trombone::set_ventricular_valve` (the larynx tier's `valve`)
+from `0` (rest: nothing of it runs, so every sound without a cough or a
+throat clearing is the same to the bit) to `1` (shut), or down to `−1`,
+the tube and its flare (cells 0 to 7) thrown open to `valve_open` (2 cm²);
+and `Trombone::set_aryepiglottic_flutter` (the tier's `flutter`), a
+raised-cosine swing of the valve's area at `flutter_rate` (70 Hz). It
+shuts over `valve_closing` (20 ms) and holds against any pressure below
+it (at 100 cmH2O nothing leaves the mouth); let go with 5 cmH2O or more
+behind it, it is thrown open within `valve_opening` (2 ms from 10 to 90 %;
+1.6 ms from shut to 90 % of its rest area in a cough), with less as much
+more slowly (let go at once with half a cmH2O behind it, it puffed). The
+flow through it, its loss and its noise are those of any narrowing (the
+joint's kinetic loss and its jet). The flutter is prescribed: in this
+waveguide the pressure in a narrow cell carries no Bernoulli drop (the
+whole kinetic loss sits at its exit joint), so a flap's driving force
+would have to be drawn on top of the model anyway.
+
+The **cough** now shuts the valve over the shut folds while the lungs
+build `cough_pressure`, then throws the glottis and the valve open, the
+tongue low and forward (/æ/) through the burst and back at /ʌ/ for the
+"uh". Where its flow went before (40 cmH2O in the lungs, 3.5 L/s at the
+peak): 13 cmH2O to the lungs and trachea, 3 to the glottis, 9 to the exit
+of the tube above the folds (still drawn in to 0.36 cm²) and 11 to the
+tongue of /ʌ/ (0.32 cm² at cells 14 to 19). Now: 6.2 L/s 40 ms after the
+opening (10 to 90 % in 17 ms, against 39), 21 cmH2O to the lungs and
+trachea, 12 to the glottis (held as wide as `set_glottal_spread` goes, 1
+cm², the folds flapping between 0.8 and 1.5 cm² in the jet), 7 to the
+tract. The owner's target, three times the old flow (10.5
+L/s), is not reachable at 40 cmH2O: the lungs' and trachea's resistance
+alone (about 3.5 cmH2O per L/s) would take 37 of it. Nor at the 14 to 18
+cmH2O the owner named: there the cough peaks at 2.7 to 3.3 L/s (3.6 at
+20), under the old cough's at 40. At 80 cmH2O (`Vocal::with_strength(2.0)`, people's range) it peaks
+at 11.7 L/s. `cough_pressure` stays 40. The burst's loudest 10 ms are 11
+dB over the speech of the same voice (6.5 before).
+
+The **throat clearing** is two pushes (16 and 12 cmH2O) held behind the
+shut folds and valve, each let out through the valve held at half its
+area with the aryepiglottic folds fluttering in it (the narrowest 0.03
+cm², the widest 0.21), the glottis open behind it and the voice off,
+then shut again as the push dies away: two rough scrapes whose sound
+repeats at 70 Hz, 6 % of their frames voiced (the cough: 49 %). Whisper
+wrote the old one "uh, uh" in a sentence; now it leaves it out ("Clear
+throat. [clear-throat] Cough. [cough]": "Clear throat. Puff.", before
+"Clear throat. Uh, uh. Tough."; the passage of the living voice: "That was,
+um, not what I expected. Shall we, uh, go run?", before "... expected. Uh,
+uh, shall we, uh, go around?"). Alone, as before, it hallucinates letters
+("P-P-P…", before "F-f-f…"). `tests/valve_gate.rs` measures all of this;
+the valve costs some 1 to 3 % of the render while it acts, nothing at rest.
+
+### A /dʒ/ before a pause (close-out, c2-badge; on by default)
+
+"He wore a large orange badge." was heard as "... foreign batch". Measured
+through the final /dʒ/ (`examples/affricate.rs --final TEXT`, which prints
+the voice's swing and the hiss every 10 ms around the release): the vowel
+before it is longer than before /tʃ/ and its closure is voiced, but at the
+end of a phrase the glottis opened for the hiss as the frication began and
+the folds all but stopped (the glottal flow repeated itself through half of
+the frication of "badge", swinging by 80 to 100 cm³/s 10 to 40 ms after the
+release against 135 just before it; "age?" 24 cm³/s). Changing one thing
+at a time showed that the cue is in "badge" itself: the same change to the
+/dʒ/ of "large" and "orange" alone left "batch", to that of "badge" alone
+gave "badge"; cutting off the hiss after the frication changed nothing.
+
+Now the folds stay together through the release of a /dʒ/ before a pause,
+the cover slack and the pharynx widening as in its closure, behind the
+voiced fricative's small leak, for `final_voicing_hold` (20 ms) after the
+mouth actually opens, and then open for the hiss as before: the voice swings
+by 118 cm³/s there ("age?" 56), the glottal gap opens some 10 ms later and
+the hiss is as loud (0.3 to 0.5 dB under). Before a voiced sound the
+frication of a word-final /dʒ/ was already voiced for 92 to 100 % of it, and
+held there it only lost its hiss ("badge on" became "bags on"); before a
+voiceless one English lets the voice go; so only a /dʒ/ before a pause
+changes, and every other render is byte-identical (`tests/final_voicing.rs`;
+`affricate_gate` now also holds a final /dʒ/'s voice through 65 to 82 % of
+its closure and frication against 0 to 9 % for /tʃ/).
+
+Whisper now writes "He are a large foreign badge." and "He are a large
+badge." (both "batch" before); "Stand at the edge.", "What is your age?",
+"Climb the ridge.", "Turn the page." and the four-sentence clip (byte for
+byte) are unchanged. "orange" is still heard as "foreign" in that sentence,
+as before (in "She has a large orange badge." it is right). The benchmarks
+are unchanged but for one sentence: "A cup of sugar makes sweet fudge."
+keeps its words and its last phonemes, but the phoneme recognizer drops the
+"a" at its start (the audio is identical up to the /dʒ/), so the 30
+held-out sentences' phoneme error is 21.1 % (21.0).
 
 ## A voice that listens
 

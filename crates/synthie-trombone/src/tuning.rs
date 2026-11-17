@@ -621,6 +621,24 @@ tuning! {
         /// pressure at some 4 to 5 per second (Luschei et al. 2006), here
         /// falling to seven tenths of this along the bout as the lungs empty.
         laugh_pressure = 12.0, 4.0..=30.0, A;
+
+        // ----- the ventricular valve (close-out, c3-valve; only heard where a cough or a
+        // throat clearing asks for it)
+
+        /// Area the tube above the folds is thrown open to in a cough's expulsive
+        /// phase, cm² at the native size (physical engine; see
+        /// `Trombone::set_ventricular_valve`): the false and aryepiglottic folds
+        /// drawn apart, every cell of the epilaryngeal tube and its flare (cells 0
+        /// to 7) widened to it. At rest the tube is 0.45 cm² and its flare 1.52.
+        /// Through the tube drawn in to 0.36 cm² and the tongue of /ʌ/ (0.32 cm²
+        /// at cells 14 to 19), a cough at 40 cmH2O peaked at 3.5 L/s, the tube's
+        /// exit taking 9 cmH2O of it and the tongue's 11.
+        valve_open = 2.0, 0.5..=4.0, A;
+        /// Rate of the aryepiglottic folds' flutter in a throat clearing, Hz
+        /// (physical engine; see `Trombone::set_aryepiglottic_flutter`): they
+        /// vibrate at some 50 to 100 Hz in growls and "ahem" sounds, here a
+        /// modulation of the ventricular valve's area at this rate.
+        flutter_rate = 70.0, 40.0..=120.0, A;
     } tiers {
     } aliases {
     }
@@ -1094,6 +1112,24 @@ tuning! {
         /// it blows them and stop by themselves after it, and the breath goes
         /// out between.
         laugh_voiced = 0.11, 0.05..=0.2, B;
+
+        // ----- the ventricular valve (close-out, c3-valve; only heard where a cough or a
+        // throat clearing asks for it)
+
+        /// Seconds the ventricular valve takes to shut from rest (physical
+        /// engine; see `Trombone::set_ventricular_valve`): it follows its target
+        /// with a first-order lag, three time constants to shut. The false folds
+        /// close in the compressive phase of a cough over some tens of
+        /// milliseconds, held there by muscle against any pressure below them.
+        valve_closing = 0.02, 0.005..=0.1, B;
+        /// Seconds the valve takes from 10 to 90 % of the way open, thrown open
+        /// by 5 cmH2O or more behind it (2.2 time constants of its lag; the same
+        /// lag widens the tube; with less pressure behind it, it opens as much
+        /// more slowly, at no pressure at its closing speed): let go, the
+        /// pressure behind it throws it open, in under 5 ms (the owner's
+        /// specification; from shut at 40 cmH2O to 90 % of its rest area, 1.6 ms
+        /// in a cough).
+        valve_opening = 0.002, 0.0005..=0.01, B;
 
         // ----- a /dʒ/ before a pause (c2-badge; `0` off) ---------------------------
 
@@ -1875,7 +1911,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_forty_two_seventy_five_and_fifty_three() {
+    fn three_parts_of_forty_four_seventy_seven_and_fifty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1883,9 +1919,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (42, 75, 53)
+            (44, 77, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 170);
+        assert_eq!(Tuning::FIELDS.len(), 174);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1900,10 +1936,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_eighty_one_and_seventy_three() {
+    fn two_passes_of_eighty_three_and_seventy_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (81, 73));
+        assert_eq!((a, b), (83, 75));
     }
 
     #[test]

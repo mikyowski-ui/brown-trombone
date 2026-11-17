@@ -31,6 +31,7 @@ pub(crate) mod radiation;
 pub(crate) mod slide;
 pub(crate) mod source;
 pub(crate) mod tilt;
+pub(crate) mod valve;
 
 use crate::math::sqrt;
 use crate::tract::{N, NOSE_LEN, NOSE_START};
@@ -40,6 +41,7 @@ use junction::{Joint, Shunt, Y_MIN, expansion_loss, solve};
 use noise::{JET_HEADROOM, Turbulence, V_MAX, full_jet, glottal_noise, jet_noise, reynolds};
 use radiation::{Head, PORTS, Radiation};
 use slide::Slide;
+use valve::{VALVE_CELL, Valve, WIDENS};
 
 /// Seconds over which the share of the glottal jet's breath noise follows
 /// the voicing (see `Phys::voiced_target`).
@@ -375,6 +377,8 @@ pub(crate) struct Gauge {
     /// each moving end times the flow its sweep takes up. Negative while
     /// the walls do work on the air.
     pub piston: f32,
+    /// Lumen of the ventricular valve's cell (cell 1, see [`valve`]), cm².
+    pub valve: f32,
 }
 
 /// The physical tract.
@@ -555,6 +559,8 @@ pub(crate) struct Phys {
     /// state for each of its channels.
     pub(crate) head: Head,
     head_tilt: [tilt::Tilt; 3],
+    /// The ventricular valve above the folds (see [`valve`]).
+    pub(crate) valve: Valve,
 }
 
 impl Phys {
@@ -654,6 +660,7 @@ impl Phys {
             ports: [0.0; PORTS],
             head: Head::new(),
             head_tilt: [tilt::Tilt::default(); 3],
+            valve: Valve::new(),
         };
         p.set_rate(1.0 / (2.0 * crate::INTERNAL_RATE), 1.0);
         p
@@ -700,6 +707,7 @@ impl Phys {
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         self.press_smooth = (dt / PRESSURE_AVERAGING).min(1.0);
         self.head.set_rate(dt, len);
+        self.valve.set_rate(dt, len);
         // Areas depend on the scale: rebuild from the next block.
         self.primed = false;
     }
@@ -725,6 +733,8 @@ impl Phys {
         self.lip_horn = horn;
         self.larynx_travel = larynx;
         self.head.set_tuning(tuning);
+        self.valve.set_tuning(tuning);
+        self.valve.set_rate(self.dt, self.len);
         self.turbulence.set_tuning(tuning);
         self.turbulence.set_rate(self.dt, self.len);
         self.tilt = self.turbulence.tilt(self.dt, self.len);
@@ -1280,6 +1290,14 @@ impl Phys {
         // The lip opening, as the lips alone make it (the teeth are not
         // the lips rounding).
         let mut lip_opening = f32::INFINITY;
+        // The ventricular valve moves tick by tick; at rest nothing of it
+        // runs.
+        let valve_on = self.valve.engaged();
+        if valve_on {
+            let across = self.r[VALVE_CELL - 1] + self.l[VALVE_CELL - 1]
+                - (self.r[VALVE_CELL + 1] + self.l[VALVE_CELL + 1]);
+            self.valve.advance(across);
+        }
         for i in 0..N {
             self.wall_y[i] *= keep;
             let d = h00 * self.d0[i] + h10 * self.m0[i] + h01 * self.d1[i] + h11 * self.m1[i];
@@ -1293,13 +1311,22 @@ impl Phys {
                     a += (gap - a) * teeth;
                 }
             }
+            let tract = a;
+            if valve_on && i < WIDENS {
+                a = self.valve.area(i, a);
+            }
             sealed |= i >= SEAL_FROM && a < A_MIN;
             y[i] = a * INV_RHO_C;
             inv[i] = 1.0 / a.max(A_MIN);
             self.wall_s[i] = self.wall_s0[i] + (self.wall_s1[i] - self.wall_s0[i]) * lambda;
+            if valve_on && i < WIDENS && tract > 0.0 {
+                // The wall's surface goes with the lumen's perimeter.
+                self.wall_s[i] *= sqrt(a / tract);
+            }
             self.adot[i] += (self.adot_target[i] - self.adot[i]) * self.adot_smooth;
         }
         self.gauge.shut = sealed;
+        self.gauge.valve = y[VALVE_CELL] * RHO_C;
         // The slides (see `slide`): their lengths on the same cubic as the
         // areas, the horn of its cell's area, the larynx slide of the mean
         // of its three cells'. Their walls are their cells' walls, as long
