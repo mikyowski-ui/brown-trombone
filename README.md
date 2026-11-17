@@ -305,10 +305,10 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 40 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 42 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-72) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
-49) is the rhythm and melody of a phrase. The classic engine reads twelve
+74) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+53) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
 
@@ -325,6 +325,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
 | anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, `head_mixdown` `0` off) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | anatomy | creak (wave 3; heard only where creak is asked for) | `creak_coupling`, `creak_press` |
+| anatomy | non-verbal sounds (wave 3B; heard only where one is asked for) | `cough_pressure`, `laugh_pressure` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -335,6 +336,7 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
 | articulation | who lowers the larynx (wave 2A; `rounded_larynx` 0.5 by default, `voiced_stop_larynx` `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
 | articulation | breathing in (wave 3; heard only where a breath is asked for) | `breath_opening` |
+| articulation | non-verbal sounds (wave 3B; heard only where one is asked for) | `laugh_rate`, `laugh_voiced` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
@@ -342,6 +344,7 @@ breath after a burst); the physical engine reads the rest as well.
 | prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
 | prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
 | prosody | breaths and creak (wave 3; `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
+| prosody | hesitation fillers (wave 3B; `fillers` `0` off) | `fillers`, `filler_length`, `filler_pause`, `filler_pitch` |
 
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score

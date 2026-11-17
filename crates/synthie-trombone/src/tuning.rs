@@ -1816,7 +1816,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_forty_seventy_two_and_forty_nine() {
+    fn three_parts_of_forty_two_seventy_four_and_fifty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1824,9 +1824,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (40, 72, 49)
+            (42, 74, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 161);
+        assert_eq!(Tuning::FIELDS.len(), 169);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1841,10 +1841,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_seventy_seven_and_sixty_nine() {
+    fn two_passes_of_eighty_one_and_seventy_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (77, 69));
+        assert_eq!((a, b), (81, 73));
     }
 
     #[test]
