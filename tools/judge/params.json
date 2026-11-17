@@ -37,7 +37,9 @@
     "head_mixdown": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
     "chest_reflection": {"lo": 0, "hi": 0.6, "default": 0.25, "pass": "a"},
     "chest_distance": {"lo": 8, "hi": 25, "default": 15, "pass": "a"},
-    "chest_corner": {"lo": 500, "hi": 4000, "default": 1500, "pass": "a"}
+    "chest_corner": {"lo": 500, "hi": 4000, "default": 1500, "pass": "a"},
+    "creak_coupling": {"lo": 0.02, "hi": 0.5, "default": 0.05, "pass": "a"},
+    "creak_press": {"lo": 0, "hi": 0.01, "default": 0.005, "pass": "a"}
   },
   "articulation": {
     "adduction_time": {"lo": 0.003, "hi": 0.02, "default": 0.008, "pass": "a"},
@@ -105,6 +107,7 @@
     "schwa_dominance": {"lo": 0.25, "hi": 8, "default": 2, "pass": "c"},
     "voiced_stop_larynx": {"lo": 0, "hi": 0.8, "default": 0, "pass": "a"},
     "rounded_larynx": {"lo": 0, "hi": 0.8, "default": 0.5, "pass": "c"},
+    "breath_opening": {"lo": 0.1, "hi": 1, "default": 0.35, "pass": "a"},
     "articulation_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "lips_rate": {"lo": 25, "hi": 70, "default": 40, "pass": "b"},
     "body_rate": {"lo": 8, "hi": 18, "default": 11.4, "pass": "b"},
@@ -155,6 +158,12 @@
     "final_slack": {"lo": 0, "hi": 0.4, "default": 0, "pass": "a"},
     "sonorant_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
     "unstressed_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
-    "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"}
+    "final_softness": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+    "breath_intake": {"lo": 0, "hi": 6, "default": 0, "pass": "a"},
+    "breath_first": {"lo": 0, "hi": 1, "default": 1, "pass": "b"},
+    "breath_pause": {"lo": 0.2, "hi": 1.5, "default": 0.45, "pass": "b"},
+    "breath_time": {"lo": 0.08, "hi": 0.3, "default": 0.15, "pass": "b"},
+    "final_fry": {"lo": 0, "hi": 1, "default": 0, "pass": "a"},
+    "fry_time": {"lo": 0.05, "hi": 0.25, "default": 0.12, "pass": "b"}
   }
 }

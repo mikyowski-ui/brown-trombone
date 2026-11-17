@@ -96,7 +96,15 @@ impl Tier {
     #[must_use]
     pub const fn variables(self) -> &'static [&'static str] {
         match self {
-            Tier::GlottalAdduction => &["voicing", "spread", "tenseness", "slack", "softness"],
+            Tier::GlottalAdduction => &[
+                "voicing",
+                "spread",
+                "tenseness",
+                "slack",
+                "softness",
+                "creak",
+                "inhale",
+            ],
             Tier::LarynxAndPitch => &["pitch", "height"],
             Tier::Velum => &["port", "haste"],
             Tier::TongueBody => &[
@@ -144,8 +152,9 @@ impl Tier {
     /// pitch).
     #[must_use]
     pub const fn neutral(self, v: usize) -> Option<f32> {
-        use var::{body, lips, tip, velum};
+        use var::{body, glottis, lips, tip, velum};
         match self {
+            Tier::GlottalAdduction if v == glottis::CREAK || v == glottis::INHALE => Some(0.0),
             Tier::Velum if v == velum::PORT => Some(0.0),
             Tier::Velum if v == velum::HASTE => Some(1.0),
             Tier::TongueBody if v == body::NARROWING_DEGREE || v == body::DORSAL_DEGREE => {
@@ -202,6 +211,15 @@ pub mod var {
         pub const SLACK: usize = 3;
         /// Softness of the voice, `0‥1`.
         pub const SOFTNESS: usize = 4;
+        /// How far the folds are in creak, `0‥1` (see
+        /// [`Trombone::set_fold_creak`](crate::Trombone::set_fold_creak));
+        /// neutral `0`.
+        pub const CREAK: usize = 5;
+        /// How far below the air's pressure the lungs draw a breath, cmH2O
+        /// (see [`Trombone::set_inhalation`](crate::Trombone::set_inhalation));
+        /// neutral `0`, so a breath gesture fades in and out with its
+        /// ramps and is over when it ends.
+        pub const INHALE: usize = 6;
     }
     /// [`Tier::LarynxAndPitch`](super::Tier::LarynxAndPitch).
     pub mod larynx {
@@ -495,6 +513,24 @@ impl Gesture {
             flags: 0,
             layer: LAYER_EXTERNAL,
         }
+    }
+
+    /// A breath in (wave 3): on [`Tier::GlottalAdduction`], the lungs
+    /// drawing `depth` cmH2O below the air's pressure (`3‥5` for a breath
+    /// between sentences) for `seconds` from now, its ramps in and out
+    /// `ramp` seconds each within that time; the glottis is held open as
+    /// the lungs draw (`ArticulationConfig::breath_opening`). The voicing
+    /// gate and the tract are left as they are. See
+    /// [`Trombone::breathe_in`](crate::Trombone::breathe_in).
+    #[must_use]
+    pub fn inhalation(depth: f32, seconds: f32, ramp: f32) -> Self {
+        let seconds = seconds.max(0.0);
+        let ramp = ramp.clamp(0.0, 0.5 * seconds);
+        Self::new(
+            Tier::GlottalAdduction,
+            Target::NONE.with(var::glottis::INHALE, depth.max(0.0)),
+        )
+        .window(Window::between(0.0, seconds - ramp).ramps(ramp, ramp))
     }
 
     /// With natural frequency `w` rad/s.

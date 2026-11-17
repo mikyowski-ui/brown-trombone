@@ -587,6 +587,23 @@ tuning! {
         /// (clothes and a surface smaller than the wavelengths above it
         /// return little of them).
         chest_corner = 1500.0, 500.0..=4000.0, A;
+
+        // ----- creak (wave 3, w3-breath; only heard where creak is asked for) --------
+
+        /// Share of the coupling between the lower and upper piece of the fold
+        /// cover that is left at full creak (physical engine; see
+        /// `Trombone::set_fold_creak`). A thick, slack fold couples its two
+        /// margins loosely (Titze & Story's rules give 0.065 of the lower
+        /// piece's stiffness at rest, the standard folds 0.31); so coupled at
+        /// 0.05, pressed and blown at 4 to 6 cmH2O, the folds alternate strong
+        /// and weak pulses at 60 to 130 Hz on /a i ə/ (`examples/breath.rs
+        /// --fine`: the energy at half the pitch 10 to 13 dB under the pitch's,
+        /// where at the full coupling it is 70 to 90 dB under).
+        creak_coupling = 0.05, 0.02..=0.5, A;
+        /// How far past touching the folds are pressed together at full creak,
+        /// cm: at 0.005 the alternation holds from 4 cmH2O; pressed at 0.01 the
+        /// folds need 6.
+        creak_press = 0.005, 0.0..=0.01, A;
     } tiers {
     } aliases {
     }
@@ -1035,6 +1052,15 @@ tuning! {
         /// and larynx together (Story 2008). The default, 0.5, is the
         /// anatomical tract's; `0` the original's.
         rounded_larynx = 0.5, 0.0..=0.8, C;
+
+        // ----- breathing in (wave 3, w3-breath; only heard where a breath is asked for)
+
+        /// Opening the glottis is held at behind the folds while the lungs draw
+        /// a breath, cm² at native size (physical engine; with the folds apart,
+        /// `abducted_area`, 0.6 cm² in all): at 4 cmH2O the air goes in at some
+        /// 1.4 L/s, as in a quick breath between sentences. A shallower breath
+        /// than 3 cmH2O opens it in proportion.
+        breath_opening = 0.35, 0.1..=1.0, A;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1378,6 +1404,38 @@ tuning! {
         /// ms; `0`, since the engine's last vowels are already darker than the
         /// reader's (see `final_slack`).
         final_softness = 0.0, 0.0..=1.0, A;
+
+        // ----- breaths and creak (wave 3, w3-breath; each `0` off) -------------------
+
+        /// How far below the air's pressure the lungs draw the breath a speaker
+        /// takes before an utterance and in the long pauses between sentences,
+        /// cmH2O (physical engine; text without bracketed phonemes only, see
+        /// `speech::breathe_in`): the folds part wide, the mouth takes the shape
+        /// of the vowel ahead, and the air rushes in through it. A breath before
+        /// a short phrase is shallower (seven tenths of it before a phrase of a
+        /// second). `0` takes none.
+        breath_intake = 0.0, 0.0..=6.0, A;
+        /// Whether an utterance opens with a breath too (`1`), its first sound
+        /// then coming `breath_time` and 0.1 s later, or only its long pauses
+        /// take one (`0`: a single sentence is spoken exactly as without
+        /// breaths). Read only with `breath_intake` on.
+        breath_first = 1.0, 0.0..=1.0, B;
+        /// Shortest pause between phrases that takes a breath, s (a sentence's
+        /// pause is `sentence_pause`, a comma's 0.18 s).
+        breath_pause = 0.45, 0.2..=1.5, B;
+        /// How long a breath draws, s, from the folds parting to the lungs
+        /// letting go; the folds come together for the voice some 0.1 s later.
+        breath_time = 0.15, 0.08..=0.3, B;
+        /// How far the folds go into creak over the last stretch of the voice in
+        /// a statement, `0‥1` (physical engine; not before a question or a
+        /// comma): the cover slackens and the folds are pressed together, and
+        /// as the breath runs down they alternate strong and weak pulses. `0`
+        /// ends every statement in modal voice.
+        final_fry = 0.0, 0.0..=1.0, A;
+        /// Seconds of voice at the end of a statement over which it is in creak
+        /// (the folds alternate from their third or fourth pulse, some 40 ms,
+        /// on).
+        fry_time = 0.12, 0.05..=0.25, B;
     } tiers {
     } aliases {
     }
@@ -1705,7 +1763,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_thirty_eight_seventy_one_and_forty_three() {
+    fn three_parts_of_forty_seventy_two_and_forty_nine() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1713,9 +1771,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (38, 71, 43)
+            (40, 72, 49)
         );
-        assert_eq!(Tuning::FIELDS.len(), 152);
+        assert_eq!(Tuning::FIELDS.len(), 161);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1730,10 +1788,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_seventy_two_and_sixty_five() {
+    fn two_passes_of_seventy_seven_and_sixty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (72, 65));
+        assert_eq!((a, b), (77, 69));
     }
 
     #[test]

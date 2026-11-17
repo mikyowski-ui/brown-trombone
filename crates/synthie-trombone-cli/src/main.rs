@@ -83,6 +83,15 @@ struct Cli {
     /// Clarity of articulation, 0 (casual) to 1 (careful).
     #[arg(long, default_value_t = Persona::NEUTRAL.clarity)]
     clarity: f32,
+    /// Take a breath before what is typed and in the pauses between its
+    /// sentences (physical engine): the lungs draw up to 5 cmH2O and the
+    /// air goes in through the mouth, shaped for the vowel ahead.
+    #[arg(long)]
+    breath_intake: bool,
+    /// Take the end of every statement this far into creak, 0 to 1
+    /// (physical engine): the folds alternate strong and weak pulses.
+    #[arg(long, value_name = "SHARE")]
+    fry: Option<f32>,
     /// Copy what the microphone hears: pitch, vowels and hiss (physical
     /// engine). Wear headphones, or the voice will hear itself; `` ` ``
     /// switches it off and on while playing.
@@ -131,6 +140,12 @@ impl Cli {
             base = base
                 .with_profile(&json)
                 .with_context(|| format!("in {}", path.display()))?;
+        }
+        if self.breath_intake {
+            base.tuning.prosody.breath_intake = 5.0;
+        }
+        if let Some(share) = self.fry {
+            base.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
         }
         if let Some(t) = self.tract {
             base.tuning = base.tuning.with_tract(t);

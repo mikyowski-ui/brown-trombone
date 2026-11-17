@@ -92,6 +92,10 @@ const JITTER_SEED: u32 = 0x5EED_0F0A;
 const JITTER_NORM: f32 = 0.774_596_7;
 /// Seconds over which the softness of the folds follows its setting.
 const SOFT_TIME: f32 = 0.01;
+/// Depth of a breath, cmH2O, from which the glottis is held open as wide
+/// as `ArticulationConfig::breath_opening`; a shallower one opens it in
+/// proportion.
+const BREATH_FULL: f32 = 3.0;
 /// Peak area swept by the vibrating folds (kinematic source), cm², native
 /// size.
 const VIBRATION_AREA: f32 = 0.14;
@@ -266,6 +270,16 @@ pub(crate) struct Source {
     /// `Trombone::set_fold_softness`).
     pub(crate) soft_target: f32,
     soft: f32,
+    /// How far the folds are in creak, `0‥1`, wanted and present (see
+    /// `Trombone::set_fold_creak`).
+    pub(crate) creak_target: f32,
+    creak: f32,
+    /// How far below the air's pressure the lungs are drawing, cmH2O (`0`:
+    /// not breathing in; see `Trombone::set_inhalation`).
+    pub(crate) intake: f32,
+    /// A fixed share of the coupling between the cover pieces, for
+    /// measuring the folds.
+    pub(crate) coupling_override: Option<f32>,
     /// Share of the glottal flow that passes between the vibrating edges.
     fold_share: f32,
     f0: f32,
@@ -277,7 +291,7 @@ pub(crate) struct Source {
     /// Relative larynx size (the tract length scale).
     size: f32,
 
-    folds: Folds,
+    pub(crate) folds: Folds,
     voicing: bool,
     /// The folds are being pressed together to start the voice.
     pressing: bool,
@@ -353,6 +367,10 @@ impl Source {
             slack: 0.0,
             soft_target: 0.0,
             soft: 0.0,
+            creak_target: 0.0,
+            creak: 0.0,
+            intake: 0.0,
+            coupling_override: None,
             fold_share: 1.0,
             f0: 140.0,
             f1: 140.0,
@@ -428,9 +446,11 @@ impl Source {
         let (lung_base, tuning) = (self.lung_base, self.tuning);
         let (spread, slack, breath) = (self.spread_target, self.slack_target, self.breath);
         let soft = self.soft_target;
+        let (creak, intake, coupling) = (self.creak_target, self.intake, self.coupling_override);
         *self = Self::new();
         (self.spread_target, self.slack_target, self.breath) = (spread, slack, breath);
         self.soft_target = soft;
+        (self.creak_target, self.intake, self.coupling_override) = (creak, intake, coupling);
         self.kind = kind;
         self.probe = probe;
         self.fallback = fallback;
@@ -468,6 +488,11 @@ impl Source {
 
     pub(crate) fn lung_pressure(&self) -> f32 {
         self.lung_base / CM_H2O
+    }
+
+    /// Lung pressure now, dyn/cm² (negative while breathing in).
+    pub(crate) fn lung_now(&self) -> f32 {
+        self.lung
     }
 
     /// Whether the lungs are pushing, and have been for long enough that
@@ -649,7 +674,10 @@ impl Source {
                 effort = crate::math::powf(tension.max(1.0), EFFORT_EXPONENT);
             }
         }
-        self.lung_target = if breathing {
+        self.lung_target = if self.intake > 0.0 {
+            // Breathing in: the lungs draw, whatever else is asked.
+            -self.intake * CM_H2O
+        } else if breathing {
             self.lung_base * effort * self.breath
         } else {
             0.0
@@ -662,8 +690,17 @@ impl Source {
         self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
         let adduction = self.tuning.articulation.adduction_time;
         self.leak += (self.leak_target - self.leak) * (dt / adduction);
+        // Into creak and out of it at the pace the folds come together: taken
+        // there over 30 ms, the folds' pulses first faded for some 80 ms
+        // before they began to alternate; over 10 ms they alternate from the
+        // third or fourth pulse (`examples/breath.rs --onset`).
+        self.creak += (self.creak_target - self.creak) * (dt / adduction);
         let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
             -self.tuning.anatomy.attack_depth * self.size
+        } else if self.creak > 0.0 && self.voicing && self.gap_override.is_none() {
+            // Creak: the folds are pressed together.
+            let pressed = -self.tuning.anatomy.creak_press * self.size;
+            self.gap_target + (pressed - self.gap_target) * self.creak
         } else {
             self.gap_target
         };
@@ -675,7 +712,15 @@ impl Source {
         self.gap += (gap_target - self.gap) * (dt / time);
         self.chink += (self.chink_target - self.chink) * (dt / adduction);
         let arytenoids = self.tuning.articulation.abduction_time;
-        let spread = self.spread_target * self.size * self.size;
+        let wanted = if self.intake > 0.0 {
+            // The posterior cricoarytenoids pull the glottis open as the
+            // lungs draw (they fire with the diaphragm).
+            let share = (self.intake / BREATH_FULL).min(1.0);
+            self.spread_target + self.tuning.articulation.breath_opening * share
+        } else {
+            self.spread_target
+        };
+        let spread = wanted * self.size * self.size;
         // They bring the glottis back together faster than they open it.
         let closing = if spread < self.spread {
             self.tuning.articulation.spread_closing.min(arytenoids)
@@ -701,6 +746,11 @@ impl Source {
 
         let mut folds = 0.0;
         if self.blend > 0.0 {
+            self.folds.inward = self.lung < 0.0;
+            self.folds.coupling = match self.coupling_override {
+                Some(share) => share,
+                None => 1.0 - self.creak * (1.0 - self.tuning.anatomy.creak_coupling),
+            };
             self.folds.hold_at(self.gap, dt);
             let tension = self.tension0 + (self.tension1 - self.tension0) * lambda;
             self.folds.tension = tension * exp(self.trim) * (1.0 - self.slack) * (1.0 + self.jit);
@@ -852,12 +902,13 @@ impl Source {
             }
             // The table sets the pitch at once; this only removes what is
             // left, slowly, and only once the voice is running cleanly.
-            // Not while the cover is slackened on purpose: that pitch dip is
-            // wanted.
+            // Not while the cover is slackened on purpose (that pitch dip is
+            // wanted), nor in creak.
             if self.clean_cycles >= 3
                 && self.tension_override.is_none()
                 && self.probe.trim
                 && self.slack < 0.005
+                && self.creak < 0.005
             {
                 self.trim =
                     (self.trim + (period / TRIM_TIME) * ln(ratio)).clamp(-TRIM_RANGE, TRIM_RANGE);

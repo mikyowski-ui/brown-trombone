@@ -305,10 +305,10 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 38 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 40 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
-71) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
-43) is the rhythm and melody of a phrase. The classic engine reads twelve
+72) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
+49) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
 
@@ -324,6 +324,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the epilarynx (wave 2B; the anatomical tract's four cells flaring over four by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
 | anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
 | anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, `head_mixdown` `0` off) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
+| anatomy | creak (wave 3; heard only where creak is asked for) | `creak_coupling`, `creak_press` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
 | articulation | leads and hand-overs | `lead`, `release_lead`, `velum_lead`, `labial_lead`, `labial_closing`, `sibilant_exit`, `tap_lead`, `lateral_release`, `liquid_transition`, `frication_ramp` |
@@ -333,12 +334,14 @@ breath after a burst); the physical engine reads the rest as well.
 | articulation | articulator speeds | `dorsum_rate`, `nasal_cavity_rate`, `closing_ratio`, `release_speed`, `velum_release`; the tiers' springs `articulation_rate` (`tongue_tip.stiffness`), `lips_rate` (`lips_and_jaw.stiffness`), `body_rate` (`tongue_body.stiffness`), `body_damping` (`tongue_body.damping`), `larynx_rate` (`larynx_and_pitch.stiffness`), `larynx_damping` (`larynx_and_pitch.damping`) |
 | articulation | an /n/ into a fronted vowel, the coloured schwa (wave 1, "canoe"; each `0` or `1` off) | `nasal_tip_release`, `fronted_after_n`, `nasal_cavity_held`, `schwa_colour` |
 | articulation | who lowers the larynx (wave 2A; `rounded_larynx` 0.5 by default, `voiced_stop_larynx` `0` off) | `voiced_stop_larynx`, `rounded_larynx` |
+| articulation | breathing in (wave 3; heard only where a breath is asked for) | `breath_opening` |
 | prosody | the rules' lengths of sounds (*classic*) | `vowel_length`, `diphthong_length`, `stop_length`, `nasal_length`, `fricative_length`, `voiced_fricative_length`, `approximant_length`, `aspirate_length`; and `voiced_sibilant_length` |
 | prosody | lengths by stress and position | `stress_stretch` (*classic*), `vowel_hold`, `lax_length`, `unstressed_lax_length`, `ih_length`, `lax_floor`, `prefortis_clip`, `prelenis_stretch`, `final_coda_stretch` |
 | prosody | rhythm (round 11, off) | `stressed_onset_length`, `cluster_length`, `function_consonant_length`, `schwa_length`, `diphthong_hold`, `rhythm_pace` |
 | prosody | intonation | `accent_size`, `accent_decay`, `accent_peak`, `declination`, `final_fall` |
 | prosody | the breath over a phrase, and pauses | `phrase_onset`, `onset_pressure`, `sonorant_onset`, `phrase_decline`, `final_drop`, `vowel_decline`, `unaccented_level`, `sentence_pause` |
 | prosody | tenseness and softness by syllable | `light_laxness`, `sonorant_slack`, `final_slack`, `sonorant_softness`, `unstressed_softness`, `final_softness` (the slacks off, `0`, since round 8, the softnesses since round 9) |
+| prosody | breaths and creak (wave 3; `breath_intake` and `final_fry` `0` off) | `breath_intake`, `breath_first`, `breath_pause`, `breath_time`, `final_fry`, `fry_time` |
 
 `ArticulationConfig` also holds a `TierDynamics` (stiffness, damping,
 dominance) for each of the six tiers of the gesture score
@@ -1227,6 +1230,55 @@ Hanna, Smith & Wolfe (2016) for the walls; Dang & Honda (1997) and Dang,
 Honda & Suzuki (1994) for the piriform sinuses and nose; Flanagan (1972)
 for lip radiation; Stevens (1971) and Shadle (1985) for turbulence;
 Peterson & Barney (1952) for the vowel targets.
+
+### Breaths and creak (wave 3, stage 3A; off by default)
+
+The physical engine can breathe in and creak, both switched off by
+default (`ProsodyConfig::breath_intake` and `final_fry` `0`; `say
+--breath-intake --fry 1`, the same flags in the terminal app,
+`VoiceSettings::with_breath(5.0, 1.0)` for a `Talker` or the stream).
+
+**Breathing in.** The lungs may draw below the air's pressure
+(`Trombone::set_inhalation`, the glottal tier's `inhale` variable,
+`Gesture::inhalation`, `Trombone::breathe_in`, `VoiceStream::breathe_in`):
+the glottis is held open behind the folds as they draw
+(`ArticulationConfig::breath_opening`, 0.6 cm² in all), the air goes in
+through the tract, and what is heard is the noise of its own jets: the
+glottal jet, and behind every narrowing of the tract a jet that forms on
+the glottis's side of it (`Phys::tick` runs the jet rule in reverse while
+the lungs draw; the folds feel the stream from above). Speech takes a
+breath before an utterance (`breath_first`) and in every pause of at
+least `breath_pause` (0.45 s: a sentence's, not a comma's), `breath_time`
+(0.15 s) long, then 0.1 s of turn before the phrase; the mouth is readied
+for the phrase's first vowel before it, the velum shut as for that vowel,
+and the first sound's shape is sent half way through the turn. At 5 cmH2O
+before a phrase of three seconds or more (seven tenths of it before one
+of a second) the air goes in at 0.4 to 0.6 L/s, and the breath stands 31
+to 37 dB under the vowels of the phrase after it (published speech
+breaths: 20 to 40 dB under the speech); the turn's largest sample step
+is under a fifth of the vowels' (`tests/breath_gate.rs`). In a pause the
+breath takes its time from the pause; before the utterance it is added,
+and every phone comes `breath_time` + 0.1 s later. Text with bracketed
+phonemes and hand-made segments (singing) take no breath; a schedule
+followed with `--match-prosody` keeps a breath where the speaker's pause
+leaves room for it and drops it otherwise.
+
+**Creak.** The standard folds are periodic wherever they vibrate (energy
+at half the pitch 50 to 90 dB under the pitch's, `examples/breath.rs`).
+Coupled more loosely between the two pieces of their cover, as a thick,
+slack fold is (Titze & Story's rules give that coupling 0.065 of the lower
+piece's stiffness, the standard folds 0.31), and pressed together, they
+alternate strong and weak pulses by themselves: at 0.05 of the coupling,
+pressed 0.005 cm and blown at 2 to 6 cmH2O, on /a i ə/ at 60 to 130 Hz,
+the half-pitch stands 8 to 14 dB under the pitch
+(`Trombone::set_fold_creak`, `AnatomyConfig::creak_coupling`,
+`creak_press`; taken there within 10 ms they alternate from the third or
+fourth pulse). Statements (`.` `!`) go into creak over the last
+`fry_time` (0.12 s) of their voice, never before the middle of the last
+vowel; questions and commas do not. In the four listening sentences the
+last 100 ms of voice then alternate by 0.6 to 0.7 of their mean pulse height
+(0.03 to 0.2 without). The share works as a switch: at 0.6 the folds do
+not cross into alternation.
 
 ## A voice that listens
 

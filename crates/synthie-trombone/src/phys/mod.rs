@@ -468,6 +468,10 @@ pub(crate) struct Phys {
     noisy: bool,
     /// Fastest jet the present lung pressure can drive, cm/s.
     v_max: f32,
+    /// The lungs are drawing (lung pressure below the air's): the stream
+    /// through the tract goes in, and its jets form on the glottis's side of
+    /// each narrowing.
+    inward: bool,
     /// Flow through each joint and noise of the free jet there, summed
     /// over the ticks of the current block, and their means over the last.
     flow_sum: [f32; N + 1],
@@ -613,6 +617,7 @@ impl Phys {
             turbulence: Turbulence::new(0x7B0E_5EED),
             noisy: true,
             v_max: V_MAX,
+            inward: false,
             flow_sum: [0.0; N + 1],
             jet_sum: [0.0; N + 1],
             summed: 0.0,
@@ -1355,9 +1360,13 @@ impl Phys {
                 nr[0] = self.l[0] + if y[0] >= Y_MIN { u / y[0] } else { 0.0 };
                 self.gauge.u_glottis = u;
                 self.v_max = V_MAX;
+                self.inward = false;
             }
             Drive::Glottis { area, lung } => {
-                self.v_max = JET_HEADROOM * sqrt(2.0 * lung.max(0.0) / RHO);
+                // Drawing or pushing, the jets are as fast as the pressure
+                // across the whole airway drives them.
+                self.v_max = JET_HEADROOM * sqrt(2.0 * lung.abs() / RHO);
+                self.inward = lung < 0.0;
                 nr[0] = self.below_glottis(area, lung, y[0]);
             }
         }
@@ -1457,6 +1466,22 @@ impl Phys {
                 self.jet_sum[j] += free;
                 if free > jet.0 {
                     jet = (free, i);
+                }
+                if self.inward {
+                    // Breathing in: the stream leaves the narrowing of
+                    // cell `j` for the cell behind it, towards the glottis,
+                    // and breaks up there, pushing towards the lungs.
+                    let back = jet_noise(
+                        -self.flow[j],
+                        inv2,
+                        inv1,
+                        self.turbulence.jet_eff,
+                        self.jet_cap(j),
+                    );
+                    pn -= hiss * back;
+                    if back > jet.0 {
+                        jet = (back, j);
+                    }
                 }
                 // A jet from behind the teeth strikes the upper ones, or,
                 // as the jaw closes the incisors, the gap between them.

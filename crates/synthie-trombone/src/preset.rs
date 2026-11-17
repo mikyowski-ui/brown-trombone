@@ -196,6 +196,22 @@ impl VoiceSettings {
         self.rate = rate;
         self
     }
+
+    /// The same voice with the living voice's breath and creak (wave 3,
+    /// physical engine): breaths drawn `intake` cmH2O deep before an
+    /// utterance and in the pauses between its sentences
+    /// ([`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake);
+    /// `0` none), and statements ending `fry` (`0‥1`) of the way into creak
+    /// ([`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry)). For a
+    /// [`Talker`](crate::Talker) and the stream's text
+    /// ([`VoiceStream::set_prosody`](crate::stream::VoiceStream::set_prosody)
+    /// with [`prosody`](Self::prosody)).
+    #[must_use]
+    pub fn with_breath(mut self, intake: f32, fry: f32) -> Self {
+        self.tuning.prosody.breath_intake = intake.clamp(0.0, 6.0);
+        self.tuning.prosody.final_fry = fry.clamp(0.0, 1.0);
+        self
+    }
 }
 
 /// Ready-made voices. Start from one and tweak the [`VoiceSettings`].
