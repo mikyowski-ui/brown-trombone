@@ -17,6 +17,14 @@
 //! `--dump-profile` prints the voice that results; `--dump-parameters`
 //! prints every tunable number with its range.
 //!
+//! `--tract anatomical|original` and `--tongue-model cosine|mri` choose
+//! the physical engine's tract (`Tuning::with_tract`) and tongue body
+//! (`Tuning::with_tongue`: the cosine hump or the measured MRI modes),
+//! laid over the voice after any profile, as a profile's numbers would be.
+//! Left out, the voice keeps its own (by default the anatomical tract and
+//! the cosine tongue). `--tract original --tongue-model mri` is
+//! `profiles/mri-tongue.json`.
+//!
 //! A profile may also move the physical engine's vowels, for trying out
 //! other targets without regenerating the vowel table: a `"vowels"` object
 //! of F1, F2 and F3 for an adult man, Hz (see `vowel_targets`), keyed by
@@ -72,7 +80,10 @@ mod wav;
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
-use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
+use synthie_trombone::{
+    Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
+    inverse,
+};
 use synthie_trombone::{Listener, Stereo};
 use synthie_trombone::{Trombone, normalize};
 
@@ -233,6 +244,8 @@ fn main() -> std::io::Result<()> {
     let mut turn: Option<[f32; 2]> = None;
     let mut pan: Option<[f32; 2]> = None;
     let mut raw = false;
+    let mut tract: Option<TractModel> = None;
+    let mut tongue: Option<TongueModel> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -264,6 +277,20 @@ fn main() -> std::io::Result<()> {
                 };
             }
             "--out" => path = value("--out"),
+            "--tract" => {
+                let v = value("--tract");
+                tract =
+                    Some(TractModel::from_name(&v).unwrap_or_else(|| {
+                        panic!("unknown tract {v:?}; try anatomical or original")
+                    }));
+            }
+            "--tongue-model" => {
+                let v = value("--tongue-model");
+                tongue =
+                    Some(TongueModel::from_name(&v).unwrap_or_else(|| {
+                        panic!("unknown tongue model {v:?}; try cosine or mri")
+                    }));
+            }
             "--size" => persona.size = value("--size").parse().expect("--size needs a number"),
             "--effort" => {
                 persona.effort = value("--effort").parse().expect("--effort needs a number");
@@ -358,6 +385,13 @@ fn main() -> std::io::Result<()> {
         settings = settings
             .with_profile(&json)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
+    }
+    // The tract and the tongue, laid over the voice after its profile.
+    if let Some(t) = tract {
+        settings.tuning = settings.tuning.with_tract(t);
+    }
+    if let Some(t) = tongue {
+        settings.tuning = settings.tuning.with_tongue(t);
     }
     if dump {
         println!("{}", settings.to_profile());

@@ -322,7 +322,7 @@ breath after a burst); the physical engine reads the rest as well.
 | anatomy | the nose and the walls | `nasal_port`, `cavity_expansion` |
 | anatomy | the tract's length (wave 2A; on by default, the anatomical tract's; each `0` off) | `lip_horn`, `larynx_travel` |
 | anatomy | the epilarynx (wave 2B; the anatomical tract's four cells flaring over four by default, `epilarynx_effort` `0` off) | `epilarynx_cells`, `epilarynx_diameter`, `epilarynx_flare`, `epilarynx_flare_cells`, `epilarynx_effort` |
-| anatomy | the tongue body from measured modes (wave 2, `0` off) | `tongue_model` |
+| anatomy | the tongue body from measured modes (wave 2, `0` off; `say --tongue-model mri`) | `tongue_model` |
 | anatomy | the head the ports radiate round (wave 3C; read in stereo, and by the mono mixdown, `head_mixdown` `0` off) | `head_radius`, `head_mixdown`, `chest_reflection`, `chest_distance`, `chest_corner` |
 | articulation | the glottis in consonants | `adduction_time`, `abduction_time`, `spread_closing`, `abducted_area`, `voiceless_spread`, `voiced_fricative_spread`, `voiced_sibilant_spread`, `onset_kick`, `kick_time` |
 | articulation | gaps and places | `fricative_gap` and `approximant_gap` (*classic*), `lateral_gap`, `lateral_channel`, `sibilant_teeth`, `postalveolar_lips`, `frication_widening`, `nasal_cavity`, `alveolar_velum`, `closure_overshoot` |
@@ -953,7 +953,7 @@ as the model goes:
   scanner, and targets that are 45 men's. The third number keeps /i/
   (+0.9) apart from /ɪ/ (−1.4) and /ɑ/ (+2.1) from /ʌ/ (−1.6), not /u/
   (−0.5) from /ʊ/ (0.0) or /e/ (−0.7) from /ɛ/ (+0.6). Measured on the merged engine (single runs): on the
-  default tract the modal body hears vowels in the LibriSpeech texts wrong
+  default tract of the time (the original one) the modal body hears vowels in the LibriSpeech texts wrong
   25.2 % of the time (the cosine 24.1 %), the ten `sentence_heldout`
   sentences 23.3 % phoneme error and 85.0 % of Whisper's words (22.0, 81.2),
   the 30 held-out 26.3 % and 77.4 % (26.3, 74.3), the 30 tuning 23.5 % and
@@ -1040,6 +1040,63 @@ as the model goes:
   listener's chest return makes 1.5), and it stays within 0.1 dB of the
   plain sum in vowels and 0 to −1.3 dB in nasals. Stereo costs about 5 %
   of the physical engine's time.
+- **The tract and the tongue by name; affricates that hiss after their
+  release (wave 3, `w3-juice`).** `say --tract anatomical|original` and
+  `--tongue-model cosine|mri`, and the app's flags of the same names, lay
+  `Tuning::with_tract` and `Tuning::with_tongue` (`TongueModel::Cosine`,
+  `TongueModel::Measured`: `tongue_model` 0 or 1) over the voice after any
+  profile; left out, the voice keeps its own. In the app they are
+  top-level flags, as `--profile` is (the `sing` subcommand takes no
+  profile, and its own `--tract` is the tract's length).
+  `profiles/mri-tongue.json` is the measured tongue on the original tract,
+  the same as `--tract original --tongue-model mri` field for field and
+  sample for sample. The four (single runs; the ten `sentence_heldout`
+  sentences and the 30 held-out ones, phoneme error and Whisper's words;
+  vowels in the LibriSpeech texts heard wrong):
+
+  | tract, tongue | ten held out | 30 held out | vowels wrong |
+  |---|---|---|---|
+  | anatomical, cosine (the default) | 15.9 %, 81.2 % | 21.1 %, 76.1 % | 20.6 % |
+  | anatomical, mri (`--tongue-model mri`) | 26.5 %, 82.5 % | 28.3 %, 74.3 % | 24.8 % |
+  | original, cosine (`--tract original`) | 22.0 %, 81.2 % | 26.8 %, 73.5 % | 23.8 % |
+  | original, mri (`profiles/mri-tongue.json`) | 23.3 %, 87.5 % | 26.9 %, 77.8 % | 25.5 % |
+
+  The 85.0 % and 77.4 % of Whisper's words that wave 2C measured with the
+  measured tongue were on the original tract (the default then); on the
+  anatomical tract it has always heard fewer (78.8 % and 70.0 % then).
+  With `--tongue-model mri` alone the default voice loses phonemes
+  everywhere and the listening sentences most (34.3 % phoneme error, 58.1 %
+  of the words), and "juice" is heard as "dose" again.
+
+  "The juice of lemons" was heard as "the dose of lemons" in the four
+  sentences as one clip. The cause was not the channel's width: through
+  the release of /dʒ/ the narrowest cell is as narrow as that of /ʒ/ (0.04
+  to 0.05 cm²), on both tracts alike (the palate is the same in both), and
+  narrowing it 0.05 or 0.1 diameter units lowers the Reynolds number
+  further (at a given pressure it grows with the square root of the area)
+  and silences a final /dʒ/. It was the air: the frication of /dʒ/ was
+  made with the folds pressed as for its closure, so the channel carried
+  some 20 cm³/s against the 90 of /ʒ/, the jet was turbulent for 45 to
+  53 % of the frication between vowels (/ʒ/ 65 to 71 %) and for 16 to 24 %
+  at the end of a word, where its hiss was 12 to 15 dB under a final /ʒ/'s;
+  and the next sound's shape was sent 30 ms into its 60 ms frication, while
+  the channel was still forming out of the closure (some 30 ms), so that it
+  was narrow enough to hiss for about 10 ms. Now the frication of /dʒ/ has
+  the larynx /ʒ/ would have in its place (inside a word the leak behind the
+  folds and the widened pharynx, at its end the partly voiceless /ʒ/'s),
+  and both affricates hand over to the next sound as late as a closure does
+  (`release_lead`, not `lead`): /dʒ/ is turbulent for 60 to 68 % of its
+  frication between vowels and 37 to 53 % at the end of a word (/ʒ/ 46 to
+  75 %), its hiss within 7 dB of /ʒ/'s or louder, /tʃ/ as before from 1 dB
+  under to 7 dB over /ʃ/ (`examples/affricate.rs`,
+  `tests/affricate_gate.rs`). The clip is heard as "... The juice of lemons
+  makes fine punch." (24 of 31 words), "Stand at the edge", "raging", "plunge
+  in" and "He chose a cheap chair" are heard right where they were not.
+  Before and after (the default voice): the ten held out 15.5 %, 83.8 % and
+  15.9 %, 81.2 % (one sentence's first words, "The source", heard as "This
+  horse"), the 30 held out 20.6 %, 75.7 % and 21.1 %, 76.1 %, vowels wrong
+  21.0 % and 20.6 %, the four listening sentences 17.2 % and 15.2 %.
+  Sentences without /tʃ dʒ/ are unchanged sample for sample.
 - **Hiss.** /s/ is a jet on the teeth, brightest of the fricatives; /ʃ/ is
   broader and lower, with rounded but open lips.
 
