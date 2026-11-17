@@ -159,6 +159,18 @@ pub struct Controls {
     /// a rounded vowel's
     /// [`ArticulationConfig::rounded_larynx`](crate::ArticulationConfig::rounded_larynx)).
     pub larynx: f32,
+    /// A breath in (wave 3): how far below the air's pressure the lungs
+    /// draw through the segment, cmH2O (see [`Trombone::set_inhalation`]);
+    /// `0` none. Speech puts one on a pause segment of its own (see
+    /// [`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake)).
+    pub intake: f32,
+    /// How far the folds go into creak, `0‥1` (see
+    /// [`Trombone::set_fold_creak`]), from `creak_from` seconds into the
+    /// segment on: the end of a statement (see
+    /// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry)).
+    pub creak: f32,
+    /// Seconds into the segment at which its `creak` is asked for.
+    pub creak_from: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -263,7 +275,9 @@ impl Utterance {
     /// Compile English text.
     #[must_use]
     pub fn from_text(text: &str, prosody: &Prosody) -> Self {
-        Self::from_tokens(&phonemize(text), prosody)
+        // Text with bracketed phonemes is a probe of the engine's sounds:
+        // it takes no breaths (see `ProsodyConfig::breath_intake`).
+        compile(&phonemize(text), prosody, !text.contains('['))
     }
 
     /// An utterance from hand-made segments (see [`crate::sing`]).
@@ -296,7 +310,7 @@ impl Utterance {
     /// Compile a token stream (see [`phonemize`]).
     #[must_use]
     pub fn from_tokens(tokens: &[Token], prosody: &Prosody) -> Self {
-        compile(tokens, prosody)
+        compile(tokens, prosody, true)
     }
 
     /// The segments, in order.
@@ -430,6 +444,14 @@ pub struct Speaker {
     /// How far the larynx was last told to be lowered, cm (see
     /// [`Controls::larynx`]): it is told only when that changes.
     larynx: f32,
+    /// How deep a breath the lungs were last told to draw, cmH2O, and how
+    /// far into creak the folds were last told to go (see
+    /// [`Controls::intake`], [`Controls::creak`]): each is told only when
+    /// it changes.
+    inhale: f32,
+    creak: f32,
+    /// When, on `clock`, the segment's creak is due.
+    creak_at: Option<f32>,
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -520,6 +542,9 @@ impl Speaker {
         self.overlap_next = 0;
         self.overlaps_on = [None; 4];
         self.larynx = 0.0;
+        self.inhale = 0.0;
+        self.creak = 0.0;
+        self.creak_at = None;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -539,6 +564,15 @@ impl Speaker {
             voice.set_larynx_height(0.0);
             self.larynx = 0.0;
         }
+        if self.inhale != 0.0 {
+            voice.set_inhalation(0.0);
+            self.inhale = 0.0;
+        }
+        if self.creak != 0.0 {
+            voice.set_fold_creak(0.0);
+            self.creak = 0.0;
+        }
+        self.creak_at = None;
         voice.articulate_phoneme(Phoneme::Sil);
         voice.set_constriction(LABIAL_SLOT, None);
         self.labial = None;
@@ -648,7 +682,31 @@ impl Speaker {
                     plant::softness(voice, g, c.softness);
                     voice.set_cavity_expansion(c.expansion);
                     self.lower_larynx(voice, g, c.larynx);
+                    if c.intake > 0.0 && self.pause_pending {
+                        // A breath is due and the mouth has not been readied
+                        // for it yet: now, before the air moves.
+                        self.ready(voice, g);
+                    }
+                    if self.inhale > 0.0 && c.intake <= 0.0 && pause && !self.ahead {
+                        // The breath turns: the first sound's shape is sent
+                        // now, so that it is made by the time it is due.
+                        self.send_next(voice, g);
+                    }
+                    self.breathe(voice, g, c.intake);
+                    if c.creak_from > 0.0 {
+                        self.creak_at = Some(self.clock + c.creak_from);
+                        self.go_creaky(voice, g, 0.0);
+                    } else {
+                        self.creak_at = None;
+                        self.go_creaky(voice, g, c.creak);
+                    }
                 }
+            }
+            if let Some(t) = self.creak_at
+                && self.clock >= t
+            {
+                self.creak_at = None;
+                self.go_creaky(voice, g, seg.gesture.creak);
             }
             let t = (self.elapsed / seg.duration).min(1.0);
             if physical {
@@ -693,25 +751,7 @@ impl Speaker {
                 && voice.intensity() <= 0.0
                 && voice.gauges().subglottal_pressure < QUIET_PRESSURE
             {
-                let segments = &self.utterance.segments[self.index..];
-                if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
-                    let next = &segments[k];
-                    articulate_segment(
-                        voice,
-                        g,
-                        &self.utterance,
-                        self.index + k,
-                        &entry_shape(next),
-                    );
-                    self.play_overlaps(voice, self.index + k);
-                    voice.settle();
-                    // What little still rings in the tract belongs to the
-                    // old shape; let it go with it.
-                    voice.reset();
-                    self.ahead = true;
-                }
-                self.pause_pending = false;
-                self.readied = true;
+                self.ready(voice, g);
             }
             if !self.ahead
                 && physical
@@ -860,6 +900,11 @@ impl Speaker {
                     plant::softness(voice, g, 0.0);
                     voice.set_cavity_expansion(0.0);
                     self.lower_larynx(voice, g, 0.0);
+                    if physical {
+                        self.breathe(voice, g, 0.0);
+                        self.go_creaky(voice, g, 0.0);
+                        self.creak_at = None;
+                    }
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
                     // own. The lungs stop pushing: an utterance that ends
@@ -875,6 +920,75 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// Set the articulators for the sound after the pause (physical engine;
+    /// see [`PAUSE_SETTLE`]), without moving through the air. A pause that
+    /// takes a breath before that sound (a segment of it has
+    /// [`Controls::intake`]) sets them for the first vowel after it
+    /// instead, so the breath goes in through the vowel's mouth; the sound's
+    /// own shape is then sent as it is due, as the breath turns.
+    fn ready(&mut self, voice: &mut Trombone, g: bool) {
+        let segments = &self.utterance.segments[self.index..];
+        if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
+            let breath = segments[..k].iter().any(|s| s.gesture.intake > 0.0);
+            let vowel = segments[k..]
+                .iter()
+                .take_while(|s| s.phoneme != Phoneme::Sil)
+                .position(|s| is_vowel(s.phoneme));
+            let (at, shape) = match vowel {
+                Some(v) if breath => (k + v, segments[k + v].articulation),
+                _ => (k, entry_shape(&segments[k])),
+            };
+            articulate_segment(voice, g, &self.utterance, self.index + at, &shape);
+            if !breath || at == k {
+                self.play_overlaps(voice, self.index + k);
+            }
+            voice.settle();
+            // What little still rings in the tract belongs to the
+            // old shape; let it go with it.
+            voice.reset();
+            self.ahead = !breath;
+        }
+        self.pause_pending = false;
+        self.readied = true;
+    }
+
+    /// Send the shape of the first sound after the pause being spoken.
+    fn send_next(&mut self, voice: &mut Trombone, g: bool) {
+        let segments = &self.utterance.segments[self.index..];
+        if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
+            let next = segments[k];
+            articulate_segment(
+                voice,
+                g,
+                &self.utterance,
+                self.index + k,
+                &entry_shape(&next),
+            );
+            self.play_overlaps(voice, self.index + k);
+            self.ahead = true;
+        }
+    }
+
+    /// Draw a breath of `cm_h2o` (see [`Controls::intake`]), when that
+    /// changes.
+    fn breathe(&mut self, voice: &mut Trombone, g: bool, cm_h2o: f32) {
+        if cm_h2o.to_bits() == self.inhale.to_bits() {
+            return;
+        }
+        self.inhale = cm_h2o;
+        plant::inhale(voice, g, cm_h2o);
+    }
+
+    /// Take the folds into creak by `share` (see [`Controls::creak`]), when
+    /// that changes.
+    fn go_creaky(&mut self, voice: &mut Trombone, g: bool, share: f32) {
+        if share.to_bits() == self.creak.to_bits() {
+            return;
+        }
+        self.creak = share;
+        plant::creak(voice, g, share);
     }
 
     /// Lower the larynx by `cm` (see [`Controls::larynx`]): on the gesture
@@ -1210,6 +1324,22 @@ mod plant {
             voice.drive(Tier::GlottalAdduction, var::glottis::SOFTNESS, x);
         } else {
             voice.set_fold_softness(x);
+        }
+    }
+
+    pub(super) fn inhale(voice: &mut Trombone, g: bool, cm_h2o: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::INHALE, cm_h2o);
+        } else {
+            voice.set_inhalation(cm_h2o);
+        }
+    }
+
+    pub(super) fn creak(voice: &mut Trombone, g: bool, share: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::CREAK, share);
+        } else {
+            voice.set_fold_creak(share);
         }
     }
 
@@ -1953,7 +2083,9 @@ fn is_obstruent(p: Phoneme) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
+/// Compile `tokens`; `breaths`: the speaker may take breaths in the pauses
+/// (see [`breathe_in`]).
+fn compile(tokens: &[Token], prosody: &Prosody, breaths: bool) -> Utterance {
     let rate = prosody.rate.clamp(0.2, 5.0);
     let expr = prosody.expressiveness.clamp(0.0, 2.0);
     let tense = prosody.tenseness.clamp(0.0, 1.0);
@@ -2107,6 +2239,12 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
         breathe(&mut drafts, &mut phrases, &accented, &timing);
+        if timing.prosody.final_fry > 0.0 {
+            creak_at_the_ends(&mut drafts, &phrases, &timing);
+        }
+        if breaths && timing.prosody.breath_intake > 0.0 {
+            breathe_in(&mut drafts, &mut phrases, &timing);
+        }
         lean_on_vowels(&mut drafts);
         keeps_tongue_up(&mut drafts, &timing);
         assimilate_place(&mut drafts);
@@ -3290,6 +3428,101 @@ fn breathe(
             }
         } else {
             drafts[k] = lead_in;
+        }
+    }
+}
+
+/// Seconds from the lungs letting go of a breath to the phrase after it:
+/// the stream turns, the folds come together, the mouth takes the first
+/// sound's shape.
+const BREATH_TURN: f32 = 0.1;
+/// Seconds a pause keeps before a breath, for the voice and the breath of
+/// the phrase before to die away and the mouth to be readied (see
+/// [`PAUSE_SETTLE`]).
+const BREATH_DIE_AWAY: f32 = 0.22;
+
+/// The physical engine's breaths (wave 3): before the utterance and in
+/// every pause between phrases of at least
+/// [`ProsodyConfig::breath_pause`](crate::ProsodyConfig::breath_pause), a
+/// pause segment of its own in which the lungs draw
+/// [`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake)
+/// (less before a short phrase: seven tenths before a phrase of one
+/// second, all of it from three) for
+/// [`ProsodyConfig::breath_time`](crate::ProsodyConfig::breath_time),
+/// then [`BREATH_TURN`] of silence before the phrase (and its lungs'
+/// lead-in, if it opens on an obstruent). In a pause the time is taken from
+/// its start, where the voice dies away, as long as [`BREATH_DIE_AWAY`] is
+/// left of it; before the utterance (with
+/// [`ProsodyConfig::breath_first`](crate::ProsodyConfig::breath_first)) it is
+/// added, so everything after it starts `breath_time + BREATH_TURN` later. The [`Speaker`] readies the
+/// mouth for the first vowel of the phrase before the breath and sends the
+/// first sound's shape as it turns. `phrases` is kept up to date.
+fn breathe_in(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timing: &Tuning) {
+    let breath = timing.prosody.breath_time;
+    for p in (0..phrases.len()).rev() {
+        let (a, b, _) = phrases[p];
+        if a >= b {
+            continue;
+        }
+        let mut s = a;
+        while s > 0 && drafts[s - 1].phoneme == Phoneme::Sil {
+            s -= 1;
+        }
+        // The lungs' lead-in before an obstruent stays where it is.
+        let lead_in = usize::from(a > s + 1 && drafts[a - 1].gesture.pressure_drop.0 < 1.0);
+        let at = a - lead_in;
+        let total: f32 = drafts[s..a].iter().map(|d| d.duration).sum();
+        let first = s == 0;
+        if first && timing.prosody.breath_first < 0.5 {
+            continue;
+        }
+        if !first {
+            let lead: f32 = drafts[at..a].iter().map(|d| d.duration).sum();
+            if total < timing.prosody.breath_pause
+                || drafts[s].duration - breath - BREATH_TURN < BREATH_DIE_AWAY
+                || total - lead - breath - BREATH_TURN < BREATH_DIE_AWAY
+            {
+                continue;
+            }
+            drafts[s].duration -= breath + BREATH_TURN;
+        }
+        let seconds: f32 = drafts[a..b].iter().map(|d| d.duration).sum();
+        let share = (0.55 + 0.15 * seconds).clamp(0.6, 1.0);
+        let mut draw = silence(breath);
+        draw.gesture.intake = timing.prosody.breath_intake * share;
+        drafts.splice(at..at, [draw, silence(BREATH_TURN)]);
+        for q in &mut phrases[p..] {
+            (q.0, q.1) = (q.0 + 2, q.1 + 2);
+        }
+    }
+}
+
+/// The physical engine's creak at the end of a statement (wave 3): over
+/// the last [`ProsodyConfig::fry_time`](crate::ProsodyConfig::fry_time) of
+/// the voice in a phrase that ends in a fall (`.` `!`), the folds go
+/// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry) of the way
+/// into creak (see [`Trombone::set_fold_creak`]); questions and commas end
+/// in modal voice. The consonants after the last voiced sound keep it, and
+/// the next phrase starts without.
+fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], timing: &Tuning) {
+    for &(a, b, brk) in phrases {
+        if !matches!(brk, Break::Period | Break::Exclamation) || a >= b {
+            continue;
+        }
+        let Some(last) = drafts[a..b].iter().rposition(|d| d.voiced) else {
+            continue;
+        };
+        let end: f32 = drafts[a..=a + last].iter().map(|d| d.duration).sum();
+        let from = end - timing.prosody.fry_time;
+        let mut t = 0.0;
+        for d in &mut drafts[a..b] {
+            let start = t;
+            t += d.duration;
+            if t <= from {
+                continue;
+            }
+            d.gesture.creak = timing.prosody.final_fry;
+            d.gesture.creak_from = (from - start).max(0.0);
         }
     }
 }

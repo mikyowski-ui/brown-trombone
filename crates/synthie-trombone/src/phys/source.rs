@@ -92,9 +92,6 @@ const JITTER_SEED: u32 = 0x5EED_0F0A;
 const JITTER_NORM: f32 = 0.774_596_7;
 /// Seconds over which the softness of the folds follows its setting.
 const SOFT_TIME: f32 = 0.01;
-/// Seconds over which the folds go into creak or come out of it (the
-/// cover slackening, the arytenoids pressing the folds together).
-const CREAK_TIME: f32 = 0.03;
 /// Depth of a breath, cmH2O, from which the glottis is held open as wide
 /// as `ArticulationConfig::breath_opening`; a shallower one opens it in
 /// proportion.
@@ -693,7 +690,11 @@ impl Source {
         self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
         let adduction = self.tuning.articulation.adduction_time;
         self.leak += (self.leak_target - self.leak) * (dt / adduction);
-        self.creak += (self.creak_target - self.creak) * (dt / CREAK_TIME);
+        // Into creak and out of it at the pace the folds come together: taken
+        // there over 30 ms, the folds' pulses first faded for some 80 ms
+        // before they began to alternate; over 10 ms they alternate from the
+        // third or fourth pulse (`examples/breath.rs --onset`).
+        self.creak += (self.creak_target - self.creak) * (dt / adduction);
         let gap_target = if self.pressing && self.tense1 >= WHISPER_TENSENESS {
             -self.tuning.anatomy.attack_depth * self.size
         } else if self.creak > 0.0 && self.voicing && self.gap_override.is_none() {

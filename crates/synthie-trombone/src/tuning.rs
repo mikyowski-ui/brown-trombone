@@ -1383,6 +1383,11 @@ tuning! {
         /// a short phrase is shallower (seven tenths of it before a phrase of a
         /// second). `0` takes none.
         breath_intake = 0.0, 0.0..=6.0, A;
+        /// Whether an utterance opens with a breath too (`1`), its first sound
+        /// then coming `breath_time` and 0.1 s later, or only its long pauses
+        /// take one (`0`: a single sentence is spoken exactly as without
+        /// breaths). Read only with `breath_intake` on.
+        breath_first = 1.0, 0.0..=1.0, B;
         /// Shortest pause between phrases that takes a breath, s (a sentence's
         /// pause is `sentence_pause`, a comma's 0.18 s).
         breath_pause = 0.45, 0.2..=1.5, B;
@@ -1395,9 +1400,10 @@ tuning! {
         /// as the breath runs down they alternate strong and weak pulses. `0`
         /// ends every statement in modal voice.
         final_fry = 0.0, 0.0..=1.0, A;
-        /// Seconds of voice at the end of a statement over which it goes into
-        /// creak (it takes some 30 ms to get there).
-        fry_time = 0.1, 0.05..=0.2, B;
+        /// Seconds of voice at the end of a statement over which it is in creak
+        /// (the folds alternate from their third or fourth pulse, some 40 ms,
+        /// on).
+        fry_time = 0.12, 0.05..=0.25, B;
     } tiers {
     } aliases {
     }
@@ -1657,7 +1663,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_thirty_five_seventy_two_and_forty_eight() {
+    fn three_parts_of_thirty_five_seventy_two_and_forty_nine() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1665,9 +1671,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (35, 72, 48)
+            (35, 72, 49)
         );
-        assert_eq!(Tuning::FIELDS.len(), 155);
+        assert_eq!(Tuning::FIELDS.len(), 156);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1682,10 +1688,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_seventy_two_and_sixty_eight() {
+    fn two_passes_of_seventy_two_and_sixty_nine() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (72, 68));
+        assert_eq!((a, b), (72, 69));
     }
 
     #[test]

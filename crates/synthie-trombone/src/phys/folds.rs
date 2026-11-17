@@ -310,7 +310,12 @@ impl Folds {
     /// the tract above to the lungs below: the same rule as the air going
     /// out, mirrored (the upper margin is the entrance, the jet leaves
     /// past the narrowest point into the trachea). `u` is negative.
-    fn inward_pressures(p: &FoldParams, (a1, a2): (f32, f32), (ps, pe): (f32, f32), u: f32) -> (f32, f32) {
+    fn inward_pressures(
+        p: &FoldParams,
+        (a1, a2): (f32, f32),
+        (ps, pe): (f32, f32),
+        u: f32,
+    ) -> (f32, f32) {
         if a2 <= 0.0 {
             return (ps, 0.0);
         }

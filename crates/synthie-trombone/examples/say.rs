@@ -46,6 +46,12 @@
 //! speaker's, the vowels were heard wrong more often: 29.0 against 26.6 %
 //! on the LibriSpeech texts). `--phone-times file.json` writes where each
 //! phone starts and ends in the output.
+//!
+//! The living voice (wave 3, physical engine): `--breath-intake` takes a
+//! breath before the text and in the pauses between its sentences (the
+//! lungs drawing up to 5 cmH2O; `ProsodyConfig::breath_intake`), `--fry 0.8`
+//! takes the end of every statement that far into creak
+//! (`ProsodyConfig::final_fry`). Both go on top of a `--profile`.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -203,6 +209,8 @@ fn main() -> std::io::Result<()> {
     let mut follow_tenseness = true;
     let mut follow_formants = false;
     let mut follow_speed = true;
+    let mut breath_intake: Option<f32> = None;
+    let mut fry: Option<f32> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -264,6 +272,8 @@ fn main() -> std::io::Result<()> {
             "--prosody-formants" => follow_formants = value("--prosody-formants") == "on",
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--dump-profile" => dump = true,
+            "--breath-intake" => breath_intake = Some(5.0),
+            "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
                 return Ok(());
@@ -305,6 +315,12 @@ fn main() -> std::io::Result<()> {
         settings = settings
             .with_profile(&json)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
+    }
+    if let Some(depth) = breath_intake {
+        settings.tuning.prosody.breath_intake = depth;
+    }
+    if let Some(share) = fry {
+        settings.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
     }
     if dump {
         println!("{}", settings.to_profile());
