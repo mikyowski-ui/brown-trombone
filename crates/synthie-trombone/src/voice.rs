@@ -1199,6 +1199,7 @@ impl Trombone {
     /// gesture of its own (dominance `w / (1 − w)` for a pull of `w`); its
     /// own lips, or, under a gap meant to hiss, lips held unrounded, are a
     /// dominant lip gesture.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn articulate_as_gestures(
         &mut self,
         a: &Articulation,

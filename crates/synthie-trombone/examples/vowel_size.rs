@@ -178,6 +178,21 @@ const START_LIPS: f32 = 1.2;
 /// map, up to the teeth (/i/ in a long tract wants a little more than the
 /// map's 34).
 const NARROWING_AT: (f32, f32) = (10.0, 38.0);
+/// The same on the modal body: from the top of the epilarynx (its first
+/// cell, `tract_modes::FROM`). /ɔ/ reached F1 only to within 3.7 % at the
+/// small sizes with its narrowing no lower than cell 10 (the cosine body's
+/// /ɑ ɔ/ narrow the lower pharynx too: the piriform sinuses, a closed side
+/// branch of some 2 cm³ hung below it, pull the F1 of an open vowel's
+/// small back cavity down by a quarter otherwise).
+const MODAL_NARROWING_AT: (f32, f32) = (7.0, 38.0);
+
+/// Where the narrowing may sit for `model`.
+fn narrowing_at(model: Model) -> (f32, f32) {
+    match model {
+        Model::Cosine => NARROWING_AT,
+        Model::Modal => MODAL_NARROWING_AT,
+    }
+}
 /// Lowest narrowing place for all but the open vowels...
 const ORAL: f32 = 14.0;
 /// ...and the F1 (adult man, Hz) from which a vowel counts as open.
@@ -247,6 +262,37 @@ const MEASURED_PULL: f32 = 1.0;
 /// which it is solved again with a narrowing along the tongue of its own.
 const NEEDS_NARROWING: f32 = 0.01;
 
+/// The cosine table just solved in this run (`--both`), whose tongues the
+/// modal shapes of the same tract carry.
+static SOLVED_COSINE: Mutex<Option<Vec<(VowelKey, [[i32; D]; ROWS])>>> = Mutex::new(None);
+
+/// `shape` with the cosine tongue a modal shape of `key` carries at
+/// `length` in the library (the cosine table of the same tract, which the
+/// jaw follows, `Tract::jaw_opening`): that of the cosine table solved just
+/// before in this run, or else the library's. A cosine shape as it is.
+fn carrying(shape: Shape, key: VowelKey, length: f32) -> Shape {
+    if shape.modes.is_none() {
+        return shape;
+    }
+    let solved = SOLVED_COSINE.lock().expect("lock").as_ref().and_then(|rows| {
+        rows.iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, r)| interpolate(Model::Cosine, r, length))
+    });
+    let cosine = solved.unwrap_or_else(|| {
+        let mut t = survey::base();
+        t.anatomy.tongue_model = 0.0;
+        articulation(key)
+            .physical_shape_with(length, &t)
+            .expect("a vowel shape")
+    });
+    Shape {
+        tongue_index: cosine.tongue_index,
+        tongue_diameter: cosine.tongue_diameter,
+        ..shape
+    }
+}
+
 /// Tract length of row `k`, computed as the library does.
 fn row_length(k: usize) -> f32 {
     FIRST + STEP * k as f32
@@ -298,7 +344,10 @@ fn to_x(s: &Shape) -> [f32; D] {
         lin(s.tongue_index, TONGUE_INDEX),
         lin(s.tongue_diameter, TONGUE_DIAMETER),
         s.lips.map_or(1.0, |l| log(l, LIPS)),
-        lin(at, NARROWING_AT),
+        lin(
+            at,
+            narrowing_at(if s.modes.is_some() { Model::Modal } else { Model::Cosine }),
+        ),
         log(narrow, NARROWING),
         lin(s.pharynx, PHARYNX),
     ];
@@ -320,7 +369,7 @@ fn from_x(x: &[f32; D], kind: Kind) -> Shape {
     let lips = kind.rounded.then(|| log(x[2], LIPS));
     let narrowing = kind
         .narrowed
-        .then(|| (lin(x[3], NARROWING_AT), log(x[4], NARROWING)));
+        .then(|| (lin(x[3], narrowing_at(kind.model)), log(x[4], NARROWING)));
     if kind.model == Model::Modal {
         let q = [0, 1, 2].map(|k| lin(x[MODE_AT[k]], inverse::mode_range(k)));
         // The cosine tongue is not used by a modal tract; the projection's
@@ -378,6 +427,8 @@ struct Goal {
     /// Highest value of each coordinate.
     hi: [f32; D],
     kind: Kind,
+    /// The vowel shape it is.
+    key: VowelKey,
     length: f32,
 }
 
@@ -401,7 +452,7 @@ impl Goal {
     }
 
     fn eval(&self, m: &mut Meter, x: &[f32; D]) -> Option<([f32; 3], f32)> {
-        let f = m.measure(&from_x(x, self.kind), self.length)?;
+        let f = m.measure(&carrying(from_x(x, self.kind), self.key, self.length), self.length)?;
         let r = self.residuals(f);
         Some((r, self.cost(x, &r)))
     }
@@ -550,6 +601,10 @@ fn rel(r: &[f32; 3]) -> [f32; 3] {
 fn prior(kind: Kind, t: &Target) -> [f32; D] {
     let mut x = cosine_prior(t);
     if kind.model == Model::Modal {
+        // The cosine prior's narrowing place, on the modal range of places.
+        let at = NARROWING_AT.0 + (NARROWING_AT.1 - NARROWING_AT.0) * x[3];
+        x[3] = ((at - MODAL_NARROWING_AT.0) / (MODAL_NARROWING_AT.1 - MODAL_NARROWING_AT.0))
+            .clamp(0.0, 1.0);
         let q = measured_prior(t);
         for k in 0..3 {
             let (lo, hi) = inverse::mode_range(k);
@@ -564,7 +619,11 @@ fn prior(kind: Kind, t: &Target) -> [f32; D] {
             let s = articulation(t.key)
                 .physical_shape(1.0)
                 .expect("a vowel shape");
-            let n = to_x(&s);
+            // (Read as a modal shape: the modal range of places.)
+            let n = to_x(&Shape {
+                modes: Some([0.0; 3]),
+                ..s
+            });
             x[3] = n[3];
             x[4] = n[4];
         }
@@ -674,7 +733,8 @@ fn natural_root(key: VowelKey) -> f32 {
 fn lowest(model: Model, t: &Target) -> [f32; D] {
     let mut lo = [0.0; D];
     if t.formants[0] < THROAT_F1 {
-        lo[3] = (ORAL - NARROWING_AT.0) / (NARROWING_AT.1 - NARROWING_AT.0);
+        let (a, b) = narrowing_at(model);
+        lo[3] = (ORAL - a) / (b - a);
     }
     if model == Model::Cosine {
         lo[5] = root_x(root_range(t.key).0);
@@ -764,6 +824,7 @@ fn native_row(m: &mut Meter, kind: Kind, t: &Target) -> Solved {
         lo: lowest(model, t),
         hi: highest(model, t),
         kind,
+        key: t.key,
         length: 1.0,
     };
     let mut best: Option<([f32; D], f32, bool)> = None;
@@ -835,6 +896,7 @@ fn chain(m: &mut Meter, kind: Kind, t: &Target, x0: [f32; D], up: bool) -> Vec<(
             lo: lowest(model, t),
             hi: highest(model, t),
             kind,
+            key: t.key,
             length,
         };
         let mut best = goal.refine(m, ahead).map(|(x, r, c)| (x, r, c, false));
@@ -984,7 +1046,7 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
             .filter(|t| measured_vowel(t.key).is_some())
             .collect();
         let at_measured = par_map(&measured, |m, t| {
-            m.measure(&from_x(&prior(first(t), t), first(t)), 1.0)
+            m.measure(&carrying(from_x(&prior(first(t), t), first(t)), t.key, 1.0), 1.0)
         });
         println!("The measured shapes on the engine (lips as the cosine body's), against the targets:");
         for (t, f) in measured.iter().zip(&at_measured) {
@@ -1094,7 +1156,7 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         .flat_map(|v| lengths.iter().map(move |&l| (v, l)))
         .collect();
     let measured = par_map(&checks, |m, &(v, l)| {
-        let f = m.measure(&interpolate(model, &table[v], l), l);
+        let f = m.measure(&carrying(interpolate(model, &table[v], l), targets[v].key, l), l);
         (f, errors(f, targets[v].key, l))
     });
 
@@ -1252,12 +1314,13 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         Model::Modal => {
             let _ = writeln!(
                 src,
-                "//! Vowel shapes of the modal tongue body (`AnatomyConfig::tongue_model`\n\
-                 //! 1) by tract length, solved from `src/vowel_targets.rs` by\n\
+                "//! Vowel shapes of the modal tongue body, by tract length (with\n\
+                 //! `AnatomyConfig::tongue_model` at 1), solved from `src/vowel_targets.rs` by\n\
                  //! `examples/vowel_size.rs`, starting from and pulled towards the\n\
                  //! measured vowels' own bodies (`src/tract_modes.rs`); do not edit.\n\
                  //! Regenerate with\n\
-                 //! `cargo run -p synthie-trombone --example vowel_size --release -- --modal`.\n\
+                 //! `cargo run -p synthie-trombone --example vowel_size --release -- --modal`\n\
+                 //! (or `-- --lengthened --both` for the lengthened tract).\n\
                  //!\n\
                  //! ```text"
             );
@@ -1273,7 +1336,7 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         .filter(|f| f.name != "tongue_model")
         .filter_map(|f| {
             let v = base.get(f.name)?;
-            (v.to_bits() != f.default.to_bits()).then(|| format!("{} {v}", f.name))
+            (v.to_bits() != f.default.to_bits()).then(|| format!("`{}` {v}", f.name))
         })
         .collect();
     if !changed.is_empty() {
@@ -1332,6 +1395,11 @@ fn run(model: Model, base: &synthie_trombone::Tuning) {
         }
     };
     std::fs::write(path, &src).expect("write the table");
+    if model == Model::Cosine {
+        let rows: Vec<(VowelKey, [[i32; D]; ROWS])> =
+            targets.iter().map(|t| t.key).zip(table.iter().copied()).collect();
+        *SOLVED_COSINE.lock().expect("lock") = Some(rows);
+    }
     println!(
         "wrote {path}: {} bytes, {:.1} s in all",
         src.len(),

@@ -403,6 +403,7 @@ enum Item {
     Voice,
 }
 
+#[allow(clippy::too_many_lines)]
 fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
     let header = words.first().copied().unwrap_or(0);
     let mut r = Reader { words, at: 1 };

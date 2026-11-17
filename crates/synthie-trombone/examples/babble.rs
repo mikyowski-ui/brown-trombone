@@ -905,7 +905,7 @@ fn modal_main() {
         .filter(|f| f.name != "tongue_model")
         .filter_map(|f| {
             let v = base.get(f.name)?;
-            (v.to_bits() != f.default.to_bits()).then(|| format!("{} {v}", f.name))
+            (v.to_bits() != f.default.to_bits()).then(|| format!("`{}` {v}", f.name))
         })
         .collect();
     let d = MODAL_DIMS;

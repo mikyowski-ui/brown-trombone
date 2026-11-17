@@ -910,7 +910,7 @@ impl Tract {
     ///
     /// On the modal body too the jaw follows the height of the cosine
     /// tongue the vowel shape carries (the cosine table's, or what the
-    /// body's numbers project nearest to): the jaw is the LipsAndJaw tier's,
+    /// body's numbers project nearest to): the jaw is the `LipsAndJaw` tier's,
     /// as before, and only the body under it changes. Following the modal
     /// body's own opening instead (its narrowest cell from the soft palate
     /// on, between that of the closest and of the most open measured vowel)
