@@ -24,7 +24,9 @@
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::many_single_char_names,
+    clippy::float_cmp
 )]
 
 use synthie_trombone::speech::{Speaker, Utterance};

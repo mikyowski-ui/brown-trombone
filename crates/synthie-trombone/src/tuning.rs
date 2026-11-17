@@ -1413,11 +1413,9 @@ impl TractModel {
     /// `say --tract` and the app's `--tract` take it.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
-            "anatomical" => Some(Self::Anatomical),
-            "original" => Some(Self::Original),
-            _ => None,
-        }
+        [Self::Anatomical, Self::Original]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
     }
 
     /// The name [`from_name`](Self::from_name) reads.
@@ -1449,11 +1447,12 @@ impl TongueModel {
     /// the app's `--tongue-model` take it.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
-            "cosine" => Some(Self::Cosine),
-            "mri" | "measured" => Some(Self::Measured),
-            _ => None,
+        if name.eq_ignore_ascii_case("measured") {
+            return Some(Self::Measured);
         }
+        [Self::Cosine, Self::Measured]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
     }
 
     /// The name [`from_name`](Self::from_name) reads first.
