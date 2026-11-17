@@ -18,7 +18,9 @@ use ratatui::widgets::{Padding, Paragraph};
 use synthie_trombone::inverse;
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
 use synthie_trombone::{Tier, TierActivity};
-use synthie_ui::theme::{self, BG, CYAN, DIM, FAINT, FG, MAGENTA, PURPLE, RED, YELLOW, bold, fg};
+use synthie_ui::theme::{
+    self, BG, CYAN, DIM, FAINT, FG, GREEN, MAGENTA, ORANGE, PURPLE, RED, YELLOW, bold, fg,
+};
 use synthie_ui::widgets::{key_hints, keycap, logo, meter, paint_background, panel, vu};
 
 const NOTE_NAMES: [&str; 12] = [
@@ -198,6 +200,7 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App, summary: bool) {
                 ctx.draw(&CLine::new(x0, a, x1, b, CYAN));
                 ctx.draw(&CLine::new(x0, -a, x1, -b, PURPLE));
             }
+            draw_lengths(ctx, &s);
             for k in 0..NOSE_LEN - 1 {
                 let (a, b) = (f64::from(s.nose[k]) / 2.0, f64::from(s.nose[k + 1]) / 2.0);
                 let (x0, x1) = ((NOSE_START + k) as f64, (NOSE_START + k + 1) as f64);
@@ -247,6 +250,7 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App, summary: bool) {
                 }
             }
             ctx.print(-0.8, -2.4, Span::styled("glottis", fg(DIM)));
+            label_lengths(ctx, &s);
             ctx.print(40.5, -2.4, Span::styled("lips", fg(DIM)));
             ctx.print(41.0, NOSE_Y + 1.1, Span::styled("nose", fg(DIM)));
             ctx.print(NOSE_START as f64 - 3.5, 2.4, Span::styled("velum", fg(DIM)));
@@ -259,6 +263,69 @@ fn draw_tract(frame: &mut Frame, area: Rect, app: &mut App, summary: bool) {
         frame
             .buffer_mut()
             .set_stringn(col, row, "◆ tongue", room, bold(YELLOW));
+    }
+}
+
+/// Native length of a tract cell, cm.
+#[allow(clippy::cast_precision_loss)]
+const CELL_CM: f64 = 16.04 / N as f64;
+
+/// The tube above the folds, the lip horn and the larynx's height on the
+/// tract view: the epilaryngeal tube's walls in green (as narrow as it
+/// is), the horn as the lips' opening carried on past them as far as the
+/// lips are out, and a lowered larynx as the tube carried on below the
+/// glottis (a raised one as a mark inside it), each to scale in cells as
+/// far as the canvas goes; faint while the lip horn or the larynx slide is
+/// off and the voice does not hear them.
+#[allow(clippy::cast_precision_loss)]
+fn draw_lengths(ctx: &mut Context, s: &crate::audio::Snapshot) {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let tube = (s.epilarynx.max(0.0).ceil() as usize).min(N - 1);
+    for i in 0..tube {
+        let j = (i + 1).min(tube);
+        let (a, b) = (
+            f64::from(s.diameters[i]) / 2.0,
+            f64::from(s.diameters[j]) / 2.0,
+        );
+        ctx.draw(&CLine::new(i as f64, a, j as f64, b, GREEN));
+        ctx.draw(&CLine::new(i as f64, -a, j as f64, -b, GREEN));
+    }
+    let (out, height) = s.lengths;
+    if out > 1e-3 {
+        let lip = f64::from(s.diameters[N - 1]) / 2.0;
+        let x0 = (N - 1) as f64;
+        let x1 = (x0 + f64::from(out) / CELL_CM).min(X_BOUNDS[1] - 0.1);
+        let colour = if s.lip_horn > 0.0 { YELLOW } else { FAINT };
+        ctx.draw(&CLine::new(x0, lip, x1, lip, colour));
+        ctx.draw(&CLine::new(x0, -lip, x1, -lip, colour));
+        ctx.draw(&CLine::new(x1, -lip, x1, lip, colour));
+    }
+    if height.abs() > 1e-3 {
+        let half = f64::from(s.diameters[0]) / 2.0;
+        let x = (-f64::from(height) / CELL_CM).max(X_BOUNDS[0] + 0.1);
+        let colour = if s.larynx_travel > 0.0 { ORANGE } else { FAINT };
+        ctx.draw(&CLine::new(x, -half - 0.3, x, half + 0.3, colour));
+        if x < 0.0 {
+            ctx.draw(&CLine::new(x, half, 0.0, half, colour));
+            ctx.draw(&CLine::new(x, -half, 0.0, -half, colour));
+        }
+    }
+}
+
+/// The words for [`draw_lengths`]: "epilarynx" under the tube, and the
+/// horn's and the larynx's lengths in cm while they are away from rest.
+fn label_lengths(ctx: &mut Context, s: &crate::audio::Snapshot) {
+    let (out, height) = s.lengths;
+    ctx.print(0.6, -1.25, Span::styled("epilarynx", fg(GREEN)));
+    if out > 1e-3 {
+        let colour = if s.lip_horn > 0.0 { YELLOW } else { FAINT };
+        let text = format!("horn {out:.1}");
+        ctx.print(39.5, -1.85, Span::styled(text, fg(colour)));
+    }
+    if height.abs() > 1e-3 {
+        let colour = if s.larynx_travel > 0.0 { ORANGE } else { FAINT };
+        let text = format!("larynx {height:+.1}");
+        ctx.print(-0.8, -1.85, Span::styled(text, fg(colour)));
     }
 }
 
@@ -586,6 +653,8 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ("c", "clear"),
                 ("\\", "engine"),
                 ("/", "formant lock"),
+                ("{ }", "lips out"),
+                ("< >", "larynx"),
             ]);
             vec![l, Line::from(v), settings]
         }
@@ -883,9 +952,16 @@ fn short_name(tier: Tier) -> &'static str {
 /// is cyan where the gesture score's gestures act on the tier (`scored`),
 /// white where the row is read off the controls, dim while nothing drives
 /// it.
-fn tier_line(name: &str, t: &TierActivity, width: usize, scored: bool) -> Line<'static> {
+fn tier_line(
+    name: &str,
+    t: &TierActivity,
+    width: usize,
+    scored: bool,
+    extra: Option<String>,
+) -> Line<'static> {
     let active = t.activation >= 0.5;
-    let track = width.saturating_sub(8 + 2).max(4);
+    let extra_width = extra.as_ref().map_or(0, |e| e.chars().count());
+    let track = width.saturating_sub(8 + 2 + extra_width).max(4);
     let style = match (active, scored) {
         (true, true) => bold(CYAN),
         (true, false) => bold(FG),
@@ -912,6 +988,47 @@ fn tier_line(name: &str, t: &TierActivity, width: usize, scored: bool) -> Line<'
         },
         if active { fg(FG) } else { fg(FAINT) },
     ));
+    if let Some(e) = extra {
+        spans.push(Span::styled(e, fg(DIM)));
+    }
+    Line::from(spans)
+}
+
+/// The tier variable beside the tier's main one, for its row: the
+/// larynx's height (`LarynxAndPitch`) and the lips' protrusion (`LipsAndJaw`),
+/// cm, as the tract has them now.
+fn tier_extra(tier: Tier, app: &App) -> Option<String> {
+    let (out, height) = app.snap.lengths;
+    match tier {
+        Tier::LarynxAndPitch => Some(format!(" h{height:+.1}")),
+        Tier::LipsAndJaw => Some(format!(" p{out:.1}")),
+        _ => None,
+    }
+}
+
+/// The lip horn and the larynx as one row of the instrument panel: how
+/// far the lips are out and the larynx above its rest, cm, with what the
+/// hand set; or that they are off (`lip_horn`, `larynx_travel` 0), which
+/// the voice does not hear.
+fn lengths_line(app: &App, w: usize) -> Line<'static> {
+    let s = &app.snap;
+    let (out, height) = s.lengths;
+    let mut spans = vec![Span::styled("horn ", fg(DIM))];
+    if s.lip_horn > 0.0 {
+        spans.push(Span::styled(format!("{out:.1}"), bold(YELLOW)));
+    } else {
+        spans.push(Span::styled("off", fg(FAINT)));
+    }
+    spans.push(Span::styled("  larynx ", fg(DIM)));
+    if s.larynx_travel > 0.0 {
+        spans.push(Span::styled(format!("{height:+.1}"), bold(ORANGE)));
+    } else {
+        spans.push(Span::styled("off", fg(FAINT)));
+    }
+    spans.push(Span::styled(" cm", fg(DIM)));
+    if w >= 34 {
+        spans.push(Span::styled("  { } < >", fg(FAINT)));
+    }
     Line::from(spans)
 }
 
@@ -995,8 +1112,11 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
     let tiers: Vec<Line> = Tier::ALL
         .iter()
         .zip(app.snap.tiers.iter().zip(&app.snap.scored))
-        .map(|(tier, (t, &scored))| tier_line(short_name(*tier), t, w, scored))
+        .map(|(tier, (t, &scored))| {
+            tier_line(short_name(*tier), t, w, scored, tier_extra(*tier, app))
+        })
         .collect();
+    let lengths = g.physical.then(|| lengths_line(app, w));
 
     // What must be there, then what fits.
     let required = 3 + tiers.len();
@@ -1009,6 +1129,7 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
         })
     };
     let age = take(age);
+    let lengths = take(lengths);
     let gap = take(gap);
     let spacer = take(Some(Line::from(vec![
         Span::styled("tiers: ", fg(DIM)),
@@ -1021,6 +1142,7 @@ fn draw_instrument(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(pressure);
     lines.push(closure);
     lines.extend(gap);
+    lines.extend(lengths);
     lines.extend(spacer);
     lines.extend(tiers);
     frame.render_widget(Paragraph::new(lines).block(block), area);
@@ -1730,7 +1852,7 @@ mod tests {
             value: 0.5,
             gestures: 2,
         };
-        let line = tier_line("velum", &t, 30, false);
+        let line = tier_line("velum", &t, 30, false, None);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         println!("{text}");
         assert_eq!(text.chars().count(), 30);
@@ -1738,13 +1860,50 @@ mod tests {
         // The target at the right end, the count after it.
         assert!(text.ends_with("┃ 2"), "{text}");
         assert_eq!(line.spans[0].style, bold(FG));
-        let idle = tier_line("tip", &TierActivity::default(), 30, false);
+        let idle = tier_line("tip", &TierActivity::default(), 30, false, None);
         let text: String = idle.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(
             text.starts_with("tip     ┃") && text.ends_with(" ·"),
             "{text}"
         );
         assert_eq!(idle.spans[0].style, fg(DIM));
+    }
+
+    /// The lip horn, the larynx and the epilarynx on the tract view, their
+    /// row in the instrument panel and the two tier variables in the tier
+    /// rows; "off" in the panel while the voice does not hear them.
+    #[test]
+    fn the_tract_shows_its_lengths_and_the_epilarynx() {
+        let (mut app, _rx) = quiet_app();
+        app.snap.glottis.physical = true;
+        app.snap.lengths = (1.2, -0.6);
+        app.snap.lip_horn = 1.2;
+        app.snap.larynx_travel = 1.0;
+        let (_, text) = draw_at(&mut app, 120, 34);
+        println!("{text}");
+        for want in ["epilarynx", "horn 1.2", "larynx -0.6", "h-0.6", "p1.2"] {
+            assert!(text.contains(want), "{want}\n{text}");
+        }
+        assert!(text.contains("horn 1.2  larynx -0.6 cm"), "{text}");
+        app.snap.lip_horn = 0.0;
+        app.snap.larynx_travel = 0.0;
+        let (_, text) = draw_at(&mut app, 120, 34);
+        assert!(text.contains("horn off  larynx off cm"), "{text}");
+    }
+
+    /// The keys move the voice's own lips and larynx (the tract's state
+    /// moves whether or not the slides are on to be heard).
+    #[test]
+    fn the_keys_move_the_lips_and_the_larynx() {
+        let mut live = Live::new(synthie_trombone::Engine::Physical);
+        for _ in 0..3 {
+            live.press('}');
+            live.press('<');
+        }
+        live.play(0.4);
+        let (out, height) = live.app.snap.lengths;
+        assert!((out - 0.6).abs() < 0.05, "{out}");
+        assert!((height + 0.6).abs() < 0.05, "{height}");
     }
 
     /// The classic engine has no air: its pressures are marked so, and

@@ -56,6 +56,7 @@ the mouse: the tract, the tongue, the velum, and every meter in the panels.
 | `m`, `r`, `c` | pitch wobble, reverb amount, clear constrictions |
 | `\` | switch between the classic and the physical engine |
 | `/` | Formant Lock: steer the vowel by F1 and F2 on a vowel chart (arrow keys then nudge F2 / F1) |
+| `{` `}`, `<` `>` | lips back / forward by 0.2 cm (back past rest they follow the rounding again), larynx lower / higher by 0.2 cm (physical engine; heard with `lip_horn` and `larynx_travel` on) |
 | `` ` `` | mimic on or off (start the app with `--mimic`; see below) |
 | `F5` | start or stop recording a take (see below) |
 | `F6` | speech through the gesture score or the old path (A/B them by ear; see the instrument panel below) |
@@ -106,13 +107,14 @@ what the voice is doing inside:
 │ ΔP 10.1 sub 10.4 lungs  8.0 cmH2O│  across the folds, below them, asked for
 │ shut ██████···········  35% folds│  closed quotient, and what is sounding
 │ gap  0.005‥0.191 cm²             │  smallest and largest glottal area
+│ horn 1.2  larynx -0.6 cm         │  lips out, larynx above rest ("off")
 │ tiers: score · controls          │  cyan names: the score; white: controls
 │ glottis ██████████████████████┃ 1│  one row per tier of the gesture score:
-│ larynx  ████████████████┃······ 1│  the bar is where it is now, ┃ its
+│ larynx  ████████████████┃·· 1 h-0.6│  the bar is where it is now, ┃ its
 │ velum   ██████████████████████┃ 1│  target, the number its gestures;
-│ body    █████┃················· 1│  a tier nothing drives is dimmed
-│ tip     ┃······················ ·│
-│ lips    ┃······················ ·│
+│ body    █████┃················· 1│  a tier nothing drives is dimmed;
+│ tip     ┃······················ ·│  h the larynx's height, p the lips'
+│ lips    ┃················· · p1.2│  protrusion, cm
 ╰──────────────────────────────────╯
 ```
 
@@ -136,6 +138,13 @@ what the voice is doing inside:
   folds' vibrating edges are closed while the voice sounds, and whether the
   folds, the pulse source or nothing is sounding. The classic engine has no
   air: it shows `classic: no air` and its LF pulse.
+- **horn** and **larynx** are how far the lips are pushed forward and the
+  larynx stands above its rest, cm (`Trombone::tract_lengths`); `off`
+  while `AnatomyConfig::lip_horn` or `larynx_travel` is `0` and the voice
+  does not hear them (the tract's state still moves). The tract view draws
+  the horn past the lips (yellow), a lowered larynx as the tube carried on
+  below the glottis (orange), both faint while off, and the epilaryngeal
+  tube's walls in green as far as `epilarynx_cells` reaches.
 - **The tiers** are the gesture score's (glottal adduction, larynx and
   pitch, velum, tongue body, tongue tip, lips and jaw), on the score's
   scales (pitch 50 to 400 Hz, logarithmic; the tip's and the lips'

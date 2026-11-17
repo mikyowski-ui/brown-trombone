@@ -77,6 +77,12 @@ pub enum Logged {
     Push(u8, ScoreGesture),
     /// End the gesture in a slot, over this many seconds.
     EndGesture(u8, f32),
+    /// Push the lips forward by this many cm, or let them follow the
+    /// rounding (`None`; `Trombone::set_lip_protrusion`).
+    Protrusion(Option<f32>),
+    /// Hold the larynx this many cm above its rest, negative lowered
+    /// (`Trombone::set_larynx_height`).
+    Larynx(f32),
 }
 
 /// Slots for gestures played by hand.
@@ -119,6 +125,11 @@ pub struct Controls {
     /// Reverb mix of the output (the take's sound is before it).
     pub reverb: f32,
     pub mimic: bool,
+    /// Lip protrusion set by hand, cm (`None`: the lips follow the
+    /// rounding).
+    pub protrusion: Option<f32>,
+    /// Larynx height set by hand, cm above rest.
+    pub larynx: f32,
 }
 
 impl Controls {
@@ -141,6 +152,8 @@ impl Controls {
             drone: false,
             reverb: START_REVERB,
             mimic: false,
+            protrusion: None,
+            larynx: 0.0,
         }
     }
 }
@@ -174,6 +187,8 @@ pub fn build_voice(sample_rate: f32, c: &Controls) -> Trombone {
     }
     v.set_wobble(c.wobble);
     v.set_always_voice(c.drone);
+    v.set_lip_protrusion(c.protrusion);
+    v.set_larynx_height(c.larynx);
     if c.mimic {
         v.set_articulation_speed(MIMIC_SPEED);
         v.set_glide(f32::INFINITY);
@@ -280,6 +295,7 @@ impl Performer {
 
     /// Carry out a command (all but [`Logged::Speak`], see
     /// [`speak`](Self::speak)). Returns an utterance let go, if any.
+    #[allow(clippy::too_many_lines)] // one arm per command
     pub fn apply(&mut self, cmd: &Logged) -> Option<Utterance> {
         let v = &mut self.voice;
         let speaking = self.speaker.is_speaking();
@@ -363,6 +379,14 @@ impl Performer {
                     }
                     *at = self.voice.push_gesture_tracked(g);
                 }
+            }
+            Logged::Protrusion(cm) => {
+                c.protrusion = cm;
+                v.set_lip_protrusion(cm);
+            }
+            Logged::Larynx(cm) => {
+                c.larynx = cm;
+                v.set_larynx_height(cm);
             }
             Logged::EndGesture(slot, ramp) => {
                 if let Some(id) = self
@@ -679,6 +703,8 @@ impl Controls {
             "drone": self.drone,
             "reverb": self.reverb,
             "mimic": self.mimic,
+            "protrusion": self.protrusion,
+            "larynx": self.larynx,
         }))
     }
 
@@ -719,6 +745,15 @@ impl Controls {
             drone: flag(v, "drone")?,
             reverb: num(v, "reverb")?,
             mimic: flag(v, "mimic")?,
+            // Takes recorded before the lip horn and the larynx had them.
+            protrusion: v
+                .get("protrusion")
+                .and_then(Value::as_f64)
+                .map(|x| x as f32),
+            larynx: v
+                .get("larynx")
+                .and_then(Value::as_f64)
+                .map_or(0.0, |x| x as f32),
         })
     }
 }
@@ -769,6 +804,8 @@ impl Logged {
             Logged::EndGesture(slot, ramp) => {
                 ("end_gesture", json!({"slot": slot, "ramp_out": ramp}))
             }
+            Logged::Protrusion(cm) => ("protrusion", json!({"cm": cm})),
+            Logged::Larynx(cm) => ("larynx", json!({"cm": cm})),
             Logged::Gesture(g) => (
                 "gesture",
                 json!({
@@ -842,6 +879,8 @@ impl Logged {
                 let slot = u8::try_from(slot()?).map_err(|e| e.to_string())?;
                 Logged::EndGesture(slot, num(v, "ramp_out")?)
             }
+            "protrusion" => Logged::Protrusion(get(v, "cm")?.as_f64().map(|x| x as f32)),
+            "larynx" => Logged::Larynx(num(v, "cm")?),
             "gesture" => {
                 let shape = get(v, "shape")?;
                 Logged::Gesture(Gesture {

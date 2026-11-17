@@ -60,6 +60,11 @@ pub enum Cmd {
     Push(u8, synthie_trombone::Gesture),
     /// End the gesture in a slot over this many seconds.
     EndGesture(u8, f32),
+    /// Push the lips forward by this many cm, or let them follow the
+    /// rounding (`None`).
+    Protrusion(Option<f32>),
+    /// Hold the larynx this many cm above its rest (negative lowered).
+    Larynx(f32),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -94,6 +99,15 @@ pub struct Snapshot {
     /// controls; see [`telemetry::tiers`]).
     pub tiers: [synthie_trombone::TierActivity; synthie_trombone::Tier::COUNT],
     pub scored: [bool; synthie_trombone::Tier::COUNT],
+    /// How far the lips are pushed forward and the larynx above its rest,
+    /// cm (`Trombone::tract_lengths`).
+    pub lengths: (f32, f32),
+    /// Whether the lip horn and the larynx slide are on
+    /// (`AnatomyConfig::lip_horn`, `larynx_travel`), and the length of the
+    /// epilaryngeal tube in cells (`epilarynx_cells`).
+    pub lip_horn: f32,
+    pub larynx_travel: f32,
+    pub epilarynx: f32,
 }
 
 impl Snapshot {
@@ -124,6 +138,10 @@ impl Snapshot {
             glottis: GlottisGauge::default(),
             tiers,
             scored,
+            lengths: voice.tract_lengths(),
+            lip_horn: voice.tuning().anatomy.lip_horn,
+            larynx_travel: voice.tuning().anatomy.larynx_travel,
+            epilarynx: voice.tuning().anatomy.epilarynx_cells,
         }
     }
 }
@@ -229,6 +247,8 @@ impl Engine {
             Cmd::Shape(shape) => Logged::Shape(shape),
             Cmd::Push(slot, g) => Logged::Push(slot, g),
             Cmd::EndGesture(slot, ramp) => Logged::EndGesture(slot, ramp),
+            Cmd::Protrusion(cm) => Logged::Protrusion(cm),
+            Cmd::Larynx(cm) => Logged::Larynx(cm),
         };
         if let Some(old) = self.core.apply(&logged) {
             self.trash(old);
