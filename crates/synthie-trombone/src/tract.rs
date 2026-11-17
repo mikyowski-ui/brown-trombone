@@ -6,7 +6,7 @@
 //! Everything here is fixed-size: no allocation, ever.
 
 use crate::INTERNAL_RATE;
-use crate::math::{cos, exp, lerp, move_towards, powf, spring_step};
+use crate::math::{cos, exp, lerp, move_towards, powf, spring_step, sqrt};
 use crate::phys::Stream;
 use crate::tuning::Tuning;
 use core::f32::consts::PI;
@@ -172,6 +172,10 @@ const RETURNED_SPEED: f32 = 1.0;
 /// is still some two-thirds open at the release; a /d/ after /n/ is
 /// released with it shut (`Tuning::velum_lead`).
 const NASAL_RELEASE_VELUM: f32 = 0.2;
+/// Tenseness of the folds at which `AnatomyConfig::epilarynx_effort`
+/// leaves the epilaryngeal tube as wide as `epilarynx_diameter`: the modal
+/// voice's (the voices' default).
+const EPILARYNX_TENSENESS: f32 = 0.65;
 
 /// Which articulator moves a cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +380,10 @@ pub(crate) struct Tract {
     /// back, `0` at rest (see [`pharynx_weight`]). Part of the vowel shape,
     /// moved with the tongue body. The classic engine leaves it at rest.
     pub(crate) pharynx: f32,
+    /// Tenseness the folds are set to (`Trombone::set_tenseness`): the
+    /// epilaryngeal tube narrows with it (physical engine, see
+    /// [`Tract::epilarynx`]).
+    pub(crate) tenseness: f32,
     pub(crate) velum_target: f32,
     /// How many times faster than [`VELUM_SHUTTING`] the velum shuts now
     /// (physical engine; `1` but out of a nasal into a vowel, see
@@ -517,6 +525,7 @@ impl Tract {
             tongue_index: 12.9,
             tongue_diameter: 2.43,
             pharynx: 0.0,
+            tenseness: 0.6,
             velum_target: VELUM_CLOSED,
             velum_haste: 1.0,
             movement_speed: MOVEMENT_SPEED,
@@ -744,10 +753,65 @@ impl Tract {
         &self.nose_max_amplitude
     }
 
+    /// The epilaryngeal tube and its flare into the lower pharynx (physical
+    /// engine): the rest diameter of cell `i` if it is one of theirs (cells
+    /// below [`BLADE_START`], where the tongue's shape begins), from the
+    /// voice's [`AnatomyConfig`](crate::AnatomyConfig): `epilarynx_cells`
+    /// of tube at `epilarynx_diameter`, narrowed or widened with the folds'
+    /// tenseness by `epilarynx_effort`, then a step or a ramp of
+    /// `epilarynx_flare_cells` up to `epilarynx_flare`. `None` above them
+    /// and on the classic engine, whose tube is the original's.
+    ///
+    /// A cell wholly in the tube or wholly past the ramp takes its diameter
+    /// as it is (the defaults give the original's cells, 0.6 × 7 and 1.1 ×
+    /// 3, exactly); a cell the tube's top or the ramp crosses takes the mean
+    /// area over its length.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub(crate) fn epilarynx(&self, i: usize) -> Option<f32> {
+        if !self.jaw || i >= BLADE_START {
+            return None;
+        }
+        let a = &self.motion.anatomy;
+        let top = a.epilarynx_cells.clamp(0.0, BLADE_START as f32);
+        let flare = a.epilarynx_flare;
+        let mut tube = a.epilarynx_diameter;
+        if a.epilarynx_effort > 0.0 {
+            let x = -a.epilarynx_effort * (self.tenseness - EPILARYNX_TENSENESS) / 0.3;
+            let share = powf(2.0, x).clamp(0.5, 2.0);
+            tube = (tube * sqrt(share)).min(flare);
+        }
+        let ramp = a.epilarynx_flare_cells.max(0.0);
+        let (from, to) = (i as f32, i as f32 + 1.0);
+        if to <= top {
+            return Some(tube);
+        }
+        if from >= top + ramp {
+            return Some(flare);
+        }
+        // The mean area over the cell, from eight points along it.
+        let (at, af) = (tube * tube, flare * flare);
+        let mut sum = 0.0;
+        for k in 0..8 {
+            let s = from + (k as f32 + 0.5) / 8.0;
+            sum += if s < top {
+                at
+            } else if ramp <= 0.0 {
+                af
+            } else {
+                at + (af - at) * ((s - top) / ramp).min(1.0)
+            };
+        }
+        Some(sqrt(sum / 8.0))
+    }
+
     /// Rest shape of cell `i` for the current tongue (after the original's
     /// `TractUI.setRestDiameter`).
     #[allow(clippy::cast_precision_loss)]
     fn rest_diameter(&self, i: usize) -> f32 {
+        if let Some(d) = self.epilarynx(i) {
+            return d;
+        }
         if i < 7 {
             return 0.6;
         }

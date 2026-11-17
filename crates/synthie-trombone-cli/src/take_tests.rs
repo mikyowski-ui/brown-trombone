@@ -502,6 +502,8 @@ fn header_and_commands_round_trip() {
         drone: false,
         reverb: 0.4,
         mimic: true,
+        protrusion: Some(0.6),
+        larynx: -0.4,
     };
     let header = header_line("take-042", SR, &controls, json!({"preset": "critter"}));
     let mut log = header;
@@ -547,6 +549,9 @@ fn header_and_commands_round_trip() {
             hiss: Some(Constriction::new(36.0, odd())),
         }),
         Logged::Gesture(Gesture::REST),
+        Logged::Protrusion(Some(odd())),
+        Logged::Protrusion(None),
+        Logged::Larynx(-odd()),
     ];
     for _ in 0..500 {
         cmds.push(Logged::Tongue(odd(), odd()));

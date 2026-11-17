@@ -759,6 +759,9 @@ impl Trombone {
     pub fn set_tenseness(&mut self, tenseness: f32) {
         if tenseness.is_finite() {
             self.glottis.target_tenseness = tenseness.clamp(0.0, 1.0);
+            // The epilaryngeal tube narrows with it (physical engine;
+            // `AnatomyConfig::epilarynx_effort`).
+            self.tract.tenseness = self.glottis.target_tenseness;
         }
     }
 
@@ -1790,6 +1793,56 @@ impl Trombone {
                     *o = phys.tick(1.0, Drive::Flow(if n == 0 { 1.0 } else { 0.0 }));
                 }
             }
+        }
+    }
+
+    /// Share of the acoustic energy in the main tube that `cells` hold
+    /// while a steady sinusoidal flow at `hz` drives the closed glottis
+    /// (physical engine; the shape as it is now, frozen): which part of the
+    /// tract a resonance at `hz` belongs to. Driven for 60 ms, then averaged
+    /// over 40 ms. For measuring; the classic engine gives zero.
+    #[doc(hidden)]
+    #[must_use]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    pub fn energy_share(&self, hz: f32, cells: core::ops::Range<usize>) -> f32 {
+        if self.engine != Engine::Physical {
+            return 0.0;
+        }
+        let mut phys = self.phys.clone();
+        phys.reset();
+        phys.freeze();
+        let rate = self.tick_rate();
+        let w = 2.0 * core::f32::consts::PI * hz / rate;
+        let settle = (0.06 * rate) as usize;
+        let measure = (0.04 * rate) as usize;
+        let (mut part, mut all) = (0.0f64, 0.0f64);
+        let mut phase = 0.0f32;
+        for n in 0..settle + measure {
+            phys.tick(1.0, Drive::Flow(crate::math::sin(phase)));
+            phase += w;
+            if phase > 2.0 * core::f32::consts::PI {
+                phase -= 2.0 * core::f32::consts::PI;
+            }
+            if n >= settle {
+                for i in 0..N {
+                    let e = f64::from(phys.cell_energy(i));
+                    all += e;
+                    if cells.contains(&i) {
+                        part += e;
+                    }
+                }
+            }
+        }
+        if all > 0.0 {
+            #[allow(clippy::cast_possible_truncation)]
+            let share = (part / all) as f32;
+            share
+        } else {
+            0.0
         }
     }
 
