@@ -1122,10 +1122,13 @@ tuning! {
         /// close in the compressive phase of a cough over some tens of
         /// milliseconds, held there by muscle against any pressure below them.
         valve_closing = 0.02, 0.005..=0.1, B;
-        /// Seconds the valve takes from shut to 90 % of the way open (2.2 time
-        /// constants of its lag; the same lag widens the tube): let go, the
+        /// Seconds the valve takes from 10 to 90 % of the way open, thrown open
+        /// by 5 cmH2O or more behind it (2.2 time constants of its lag; the same
+        /// lag widens the tube; with less pressure behind it, it opens as much
+        /// more slowly, at no pressure at its closing speed): let go, the
         /// pressure behind it throws it open, in under 5 ms (the owner's
-        /// specification).
+        /// specification; from shut at 40 cmH2O to 90 % of its rest area, 1.6 ms
+        /// in a cough).
         valve_opening = 0.002, 0.0005..=0.01, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).

@@ -190,3 +190,89 @@ impl Valve {
         self.x
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DT: f32 = 1.0 / 96_000.0;
+
+    /// Ticks until `done`, at most a second's.
+    fn ticks(v: &mut Valve, across: f32, done: impl Fn(&Valve) -> bool) -> usize {
+        (0..96_000)
+            .find(|_| {
+                v.advance(across);
+                done(v)
+            })
+            .unwrap_or(96_000)
+    }
+
+    #[test]
+    fn it_shuts_in_its_closing_time_and_is_thrown_open_in_its_opening_time() {
+        let mut v = Valve::new();
+        v.set_rate(DT, 1.0);
+        assert!(!v.engaged());
+        v.target = 1.0;
+        let shut = ticks(&mut v, 0.0, |v| v.area(VALVE_CELL, 0.45) == 0.0);
+        #[allow(clippy::cast_precision_loss)]
+        let t = shut as f32 * DT;
+        let want = crate::Tuning::DEFAULT.articulation.valve_closing;
+        assert!((0.9 * want..=1.1 * want).contains(&t), "shut in {t} s");
+        // The cells above it are the tract's.
+        assert_eq!(v.area(VALVE_CELL + 1, 0.45), 0.45);
+        // Let go with 40 cmH2O behind it: 90 % open in the opening time.
+        v.target = 0.0;
+        let open = ticks(&mut v, 40.0 * super::super::CM_H2O, |v| {
+            v.area(VALVE_CELL, 0.45) >= 0.9 * 0.45
+        });
+        #[allow(clippy::cast_precision_loss)]
+        let t = open as f32 * DT;
+        let want = crate::Tuning::DEFAULT.articulation.valve_opening;
+        assert!(t <= 1.1 * want, "open in {t} s");
+        // And at rest again exactly, and still.
+        ticks(&mut v, 0.0, |v| !v.engaged());
+        assert!(!v.engaged());
+        assert_eq!(v.position(), 0.0);
+        assert_eq!(v.area(0, 0.45), 0.45);
+    }
+
+    #[test]
+    fn thrown_wide_it_widens_the_tube_and_its_flare_to_the_open_area() {
+        let mut v = Valve::new();
+        v.set_rate(DT, 1.0);
+        v.target = -1.0;
+        ticks(&mut v, 40.0 * super::super::CM_H2O, |v| {
+            v.position() < -0.999
+        });
+        let open = crate::Tuning::DEFAULT.anatomy.valve_open;
+        for i in 0..WIDENS {
+            assert!((v.area(i, 0.45) - open).abs() < 0.01, "cell {i}");
+        }
+        // Not wider than a cell already is, nor past the flare.
+        assert_eq!(v.area(3, 3.0), 3.0);
+        assert_eq!(v.area(WIDENS, 0.45), 0.45);
+    }
+
+    #[test]
+    fn the_flutter_swings_the_valve_at_its_rate() {
+        let mut v = Valve::new();
+        v.set_rate(DT, 1.0);
+        v.flutter_target = 1.0;
+        ticks(&mut v, 0.0, |v| v.depth > 0.999);
+        let areas: Vec<f32> = (0..96_000)
+            .map(|_| {
+                v.advance(0.0);
+                v.area(VALVE_CELL, 0.45)
+            })
+            .collect();
+        let troughs = (1..areas.len() - 1)
+            .filter(|&k| areas[k] < areas[k - 1] && areas[k] <= areas[k + 1])
+            .count();
+        #[allow(clippy::cast_precision_loss)]
+        let hz = troughs as f32;
+        let want = crate::Tuning::DEFAULT.anatomy.flutter_rate;
+        assert!((hz - want).abs() <= 1.0, "{hz} Hz");
+        let lo = areas.iter().copied().fold(f32::MAX, f32::min);
+        assert!(lo < 0.01, "{lo}");
+    }
+}

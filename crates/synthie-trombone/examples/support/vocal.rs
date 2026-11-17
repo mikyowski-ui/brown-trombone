@@ -35,6 +35,8 @@ pub struct Rec {
     pub edge: Vec<f32>,
     /// The folds' measured pitch, Hz (0 while they do not vibrate).
     pub pitch: Vec<f32>,
+    /// Lumen of the ventricular valve's cell (cell 1), cm².
+    pub valve: Vec<f32>,
     pub finite: bool,
 }
 
@@ -51,6 +53,7 @@ impl Rec {
         self.area.push(g.glottal_area);
         self.edge.push(g.edge_area);
         self.pitch.push(g.fold_pitch);
+        self.valve.push(g.valve_area);
         self.finite &= out.is_finite()
             && g.lung_pressure.is_finite()
             && g.subglottal_pressure.is_finite()

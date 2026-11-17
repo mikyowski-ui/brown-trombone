@@ -32,26 +32,33 @@
 //!   study: here 1.5 times the voice's pitch).
 //! - **Cough** ([`Vocalization::Cough`]): an inspiration (3A's breath in),
 //!   a compression phase of some 0.2 s against the folds pressed shut
-//!   ([`var::glottis::SEAL`]) and the tube above them drawn in, while the
-//!   lungs build [`AnatomyConfig::cough_pressure`]; then the folds are
-//!   thrown wide open: a burst of air (the expulsive phase, 30 to 50 ms at
-//!   up to 12 L/s in people, then 0.2 to 0.5 s of lesser flow), its noise
-//!   the jets' own, and a short voiced, breathy tail ("uh") as the push
-//!   dies away.
+//!   ([`var::glottis::SEAL`]) and the ventricular valve shut over them
+//!   ([`var::larynx::VALVE`]: the false and aryepiglottic folds), while the
+//!   lungs build [`AnatomyConfig::cough_pressure`]; then the folds and the
+//!   supraglottic larynx are thrown wide open, the tongue low and forward
+//!   (/æ/): a burst of air (the expulsive phase, 30 to 50 ms at 6 to 12 L/s
+//!   in people, then 0.2 to 0.5 s of lesser flow; here 6.2 L/s 40 ms after
+//!   the opening), its noise the jets' own, and a short voiced, breathy tail
+//!   ("uh", the tongue back at /ʌ/) as the push dies away.
 //! - **Throat clearing** ([`Vocalization::ClearThroat`]): two shorter,
-//!   weaker coughs, more voiced, with the epilaryngeal tube narrowed
-//!   ([`var::larynx::SQUEEZE`]) and the folds pressed (tenseness 0.9),
-//!   low in pitch, the second weaker.
+//!   weaker pushes, each held behind the shut folds and valve, then let out
+//!   through the valve held narrow with the aryepiglottic folds fluttering
+//!   in it ([`var::larynx::FLUTTER`], at [`AnatomyConfig::flutter_rate`]),
+//!   the glottis open behind it and the voice off: two rough, noisy
+//!   scrapes, the second weaker. (Released into a pressed, creaky voice
+//!   through the tube drawn in, as before the valve, they were two voiced
+//!   syllables, which Whisper wrote "uh, uh" in a sentence.)
 //! - **Sigh** ([`Vocalization::Sigh`]): a deep breath in (twice the depth of
 //!   a breath between sentences) and a long, breathy exhalation, voiced
 //!   with the glottis held open (high airflow, soft adduction), its pitch
 //!   falling from a quarter above the voice's to a fifth below and the
 //!   tract relaxing from an open vowel towards schwa, ending in breath.
 //!
-//! The model has no false folds: the closure of a cough is the true folds
-//! pressed past touching (their pressed edges feel none of the pressure
-//! behind them, so they hold at any), with the epilaryngeal tube drawn in
-//! above them; the lungs are a pressure source that follows its target
+//! The closure of a cough is the true folds pressed past touching (their
+//! pressed edges feel none of the pressure behind them, so they hold at
+//! any) and the ventricular valve above them (`phys::valve`: its own state
+//! and speed, shut at cell 1, thrown open in under 5 ms by the pressure
+//! behind it); the lungs are a pressure source that follows its target
 //! within 30 ms. Everything here is gestures, and the folds, the jets and
 //! the tract do the rest: the burst of a cough, the breath between a
 //! laugh's calls and the hum of a chuckle come out of the model's physics.
@@ -72,7 +79,7 @@ pub enum Vocalization {
     Laugh,
     /// A short, closed-mouth laugh through the nose.
     Chuckle,
-    /// Two short, weak, voiced coughs with the throat narrowed.
+    /// Two short, weak scrapes through the narrowed, fluttering valve.
     ClearThroat,
     /// A breath in, the folds shut against the lungs' pressure, a burst.
     Cough,
