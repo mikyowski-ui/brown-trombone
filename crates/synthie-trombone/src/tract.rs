@@ -754,7 +754,15 @@ impl Tract {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn modal_from(&self) -> usize {
         let a = &self.motion.anatomy;
-        let top = (a.epilarynx_cells.max(0.0) + a.epilarynx_flare_cells.max(0.0)).ceil() as usize;
+        let end = a.epilarynx_cells.max(0.0) + a.epilarynx_flare_cells.max(0.0);
+        // Rounded up (no `ceil` without `std`).
+        let whole = end as usize;
+        #[allow(clippy::cast_precision_loss)]
+        let top = if (whole as f32) < end {
+            whole + 1
+        } else {
+            whole
+        };
         top.clamp(modes::FROM, BLADE_START)
     }
 

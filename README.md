@@ -918,7 +918,10 @@ as the model goes:
   areas or a wider scale change the engine's formants of his vowels by
   about a point: a lossless tube depends on area ratios alone). His own
   epilarynx is four sections (1.5 cm) of diameters 0.51 to 0.61 (a uniform
-  tube of the same air 0.56, the engine's 0.6); the body taken from the
+  tube of the same air 0.56, the engine's 0.6; on the wave's tract, with
+  the tables of 0.6, a tube of 0.56 heard the vowels wrong 24.1 % of the
+  time against 25.5 %, the 30 held-out sentences 27.9 % and 70.9 % against
+  28.8 % and 70.0 %); the body taken from the
   fifth over the original seven cells of tube put the tract's fourth
   formant at 3.8 to 4.3 kHz and the 4 to 8 kHz band 5 to 12 dB higher in
   every vowel, as four cells of tube do: the body begins where the tube
@@ -934,25 +937,37 @@ as the model goes:
   /ʌ/ was heard as /ɑ/ 8 times in 18. Every vowel is solved again for the
   modal body (`src/vowel_modes_table.rs`), started from and pulled towards
   the speaker's shape for the eleven he said (a blend of his shapes for the
-  others); F1 and F2 land within 3 % at every size but /ɔ/ (F1 up to 3.9 %
-  short in small bodies), the open vowels /ɑ ɔ æ aʊ ɔɪ/ and the end of
+  others); on the default tract F1 and F2 land within 3 % at every size but
+  /ɔ ɔɪ/ (F1 up to 3.7 % short in small bodies; on the wave's tract up to
+  4.7 %, and /æ aɪ aʊ/ up to 3.2 %, where the cosine body misses /ɑ/ by up
+  to 5 % and the modal body reaches it), the open vowels /ɑ ɔ æ aʊ ɔɪ/ and the end of
   /ʌ/'s glide with a narrowing of the lower pharynx as on the cosine body
   (the piriform sinuses, some 2 cm³ hung below, pull an open vowel's F1
   down by a quarter: the speaker's /ɑ/ on the engine is at 552 Hz with
   them, 745 without, his own 761 scaled). Solved, his vowels move by up to
-  2.3 of their units from his own shapes (/ɔ/'s second number, /æ ɛ i/'s
-  third; /ɪ u/ by under one): one supine man holding vowels in a scanner,
-  and targets that are 45 men's. The third number keeps /i/ (+3.3) apart
-  from /ɪ/ (−1.4) and /ɑ/ (+2.0) from /ʌ/ (−1.5), not /u/ (−0.4) from /ʊ/
-  (+0.1). Measured in the LibriSpeech texts, the modal body is heard
-  worse than the cosine: vowels wrong 28.7 % against 24.1 % (27.6 against
-  23.4 % on the lengthened tract), the 30 held-out sentences 28.1 % and
-  67.4 % against 26.3 % and 74.3 %; its front vowels are heard as well or
-  better (/ɛ/ 13 against 17 %), its back ones worse (/ʌ/ 39 against 11 %,
-  /ɔ/ 81 against 62 %, mostly as /ɑ/), and the tense–lax confusions the
-  third mode was to cure are few either way (9 of the cosine's 69 wrong
-  vowels). The tables are solved per tract as well: a voice with the
-  lengthened tract (`lip_horn` or `larynx_travel` above 0) reads
+  2.3 of their units from his own shapes (/ɔ/'s second number, /æ ɛ ʌ/'s
+  third; /e o/ by under half a unit): one supine man holding vowels in a
+  scanner, and targets that are 45 men's. The third number keeps /i/
+  (+0.9) apart from /ɪ/ (−1.4) and /ɑ/ (+2.1) from /ʌ/ (−1.6), not /u/
+  (−0.5) from /ʊ/ (0.0) or /e/ (−0.7) from /ɛ/ (+0.6). Measured on the merged engine (single runs): on the
+  default tract the modal body hears vowels in the LibriSpeech texts wrong
+  25.2 % of the time (the cosine 24.1 %), the ten `sentence_heldout`
+  sentences 23.3 % phoneme error and 85.0 % of Whisper's words (22.0, 81.2),
+  the 30 held-out 26.3 % and 77.4 % (26.3, 74.3), the 30 tuning 23.5 % and
+  74.4 % (21.4, 74.1), consonants right 86.9 % (88.9); on the tract the
+  wave is switched on with (`lip_horn` 1.2, `larynx_travel` 1,
+  `rounded_larynx` 0.5, four cells of tube) the cosine body, solved again,
+  gives 19.2 % vowels wrong, 16.3 % and 81.2 %, 20.4 % and 73.5 %, 17.1 %
+  and 79.1 %, 90.5 % right, and the modal body 25.5 %, 24.5 % and 78.8 %,
+  28.8 % and 70.0 %, 25.3 % and 74.1 %, 87.6 %. The modal body's front
+  vowels are heard as well or better (/ɛ/ 0 % wrong on the default tract,
+  the cosine's 17 %), its back ones worse (/ɔ/ 75 to 88 % against 62 %,
+  mostly as /ɑ/; /ʌ/ 22 against 6 to 11 %), and the tense–lax confusions
+  the third mode was to cure are few either way (9 of the cosine's 69
+  wrong vowels; most are /ə/ heard as /ɪ æ/ and /ɔ ɑ/ heard as /ɑ æ/).
+  The tables are solved per tract as well: a voice with the
+  lengthened tract (`lip_horn` or `larynx_travel` above 0, or the tube
+  above the folds off its defaults) reads
   `src/vowel_size_wave_table.rs` or `src/vowel_modes_wave_table.rs`
   (`vowel_targets::lengthened`), solved by
   `vowel_size -- --lengthened --both`; `babble -- --modal --lengthened`

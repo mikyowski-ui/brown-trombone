@@ -262,9 +262,11 @@ const MEASURED_PULL: f32 = 1.0;
 /// which it is solved again with a narrowing along the tongue of its own.
 const NEEDS_NARROWING: f32 = 0.01;
 
+/// A cosine table as solved: its rows per vowel shape.
+type SolvedTable = Vec<(VowelKey, [[i32; D]; ROWS])>;
 /// The cosine table just solved in this run (`--both`), whose tongues the
 /// modal shapes of the same tract carry.
-static SOLVED_COSINE: Mutex<Option<Vec<(VowelKey, [[i32; D]; ROWS])>>> = Mutex::new(None);
+static SOLVED_COSINE: Mutex<Option<SolvedTable>> = Mutex::new(None);
 
 /// `shape` with the cosine tongue a modal shape of `key` carries at
 /// `length` in the library (the cosine table of the same tract, which the
