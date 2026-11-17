@@ -320,7 +320,11 @@ fn chunked_text_is_spoken_as_the_text_whole() {
         (Engine::Physical, 0.0),
         (Engine::Physical, 1.0),
     ] {
+        // Wave 3 off: with breaths between sentences the stream's pieces
+        // after the first open with the breath the text's pause would take
+        // (`tests/living_voice.rs`).
         let mut settings = Preset::Deep.settings().with_engine(engine);
+        settings.tuning = settings.tuning.with_living_voice(false);
         settings.tuning.articulation.gesture_score = score;
         let prosody = settings.prosody();
         let (streamed, said) = stream_text(&chunks(TEXT), &prosody, Granularity::Sentence);

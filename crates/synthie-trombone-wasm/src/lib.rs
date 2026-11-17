@@ -8,8 +8,8 @@
 use synthie::audio::fx::Reverb;
 use synthie_trombone::speech::{Speaker, Utterance};
 use synthie_trombone::{
-    BLADE_START, Constriction, LIP_START, N, NOSE_LEN, NOSE_START, Preset, TIP_START, Trombone,
-    VoiceSettings, midi_to_hz,
+    BLADE_START, Constriction, LIP_START, Listener, N, NOSE_LEN, NOSE_START, Preset, Stereo,
+    TIP_START, Trombone, VoiceSettings, midi_to_hz,
 };
 use wasm_bindgen::prelude::*;
 
@@ -73,6 +73,55 @@ impl Engine {
             }
             *s = (self.reverb.process(dry, self.reverb_mix) * 0.9).clamp(-1.0, 1.0);
         }
+    }
+
+    /// Fill `left` and `right` with the two ears of the listener (see
+    /// `setStereo`; the reverb's share is the same in both).
+    #[wasm_bindgen(js_name = renderStereo)]
+    pub fn render_stereo(&mut self, left: &mut [f32], right: &mut [f32]) {
+        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+            let dry = self.speaker.process(&mut self.voice);
+            if self.was_speaking && !self.speaker.is_speaking() {
+                self.was_speaking = false;
+                self.restore_instrument();
+            }
+            let room = self.reverb.process(dry, self.reverb_mix) - dry;
+            let [a, b] = self.voice.frame();
+            *l = ((a + room) * 0.9).clamp(-1.0, 1.0);
+            *r = ((b + room) * 0.9).clamp(-1.0, 1.0);
+        }
+    }
+
+    /// How `renderStereo` hears the physical engine: 0 both channels mono,
+    /// 1 the two ears of a listener, 2 a plain microphone pair.
+    #[wasm_bindgen(js_name = setStereo)]
+    pub fn set_stereo(&mut self, mode: u8) {
+        self.voice.set_stereo(match mode {
+            1 => Stereo::Binaural,
+            2 => Stereo::Pair,
+            _ => Stereo::Off,
+        });
+    }
+
+    /// Where the listener is, seen from the talker's face (degrees, positive
+    /// to the talker's right and up; metres), and where the listener hears
+    /// the talker in their own head (degrees). Glides there without a click.
+    #[wasm_bindgen(js_name = setListener)]
+    pub fn set_listener(
+        &mut self,
+        azimuth: f32,
+        elevation: f32,
+        distance: f32,
+        heard_azimuth: f32,
+        heard_elevation: f32,
+    ) {
+        self.voice.set_listener(Listener {
+            azimuth,
+            elevation,
+            distance,
+            heard_azimuth,
+            heard_elevation,
+        });
     }
 
     // ----- playing --------------------------------------------------------

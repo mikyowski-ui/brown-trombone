@@ -84,6 +84,7 @@ mod talker;
 mod tract;
 mod tract_modes;
 mod tuning;
+pub mod vocal;
 mod voice;
 mod vowel_size;
 pub mod vowel_targets;
@@ -96,6 +97,7 @@ mod lpc;
 pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
 pub use phoneme::{Articulation, Manner, Phoneme};
+pub use phys::radiation::{Listener, Stereo};
 pub use preset::{Persona, Preset, VoiceSettings};
 #[cfg(feature = "profile")]
 pub use profile::{ProfileError, tuning_parameters};
@@ -106,9 +108,10 @@ pub use tract::{
     TIP_START, TONGUE_DIAMETER, TONGUE_INDEX,
 };
 pub use tuning::{
-    AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, TractModel,
-    Tuning,
+    AnatomyConfig, ArticulationConfig, Field, Part, Pass, ProsodyConfig, TierDynamics, TongueModel,
+    TractModel, Tuning,
 };
+pub use vocal::{Vocal, Vocalization};
 pub use voice::{Engine, Fallback, Gauges, GlottalSource, SLOT_LIPS, SLOT_MAIN, Trombone};
 
 /// Rate at which the glottis runs; the tract runs at twice this.

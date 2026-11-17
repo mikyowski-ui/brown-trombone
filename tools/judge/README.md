@@ -814,7 +814,29 @@ threads, about 610 times real time (the whole graph 150 times).
   level loop (`transfer --level`) did not help either (20.8 % on the ten
   held-out sentences).
 
-Measured (deep voice, pitch moved to the voice, single runs):
+- **Tags, fillers, breaths, creak** (wave 3). A vocalization tag
+  (`[sigh]`, `[laugh]`, `[chuckle]`, `[clear-throat]`, `[cough]`) is taken
+  out of the text the model reads (dizione would read the word: "S AY") and
+  its pause held open at the rules' length (`vocal_gaps`: the engine's
+  phones for the text before the tag say where; a sigh's pause is 2.9 s,
+  which the model's gap would have squeezed it into). Fillers ("um", "uh")
+  are words to the model and the engine's filler phones, and keep the
+  model's timing. Bracketed phonemes are refused with a message. The
+  engine's breath between sentences is drawn only in a followed pause that
+  leaves 0.22 s before it; the model leaves 0.27 to 0.32 s, so the bridge
+  holds sentence pauses at `--sentence-pause` 0.5 s (default; 0 keeps the
+  model's): measured in the four sentences' pauses, -37 to -46 dB with the
+  breath (the rules' -36 to -46) against -58 to -70 dB with the model's
+  pauses, as with `--no-breath`. The creak at a statement's end is the
+  engine's and stays (`--fry 0` changes the rendering).
+
+On the engine with wave 3 on (main 42e8fae; M2 default, sentence pause 0.5):
+rules 15.1 / 81.2 % on the ten held-out sentences, M2 19.2 / 83.8 %; the
+four listening sentences 16.2 / 87.1 and 15.2 / 87.1 %; the four as one
+clip 12.1 / 77.4 and 9.1 / 90.3 % (8.1 / 90.3 % with the model's own
+pauses); the 30 held-out 21.0 / 77.1 and 22.2 / 72.3 %.
+
+Measured before wave 3 (b176267; deep voice, pitch moved to the voice, single runs):
 
 | | rules | M2 (default) | F2 | M2, speed 1 | M2, energy as breath |
 |---|---:|---:|---:|---:|---:|

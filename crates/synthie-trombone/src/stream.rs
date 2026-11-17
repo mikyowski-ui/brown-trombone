@@ -89,7 +89,7 @@ pub use text::Granularity;
 
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
-use crate::{Constriction, Phoneme, Trombone};
+use crate::{Constriction, Listener, Phoneme, Stereo, Trombone, Vocal, Vocalization};
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
@@ -165,6 +165,12 @@ pub enum Event {
     Gesture(Gesture),
     /// Stop speaking, and drop the speech queued after it.
     StopSpeaking,
+    /// Move the listener (see [`Trombone::set_listener`]): it glides there.
+    Listener(Listener),
+    /// How the two channels are heard (see [`Trombone::set_stereo`]).
+    Stereo(Stereo),
+    /// A vocalization, now (wave 3; see [`VoiceStream::vocalize`]).
+    Vocalize(Vocal),
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -218,6 +224,9 @@ const TAG_LENGTH: u8 = 16;
 const TAG_SPEED: u8 = 17;
 const TAG_GESTURE: u8 = 18;
 const TAG_STOP: u8 = 19;
+const TAG_LISTENER: u8 = 40;
+const TAG_STEREO: u8 = 41;
+const TAG_VOCALIZE: u8 = 30;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -298,6 +307,7 @@ impl Reader<'_> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn encode(event: &Event, at: Option<u64>) -> Message {
     let tag = match event {
         Event::NoteOn(_) => TAG_NOTE_ON,
@@ -319,6 +329,9 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::ArticulationSpeed(_) => TAG_SPEED,
         Event::Gesture(_) => TAG_GESTURE,
         Event::StopSpeaking => TAG_STOP,
+        Event::Listener(_) => TAG_LISTENER,
+        Event::Stereo(_) => TAG_STEREO,
+        Event::Vocalize(_) => TAG_VOCALIZE,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -385,6 +398,33 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
             ] {
                 m.float(x);
             }
+        }
+        Event::Listener(l) => {
+            for x in [
+                l.azimuth,
+                l.elevation,
+                l.distance,
+                l.heard_azimuth,
+                l.heard_elevation,
+            ] {
+                m.float(x);
+            }
+        }
+        Event::Stereo(s) => m.word(match s {
+            Stereo::Off => 0,
+            Stereo::Binaural => 1,
+            Stereo::Pair => 2,
+        }),
+        Event::Vocalize(v) => {
+            #[allow(clippy::cast_possible_truncation)]
+            let kind = Vocalization::ALL
+                .iter()
+                .position(|&k| k == v.kind)
+                .unwrap_or(0) as u32;
+            m.word(kind);
+            m.float(v.length);
+            m.float(v.strength);
+            m.float(v.pitch);
         }
         Event::NoteOff | Event::StopSpeaking => {}
     }
@@ -493,6 +533,30 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             })
         }
         TAG_STOP => Event::StopSpeaking,
+        TAG_LISTENER => Event::Listener(Listener {
+            azimuth: r.float(),
+            elevation: r.float(),
+            distance: r.float(),
+            heard_azimuth: r.float(),
+            heard_elevation: r.float(),
+        }),
+        TAG_STEREO => Event::Stereo(match r.word() {
+            1 => Stereo::Binaural,
+            2 => Stereo::Pair,
+            _ => Stereo::Off,
+        }),
+        TAG_VOCALIZE => {
+            let kind = Vocalization::ALL
+                .get(r.word() as usize)
+                .copied()
+                .unwrap_or(Vocalization::Sigh);
+            Event::Vocalize(Vocal {
+                kind,
+                length: r.float(),
+                strength: r.float(),
+                pitch: r.float(),
+            })
+        }
         #[cfg(feature = "std")]
         TAG_SPEAK => {
             let mode = if r.word() == 1 {
@@ -789,6 +853,36 @@ impl<'a> VoiceStream<'a> {
             .map_err(|_| Full(gesture))
     }
 
+    /// Take a breath: the voice's lungs draw `cm_h2o` below the air's
+    /// pressure for `seconds` (a [`Gesture::inhalation`] with 30 ms ramps,
+    /// as [`Trombone::breathe_in`] takes; physical engine).
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the gesture when the ring has no room for it.
+    pub fn breathe_in(
+        &mut self,
+        cm_h2o: f32,
+        seconds: f32,
+        when: When,
+    ) -> Result<(), Full<Gesture>> {
+        self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// Make a vocalization (wave 3; see [`Trombone::vocalize`]): a sigh, a
+    /// laugh, a chuckle, a throat clearing or a cough. Speech the stream is
+    /// saying waits for it and carries on after it (see
+    /// [`Speaker::interject`](crate::speech::Speaker::interject)).
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the vocalization when the ring has no room for it.
+    pub fn vocalize(&mut self, v: impl Into<Vocal>, when: When) -> Result<(), Full<Vocal>> {
+        let v = v.into();
+        self.push_when(when, Event::Vocalize(v))
+            .map_err(|_| Full(v))
+    }
+
     /// Words free in the ring.
     #[must_use]
     pub fn free(&self) -> usize {
@@ -977,7 +1071,7 @@ impl VoiceStream<'_> {
             self.text.drain(..end);
             return true;
         }
-        let u = Utterance::from_text(piece, &self.prosody);
+        let mut u = Utterance::from_text(piece, &self.prosody);
         if u.is_empty() {
             self.text.drain(..end);
             return true;
@@ -985,11 +1079,22 @@ impl VoiceStream<'_> {
         // The pause the compiler leaves between this piece and the one
         // before, had they come as one text; less what the two leave on
         // their own (the end of the one, the start of the other).
-        let gap = self.last_piece.as_ref().map_or(0.0, |last| {
+        let mut gap = 0.0;
+        if let Some(last) = &self.last_piece {
             let both = Utterance::from_text(&(last.text.clone() + piece), &self.prosody);
-            pause_between(&both, last.phones)
-                .map_or(0.0, |between| between - last.trailing - silence(&u, false))
-        });
+            // Had they come as one text, the lungs would draw a breath in
+            // the pause between them (wave 3: between sentences, where the
+            // utterance itself opens without one, `breath_first` 0): the
+            // piece takes it before itself, and the gap is what is left of
+            // the pause.
+            if breath_between(&both, last.phones) && !breath_before(&u) {
+                let mut first = self.prosody;
+                first.tuning.prosody.breath_first = 1.0;
+                u = Utterance::from_text(piece, &first);
+            }
+            gap = pause_between(&both, last.phones)
+                .map_or(0.0, |between| between - last.trailing - silence(&u, false));
+        }
         let last = Piece {
             text: piece.into(),
             phones: phones(&u),
@@ -1048,6 +1153,28 @@ fn silence(u: &Utterance, end: bool) -> f32 {
     } else {
         (0..s.len()).take_while(quiet).map(|k| s[k].duration).sum()
     }
+}
+
+/// Whether `u` draws a breath between its phone `phones − 1` and its
+/// phone `phones`.
+#[cfg(feature = "std")]
+fn breath_between(u: &Utterance, phones: usize) -> bool {
+    let s = u.segments();
+    let before = (0..s.len()).rfind(|&k| u.phone_of(k).is_some_and(|p| p < phones));
+    let after = (0..s.len()).find(|&k| u.phone_of(k).is_some_and(|p| p >= phones));
+    match (before, after) {
+        (Some(b), Some(a)) => s[b + 1..a].iter().any(|x| x.gesture.intake > 0.0),
+        _ => false,
+    }
+}
+
+/// Whether `u` draws a breath before its first phone.
+#[cfg(feature = "std")]
+fn breath_before(u: &Utterance) -> bool {
+    let s = u.segments();
+    (0..s.len())
+        .take_while(|&k| u.phone_of(k).is_none())
+        .any(|k| s[k].gesture.intake > 0.0)
 }
 
 /// Seconds of silence in `u` between its phone `phones − 1` and its phone
@@ -1157,6 +1284,22 @@ impl<'a> VoicePlayer<'a> {
         }
     }
 
+    /// [`process`](Self::process) as a frame, `[left, right]` (see
+    /// [`Trombone::set_stereo`]).
+    pub fn process_stereo(&mut self, voice: &mut Trombone) -> [f32; 2] {
+        self.process(voice);
+        voice.frame()
+    }
+
+    /// Fill `out` with interleaved frames, left then right (see
+    /// [`process_stereo`](Self::process_stereo); an odd last sample is
+    /// left alone).
+    pub fn render_stereo(&mut self, voice: &mut Trombone, out: &mut [f32]) {
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo(voice);
+        }
+    }
+
     fn carry_out(&mut self, voice: &mut Trombone, item: Item) {
         let event = match item {
             Item::Event(e) => e,
@@ -1212,6 +1355,18 @@ impl<'a> VoicePlayer<'a> {
                         talk.stop(voice, shared);
                     }
                 }
+            }
+            Event::Listener(l) => voice.set_listener(l),
+            Event::Stereo(s) => voice.set_stereo(s),
+            Event::Vocalize(v) => {
+                #[cfg(feature = "std")]
+                if let Some(talk) = &mut self.talk
+                    && talk.state == State::Speaking
+                {
+                    talk.speaker.interject(voice, v);
+                    return;
+                }
+                voice.vocalize(v);
             }
         }
     }

@@ -41,7 +41,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
-use synthie_trombone::{Engine, Persona, Preset, VoiceSettings};
+use synthie_trombone::{Engine, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
@@ -59,6 +59,18 @@ struct Cli {
     /// tuner or by `match_voice.py`.
     #[arg(long)]
     profile: Option<PathBuf>,
+    /// The physical engine's vocal tract, laid over the voice after the
+    /// profile: `anatomical` (the default's: lip horn, moving larynx, the
+    /// measured tube above the folds) or `original` (Pink Trombone's tube
+    /// in real units). Left out, the voice keeps its own.
+    #[arg(long, value_parser = parse_tract)]
+    tract: Option<TractModel>,
+    /// The physical engine's tongue body, laid over the voice after the
+    /// profile: `cosine` (the default's) or `mri` (the measured modes of
+    /// one man's vowels). `--tract original --tongue-model mri` is
+    /// `profiles/mri-tongue.json`.
+    #[arg(long, value_parser = parse_tongue)]
+    tongue_model: Option<TongueModel>,
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
@@ -71,6 +83,19 @@ struct Cli {
     /// Clarity of articulation, 0 (casual) to 1 (careful).
     #[arg(long, default_value_t = Persona::NEUTRAL.clarity)]
     clarity: f32,
+    /// Take a breath before what is typed as well as in the pauses between
+    /// its sentences (physical engine): the lungs draw 5 cmH2O and the air
+    /// goes in through the mouth, shaped for the vowel ahead.
+    #[arg(long, conflicts_with = "no_breath")]
+    breath_intake: bool,
+    /// Take no breaths at all, not even between sentences (physical engine).
+    #[arg(long)]
+    no_breath: bool,
+    /// Take the end of every statement this far into creak, 0 to 1
+    /// (physical engine): the folds alternate strong and weak pulses. `0`
+    /// ends every statement in modal voice.
+    #[arg(long, value_name = "SHARE")]
+    fry: Option<f32>,
     /// Copy what the microphone hears: pitch, vowels and hiss (physical
     /// engine). Wear headphones, or the voice will hear itself; `` ` ``
     /// switches it off and on while playing.
@@ -90,6 +115,12 @@ struct Cli {
     /// misbehave in a terminal. It holds whatever is typed.
     #[arg(long, value_name = "FILE")]
     key_log: Option<PathBuf>,
+    /// Play the physical engine in stereo, as the two ears of a listener a
+    /// metre in front of the talker (each port of the tract on its own
+    /// path round both heads); `--stereo pair` for a plain microphone pair
+    /// instead, for loudspeakers.
+    #[arg(long, value_name = "MODE", num_args = 0..=1, default_missing_value = "binaural", value_parser = parse_stereo)]
+    stereo: Option<Stereo>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -114,6 +145,22 @@ impl Cli {
                 .with_profile(&json)
                 .with_context(|| format!("in {}", path.display()))?;
         }
+        if self.breath_intake {
+            base.tuning.prosody.breath_intake = 5.0;
+            base.tuning.prosody.breath_first = 1.0;
+        }
+        if self.no_breath {
+            base.tuning.prosody.breath_intake = 0.0;
+        }
+        if let Some(share) = self.fry {
+            base.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
+        }
+        if let Some(t) = self.tract {
+            base.tuning = base.tuning.with_tract(t);
+        }
+        if let Some(t) = self.tongue_model {
+            base.tuning = base.tuning.with_tongue(t);
+        }
         let persona = Persona {
             size: self.size,
             effort: self.effort,
@@ -124,12 +171,31 @@ impl Cli {
     }
 }
 
+fn parse_stereo(name: &str) -> Result<Stereo, String> {
+    match name.to_ascii_lowercase().as_str() {
+        "binaural" | "ears" => Ok(Stereo::Binaural),
+        "pair" => Ok(Stereo::Pair),
+        "off" | "mono" => Ok(Stereo::Off),
+        other => Err(format!("unknown stereo {other:?}; try binaural or pair")),
+    }
+}
+
 fn parse_engine(name: &str) -> Result<Engine, String> {
     match name.to_ascii_lowercase().as_str() {
         "classic" => Ok(Engine::Classic),
         "physical" => Ok(Engine::Physical),
         other => Err(format!("unknown engine {other:?}; try classic or physical")),
     }
+}
+
+fn parse_tract(name: &str) -> Result<TractModel, String> {
+    TractModel::from_name(name)
+        .ok_or_else(|| format!("unknown tract {name:?}; try anatomical or original"))
+}
+
+fn parse_tongue(name: &str) -> Result<TongueModel, String> {
+    TongueModel::from_name(name)
+        .ok_or_else(|| format!("unknown tongue model {name:?}; try cosine or mri"))
 }
 
 #[derive(Debug, Subcommand)]
@@ -156,6 +222,7 @@ fn main() -> Result<()> {
                 cli.mic.as_deref(),
                 cli.record,
                 cli.key_log.as_deref(),
+                cli.stereo.unwrap_or(Stereo::Off),
             )
         }
     }
@@ -168,6 +235,7 @@ fn tui(
     microphone: Option<&str>,
     takes: PathBuf,
     key_log: Option<&std::path::Path>,
+    stereo: Stereo,
 ) -> Result<()> {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
@@ -175,7 +243,7 @@ fn tui(
         original_hook(info);
     }));
 
-    let (streams, link) = audio::start(mimic, microphone, takes)?;
+    let (streams, link) = audio::start(mimic, microphone, takes, stereo)?;
     let _streams = streams;
 
     enable_raw_mode()?;
@@ -321,4 +389,107 @@ fn restore() -> Result<()> {
         DisableMouseCapture
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synthie_trombone::Tuning;
+
+    fn voice(args: &[&str]) -> VoiceSettings {
+        let mut all = vec!["synthie-trombone"];
+        all.extend_from_slice(args);
+        Cli::try_parse_from(all)
+            .expect("flags")
+            .voice()
+            .expect("a voice")
+            .1
+    }
+
+    const PROFILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../profiles/mri-tongue.json"
+    );
+
+    #[test]
+    fn tract_and_tongue_flags_parse() {
+        for (flag, value) in [
+            ("--tract", "anatomical"),
+            ("--tract", "Original"),
+            ("--tongue-model", "cosine"),
+            ("--tongue-model", "mri"),
+            ("--tongue-model", "measured"),
+        ] {
+            assert!(Cli::try_parse_from(["synthie-trombone", flag, value]).is_ok());
+        }
+        for (flag, value) in [("--tract", "wide"), ("--tongue-model", "flat")] {
+            assert!(Cli::try_parse_from(["synthie-trombone", flag, value]).is_err());
+        }
+        // The `sing` subcommand's own --tract is the tract length.
+        let cli = Cli::try_parse_from(["synthie-trombone", "--tract", "original", "sing", "x.mid"])
+            .expect("flags");
+        assert_eq!(cli.tract, Some(TractModel::Original));
+    }
+
+    #[test]
+    fn the_flags_select_what_they_say() {
+        let plain = voice(&["--engine", "physical"]);
+        // Left out or given as the default's, nothing changes.
+        assert_eq!(plain.tuning, Tuning::DEFAULT);
+        assert_eq!(
+            voice(&[
+                "--engine",
+                "physical",
+                "--tract",
+                "anatomical",
+                "--tongue-model",
+                "cosine"
+            ]),
+            plain
+        );
+        let original = voice(&["--engine", "physical", "--tract", "original"]);
+        assert_eq!(
+            original.tuning,
+            Tuning::DEFAULT.with_tract(TractModel::Original)
+        );
+        assert_eq!(TractModel::of(&original.tuning), TractModel::Original);
+        let mri = voice(&["--engine", "physical", "--tongue-model", "mri"]);
+        assert_eq!(mri.tuning.anatomy.tongue_model, 1.0);
+        assert_eq!(TractModel::of(&mri.tuning), TractModel::Anatomical);
+        // Both together are the profile, field for field.
+        assert_eq!(
+            voice(&[
+                "--engine",
+                "physical",
+                "--tract",
+                "original",
+                "--tongue-model",
+                "mri"
+            ]),
+            voice(&["--engine", "physical", "--profile", PROFILE])
+        );
+    }
+
+    #[test]
+    fn the_breath_and_creak_flags_switch_them_on_and_off() {
+        // `--breath-intake` asks for the breath before the utterance as
+        // well; `--no-breath` takes none; `--fry 0` ends in modal voice.
+        let all = voice(&["--engine", "physical", "--breath-intake"]).tuning;
+        assert_eq!(all.prosody.breath_intake, 5.0);
+        assert_eq!(all.prosody.breath_first, 1.0);
+        let none = voice(&["--engine", "physical", "--no-breath"]).tuning;
+        assert_eq!(none.prosody.breath_intake, 0.0);
+        let modal = voice(&["--engine", "physical", "--fry", "0"]).tuning;
+        assert_eq!(modal.prosody.final_fry, 0.0);
+        let creak = voice(&["--engine", "physical", "--fry", "1"]).tuning;
+        assert_eq!(creak.prosody.final_fry, 1.0);
+        // Everything else as the default's.
+        let off = Tuning::DEFAULT;
+        let mut back = none;
+        back.prosody.breath_intake = off.prosody.breath_intake;
+        assert_eq!(back, off);
+        assert!(
+            Cli::try_parse_from(["synthie-trombone", "--breath-intake", "--no-breath"]).is_err()
+        );
+    }
 }

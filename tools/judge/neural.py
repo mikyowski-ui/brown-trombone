@@ -25,7 +25,14 @@ From the text:
 * **pauses** -- the frames the model gives punctuation, word gaps and the
   utterance edges, where they are at least ``KEEP_PAUSE`` long; shorter ones
   go to the phones either side. The model reads one sentence per call; the
-  sentences are joined on one clock.
+  sentences are joined on one clock, at least ``SENTENCE_PAUSE`` apart so that
+  the engine's breath between them is drawn. Its creak at the end of a
+  statement (``ProsodyConfig::final_fry``) is the engine's own and stays.
+* **tags and fillers** -- a vocalization tag (``[sigh]``, ``[laugh]`` ...) is
+  taken out of the text the model reads (it would read the word) and its
+  pause, the vocalization's own length, held open at the rules' length
+  (``vocal_gaps``); a filler ("um", "uh") is a word to the model and phones to
+  the engine and keeps the model's timing. Bracketed phonemes are refused.
 * **pitch** -- the model's F0 every frame; through the frames it calls
   unvoiced a line in semitones (``prosody.fill_pitch``).
 * **level** -- the model's energy (log RMS of its recordings) as dB, each
@@ -130,6 +137,16 @@ THREADS = 4
 #: (``follow_speed_max``), was heard worse on the held-out sentences (phoneme
 #: error 18.0 % at 1, 21.2 % at 0.9, 15.5 % at 0.8, the rules 15.5 %).
 SPEED = 0.8
+#: The least pause between two sentences, s. The model leaves 0.27 to
+#: 0.32 s between sentences (the four test sentences, M2); the engine's
+#: breath between them (``ProsodyConfig::breath_intake``, on since wave 3) is
+#: kept in a followed pause only where 0.22 s are left before it
+#: (``Utterance::follow_with``), so with the model's pauses it fell out (the
+#: pauses as quiet as with ``--no-breath``, -58 to -70 dB against -37 to -46
+#: with the breath). Held at 0.5 s the breath is drawn as by the rules
+#: (whose pause is 0.55 s); Whisper and the phonemes heard the clip the same
+#: (28 of 31 words; 9.1 against 8.1 % phoneme error, one phoneme).
+SENTENCE_PAUSE = 0.5
 #: Where the breath shares come from: ``"rules"`` (a share of 1, the rules'
 #: level) or ``"energy"`` (the model's level, see the module).
 BREATH = "rules"
@@ -591,10 +608,48 @@ def breath_shares(phones: list[str], start, end, db, hop: float) -> tuple[np.nda
     return lv, np.asarray(Pr.db_breath(np.clip(target, *Pr.LEVEL_RANGE)), float)
 
 
+def sentence_ends(mp: ModelPhones, start, end) -> list[int]:
+    """The engine phones each sentence but the last ends on: the one whose
+    end is nearest the end of the model's sentence."""
+    ends = np.asarray(end[:-1], float)
+    return [int(np.argmin(np.abs(ends - pe))) for _, pe in mp.pieces[:-1]]
+
+
+def open_gaps(mp: ModelPhones, start, end, want: dict[int, float], frame: float | None = None):
+    """The pause after each phone ``k`` of ``want`` made at least ``want[k]`` seconds
+    long, in whole frames: the phones after it move later and the frame
+    tracks get unvoiced frames there (the pitch held, the level silent).
+    Returns the new starts, ends and model tracks (a copy of ``mp``)."""
+    frame = frame or frame_seconds()
+    start, end = np.array(start, float), np.array(end, float)
+    f0, voiced, db = list(mp.f0), list(mp.voiced), list(mp.energy_db)
+    for k in sorted(want, reverse=True):
+        if not 0 <= k < len(start) - 1:
+            continue
+        have = start[k + 1] - end[k]
+        if want[k] <= have + 1e-9:
+            continue
+        n = int(math.ceil((want[k] - have) / frame - 1e-9))
+        at = min(len(f0), max(0, int(round(0.5 * (end[k] + start[k + 1]) / frame))))
+        hold = f0[at - 1] if at > 0 else (f0[0] if f0 else 100.0)
+        f0[at:at] = [hold] * n
+        voiced[at:at] = [False] * n
+        db[at:at] = [-100.0] * n
+        start[k + 1 :] += n * frame
+        end[k + 1 :] += n * frame
+    out = ModelPhones(mp.symbols, mp.token, mp.start, mp.end, np.array(f0, float), np.array(voiced, bool),
+                      np.array(db, float), mp.pieces, mp.unknown)  # fmt: skip
+    return start, end, out
+
+
 def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: bool = False,
-                   meta: dict | None = None) -> tuple[dict, dict]:  # fmt: skip
+                   meta: dict | None = None, gaps: dict[int, float] | None = None,
+                   sentence_pause: float = 0.0) -> tuple[dict, dict]:  # fmt: skip
     """The schedule (``prosody.analyse_audio``'s format) of the engine's phones on
-    the model's timing, pitch and level, and a report of the mapping."""
+    the model's timing, pitch and level, and a report of the mapping;
+    ``gaps`` (phone -> seconds) are pauses held open at least that long (a
+    vocalization's, see ``vocal_gaps``), ``sentence_pause`` the least pause
+    between two sentences (0: the model's)."""
     import prosody as Pr
 
     frame = frame_seconds()
@@ -606,6 +661,15 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
     al = Pr.Aligned(list(engine), start, end, 0.5 * (start + end))
     Pr.enforce_floor(al)
     start, end = al.start, al.end
+    want = dict(gaps or {})
+    if sentence_pause > 0:
+        for k in sentence_ends(mp, start, end):
+            want[k] = max(want.get(k, 0.0), sentence_pause)
+    opened = 0.0
+    if want:
+        total = float(end[-1])
+        start, end, mp = open_gaps(mp, start, end, want, frame)
+        opened = float(end[-1]) - total
     track = pitch_track(mp)
     t = np.arange(len(track)) * frame
     lv, br = breath_shares(engine, start, end, mp.energy_db, frame)
@@ -627,6 +691,7 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
         "phones": len(engine), "model_phones": len(mp.symbols), "matched": pl.matched,
         "substituted": pl.substituted, "dropped": pl.dropped, "added": pl.added,
         "below_floor": short, "pauses_closed": closed, "pauses": len(pauses), "unknown": mp.unknown,
+        "held_open_s": round(opened, 4),
     }  # fmt: skip
     sched = {
         "format": "synthie-prosody-1",
@@ -645,52 +710,118 @@ def build_schedule(text: str, mp: ModelPhones, engine: list[str], rule, breath: 
 
 
 def engine_phones(text: str, say: Path | None = None) -> tuple[list[str], np.ndarray]:
-    """The engine's phones for ``text`` and their rule durations, from
-    ``say --phone-times`` on the classic engine: its phones are the physical
-    engine's (the same on all 25 sentences of the fast check and the tuning
-    set, measured) and it renders in milliseconds; the durations only share
-    time out where the model and the engine disagree."""
+    """The engine's phones for ``text`` and their rule durations (see
+    ``engine_spans``)."""
+    phones, spans = engine_spans(text, say)
+    return phones, spans[:, 1] - spans[:, 0]
+
+
+def engine_spans(text: str, say: Path | None = None, engine: str = "classic") -> tuple[list[str], np.ndarray]:
+    """The engine's phones for ``text`` and their rule spans (s), from
+    ``say --phone-times``, by default on the classic engine: its phones are the
+    physical engine's (the same on all 25 sentences of the fast check and
+    the tuning set, measured) and it renders in milliseconds; the durations
+    only share time out where the model and the engine disagree. The
+    physical engine's own spans (a render) are needed where the pauses
+    matter: the classic engine leaves 0.18 s for a vocalization."""
     import render
 
     with tempfile.TemporaryDirectory() as tmp:
         times = Path(tmp) / "t.json"
-        subprocess.run([str(say or render.say_bin()), "--engine", "classic", "--voice", "deep", "--out",
+        subprocess.run([str(say or render.say_bin()), "--engine", engine, "--voice", "deep", "--out",
                         str(Path(tmp) / "x.wav"), "--phone-times", str(times), text],
                        capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)  # fmt: skip
-        return read_phones(times)
+        return read_spans(times)
 
 
 def read_phones(path: Path) -> tuple[list[str], np.ndarray]:
+    """The engine's phones and their rule durations (see ``read_spans``)."""
+    phones, spans = read_spans(path)
+    return phones, spans[:, 1] - spans[:, 0]
+
+
+def read_spans(path: Path) -> tuple[list[str], np.ndarray]:
     """The engine's phones and their rule spans as ``say --phone-times`` (and
     ``say --neural``) write them: ``{"phones": [...], "spans": [[a, b], ...]}``."""
     rec = json.loads(Path(path).read_text(encoding="utf-8"))
     spans = np.array(rec["spans"], float).reshape(-1, 2)
     if len(spans) != len(rec["phones"]):
         raise ValueError(f"{path}: {len(rec['phones'])} phones and {len(spans)} spans")
-    return list(rec["phones"]), spans[:, 1] - spans[:, 0]
+    return list(rec["phones"]), spans
+
+
+#: The engine's tags for vocalizations (``vocal::Vocalization::name``): written
+#: ``[sigh]`` in the text.
+TAGS = ("sigh", "laugh", "chuckle", "clear-throat", "cough")
+_BRACKET = re.compile(r"\[([^\]]*)\]?")
+
+
+def split_tags(text: str) -> tuple[str, list[int]]:
+    """The text the model reads (the vocalization tags taken out: it would
+    read ``[sigh]`` as the word) and where each tag stood (its offset in
+    ``text``). Bracketed phonemes (``[HH AX L OW1]``, the judge's probes) are
+    refused: the model reads words."""
+    tags, out, last = [], [], 0
+    for m in _BRACKET.finditer(text):
+        if m.group(1).strip() not in TAGS:
+            raise ValueError(f"neural prosody reads words, not bracketed phonemes: {m.group(0)!r}")
+        out.append(text[last : m.start()])
+        tags.append(m.start())
+        last = m.end()
+    out.append(text[last:])
+    return re.sub(r"\s+", " ", " ".join(out)).strip(), tags
+
+
+def vocal_gaps(text: str, tags: list[int], engine: list[str], spans, say: Path | None = None) -> dict[int, float]:
+    """For each tag, the engine phone it follows and the rules' pause there
+    (the vocalization's own length and the pauses around it): the schedule
+    holds that pause open, or the vocalization would be squeezed into the
+    model's (``Utterance::follow`` gives a pause the speaker's length). The
+    phone is found by the engine's phones for the text before the tag,
+    which must be the first ones of the whole text's."""
+    spans = np.asarray(spans, float)
+    out: dict[int, float] = {}
+    for pos in tags:
+        prefix = text[:pos]
+        if not any(c.isalnum() for c in _BRACKET.sub(" ", prefix)):
+            continue
+        n = len(engine_spans(prefix, say)[0])
+        if engine_spans(prefix, say)[0] != engine[:n]:
+            raise ValueError(f"the engine's phones before the tag at {pos} are not the text's first ones")
+        if 0 < n < len(engine):
+            out[n - 1] = max(out.get(n - 1, 0.0), float(spans[n, 0] - spans[n - 1, 1]))
+    return out
 
 
 def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float = SPEED, pitch_shift_st: float = 0.0,
                     pitch_range: float = 1.0, breath: bool = BREATH == "energy",
-                    phones: tuple[list[str], np.ndarray] | None = None,
-                    say: Path | None = None) -> tuple[dict, dict]:  # fmt: skip
+                    phones: tuple[list[str], np.ndarray] | None = None, say: Path | None = None,
+                    sentence_pause: float = SENTENCE_PAUSE) -> tuple[dict, dict]:  # fmt: skip
     """The schedule for ``text`` with the model's prosody, and a report (the
-    mapping, the time the model took)."""
+    mapping, the time the model took). ``phones``: the engine's phones and
+    their rule spans, if known (``say --neural`` passes them). Fillers ("um")
+    are words to the model and phones to the engine, and pass through with
+    the model's timing; vocalization tags are taken out of the model's text
+    and their pauses held open at the rules' length (``vocal_gaps``)."""
     t0 = time.perf_counter()
+    model_text, tags = split_tags(text)
     runs = []
-    for s in sentences(text):
+    for s in sentences(model_text):
         ph = model.phonemize(s)
         if len(ph.ids) > MAX_TOKENS:
             raise ValueError(f"a sentence of more than {MAX_TOKENS} tokens: {s[:40]!r}")
         runs.append(model.run(ph, voice, speed, pitch_shift_st, pitch_range))
     t_model = time.perf_counter() - t0
     mp = lay_out(runs)
-    engine, rule = phones if phones is not None else engine_phones(text, say)
+    engine, spans = phones if phones is not None else engine_spans(text, say, "physical" if tags else "classic")
+    rule = spans[:, 1] - spans[:, 0]
+    gaps = vocal_gaps(text, tags, engine, spans, say) if tags else {}
     meta = {"model": f"{MODEL_REPO}@{MODEL_REVISION[:8]}", "dizione": DIZIONE_COMMIT[:8], "voice": voice,
             "speed": speed, "pitch_shift_st": pitch_shift_st, "pitch_range": pitch_range,
             "frame_s": frame_seconds(), "frames": int(len(mp.f0)), "sentences": len(runs),
-            "tokens": [" ".join(r["symbols"]) for r in runs]}  # fmt: skip
-    sched, report = build_schedule(text, mp, engine, rule, breath, meta)
+            "tokens": [" ".join(r["symbols"]) for r in runs], "sentence_pause": sentence_pause,
+            "vocal_gaps": {str(k): round(v, 4) for k, v in gaps.items()}}  # fmt: skip
+    sched, report = build_schedule(text, mp, engine, rule, breath, meta, gaps, sentence_pause)
     v = mp.f0[mp.voiced]
     report.update({
         "model_s": t_model, "speech_s": len(mp.f0) * frame_seconds(), "total_s": time.perf_counter() - t0,
@@ -702,9 +833,10 @@ def neural_schedule(model: TinyVoca, text: str, voice: str = "M2", speed: float 
 
 def cmd_neural(args) -> int:
     model = TinyVoca(Path(args.model_dir) if args.model_dir else None, args.threads)
-    phones = read_phones(Path(args.phones)) if args.phones else None
+    phones = read_spans(Path(args.phones)) if args.phones else None
     sched, rep = neural_schedule(model, args.text, args.voice, args.speed, args.pitch_shift, args.pitch_range,
-                                 args.breath == "energy", phones, Path(args.say) if args.say else None)  # fmt: skip
+                                 args.breath == "energy", phones, Path(args.say) if args.say else None,
+                                 args.sentence_pause)  # fmt: skip
     Path(args.out).write_text(json.dumps(sched, indent=1, ensure_ascii=False), encoding="utf-8")
     f0 = rep["f0"]
     print(f"{args.out}: {rep['phones']} phones, {rep['pauses']} pauses, {rep['speech_s']:.2f} s of speech; the model "
@@ -712,7 +844,8 @@ def cmd_neural(args) -> int:
           f"the bridge {1000 * rep['total_s']:.0f} ms")  # fmt: skip
     print(f"  mapping: {rep['matched']} matched ({len(rep['substituted'])} as another sound), "
           f"{len(rep['dropped'])} model phones dropped, {len(rep['added'])} engine phones added, "
-          f"{len(rep['below_floor'])} below the floor, {rep['pauses_closed']} short pauses closed")  # fmt: skip
+          f"{len(rep['below_floor'])} below the floor, {rep['pauses_closed']} short pauses closed, "
+          f"{rep['held_open_s']:.2f} s of pauses held open")  # fmt: skip
     for a, b in rep["substituted"]:
         print(f"    the model's {a} for the engine's {b}")
     if rep["dropped"]:
@@ -735,6 +868,9 @@ def add_parser(sub) -> None:
     n.add_argument("--pitch-range", type=float, default=1.0, help="the model's pitch movement around its mean, scaled")
     n.add_argument("--breath", choices=["rules", "energy"], default=BREATH,
                    help="breath shares from the rules (1) or the model's energy (default: %(default)s)")
+    n.add_argument("--sentence-pause", type=float, default=SENTENCE_PAUSE,
+                   help="the least pause between two sentences, s, room for the engine's breath "
+                   "(default: %(default)s; 0 keeps the model's own)")
     n.add_argument("--phones", help="the engine's phones and rule spans as JSON (as say --phone-times writes them)")
     n.add_argument("--say", help="the say binary for the engine's phones (default: bin/say, or SAY_BIN)")
     n.add_argument("--model-dir", help="where the model is (default: TINY_VOCA_DIR, else .cache/tiny-voca)")

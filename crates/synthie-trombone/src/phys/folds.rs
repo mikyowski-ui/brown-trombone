@@ -223,6 +223,16 @@ pub(crate) struct Folds {
     /// Tension: stiffness is multiplied and mass divided by this, which
     /// moves every natural frequency in proportion.
     pub(crate) tension: f32,
+    /// Share of the coupling between the two cover pieces (`kc`) left:
+    /// `1` as the parameters have it, less in creak (see
+    /// `Source::creak`). A thick, slack fold couples its lower and upper
+    /// margins far more loosely than the standard folds do: the rules of
+    /// Titze & Story (2002) give `kc` 0.065 of `k1` at rest (6.9 against
+    /// 106 kN/m), Steinecke & Herzel's set 0.31 (25 against 80).
+    pub(crate) coupling: f32,
+    /// The air is going in (the lungs are drawing): the folds' upper
+    /// margin meets the stream first.
+    pub(crate) inward: bool,
 }
 
 impl Folds {
@@ -238,6 +248,8 @@ impl Folds {
             rest: 0.0179,
             rest_speed: 0.0,
             tension: 1.0,
+            coupling: 1.0,
+            inward: false,
         }
     }
 
@@ -294,6 +306,36 @@ impl Folds {
         self.x1
     }
 
+    /// Pressure on the lower and upper piece while the air goes in, from
+    /// the tract above to the lungs below: the same rule as the air going
+    /// out, mirrored (the upper margin is the entrance, the jet leaves
+    /// past the narrowest point into the trachea). `u` is negative.
+    fn inward_pressures(
+        p: &FoldParams,
+        (a1, a2): (f32, f32),
+        (ps, pe): (f32, f32),
+        u: f32,
+    ) -> (f32, f32) {
+        if a2 <= 0.0 {
+            return (ps, 0.0);
+        }
+        if a1 <= 0.0 {
+            return (ps, pe);
+        }
+        let head = 0.5 * RHO * u * u;
+        let slit = -12.0 * MU * p.length * p.length * u;
+        let (cube1, cube2) = (a1 * a1 * a1, a2 * a2 * a2);
+        let drop2 = slit * 0.5 * p.d2 / cube2;
+        let drop1 = slit * (p.d2 / cube2 + 0.5 * p.d1 / cube1);
+        let p2 = (pe - head / (a2 * a2) - drop2).max(ps.min(pe));
+        let p1 = if a1 <= a2 {
+            (pe - head / (a1 * a1) - drop1).max(ps.min(pe))
+        } else {
+            ps
+        };
+        (p1, p2)
+    }
+
     /// Move the folds one tick under the pressures and flow the tract
     /// solver just found. `share` is the part of that flow that passes
     /// between the vibrating edges (the rest leaks behind them).
@@ -318,7 +360,9 @@ impl Folds {
         // felt almost the whole lung pressure pushing it open, and under
         // vowels that load the folds heavily (a close vowel, a pitch near
         // F1, a breathy or a soft voice) the edges stopped meeting.
-        let (p1, p2) = if a1 <= 0.0 {
+        let (p1, p2) = if self.inward {
+            Self::inward_pressures(p, (a1, a2), (ps, pe), u)
+        } else if a1 <= 0.0 {
             (0.0, pe)
         } else if a2 <= 0.0 {
             (ps, pe)
@@ -344,8 +388,9 @@ impl Folds {
         let l2 = 2.0 * p.length;
         let s1 = self.x1 - self.xb;
         let s2 = self.x2 - self.xb;
-        let mut e1 = -q * p.k1 * s1 - q * p.kc * (self.x1 - self.x2);
-        let mut e2 = -q * p.k2 * s2 - q * p.kc * (self.x2 - self.x1);
+        let qk = q * self.coupling;
+        let mut e1 = -q * p.k1 * s1 - qk * p.kc * (self.x1 - self.x2);
+        let mut e2 = -q * p.k2 * s2 - qk * p.kc * (self.x2 - self.x1);
         if a1 < 0.0 {
             e1 -= q * p.c1 * a1 / l2;
         }

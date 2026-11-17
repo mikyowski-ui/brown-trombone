@@ -24,6 +24,7 @@
 
 use crate::math::{exp, lerp};
 use crate::phoneme::{Articulation, Manner, Phoneme};
+use crate::vocal::{Vocal, Vocalization};
 use crate::vowel_targets::VowelKey;
 use crate::{Engine, SLOT_MAIN, Trombone, Tuning};
 use alloc::string::String;
@@ -159,6 +160,18 @@ pub struct Controls {
     /// a rounded vowel's
     /// [`ArticulationConfig::rounded_larynx`](crate::ArticulationConfig::rounded_larynx)).
     pub larynx: f32,
+    /// A breath in (wave 3): how far below the air's pressure the lungs
+    /// draw through the segment, cmH2O (see [`Trombone::set_inhalation`]);
+    /// `0` none. Speech puts one on a pause segment of its own (see
+    /// [`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake)).
+    pub intake: f32,
+    /// How far the folds go into creak, `0‥1` (see
+    /// [`Trombone::set_fold_creak`]), from `creak_from` seconds into the
+    /// segment on: the end of a statement (see
+    /// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry)).
+    pub creak: f32,
+    /// Seconds into the segment at which its `creak` is asked for.
+    pub creak_from: f32,
 }
 
 /// A compiled, ready-to-play articulation track.
@@ -213,6 +226,9 @@ pub struct Utterance {
     /// Whether the [`Speaker`] plays it as gestures on the voice's score
     /// ([`ArticulationConfig::gesture_score`](crate::ArticulationConfig::gesture_score); physical engine).
     gestures: bool,
+    /// The vocalizations of its text's tags (`[laugh]`; wave 3, w3-vocal),
+    /// each with the segment it is made in, in order.
+    vocals: Vec<(u32, Vocal)>,
 }
 
 /// A gesture of an utterance's score that is not one of its segments' own
@@ -244,6 +260,54 @@ pub enum Token {
     WordBreak,
     /// Phrase break from punctuation.
     Break(Break),
+    /// A vocalization written as a tag (`[sigh]`, `[laugh]`, `[chuckle]`,
+    /// `[clear-throat]`, `[cough]`; wave 3): it ends the phrase before it,
+    /// takes its own time, and the next phrase starts after it (see
+    /// [`crate::vocal`]). Physical engine; the classic engine leaves a pause.
+    Vocal(Vocalization),
+    /// The word whose phones follow is a hesitation filler ("uh", "um",
+    /// "hmm", "er", "mm"; wave 3), spoken as one with
+    /// [`ProsodyConfig::fillers`](crate::ProsodyConfig::fillers) on and as a
+    /// word otherwise.
+    Filler(Filler),
+}
+
+/// A hesitation filler (wave 3, w3-vocal; see
+/// [`ProsodyConfig::fillers`](crate::ProsodyConfig::fillers)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Filler {
+    /// "uh": a schwa held.
+    Uh,
+    /// "um" (also "uhm", "erm"): a schwa, then the lips shut and the voice
+    /// through the nose.
+    Um,
+    /// "hmm" (also "hm"): the mouth shut, the voice through the nose.
+    Hmm,
+    /// "er": the r-coloured vowel held.
+    Er,
+    /// "mm" (also "mmm"): the same hum as "hmm".
+    Mm,
+}
+
+impl Filler {
+    /// The filler a word is (lower case), if it is one.
+    #[must_use]
+    pub fn from_word(word: &str) -> Option<Self> {
+        match word {
+            "uh" => Some(Self::Uh),
+            "um" | "uhm" | "erm" => Some(Self::Um),
+            "hmm" | "hm" | "hmmm" => Some(Self::Hmm),
+            "er" => Some(Self::Er),
+            "mm" | "mmm" => Some(Self::Mm),
+            _ => None,
+        }
+    }
+
+    /// Whether it ends in a hum, and is held a quarter longer, with a
+    /// longer pause after it (see [`ProsodyConfig::filler_pause`](crate::ProsodyConfig::filler_pause)).
+    const fn hums(self) -> bool {
+        matches!(self, Self::Um | Self::Hmm | Self::Mm)
+    }
 }
 
 /// Kinds of phrase break.
@@ -263,7 +327,13 @@ impl Utterance {
     /// Compile English text.
     #[must_use]
     pub fn from_text(text: &str, prosody: &Prosody) -> Self {
-        Self::from_tokens(&phonemize(text), prosody)
+        // Text with bracketed phonemes is a probe of the engine's sounds:
+        // it takes no breaths (see `ProsodyConfig::breath_intake`) and does
+        // not creak (`ProsodyConfig::final_fry`): the creak of a statement's
+        // end covered up to half of a probe's last vowel, and the judge's
+        // consonant probe (`score physical --sets vcv`) went from 60.2 % to
+        // 64.0 % phoneme error ("B AH T" heard "B AA D").
+        compile(&phonemize(text), prosody, !has_phonemes_in_brackets(text))
     }
 
     /// An utterance from hand-made segments (see [`crate::sing`]).
@@ -290,13 +360,24 @@ impl Utterance {
             followed: follow::Followed::default(),
             gestures: Tuning::DEFAULT.articulation.gesture_score >= 0.5,
             overlaps: Vec::new(),
+            vocals: Vec::new(),
         }
+    }
+
+    /// The vocalization made in segment `index` (a tag of the text, see
+    /// [`Token::Vocal`]), if any.
+    #[must_use]
+    pub fn vocal_at(&self, index: usize) -> Option<Vocal> {
+        self.vocals
+            .iter()
+            .find(|(k, _)| *k as usize == index)
+            .map(|&(_, v)| v)
     }
 
     /// Compile a token stream (see [`phonemize`]).
     #[must_use]
     pub fn from_tokens(tokens: &[Token], prosody: &Prosody) -> Self {
-        compile(tokens, prosody)
+        compile(tokens, prosody, true)
     }
 
     /// The segments, in order.
@@ -430,6 +511,23 @@ pub struct Speaker {
     /// How far the larynx was last told to be lowered, cm (see
     /// [`Controls::larynx`]): it is told only when that changes.
     larynx: f32,
+    /// How deep a breath the lungs were last told to draw, cmH2O, and how
+    /// far into creak the folds were last told to go (see
+    /// [`Controls::intake`], [`Controls::creak`]): each is told only when
+    /// it changes.
+    inhale: f32,
+    creak: f32,
+    /// When, on `clock`, the segment's creak is due.
+    creak_at: Option<f32>,
+    /// The segment being spoken is the turn after a breath: the next
+    /// sound's shape is still to be sent.
+    turning: bool,
+    /// Seconds the speech waits, its segments held where they are, for a
+    /// vocalization it was interrupted by (see [`Speaker::interject`]).
+    waiting: f32,
+    /// A vocalization of the utterance's (or one it was interrupted by) is
+    /// playing on the voice.
+    vocalizing: bool,
 }
 
 /// The way out of a sibilant into /f v/: the sibilant's gap as it was,
@@ -520,6 +618,11 @@ impl Speaker {
         self.overlap_next = 0;
         self.overlaps_on = [None; 4];
         self.larynx = 0.0;
+        self.inhale = 0.0;
+        self.creak = 0.0;
+        self.creak_at = None;
+        self.turning = false;
+        self.waiting = 0.0;
         core::mem::replace(&mut self.utterance, utterance)
     }
 
@@ -529,6 +632,11 @@ impl Speaker {
         // then the voice's again.
         voice.end_gesture_layer(crate::gesture::LAYER_SEGMENT);
         voice.end_gesture_layer(crate::gesture::LAYER_SCORE);
+        if self.vocalizing {
+            voice.stop_vocalizing();
+            self.vocalizing = false;
+        }
+        self.waiting = 0.0;
         voice.set_voiced(false);
         voice.set_breath(1.0);
         voice.set_glottal_spread(0.0);
@@ -539,6 +647,15 @@ impl Speaker {
             voice.set_larynx_height(0.0);
             self.larynx = 0.0;
         }
+        if self.inhale != 0.0 {
+            voice.set_inhalation(0.0);
+            self.inhale = 0.0;
+        }
+        if self.creak != 0.0 {
+            voice.set_fold_creak(0.0);
+            self.creak = 0.0;
+        }
+        self.creak_at = None;
         voice.articulate_phoneme(Phoneme::Sil);
         voice.set_constriction(LABIAL_SLOT, None);
         self.labial = None;
@@ -577,9 +694,35 @@ impl Speaker {
         voice.set_always_voice(false);
     }
 
+    /// Make a vocalization now, in the middle of what is being said (wave
+    /// 3, w3-vocal; see [`Trombone::vocalize`]): the speech waits where it
+    /// is for the event's length, its segments held, then carries on from
+    /// there (a game interrupts a sentence with a cough). Not speaking, the
+    /// voice makes it alone. Returns its length in seconds (`None`: not
+    /// made, see [`Trombone::vocalize`]). Never allocates.
+    pub fn interject(&mut self, voice: &mut Trombone, v: impl Into<Vocal>) -> Option<f32> {
+        let seconds = voice.vocalize(v)?;
+        if self.is_speaking() {
+            self.waiting = seconds;
+            self.vocalizing = true;
+        }
+        Some(seconds)
+    }
+
     /// Advance one output sample and render it.
     #[allow(clippy::too_many_lines)] // one sample of every channel's timing
     pub fn process(&mut self, voice: &mut Trombone) -> f32 {
+        if self.waiting > 0.0 {
+            // Held for a vocalization: the speech's gestures stay as they
+            // are under it, and carry on when it is over.
+            self.waiting -= 1.0 / voice.sample_rate();
+            if self.waiting <= 0.0 {
+                self.waiting = 0.0;
+                self.vocalizing = false;
+                self.resume(voice);
+            }
+            return voice.process();
+        }
         if let Some(&seg) = self.utterance.segments.get(self.index) {
             let physical = voice.engine() == Engine::Physical;
             let g = self.gesture_path(voice);
@@ -596,6 +739,15 @@ impl Speaker {
                     .iter()
                     .all(|s| s.phoneme == Phoneme::Sil);
                 self.pause_pending = pause && !self.readied && !last;
+                if physical && let Some(v) = self.utterance.vocal_at(self.index) {
+                    // A tag of the text: the voice makes it through this
+                    // pause, which readies nothing (the pause after it does).
+                    self.vocalizing = voice.vocalize(v).is_some();
+                    self.pause_pending = false;
+                    self.readied = false;
+                } else {
+                    self.vocalizing = false;
+                }
                 self.gap_stage = u8::from(seg.gesture.gap_opening.0 <= 0.0);
                 self.closure_made = false;
                 if !self.ahead && !pause {
@@ -648,7 +800,36 @@ impl Speaker {
                     plant::softness(voice, g, c.softness);
                     voice.set_cavity_expansion(c.expansion);
                     self.lower_larynx(voice, g, c.larynx);
+                    if c.intake > 0.0 && self.pause_pending {
+                        // A breath is due and the mouth has not been readied
+                        // for it yet: now, before the air moves.
+                        self.ready(voice, g);
+                    }
+                    // The breath turns: the first sound's shape is sent half
+                    // way through the turn, once the stream going in has all
+                    // but stopped (sent as the lungs let go, a gap forming in
+                    // the inward stream hissed 25 dB louder than the breath),
+                    // so that it is made by the time it is due.
+                    self.turning = self.inhale > 0.0 && c.intake <= 0.0 && pause;
+                    self.breathe(voice, g, c.intake);
+                    if c.creak_from > 0.0 {
+                        self.creak_at = Some(self.clock + c.creak_from);
+                        self.go_creaky(voice, g, 0.0);
+                    } else {
+                        self.creak_at = None;
+                        self.go_creaky(voice, g, c.creak);
+                    }
                 }
+            }
+            if self.turning && !self.ahead && self.elapsed >= 0.5 * seg.duration {
+                self.turning = false;
+                self.send_next(voice, g);
+            }
+            if let Some(t) = self.creak_at
+                && self.clock >= t
+            {
+                self.creak_at = None;
+                self.go_creaky(voice, g, seg.gesture.creak);
             }
             let t = (self.elapsed / seg.duration).min(1.0);
             if physical {
@@ -693,38 +874,26 @@ impl Speaker {
                 && voice.intensity() <= 0.0
                 && voice.gauges().subglottal_pressure < QUIET_PRESSURE
             {
-                let segments = &self.utterance.segments[self.index..];
-                if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
-                    let next = &segments[k];
-                    articulate_segment(
-                        voice,
-                        g,
-                        &self.utterance,
-                        self.index + k,
-                        &entry_shape(next),
-                    );
-                    self.play_overlaps(voice, self.index + k);
-                    voice.settle();
-                    // What little still rings in the tract belongs to the
-                    // old shape; let it go with it.
-                    voice.reset();
-                    self.ahead = true;
-                }
-                self.pause_pending = false;
-                self.readied = true;
+                self.ready(voice, g);
             }
             if !self.ahead
                 && physical
                 && let Some(&next) = self.utterance.segments.get(self.index + 1)
                 && next.phoneme != Phoneme::Sil
             {
-                let closed = matches!(
-                    seg.phoneme.manner(),
-                    Manner::Stop | Manner::Affricate | Manner::Nasal
-                ) && seg
-                    .articulation
-                    .constriction
-                    .is_some_and(|c| c.diameter <= 0.3);
+                // An affricate's frication is its closure letting go: the
+                // tongue holds the narrow channel and leaves it for the
+                // next sound as late as a closure does. With the usual lead
+                // the next shape was sent 30 ms into the 60 ms frication of
+                // /dʒ/, while the channel was still forming out of the
+                // closure (some 30 ms): it was narrow enough to hiss for
+                // about 10 ms.
+                let closed = seg.phoneme.manner() == Manner::Affricate
+                    || matches!(seg.phoneme.manner(), Manner::Stop | Manner::Nasal)
+                        && seg
+                            .articulation
+                            .constriction
+                            .is_some_and(|c| c.diameter <= 0.3);
                 let lead = if next.gesture.approach > 0.0 {
                     next.gesture.approach
                 } else if closed {
@@ -860,6 +1029,11 @@ impl Speaker {
                     plant::softness(voice, g, 0.0);
                     voice.set_cavity_expansion(0.0);
                     self.lower_larynx(voice, g, 0.0);
+                    if physical {
+                        self.breathe(voice, g, 0.0);
+                        self.go_creaky(voice, g, 0.0);
+                        self.creak_at = None;
+                    }
                     // The physical tract keeps the shape it ended on (see
                     // `PAUSE_SETTLE`); the next utterance starts from its
                     // own. The lungs stop pushing: an utterance that ends
@@ -875,6 +1049,93 @@ impl Speaker {
             }
         }
         voice.process()
+    }
+
+    /// After a vocalization the speech was held for (see
+    /// [`interject`](Self::interject)): on the old path the segment's own
+    /// voicing, tenseness and glottal opening again (the gesture path's are
+    /// gestures that held under it).
+    fn resume(&mut self, voice: &mut Trombone) {
+        let g = self.gesture_path(voice);
+        if g {
+            return;
+        }
+        if let Some(&seg) = self.utterance.segments.get(self.index) {
+            plant::voiced(voice, g, seg.voiced && self.voice_at.is_none());
+            plant::tenseness(voice, g, seg.tenseness);
+            if voice.engine() == Engine::Physical {
+                plant::spread(voice, g, seg.gesture.spread);
+            }
+        }
+    }
+
+    /// Set the articulators for the sound after the pause (physical engine;
+    /// see [`PAUSE_SETTLE`]), without moving through the air. A pause that
+    /// takes a breath before that sound (a segment of it has
+    /// [`Controls::intake`]) sets them for the first vowel after it
+    /// instead, so the breath goes in through the vowel's mouth; the sound's
+    /// own shape is then sent as it is due, as the breath turns.
+    fn ready(&mut self, voice: &mut Trombone, g: bool) {
+        let segments = &self.utterance.segments[self.index..];
+        if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
+            let breath = segments[..k].iter().any(|s| s.gesture.intake > 0.0);
+            let vowel = segments[k..]
+                .iter()
+                .take_while(|s| s.phoneme != Phoneme::Sil)
+                .position(|s| is_vowel(s.phoneme));
+            let (at, shape) = match vowel {
+                Some(v) if breath => (k + v, segments[k + v].articulation),
+                _ => (k, entry_shape(&segments[k])),
+            };
+            articulate_segment(voice, g, &self.utterance, self.index + at, &shape);
+            if !breath || at == k {
+                self.play_overlaps(voice, self.index + k);
+            }
+            voice.settle();
+            // What little still rings in the tract belongs to the
+            // old shape; let it go with it.
+            voice.reset();
+            self.ahead = !breath;
+        }
+        self.pause_pending = false;
+        self.readied = true;
+    }
+
+    /// Send the shape of the first sound after the pause being spoken.
+    fn send_next(&mut self, voice: &mut Trombone, g: bool) {
+        let segments = &self.utterance.segments[self.index..];
+        if let Some(k) = segments.iter().position(|s| s.phoneme != Phoneme::Sil) {
+            let next = segments[k];
+            articulate_segment(
+                voice,
+                g,
+                &self.utterance,
+                self.index + k,
+                &entry_shape(&next),
+            );
+            self.play_overlaps(voice, self.index + k);
+            self.ahead = true;
+        }
+    }
+
+    /// Draw a breath of `cm_h2o` (see [`Controls::intake`]), when that
+    /// changes.
+    fn breathe(&mut self, voice: &mut Trombone, g: bool, cm_h2o: f32) {
+        if cm_h2o.to_bits() == self.inhale.to_bits() {
+            return;
+        }
+        self.inhale = cm_h2o;
+        plant::inhale(voice, g, cm_h2o);
+    }
+
+    /// Take the folds into creak by `share` (see [`Controls::creak`]), when
+    /// that changes.
+    fn go_creaky(&mut self, voice: &mut Trombone, g: bool, share: f32) {
+        if share.to_bits() == self.creak.to_bits() {
+            return;
+        }
+        self.creak = share;
+        plant::creak(voice, g, share);
     }
 
     /// Lower the larynx by `cm` (see [`Controls::larynx`]): on the gesture
@@ -1213,6 +1474,22 @@ mod plant {
         }
     }
 
+    pub(super) fn inhale(voice: &mut Trombone, g: bool, cm_h2o: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::INHALE, cm_h2o);
+        } else {
+            voice.set_inhalation(cm_h2o);
+        }
+    }
+
+    pub(super) fn creak(voice: &mut Trombone, g: bool, share: f32) {
+        if g {
+            voice.drive(Tier::GlottalAdduction, var::glottis::CREAK, share);
+        } else {
+            voice.set_fold_creak(share);
+        }
+    }
+
     pub(super) fn pitch(voice: &mut Trombone, g: bool, hz: f32) {
         if g {
             voice.drive(Tier::LarynxAndPitch, var::larynx::PITCH, hz);
@@ -1335,7 +1612,9 @@ fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
     let mut before = String::new();
     let mut flush = |word: &mut String, out: &mut Vec<Token>| {
         if !word.is_empty() {
-            if let Some(form) = WEAK_FORMS.iter().find(|f| f.word == word.as_str())
+            if let Some(f) = Filler::from_word(word) {
+                out.push(Token::Filler(f));
+            } else if let Some(form) = WEAK_FORMS.iter().find(|f| f.word == word.as_str())
                 && !(form.noun && DETERMINERS.contains(&before.as_str()))
             {
                 weak.push((out.len(), form));
@@ -1357,7 +1636,16 @@ fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
                     }
                     span.push(c);
                 }
-                push_arpabet(&span, &mut out);
+                // A tag (`[laugh]`) is a vocalization; anything else is
+                // phonemes.
+                if let Some(v) = Vocalization::from_name(span.trim()) {
+                    if matches!(out.last(), Some(Token::WordBreak)) {
+                        out.pop();
+                    }
+                    out.push(Token::Vocal(v));
+                } else {
+                    push_arpabet(&span, &mut out);
+                }
             }
             c if c.is_alphabetic() || c == '\'' || c == '’' => {
                 if c == '’' {
@@ -1470,8 +1758,12 @@ fn reduce_function_words(tokens: &mut Vec<Token>, weak: &[(usize, &'static WeakF
             .iter()
             .take_while(|t| matches!(t, Token::Phone { .. }))
             .count();
-        let next = match tokens.get(start + len..start + len + 2) {
-            Some([Token::WordBreak, Token::Phone { phoneme, .. }]) => *phoneme,
+        // A filler's mark is not a word of its own.
+        let mut after = tokens[start + len..]
+            .iter()
+            .filter(|t| !matches!(t, Token::Filler(_)));
+        let next = match (after.next(), after.next()) {
+            (Some(Token::WordBreak), Some(Token::Phone { phoneme, .. })) => *phoneme,
             _ => continue,
         };
         let phones = match form.before_vowel {
@@ -1891,6 +2183,8 @@ struct Draft {
     ahead: Option<Articulation>,
     /// Which phone of the text this draft realises ([`NO_PHONE`]: a pause).
     phone: u32,
+    /// The vocalization this pause is made of (a tag of the text).
+    vocal: Option<Vocal>,
 }
 
 /// Where a phone stands, for the physical engine's voicing rules.
@@ -1927,8 +2221,8 @@ impl Context {
                     }
                     same_word = true;
                 }
-                Token::WordBreak => same_word = false,
-                Token::Break(_) => break,
+                Token::WordBreak | Token::Filler(_) => same_word = false,
+                Token::Break(_) | Token::Vocal(_) => break,
             }
         }
         Self {
@@ -1953,13 +2247,19 @@ fn is_obstruent(p: Phoneme) -> bool {
 }
 
 #[allow(clippy::too_many_lines)]
-fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
+/// Compile `tokens`; `living`: the speaker may take breaths in the pauses
+/// (see [`breathe_in`]) and creak at the end of a statement (see
+/// [`creak_at_the_ends`]); a probe of the engine's sounds does neither.
+fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
     let rate = prosody.rate.clamp(0.2, 5.0);
     let expr = prosody.expressiveness.clamp(0.0, 2.0);
     let tense = prosody.tenseness.clamp(0.0, 1.0);
     let nasality = prosody.nasality.clamp(0.0, 1.0);
     let timing = prosody.tuning.clamped();
     let physical = prosody.engine == Engine::Physical;
+    // Fillers' marks out, each filler its own phrase while they are on.
+    let (tokens, fillers) = mark_fillers(tokens, physical && timing.prosody.fillers >= 0.5);
+    let tokens = &tokens[..];
 
     // Split into phrases at breaks; each phrase gets its own contour.
     let mut drafts: Vec<Draft> = Vec::new();
@@ -2025,6 +2325,26 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
                 drafts.push(silence(pause));
                 phrase_start = drafts.len();
             }
+            Token::Vocal(kind) => {
+                // A phrase boundary before it (with the voice held up, as at
+                // a comma), the event in a pause of its own length, and a
+                // moment after it for the mouth to be readied.
+                if drafts.len() > phrase_start {
+                    push_phrase_end(&mut drafts, phrase_start, Some(Break::Comma));
+                    phrases.push((phrase_start, drafts.len(), Break::Comma));
+                }
+                if physical {
+                    let v = Vocal::new(kind).with_pitch(prosody.pitch);
+                    let mut d = silence(v.seconds(&timing));
+                    d.vocal = Some(v);
+                    drafts.push(d);
+                    drafts.push(silence(VOCAL_AFTER / rate));
+                } else {
+                    drafts.push(silence(0.18 / rate));
+                }
+                phrase_start = drafts.len();
+            }
+            Token::Filler(_) => {}
         }
         i += 1;
     }
@@ -2045,9 +2365,13 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         give_taps_time(&mut drafts, &timing, rate);
     }
 
-    // Lengthen the last syllable of each phrase.
+    // Lengthen the last syllable of each phrase (once: not again for the
+    // pauses of a vocalization after it).
     for k in 1..drafts.len() {
+        let again = drafts[k - 1].phoneme == Phoneme::Sil
+            && (drafts[k].vocal.is_some() || drafts[k - 1].vocal.is_some());
         if drafts[k].phoneme == Phoneme::Sil
+            && !again
             && let Some(v) = drafts[..k].iter().rposition(|d| d.vowel)
         {
             drafts[v].duration *= 1.4;
@@ -2068,6 +2392,9 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
 
     if physical {
         darken_before_coda_l(&mut drafts, &mut phrases, &timing);
+    }
+    if !fillers.is_empty() {
+        hold_fillers(&mut drafts, &fillers, &timing, rate);
     }
 
     // Coarticulation: consonants borrow the tongue of the next vowel (or
@@ -2106,7 +2433,16 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         for &(a, b, brk) in &phrases {
             intonation(&mut drafts[a..b], brk, expr, &timing);
         }
+        if !fillers.is_empty() {
+            pitch_fillers(&mut drafts, &fillers, &timing);
+        }
         breathe(&mut drafts, &mut phrases, &accented, &timing);
+        if living && timing.prosody.final_fry > 0.0 {
+            creak_at_the_ends(&mut drafts, &phrases, &timing);
+        }
+        if living && timing.prosody.breath_intake > 0.0 {
+            breathe_in(&mut drafts, &mut phrases, &timing);
+        }
         lean_on_vowels(&mut drafts);
         keeps_tongue_up(&mut drafts, &timing);
         assimilate_place(&mut drafts);
@@ -2120,7 +2456,12 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
     let phones = drafts.iter().map(|d| d.phone).collect();
     let mut last = prosody.pitch;
     let mut overlaps = Vec::new();
+    let mut vocals = Vec::new();
     for mut d in drafts {
+        if let Some(v) = d.vocal {
+            #[allow(clippy::cast_possible_truncation)]
+            vocals.push((segments.len() as u32, v));
+        }
         if let Some(a) = d.ahead {
             #[allow(clippy::cast_possible_truncation)]
             let from = segments.len() as u32;
@@ -2196,6 +2537,158 @@ fn compile(tokens: &[Token], prosody: &Prosody) -> Utterance {
         pitch_track: Vec::new(),
         pitch_hop: 0.0,
         followed: follow::Followed::default(),
+        vocals,
+    }
+}
+
+/// Seconds of pause after a vocalization in text, at the speaking rate 1:
+/// the mouth is readied in it for what follows (see [`PAUSE_SETTLE`]).
+const VOCAL_AFTER: f32 = 0.15;
+
+/// Whether `text` has phonemes in brackets (`[HH AX L OW1]`), not only
+/// vocalizations' tags (`[laugh]`).
+fn has_phonemes_in_brackets(text: &str) -> bool {
+    text.split('[')
+        .skip(1)
+        .any(|s| Vocalization::from_name(s.split(']').next().unwrap_or("").trim()).is_none())
+}
+
+/// `tokens` without the marks of hesitation fillers, and, with `on`, each
+/// filler as a phrase of its own (a break before it and after it where the
+/// text has none) and where its phones are: `(first phone, phones, filler)`
+/// by the place of the phones among the text's.
+fn mark_fillers(tokens: &[Token], on: bool) -> (Vec<Token>, Vec<(u32, u32, Filler)>) {
+    let mut out = Vec::with_capacity(tokens.len() + 4);
+    let mut found = Vec::new();
+    let mut phone = 0u32;
+    let mut k = 0;
+    while k < tokens.len() {
+        let t = tokens[k];
+        k += 1;
+        match t {
+            Token::Filler(f) if on => {
+                let before = out.iter().rev().find(|t| !matches!(t, Token::WordBreak));
+                if matches!(before, Some(Token::Phone { .. })) {
+                    if matches!(out.last(), Some(Token::WordBreak)) {
+                        out.pop();
+                    }
+                    out.push(Token::Break(Break::Comma));
+                }
+                let n = tokens[k..]
+                    .iter()
+                    .take_while(|t| matches!(t, Token::Phone { .. }))
+                    .count();
+                // Its vowel the schwa of "uh" ("er" is the same hesitation,
+                // spelt as non-rhotic speakers say it: held as /ɝ/ it was
+                // heard as "her"), unaccented.
+                out.extend(tokens[k..k + n].iter().map(|&t| match t {
+                    Token::Phone { phoneme, .. } if is_vowel(phoneme) => Token::Phone {
+                        phoneme: Phoneme::Ah,
+                        stressed: false,
+                    },
+                    t => t,
+                }));
+                #[allow(clippy::cast_possible_truncation)]
+                found.push((phone, n as u32, f));
+                #[allow(clippy::cast_possible_truncation)]
+                let n32 = n as u32;
+                phone += n32;
+                k += n;
+                let after = tokens[k..]
+                    .iter()
+                    .find(|t| !matches!(t, Token::WordBreak | Token::Filler(_)));
+                if matches!(after, Some(Token::Phone { .. })) {
+                    if matches!(tokens.get(k), Some(Token::WordBreak)) {
+                        k += 1;
+                    }
+                    out.push(Token::Break(Break::Comma));
+                }
+            }
+            Token::Filler(_) => {}
+            Token::Phone { .. } => {
+                phone += 1;
+                out.push(t);
+            }
+            _ => out.push(t),
+        }
+    }
+    (out, found)
+}
+
+/// The drafts of each filler (see [`mark_fillers`]) held for
+/// [`ProsodyConfig::filler_length`](crate::ProsodyConfig::filler_length)
+/// (a quarter more for one that hums, its vowel a little under half of
+/// that), unaccented,
+/// and the pause after it at least
+/// [`ProsodyConfig::filler_pause`](crate::ProsodyConfig::filler_pause)
+/// (six tenths of it after "uh" and "er").
+fn hold_fillers(drafts: &mut [Draft], fillers: &[(u32, u32, Filler)], timing: &Tuning, rate: f32) {
+    let p = &timing.prosody;
+    for &(first, n, f) in fillers {
+        let mine = |d: &Draft| d.phone != NO_PHONE && (first..first + n).contains(&d.phone);
+        let Some(a) = drafts.iter().position(mine) else {
+            continue;
+        };
+        let b = a + drafts[a..].iter().take_while(|d| mine(d)).count();
+        let total = p.filler_length * if f.hums() { 1.25 } else { 1.0 } / rate;
+        // How the length is shared: a hum's vowel a little under half, the
+        // rest the hum (with a fifth, "um" was heard as "hmm").
+        let vowels: f32 = drafts[a..b]
+            .iter()
+            .filter(|d| d.vowel)
+            .map(|d| d.duration)
+            .sum();
+        let others: f32 = drafts[a..b]
+            .iter()
+            .filter(|d| !d.vowel)
+            .map(|d| d.duration)
+            .sum();
+        let (to_vowels, to_others) = match (vowels > 0.0, others > 0.0) {
+            (true, true) => (0.45 * total, 0.55 * total),
+            (true, false) => (total, 0.0),
+            _ => (0.0, total),
+        };
+        for d in &mut drafts[a..b] {
+            d.duration *= if d.vowel {
+                to_vowels / vowels
+            } else {
+                to_others / others
+            };
+            d.voiced = true;
+        }
+        let pause = p.filler_pause * if f.hums() { 1.0 } else { 0.6 } / rate;
+        if let Some(d) = drafts.get_mut(b).filter(|d| d.phoneme == Phoneme::Sil) {
+            d.duration = d.duration.max(pause);
+        }
+    }
+}
+
+/// The pitch of each filler: from
+/// [`ProsodyConfig::filler_pitch`](crate::ProsodyConfig::filler_pitch) of the
+/// baseline at its start, level but for a slow fall of a semitone and a half
+/// to its end, from the pause before it on (physical engine).
+fn pitch_fillers(drafts: &mut [Draft], fillers: &[(u32, u32, Filler)], timing: &Tuning) {
+    /// The fall over a filler, semitones.
+    const FALL: f32 = 1.5;
+    let start = timing.prosody.filler_pitch;
+    for &(first, n, _) in fillers {
+        let mine = |d: &Draft| d.phone != NO_PHONE && (first..first + n).contains(&d.phone);
+        let Some(a) = drafts.iter().position(mine) else {
+            continue;
+        };
+        let b = a + drafts[a..].iter().take_while(|d| mine(d)).count();
+        let total: f32 = drafts[a..b].iter().map(|d| d.duration).sum();
+        if a > 0 && drafts[a - 1].phoneme == Phoneme::Sil {
+            drafts[a - 1].accent = start;
+        }
+        let mut t = 0.0;
+        for d in &mut drafts[a..b] {
+            t += d.duration;
+            d.accent = start * crate::math::powf(2.0, -FALL * t / total.max(1e-3) / 12.0);
+            d.mid_accent = 0.0;
+            d.gesture.pitch_arc = 0.0;
+            d.gesture.kick = 0.0;
+        }
     }
 }
 
@@ -2312,11 +2805,12 @@ fn function_words(tokens: &[Token]) -> Vec<bool> {
                 out.push(false);
                 stressed |= s;
             }
-            Token::WordBreak | Token::Break(_) => {
+            Token::WordBreak | Token::Break(_) | Token::Vocal(_) => {
                 out[start..].fill(!stressed);
                 start = out.len();
                 stressed = false;
             }
+            Token::Filler(_) => {}
         }
     }
     out[start..].fill(!stressed);
@@ -2787,6 +3281,7 @@ fn silence(duration: f32) -> Draft {
         ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
+        vocal: None,
     }
 }
 
@@ -2843,6 +3338,7 @@ fn expand(
         ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
+        vocal: None,
     };
     let Some(context) = context else {
         // The classic engine.
@@ -3014,12 +3510,26 @@ fn expand(
         Manner::Affricate => {
             let fric = if a.voiced { Phoneme::Zh } else { Phoneme::Sh };
             let g = if a.voiced { voiced_stop } else { voiceless };
-            // The frication of /dʒ/ comes straight out of the closure, with
-            // the folds still pressed for its voice.
-            let fg = if a.voiced {
-                Controls::default()
-            } else {
+            // The frication of /dʒ/ is made with the larynx of /ʒ/ in the
+            // same place: air behind the vibrating folds (and the pharynx
+            // widened a little inside a word), word-finally the plainer hiss
+            // of a partly voiceless /ʒ/. With the folds pressed as for the
+            // closure (as it was) the channel, as narrow as that of /ʒ/
+            // (0.04 to 0.05 cm²), carried a mean flow of some 20 cm³/s
+            // against the 90 of /ʒ/: its Reynolds number stayed under the
+            // critical 1700 for half of the frication, the jet was
+            // turbulent for 45 to 53 % of it (/ʒ/ 65 to 71 %) and not at all
+            // at the end of "edge", on both tracts.
+            let word_final = context.next.is_none_or(|(_, _, same)| !same);
+            let fg = if !a.voiced {
                 voiceless
+            } else if word_final {
+                Controls {
+                    spread: timing.articulation.voiced_sibilant_spread,
+                    ..Controls::default()
+                }
+            } else {
+                medial_zh
             };
             out.push(with(draft(p, a, dur * 0.6, a.voiced), g));
             // The frication of /tʃ/ is nearly as long as a fricative's (70
@@ -3294,6 +3804,133 @@ fn breathe(
     }
 }
 
+/// Seconds from the lungs letting go of a breath to the phrase after it:
+/// the stream turns, the folds come together, the mouth takes the first
+/// sound's shape.
+const BREATH_TURN: f32 = 0.1;
+/// Seconds a pause keeps before a breath, for the voice and the breath of
+/// the phrase before to die away and the mouth to be readied (see
+/// [`PAUSE_SETTLE`]).
+const BREATH_DIE_AWAY: f32 = 0.22;
+
+/// The physical engine's breaths (wave 3): before the utterance and in
+/// every pause between phrases of at least
+/// [`ProsodyConfig::breath_pause`](crate::ProsodyConfig::breath_pause), a
+/// pause segment of its own in which the lungs draw
+/// [`ProsodyConfig::breath_intake`](crate::ProsodyConfig::breath_intake)
+/// (less before a short phrase: seven tenths before a phrase of one
+/// second, all of it from three) for
+/// [`ProsodyConfig::breath_time`](crate::ProsodyConfig::breath_time),
+/// then [`BREATH_TURN`] of silence before the phrase (and its lungs'
+/// lead-in, if it opens on an obstruent). In a pause the time is taken from
+/// its start, where the voice dies away, as long as [`BREATH_DIE_AWAY`] is
+/// left of it; before the utterance (with
+/// [`ProsodyConfig::breath_first`](crate::ProsodyConfig::breath_first)) it is
+/// added, so everything after it starts `breath_time + BREATH_TURN` later. The [`Speaker`] readies the
+/// mouth for the first vowel of the phrase before the breath and sends the
+/// first sound's shape as it turns. `phrases` is kept up to date.
+fn breathe_in(drafts: &mut Vec<Draft>, phrases: &mut [(usize, usize, Break)], timing: &Tuning) {
+    let breath = timing.prosody.breath_time;
+    for p in (0..phrases.len()).rev() {
+        let (a, b, _) = phrases[p];
+        if a >= b {
+            continue;
+        }
+        let mut s = a;
+        // Not into a vocalization: it breathes in itself.
+        while s > 0 && drafts[s - 1].phoneme == Phoneme::Sil && drafts[s - 1].vocal.is_none() {
+            s -= 1;
+        }
+        // The lungs' lead-in before an obstruent stays where it is.
+        let lead_in = usize::from(a > s + 1 && drafts[a - 1].gesture.pressure_drop.0 < 1.0);
+        let at = a - lead_in;
+        let total: f32 = drafts[s..a].iter().map(|d| d.duration).sum();
+        let first = s == 0;
+        if first && timing.prosody.breath_first < 0.5 {
+            continue;
+        }
+        if !first {
+            let lead: f32 = drafts[at..a].iter().map(|d| d.duration).sum();
+            if total < timing.prosody.breath_pause
+                || drafts[s].duration - breath - BREATH_TURN < BREATH_DIE_AWAY
+                || total - lead - breath - BREATH_TURN < BREATH_DIE_AWAY
+            {
+                continue;
+            }
+            drafts[s].duration -= breath + BREATH_TURN;
+        }
+        let seconds: f32 = drafts[a..b].iter().map(|d| d.duration).sum();
+        let share = (0.55 + 0.15 * seconds).clamp(0.6, 1.0);
+        // The lungs push in neither (a pause's breath, see `breathe`).
+        let mut draw = silence(breath);
+        draw.gesture.intake = timing.prosody.breath_intake * share;
+        draw.gesture.pressure_drop = (1.0, 1.0);
+        let mut turn = silence(BREATH_TURN);
+        turn.gesture.pressure_drop = (1.0, 1.0);
+        drafts.splice(at..at, [draw, turn]);
+        for q in &mut phrases[p..] {
+            (q.0, q.1) = (q.0 + 2, q.1 + 2);
+        }
+    }
+}
+
+/// The physical engine's creak at the end of a statement (wave 3): over
+/// the last [`ProsodyConfig::fry_time`](crate::ProsodyConfig::fry_time) of
+/// the voice in a phrase that ends in a fall (`.` `!`), the folds go
+/// [`ProsodyConfig::final_fry`](crate::ProsodyConfig::final_fry) of the way
+/// into creak (see [`Trombone::set_fold_creak`]), never from before the
+/// middle of its last vowel; questions and commas end in modal voice. The
+/// creak ends with the last sonorant (a vowel, a nasal, a liquid or a
+/// glide): a voiced obstruent after it is spoken in modal voice, and the
+/// voiceless consonants after the last sonorant keep the creak (their
+/// folds are apart), unless a voiced obstruent follows it. The next phrase
+/// starts without.
+fn creak_at_the_ends(drafts: &mut [Draft], phrases: &[(usize, usize, Break)], timing: &Tuning) {
+    for &(a, b, brk) in phrases {
+        if !matches!(brk, Break::Period | Break::Exclamation) || a >= b {
+            continue;
+        }
+        // Pressed together, the folds pass too little air for a fricative:
+        // creaked through, a final /ʒ/ lost 30 dB of its jet noise and a
+        // final /dʒ/ all of it (`affricate_gate`), and every final /z/ of a
+        // plural would have gone with them.
+        let sonorant = |d: &Draft| {
+            d.voiced
+                && matches!(
+                    d.phoneme.manner(),
+                    Manner::Vowel | Manner::Diphthong | Manner::Nasal | Manner::Approximant
+                )
+        };
+        let Some(last) = drafts[a..b].iter().rposition(sonorant) else {
+            continue;
+        };
+        let modal_after = drafts[a + last + 1..b].iter().any(|d| d.voiced);
+        let end: f32 = drafts[a..=a + last].iter().map(|d| d.duration).sum();
+        // Never before the middle of the last vowel: the consonant before it
+        // and the vowel's onset keep their modal voice (the pitch raised
+        // after a voiceless stop is heard in the first cycles; in "a ta" the
+        // whole vowel creaked and its onset pitch could not be read).
+        let phrase = &drafts[a..b];
+        let middle = phrase.iter().rposition(|d| d.vowel).map_or(0.0, |v| {
+            let head = vowel_head(phrase, v);
+            let start: f32 = phrase[..head].iter().map(|d| d.duration).sum();
+            let length: f32 = phrase[head..=v].iter().map(|d| d.duration).sum();
+            start + 0.5 * length
+        });
+        let from = (end - timing.prosody.fry_time).max(middle);
+        let mut t = 0.0;
+        for (i, d) in drafts[a..b].iter_mut().enumerate() {
+            let start = t;
+            t += d.duration;
+            if t <= from || (modal_after && i > last) {
+                continue;
+            }
+            d.gesture.creak = timing.prosody.final_fry;
+            d.gesture.creak_from = (from - start).max(0.0);
+        }
+    }
+}
+
 /// The shortest phrase that loses all of [`ProsodyConfig::phrase_decline`](crate::ProsodyConfig::phrase_decline) of its
 /// breath, seconds; a shorter one loses as much as the lungs would in its
 /// time. The lungs run down with time, not with the share of a phrase
@@ -3454,6 +4091,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         ahead: None,
         phone: NO_PHONE,
         mid_accent: 0.0,
+        vocal: None,
     }
 }
 

@@ -17,6 +17,14 @@
 //! `--dump-profile` prints the voice that results; `--dump-parameters`
 //! prints every tunable number with its range.
 //!
+//! `--tract anatomical|original` and `--tongue-model cosine|mri` choose
+//! the physical engine's tract (`Tuning::with_tract`) and tongue body
+//! (`Tuning::with_tongue`: the cosine hump or the measured MRI modes),
+//! laid over the voice after any profile, as a profile's numbers would be.
+//! Left out, the voice keeps its own (by default the anatomical tract and
+//! the cosine tongue). `--tract original --tongue-model mri` is
+//! `profiles/mri-tongue.json`.
+//!
 //! A profile may also move the physical engine's vowels, for trying out
 //! other targets without regenerating the vowel table: a `"vowels"` object
 //! of F1, F2 and F3 for an adult man, Hz (see `vowel_targets`), keyed by
@@ -59,6 +67,31 @@
 //! the Python of `SYNTHIE_NEURAL_PYTHON` (default: `tools/judge/.venv`,
 //! with the judge's `neural` dependency group installed) from the judge
 //! folder `SYNTHIE_JUDGE_DIR` (default: this checkout's).
+//! The breath, creak and filler flags below apply as without it; the
+//! bridge holds the pauses between sentences at 0.5 s so the breath fits,
+//! keeps a tag's vocalization at its own length and refuses bracketed
+//! phonemes.
+//!
+//! `--stereo` writes two channels: the two ears of a listener, each port of
+//! the tract (lips, nostrils, throat, cheeks) on its own path round the
+//! talker's head and the listener's (`--stereo-pair`: a plain ORTF
+//! microphone pair instead). `--listener AZIMUTH[,ELEVATION[,DISTANCE]]`
+//! puts the listener where the talker's head sees them (degrees, positive
+//! to the talker's right and up; metres; default `0,0,1`), `--heard
+//! AZIMUTH[,ELEVATION]` turns the listener's own head (where they hear the
+//! talker; default straight ahead), and `--turn FROM,TO` turns the
+//! talker's head from `FROM` to `TO` degrees (positive to the talker's
+//! right) while speaking; `--pan FROM,TO` turns where the listener hears
+//! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
+//! bringing the loudest to 0.89 (for comparing levels between files).
+//!
+//! The living voice (wave 3, physical engine): `--breath-intake` takes a
+//! breath before the text as well as in the pauses between its sentences
+//! (the lungs drawing 5 cmH2O; `ProsodyConfig::breath_intake` and
+//! `breath_first`), `--no-breath` takes none; `--fry 0.8` takes the end of
+//! every statement that far into creak (`ProsodyConfig::final_fry`; `--fry
+//! 0` ends them in modal voice). All go on top of a `--profile`. Text with
+//! bracketed phonemes (the judge's probes) never takes a breath.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -74,7 +107,11 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
-use synthie_trombone::{Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, inverse};
+use synthie_trombone::{
+    Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
+    inverse,
+};
+use synthie_trombone::{Listener, Stereo};
 use synthie_trombone::{Trombone, normalize};
 
 /// A prosody schedule (`tools/judge/prosody.py`) from its JSON.
@@ -170,6 +207,8 @@ fn neural_schedule(
         .args(speed.map(|s| ["--speed", s]).into_iter().flatten())
         .arg("--phones")
         .arg(&phones_file)
+        .arg("--say")
+        .arg(std::env::current_exe()?)
         .arg("--out")
         .arg(&schedule_file)
         .arg(text)
@@ -245,6 +284,17 @@ fn take_vowels(json: &str) -> (String, Vec<(VowelKey, [f32; 3])>) {
     (value.to_string(), targets)
 }
 
+/// Up to three numbers separated by commas, the rest left as `into` has
+/// them.
+fn numbers(text: &str, into: &mut [f32]) {
+    for (slot, part) in into.iter_mut().zip(text.split(',')) {
+        *slot = part
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("not a number: {part:?}"));
+    }
+}
+
 /// Shape `voice`'s vowels for `targets` (adult man, Hz), at its size.
 fn hold_vowels(voice: &mut Trombone, targets: &[(VowelKey, [f32; 3])]) {
     let length = voice.tract_length();
@@ -285,6 +335,15 @@ fn main() -> std::io::Result<()> {
     let mut follow_formants = false;
     let mut follow_speed = true;
     let mut neural: Option<String> = None;
+    let mut breath: Option<bool> = None;
+    let mut fry: Option<f32> = None;
+    let mut stereo = Stereo::Off;
+    let mut listener = Listener::FRONT;
+    let mut turn: Option<[f32; 2]> = None;
+    let mut pan: Option<[f32; 2]> = None;
+    let mut raw = false;
+    let mut tract: Option<TractModel> = None;
+    let mut tongue: Option<TongueModel> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -316,6 +375,20 @@ fn main() -> std::io::Result<()> {
                 };
             }
             "--out" => path = value("--out"),
+            "--tract" => {
+                let v = value("--tract");
+                tract =
+                    Some(TractModel::from_name(&v).unwrap_or_else(|| {
+                        panic!("unknown tract {v:?}; try anatomical or original")
+                    }));
+            }
+            "--tongue-model" => {
+                let v = value("--tongue-model");
+                tongue =
+                    Some(TongueModel::from_name(&v).unwrap_or_else(|| {
+                        panic!("unknown tongue model {v:?}; try cosine or mri")
+                    }));
+            }
             "--size" => persona.size = value("--size").parse().expect("--size needs a number"),
             "--effort" => {
                 persona.effort = value("--effort").parse().expect("--effort needs a number");
@@ -347,6 +420,32 @@ fn main() -> std::io::Result<()> {
             "--prosody-speed" => follow_speed = value("--prosody-speed") != "off",
             "--neural" => neural = Some(value("--neural")),
             "--dump-profile" => dump = true,
+            "--breath-intake" => breath = Some(true),
+            "--no-breath" => breath = Some(false),
+            "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
+            "--raw" => raw = true,
+            "--stereo" => stereo = Stereo::Binaural,
+            "--stereo-pair" => stereo = Stereo::Pair,
+            "--listener" => {
+                let mut v = [listener.azimuth, listener.elevation, listener.distance];
+                numbers(&value("--listener"), &mut v);
+                [listener.azimuth, listener.elevation, listener.distance] = v;
+            }
+            "--heard" => {
+                let mut v = [listener.heard_azimuth, listener.heard_elevation];
+                numbers(&value("--heard"), &mut v);
+                [listener.heard_azimuth, listener.heard_elevation] = v;
+            }
+            "--turn" => {
+                let mut v = [0.0; 2];
+                numbers(&value("--turn"), &mut v);
+                turn = Some(v);
+            }
+            "--pan" => {
+                let mut v = [0.0; 2];
+                numbers(&value("--pan"), &mut v);
+                pan = Some(v);
+            }
             "--dump-parameters" => {
                 println!("{}", synthie_trombone::tuning_parameters());
                 return Ok(());
@@ -398,6 +497,24 @@ fn main() -> std::io::Result<()> {
         settings = settings
             .with_profile(&json)
             .unwrap_or_else(|e| panic!("{file}: {e}"));
+    }
+    match breath {
+        Some(true) => {
+            settings.tuning.prosody.breath_intake = 5.0;
+            settings.tuning.prosody.breath_first = 1.0;
+        }
+        Some(false) => settings.tuning.prosody.breath_intake = 0.0,
+        None => {}
+    }
+    if let Some(share) = fry {
+        settings.tuning.prosody.final_fry = share.clamp(0.0, 1.0);
+    }
+    // The tract and the tongue, laid over the voice after its profile.
+    if let Some(t) = tract {
+        settings.tuning = settings.tuning.with_tract(t);
+    }
+    if let Some(t) = tongue {
+        settings.tuning = settings.tuning.with_tongue(t);
     }
     if dump {
         println!("{}", settings.to_profile());
@@ -460,12 +577,52 @@ fn main() -> std::io::Result<()> {
     }
     println!();
     let started = Instant::now();
-    let mut out = talker.bake_utterance(utterance);
+    let channels = if stereo == Stereo::Off { 1 } else { 2 };
+    let mut out = if stereo == Stereo::Off {
+        talker.bake_utterance(utterance)
+    } else {
+        talker.set_stereo(stereo);
+        talker.set_listener(listener);
+        match (turn, pan) {
+            (None, None) => talker.bake_utterance_stereo(utterance),
+            (turn, pan) => {
+                let [from, to] = turn.unwrap_or([0.0; 2]);
+                let [pan_from, pan_to] = pan.unwrap_or([listener.heard_azimuth; 2]);
+                // The talker's head turns while it speaks: the listener,
+                // where it stands, is seen further and further the other
+                // way.
+                let frames = ((utterance.duration() + 0.25) * SR as f32) as usize;
+                let at = |k: usize| {
+                    let t = k as f32 / frames.max(1) as f32;
+                    Listener {
+                        azimuth: listener.azimuth - (from + (to - from) * t),
+                        heard_azimuth: pan_from + (pan_to - pan_from) * t,
+                        ..listener
+                    }
+                };
+                talker.set_listener(at(0));
+                talker.voice_mut().reset();
+                talker.say_utterance(utterance);
+                let mut out = vec![0.0; 2 * frames];
+                for (k, block) in out.chunks_mut(2 * 64).enumerate() {
+                    talker.set_listener(at(k * 64));
+                    talker.render_stereo(block);
+                }
+                out
+            }
+        }
+    };
     let took = started.elapsed().as_secs_f32();
-    normalize(&mut out, 0.89);
+    if !raw {
+        normalize(&mut out, 0.89);
+    }
 
-    wav::write(&path, SR, &out)?;
-    let seconds = out.len() as f32 / SR as f32;
+    if channels == 1 {
+        wav::write(&path, SR, &out)?;
+    } else {
+        wav::write_stereo(&path, SR, &out)?;
+    }
+    let seconds = out.len() as f32 / (channels * SR) as f32;
     println!(
         "wrote {path} ({seconds:.1} s, rendered in {took:.2} s: {:.0}x real time)",
         seconds / took

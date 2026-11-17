@@ -233,3 +233,54 @@ def test_say_follows_a_schedule_of_this_shape():
     spans = r["spans"]
     want = np.array([p["end"] - p["start"] for p in sched["phones"]])
     assert np.median(np.abs((spans[:, 1] - spans[:, 0]) - want)) < 0.02
+
+
+def test_tags_are_taken_out_of_the_model_text_and_phonemes_refused():
+    given = "I was so tired. [sigh] Well, um, [clear-throat] go home."
+    text, tags = N.split_tags(given)
+    assert text == "I was so tired. Well, um, go home." and tags == [given.index("[sigh"), given.index("[clear")]
+    assert N.split_tags("No tags, uh, here.") == ("No tags, uh, here.", [])
+    with pytest.raises(ValueError, match="bracketed phonemes"):
+        N.split_tags("Say [HH AX L OW1] now.")
+
+
+def test_a_pause_held_open_moves_what_follows_and_the_tracks_with_it():
+    fr = N.frame_seconds()
+    mp = N.ModelPhones()
+    mp.f0, mp.voiced, mp.energy_db = np.full(30, 120.0), np.ones(30, bool), np.zeros(30)
+    start, end = np.array([0, 10, 20]) * fr, np.array([10, 20, 30]) * fr
+    s2, e2, mp2 = N.open_gaps(mp, start, end, {1: 5.5 * fr})
+    assert np.allclose(s2[:2], start[:2]) and np.allclose(e2[:2], end[:2])
+    assert s2[2] - e2[1] == pytest.approx(6 * fr)  # whole frames, at least what was asked
+    assert len(mp2.f0) == 36 and (~mp2.voiced).sum() == 6 and np.all(mp2.f0 == 120.0)
+    assert np.all(mp2.energy_db[~mp2.voiced] < -90)
+    # a pause already long enough is left alone, and so is the last phone
+    s3, _, mp3 = N.open_gaps(mp, start, end, {1: 0.0, 2: 1.0})
+    assert np.allclose(s3, start) and len(mp3.f0) == 30
+
+
+def test_sentence_ends_are_found_and_their_pauses_can_be_lengthened():
+    fr = N.frame_seconds()
+    runs = [_run(["<bos>", "s", "iː", ".", "<eos>"], [2, 8, 10, 0, 3]), _run(["<bos>", "t", "uː", ".", "<eos>"], [25, 5, 12, 0, 2])]
+    mp = N.lay_out(runs)
+    engine, rule = ["S", "IY", "T", "UW"], np.array([0.1, 0.12, 0.06, 0.15])
+    (s0, _) = N.build_schedule("See. Two.", mp, engine, rule)
+    gap0 = s0["phones"][2]["start"] - s0["phones"][1]["end"]
+    assert gap0 == pytest.approx(28 * fr, abs=1e-3)
+    assert N.sentence_ends(mp, [p["start"] for p in s0["phones"]], [p["end"] for p in s0["phones"]]) == [1]
+    (s1, rep) = N.build_schedule("See. Two.", mp, engine, rule, sentence_pause=0.5)
+    gap1 = s1["phones"][2]["start"] - s1["phones"][1]["end"]
+    assert 0.5 <= gap1 < 0.5 + fr + 1e-3 and rep["held_open_s"] == pytest.approx(gap1 - gap0, abs=1e-3)
+    assert len(s1["pitch"]["hz"]) == len(s0["pitch"]["hz"]) + round((gap1 - gap0) / fr)
+
+
+def test_a_vocalization_keeps_the_rules_pause():
+    say = HERE / "bin" / "say"
+    if not say.exists():
+        pytest.skip("bin/say not built")
+    text = "I was so tired. [sigh] Well, go home."
+    model_text, tags = N.split_tags(text)
+    phones, spans = N.engine_spans(text, say, "physical")
+    gaps = N.vocal_gaps(text, tags, phones, spans, say)
+    n = len(N.engine_spans("I was so tired.", say)[0])
+    assert list(gaps) == [n - 1] and gaps[n - 1] > 1.0  # the sigh, in the rules' pause

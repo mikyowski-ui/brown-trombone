@@ -29,6 +29,14 @@ mod imp {
     pub fn sqrt(x: f32) -> f32 {
         x.sqrt()
     }
+    #[inline]
+    pub fn acos(x: f32) -> f32 {
+        x.acos()
+    }
+    #[inline]
+    pub fn atan2(y: f32, x: f32) -> f32 {
+        y.atan2(x)
+    }
 }
 
 #[cfg(all(not(feature = "std"), feature = "libm"))]
@@ -56,6 +64,14 @@ mod imp {
     #[inline]
     pub fn sqrt(x: f32) -> f32 {
         libm::sqrtf(x)
+    }
+    #[inline]
+    pub fn acos(x: f32) -> f32 {
+        libm::acosf(x)
+    }
+    #[inline]
+    pub fn atan2(y: f32, x: f32) -> f32 {
+        libm::atan2f(y, x)
     }
 }
 

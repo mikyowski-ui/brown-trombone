@@ -555,6 +555,72 @@ tuning! {
         /// follows the cosine tongue the shapes carry. The classic engine keeps
         /// the cosine.
         tongue_model = 0.0, 0.0..=1.0, A;
+
+        // ----- the head (wave 3, stage 3C) -------------------------------------------
+
+        /// Radius of the talker's head as a rigid sphere, cm at the native
+        /// size (it grows with the tract): above about `c/(πa)`, 620 Hz at
+        /// 8.75 cm, the ports' high frequencies beam the way they point, and
+        /// the paths round the head to a listener are this long (Brown &
+        /// Duda 1998; see `phys::radiation::Head`). Physical engine, read
+        /// while the head is on: in stereo (`Trombone::set_stereo`) or for
+        /// the mixdown (`head_mixdown`).
+        head_radius = 8.75, 7.0..=10.5, A;
+        /// How much of the physical engine's mono output is the head's
+        /// mixdown: the lips, the nostrils, the throat and the cheeks as
+        /// heard straight ahead on the mouth's axis, each through its own
+        /// beaming, summed without the paths' delays. `0` keeps the plain
+        /// sum of the ports' flows (as before the head), `1` the mixdown
+        /// (the default since wave 3 was switched on);
+        /// the two differ by under 0.1 dB in vowels and by 0 to −1.3 dB in
+        /// nasals (the nostrils point 40° down), in 500 Hz bands to 5 kHz.
+        head_mixdown = 1.0, 0.0..=1.0, A;
+        /// Share of the mouth's sound the chest sends back, in stereo: an
+        /// image of the lips mirrored in a surface facing up and forward,
+        /// heard as far as the listener sees that surface (0.18 of the lips'
+        /// level straight ahead, none from behind). Not in the mixdown.
+        chest_reflection = 0.25, 0.0..=0.6, A;
+        /// Distance from the lips to the chest's surface along its normal,
+        /// cm at the native size: the return's delay (0.62 ms straight ahead
+        /// at 15 cm; its first notch near 800 Hz).
+        chest_distance = 15.0, 8.0..=25.0, A;
+        /// Corner of the chest return's low-pass, Hz at the native size
+        /// (clothes and a surface smaller than the wavelengths above it
+        /// return little of them).
+        chest_corner = 1500.0, 500.0..=4000.0, A;
+
+        // ----- creak (wave 3, w3-breath; only heard where creak is asked for) --------
+
+        /// Share of the coupling between the lower and upper piece of the fold
+        /// cover that is left at full creak (physical engine; see
+        /// `Trombone::set_fold_creak`). A thick, slack fold couples its two
+        /// margins loosely (Titze & Story's rules give 0.065 of the lower
+        /// piece's stiffness at rest, the standard folds 0.31); so coupled at
+        /// 0.05, pressed and blown at 4 to 6 cmH2O, the folds alternate strong
+        /// and weak pulses at 60 to 130 Hz on /a i ə/ (`examples/breath.rs
+        /// --fine`: the energy at half the pitch 10 to 13 dB under the pitch's,
+        /// where at the full coupling it is 70 to 90 dB under).
+        creak_coupling = 0.05, 0.02..=0.5, A;
+        /// How far past touching the folds are pressed together at full creak,
+        /// cm: at 0.005 the alternation holds from 4 cmH2O; pressed at 0.01 the
+        /// folds need 6.
+        creak_press = 0.005, 0.0..=0.01, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Peak pressure the lungs build behind the shut folds in a cough, cmH2O
+        /// (physical engine; see `Trombone::vocalize`). People reach 50 to 100
+        /// and more in the chest in a voluntary cough (58 to 214 cmH2O
+        /// intrathoracic); this model holds finite and its output bounded to
+        /// 100 (`tests/vocal_gate.rs`), and at 40, the most a voice's lung
+        /// pressure is ever set to, the burst after the release is some 10 dB
+        /// over the speech around it.
+        cough_pressure = 40.0, 10.0..=100.0, A;
+        /// Peak of each pulse of pressure the lungs push a laugh's call with,
+        /// cmH2O (physical engine): laughter is made by pulses of subglottal
+        /// pressure at some 4 to 5 per second (Luschei et al. 2006), here
+        /// falling to seven tenths of this along the bout as the lungs empty.
+        laugh_pressure = 12.0, 4.0..=30.0, A;
     } tiers {
     } aliases {
     }
@@ -1003,6 +1069,31 @@ tuning! {
         /// and larynx together (Story 2008). The default, 0.5, is the
         /// anatomical tract's; `0` the original's.
         rounded_larynx = 0.5, 0.0..=0.8, C;
+
+        // ----- breathing in (wave 3, w3-breath; only heard where a breath is asked for)
+
+        /// Opening the glottis is held at behind the folds while the lungs draw
+        /// a breath, cm² at native size (physical engine; with the folds apart,
+        /// `abducted_area`, 0.6 cm² in all): at 4 cmH2O the air goes in at some
+        /// 1.4 L/s, as in a quick breath between sentences. A shallower breath
+        /// than 3 cmH2O opens it in proportion.
+        breath_opening = 0.35, 0.1..=1.0, A;
+
+        // ----- non-verbal sounds (wave 3, w3-vocal; only heard where one is asked for)
+
+        /// Calls per second in a laugh (physical engine; see
+        /// `Trombone::vocalize`): 4.37 in 1,024 bouts of 97 young adults
+        /// (Bachorowski, Smoski & Owren 2001), the intervals between them
+        /// growing towards the end of the bout (here by a fifth).
+        laugh_rate = 4.4, 3.0..=6.0, B;
+        /// Seconds of each call of a laugh after the first (voiced, open-mouth
+        /// calls 0.11 s, with 0.12 s between them, in the same study); the
+        /// first is longer (0.28 against 0.13 s there; here 1.4 times this).
+        /// The lungs' pulse holds for half of it and lets go through the rest,
+        /// the adductors narrowing the glottis with it; the folds sound while
+        /// it blows them and stop by themselves after it, and the breath goes
+        /// out between.
+        laugh_voiced = 0.11, 0.05..=0.2, B;
     } tiers {
         /// The folds coming together and parting (adduction and abduction).
         /// Not read yet: today the glottis follows first-order lags
@@ -1346,6 +1437,71 @@ tuning! {
         /// ms; `0`, since the engine's last vowels are already darker than the
         /// reader's (see `final_slack`).
         final_softness = 0.0, 0.0..=1.0, A;
+
+        // ----- breaths and creak (wave 3, w3-breath; each `0` off) -------------------
+
+        /// How far below the air's pressure the lungs draw the breath a speaker
+        /// takes before an utterance and in the long pauses between sentences,
+        /// cmH2O (physical engine; text without bracketed phonemes only, see
+        /// `speech::breathe_in`): the folds part wide, the mouth takes the shape
+        /// of the vowel ahead, and the air rushes in through it. A breath before
+        /// a short phrase is shallower (seven tenths of it before a phrase of a
+        /// second). `0` takes none; 5 by default, in the pauses between
+        /// sentences only (`breath_first` 0).
+        breath_intake = 5.0, 0.0..=6.0, A;
+        /// Whether an utterance opens with a breath too (`1`), its first sound
+        /// then coming `breath_time` and 0.1 s later, or only its long pauses
+        /// take one (`0`: a single sentence is spoken exactly as without
+        /// breaths; the default: the breath before the utterance cost about a
+        /// point of phoneme error on single sentences, `say --breath-intake`
+        /// asks for it). Read only with `breath_intake` on.
+        breath_first = 0.0, 0.0..=1.0, B;
+        /// Shortest pause between phrases that takes a breath, s (a sentence's
+        /// pause is `sentence_pause`, a comma's 0.18 s).
+        breath_pause = 0.45, 0.2..=1.5, B;
+        /// How long a breath draws, s, from the folds parting to the lungs
+        /// letting go; the folds come together for the voice some 0.1 s later.
+        breath_time = 0.15, 0.08..=0.3, B;
+        /// How far the folds go into creak over the last stretch of the voice in
+        /// a statement, `0‥1` (physical engine; not before a question or a
+        /// comma): the cover slackens and the folds are pressed together, and
+        /// as the breath runs down they alternate strong and weak pulses. `0`
+        /// ends every statement in modal voice; `1` by default.
+        final_fry = 1.0, 0.0..=1.0, A;
+        /// Seconds of voice at the end of a statement over which it is in creak,
+        /// up to the end of its last sonorant (the folds alternate from their
+        /// third or fourth pulse, some 40 ms, on). 0.08 by default: over those
+        /// 80 ms the pulse heights of the breath gate's two statements
+        /// alternate by 0.38 and 0.56 of their mean;
+        /// stage 3A's 0.12 creaks longer at about a point of phoneme error on
+        /// single sentences.
+        fry_time = 0.08, 0.05..=0.25, B;
+
+        // ----- hesitation fillers (wave 3, w3-vocal; on by default, `fillers` 0 off) ---
+
+        /// Whether "uh", "um", "hmm", "er" and "mm" are spoken as hesitation
+        /// fillers (`1`, the default; physical engine): long, low and level,
+        /// the schwa held and the nasal hummed, with a pause after; `0` speaks
+        /// them as words (with fillers, Whisper wrote "um" and "uh" where the
+        /// text has them; spoken as words, it left "um" out and ran "we, uh,
+        /// go" into other words).
+        fillers = 1.0, 0.0..=1.0, A;
+        /// Seconds a filler is held at the speaking rate 1: its vowel, or its
+        /// vowel and nasal together ("um" 45 % of it the schwa, the rest the
+        /// hum). Filled pauses run from 0.2 to over a second in
+        /// conversation, "um" longer than "uh" (Clark & Fox Tree 2002); here
+        /// "uh" and "er" take this, "um", "hmm" and "mm" a quarter more.
+        filler_length = 0.42, 0.2..=1.0, B;
+        /// Seconds of silence after a filler before the speech goes on ("um"
+        /// leaves a longer delay after it than "uh", Clark & Fox Tree 2002:
+        /// "uh" takes six tenths of this), unless a pause is there already.
+        filler_pause = 0.3, 0.0..=1.0, B;
+        /// Pitch of a filler as a share of the voice's baseline, at its start;
+        /// it falls a semitone and a half to its end. Clause-internal filled
+        /// pauses lie a fixed share (0.6) of the way down from the peak before
+        /// them to the speaker's lowest pitch, and fall a little and linearly
+        /// (Shriberg & Lickley 1992).
+        filler_pitch = 0.86, 0.6..=1.0, A;
     } tiers {
     } aliases {
     }
@@ -1408,7 +1564,75 @@ impl TractModel {
     }
 }
 
+impl TractModel {
+    /// The tract a name gives (any case): `anatomical` or `original`, as
+    /// `say --tract` and the app's `--tract` take it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Anatomical, Self::Original]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
+    }
+
+    /// The name [`from_name`](Self::from_name) reads.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Anatomical => "anatomical",
+            Self::Original => "original",
+        }
+    }
+}
+
+/// The two tongue bodies of the physical engine, as
+/// [`AnatomyConfig::tongue_model`] chooses them (see
+/// [`Tuning::with_tongue`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TongueModel {
+    /// Pink Trombone's cosine hump, slid along the tube by its place and
+    /// height (`tongue_model` 0, [`Tuning::DEFAULT`]'s).
+    Cosine,
+    /// A measured neutral shape and three principal modes of one man's
+    /// vowels from MRI (Story 2008; `tongue_model` 1).
+    Measured,
+}
+
+impl TongueModel {
+    /// The tongue a name gives (any case): `cosine`, or `mri` (also
+    /// `measured`) for the measured modes, as `say --tongue-model` and
+    /// the app's `--tongue-model` take it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("measured") {
+            return Some(Self::Measured);
+        }
+        [Self::Cosine, Self::Measured]
+            .into_iter()
+            .find(|t| t.name().eq_ignore_ascii_case(name))
+    }
+
+    /// The name [`from_name`](Self::from_name) reads first.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Cosine => "cosine",
+            Self::Measured => "mri",
+        }
+    }
+}
+
 impl Tuning {
+    /// This tuning with the tongue body `tongue` (`anatomy.tongue_model`;
+    /// every other number as it is).
+    #[must_use]
+    pub const fn with_tongue(mut self, tongue: TongueModel) -> Self {
+        self.anatomy.tongue_model = match tongue {
+            TongueModel::Cosine => 0.0,
+            TongueModel::Measured => 1.0,
+        };
+        self
+    }
+
     /// This tuning with the numbers of `tract` (the tract's length, its
     /// larynx and the tube above the folds; every other number as it is).
     #[must_use]
@@ -1433,6 +1657,38 @@ impl Tuning {
                 a.epilarynx_flare_cells = 4.0;
                 r.rounded_larynx = 0.5;
             }
+        }
+        self
+    }
+
+    /// This tuning with the living voice of wave 3 on or off (every other
+    /// number as it is). On: the mono output is the head's mixdown
+    /// (`anatomy.head_mixdown` 1), the lungs draw a breath of 5 cmH2O in
+    /// the pauses between sentences but not before the utterance
+    /// (`prosody.breath_intake` 5, `breath_first` 0), and statements end
+    /// in creak over their last 0.08 s of voice (`final_fry` 1, `fry_time`
+    /// 0.08), and "uh", "um" and "hmm" are spoken as hesitation fillers
+    /// (`prosody.fillers` 1). Off: the six numbers as they were before wave 3
+    /// (the plain sum of the ports, no breaths, modal voice to the end, the
+    /// fillers spoken as words; `breath_first` 1 and `fry_time` 0.12, read
+    /// only when their switch is on).
+    #[must_use]
+    pub const fn with_living_voice(mut self, on: bool) -> Self {
+        let p = &mut self.prosody;
+        if on {
+            self.anatomy.head_mixdown = 1.0;
+            p.breath_intake = 5.0;
+            p.breath_first = 0.0;
+            p.final_fry = 1.0;
+            p.fry_time = 0.08;
+            p.fillers = 1.0;
+        } else {
+            self.anatomy.head_mixdown = 0.0;
+            p.breath_intake = 0.0;
+            p.breath_first = 1.0;
+            p.final_fry = 0.0;
+            p.fry_time = 0.12;
+            p.fillers = 0.0;
         }
         self
     }
@@ -1605,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn three_parts_of_thirty_two_seventy_one_and_forty_three() {
+    fn three_parts_of_forty_two_seventy_four_and_fifty_three() {
         let count = |part| Tuning::FIELDS.iter().filter(|f| f.part == part).count();
         assert_eq!(
             (
@@ -1613,9 +1869,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (33, 71, 43)
+            (42, 74, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 147);
+        assert_eq!(Tuning::FIELDS.len(), 169);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1630,10 +1886,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_sixty_seven_and_sixty_five() {
+    fn two_passes_of_eighty_one_and_seventy_three() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (67, 65));
+        assert_eq!((a, b), (81, 73));
     }
 
     #[test]

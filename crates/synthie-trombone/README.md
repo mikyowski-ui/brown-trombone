@@ -60,6 +60,27 @@ Tenseness, jitter, vibrato, nasality, speaking rate and intonation range
 complete the character. With the `serde` feature, `VoiceSettings` can live
 in your game's data files.
 
+## Laughs, coughs and fillers
+
+On the physical engine a voice can sigh, laugh, chuckle, clear its throat
+and cough (wave 3; `Vocalization`, `Vocal`): in text as tags, and as a
+call while it speaks; a sentence waits for a call made through the
+`Talker` (or a stream) and carries on after it.
+
+```
+use synthie_trombone::{Engine, Preset, Talker, Vocalization};
+
+let mut npc = Talker::new(44_100.0, Preset::Deep.settings().with_engine(Engine::Physical));
+let line = npc.bake("Well, [sigh] I suppose so. [laugh] That was close.");
+assert!(!line.is_empty());
+npc.say("Shall we go on?");
+npc.vocalize(Vocalization::Cough); // now; a sentence being said waits for it
+```
+
+By default (`ProsodyConfig::fillers` 1) "uh", "um" and "hmm" are spoken
+as hesitation fillers: long, low and level, the hum held, a pause after;
+`fillers` 0 speaks them as words.
+
 ## Instrument and streaming
 
 ```rust
@@ -117,6 +138,34 @@ ring and the events are `no_std` (`StreamBuffer::split`); utterances and text
 need `std`. `examples/stream.rs` feeds a voice from a script of timed events
 and from stdin.
 
+## Stereo
+
+The physical engine can be heard by a listener's two ears: each port of
+the tract (the lips, each nostril, the throat's and the cheeks' walls)
+from its own place on a head, on its own path round the talker's head
+and the listener's, and off the chest. Turn the talker's head away by
+moving the listener's `azimuth`; the paths glide, so it can move while
+the voice speaks.
+
+```rust
+use synthie_trombone::{Engine, Listener, Preset, Stereo, Talker};
+
+let mut npc = Talker::new(48_000.0, Preset::Deep.settings().with_engine(Engine::Physical));
+npc.set_stereo(Stereo::Binaural); // or Stereo::Pair: a microphone pair
+// The listener at the talker's right, 2 m away, hearing the talker ahead.
+npc.set_listener(Listener { azimuth: 90.0, distance: 2.0, ..Listener::FRONT });
+let frames: Vec<f32> = npc.bake_stereo("Over here."); // left, right, left, ...
+assert_eq!(frames.len() % 2, 0);
+// A game with both on a map (metres east, north, up; headings clockwise
+// from north) lets the library work the angles out:
+npc.set_listener(Listener::on_map([0.0, 0.0, 1.6], 90.0, [3.0, 4.0, 1.7], 200.0));
+```
+
+`Trombone::process_stereo`, `render_stereo` (interleaved) and `frame` do
+the same on the voice, `VoicePlayer::render_stereo` on a stream, and
+`Event::Listener` / `Event::Stereo` move them from another thread. The
+mono output is unchanged by all of it.
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six
@@ -127,7 +176,8 @@ degree, the lips' aperture and protrusion, the port, the glottis's spread,
 the pitch and the larynx's height; the protrusion and the height lengthen
 the physical tract with `AnatomyConfig::lip_horn` and `larynx_travel` on;
 with `AnatomyConfig::tongue_model` 1 the tongue body is three numbers of
-measured MRI modes, `mode_1..3`, see `inverse::Shape::modes`),
+measured MRI modes, `mode_1..3`, see `inverse::Shape::modes`;
+`Tuning::with_tongue(TongueModel::Measured)`, `say --tongue-model mri`),
 moved towards as a mass on a spring of its own stiffness and damping,
 weighted by its dominance against the other gestures active on the tier,
 inside an activation window with ramps. Push one into a playing voice and
@@ -176,7 +226,11 @@ singing. Its speech has a voiced/voiceless contrast made by the larynx
 a voice that lasts through /b d g/), timed from the moment the mouth
 actually shuts (`Trombone::mouth_shut`, `Gauges::mouth_shut`); a slow
 tongue body and jaw under quick tip and lips; vowels from published
-formants; and breath and intonation shaped per phrase. Choose it per
+formants; breath and intonation shaped per phrase; and, since wave 3, a
+breath drawn in the pauses between sentences, creak at the end of a
+statement and the sound of the ports as a head beams them
+(`Tuning::with_living_voice(false)` switches the three off, and the
+hesitation fillers too). Choose it per
 voice with `VoiceSettings::with_engine`, or on a `Trombone` with
 `set_engine`. The physical tract's lowest cells, the epilaryngeal tube
 above the folds and its flare into the pharynx, are shaped by
@@ -214,10 +268,10 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 33 numbers),
-`ArticulationConfig` (how sounds are made and joined: 71, with a
+`AnatomyConfig` (the body, its tissues and sources: 42 numbers),
+`ArticulationConfig` (how sounds are made and joined: 74, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
-`ProsodyConfig` (the rhythm and melody of a phrase: 43), each number with
+`ProsodyConfig` (the rhythm and melody of a phrase: 53), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine
 reads twelve of them). A JSON profile can set them by name, flat or by
 part (`profile` feature, `VoiceSettings::with_profile`). The repository README has the details,

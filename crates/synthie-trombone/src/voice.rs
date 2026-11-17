@@ -2,15 +2,17 @@
 //! behind a small, real-time safe API.
 
 use crate::INTERNAL_RATE;
-use crate::gesture::{self, Blend, Gesture, GestureId, Score, Target, Tier, TierActivity};
+use crate::gesture::{self, Blend, Gesture, GestureId, Score, Target, Tier, TierActivity, Window};
 use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
+use crate::phys::radiation::{Listener, Stereo};
 use crate::phys::source::{Source, SourceKind, WHISPER_TENSENESS};
 use crate::phys::{CM_H2O, Drive, Phys};
 use crate::tract::{Constriction, Dynamics, HISS_WIDEST, MOVEMENT_SPEED, N, NOSE_LEN, Tract};
 use crate::tuning::Tuning;
+use crate::vocal::Vocal;
 use core::f32::consts::PI;
 
 /// Internal samples per parameter block (classic engine): 10.7 ms.
@@ -28,6 +30,12 @@ pub const SLOT_LIPS: usize = crate::tract::ROUNDING_SLOT;
 /// Output level of the physical engine: radiated flow derivative
 /// (cm³/s²) to sample units, set so both engines are about equally loud.
 const PHYSICAL_GAIN: f32 = 2.5e-7;
+/// Seconds over which a breath taken with [`Trombone::breathe_in`] comes and
+/// goes.
+const BREATH_RAMP: f32 = 0.03;
+/// Most a vocalization's push may ask of the lungs, cmH2O (see
+/// [`Trombone::set_lung_push`]).
+const PUSH_MOST: f32 = 100.0;
 
 /// Widest opening (touch-diameter units) that still counts as a fricative;
 /// wider consonant openings are approximants.
@@ -198,6 +206,9 @@ pub struct Gauges {
     pub glottal_flow: f32,
     /// Pressure just below the vocal folds, cmH2O.
     pub subglottal_pressure: f32,
+    /// Pressure in the lungs, cmH2O: negative while breathing in (see
+    /// [`Trombone::set_inhalation`]).
+    pub lung_pressure: f32,
     /// Pressure just above the vocal folds, cmH2O.
     pub supraglottal_pressure: f32,
     /// Air flow out of the lips, cm³/s.
@@ -273,6 +284,9 @@ pub struct Trombone {
     /// The vowel whose body and lips span the consonants leaning on it, and
     /// its tongue body gesture (see [`Trombone::articulate_as_gestures`]).
     span: Option<(crate::vowel_targets::VowelKey, GestureId)>,
+    /// When the vocalization playing ends, on the score's clock (see
+    /// [`Trombone::vocalize`]).
+    vocal_end: f64,
     simplex: Simplex,
     rng: Rng,
     frication: BandPass,
@@ -296,6 +310,23 @@ pub struct Trombone {
     dc_y: f32,
     dc_r: f32,
     gain: f32,
+    /// The two channels of the head's listener (see [`Trombone::set_stereo`]).
+    ears: Ears,
+}
+
+/// The two channels of the physical engine's listener on their way out:
+/// each ear's radiated flow at the last internal sample, after the soft
+/// folds' low-pass, its last two internal samples for resampling, its DC
+/// blocker, and the frame [`Trombone::process`] made last.
+#[derive(Clone, Copy, Debug, Default)]
+struct Ears {
+    flow: [f32; 2],
+    soft: [f32; 2],
+    prev: [f32; 2],
+    cur: [f32; 2],
+    dc_x: [f32; 2],
+    dc_y: [f32; 2],
+    frame: [f32; 2],
 }
 
 impl Trombone {
@@ -344,6 +375,7 @@ impl Trombone {
             score: Score::new(),
             driven: [None; Tier::COUNT],
             span: None,
+            vocal_end: 0.0,
             simplex,
             rng,
             frication: BandPass::new(1000.0, 0.5, INTERNAL_RATE),
@@ -361,6 +393,7 @@ impl Trombone {
             dc_y: 0.0,
             dc_r: 1.0 - 2.0 * PI * 10.0 / sample_rate,
             gain: 1.0,
+            ears: Ears::default(),
         }
     }
 
@@ -386,6 +419,7 @@ impl Trombone {
         self.cur = 0.0;
         self.dc_x = 0.0;
         self.dc_y = 0.0;
+        self.ears = Ears::default();
     }
 
     // ----- engine ------------------------------------------------------
@@ -521,6 +555,14 @@ impl Trombone {
     pub fn override_muscles(&mut self, muscles: Option<(f32, f32, f32)>) {
         self.source.muscle_override = muscles;
         self.source.set_size(self.tract_length);
+    }
+
+    /// Hold the coupling between the two cover pieces of the folds at
+    /// `share` of its standard value (`None`: as creak sets it, see
+    /// [`set_fold_creak`](Self::set_fold_creak)). For measuring the folds.
+    #[doc(hidden)]
+    pub fn override_fold_coupling(&mut self, share: Option<f32>) {
+        self.source.coupling_override = share;
     }
 
     /// Switch parts of the fold control off, to find out which of them a
@@ -671,6 +713,109 @@ impl Trombone {
     pub fn set_fold_softness(&mut self, share: f32) {
         if share.is_finite() {
             self.source.soft_target = share.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Take the folds into creak, `0` (modal, the default) to `1`, as a
+    /// speaker's voice does at the end of a statement: the cover of the
+    /// folds slackens, so that its lower and upper margins move more apart
+    /// from each other (their coupling falls to
+    /// [`AnatomyConfig::creak_coupling`](crate::AnatomyConfig::creak_coupling)
+    /// of itself), and the folds are pressed together
+    /// ([`AnatomyConfig::creak_press`](crate::AnatomyConfig::creak_press)).
+    /// What they then do is their own: blown at 4 to 6 cmH2O they alternate
+    /// strong and weak pulses (energy at half the pitch), below that they
+    /// stop. It takes some 30 ms. Physical engine only.
+    pub fn set_fold_creak(&mut self, share: f32) {
+        if share.is_finite() {
+            self.source.creak_target = share.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Breathe in: the lungs draw `cm_h2o` (`0‥8`) below the air's pressure
+    /// and the glottis is held open behind the folds
+    /// ([`ArticulationConfig::breath_opening`](crate::ArticulationConfig::breath_opening)),
+    /// so the air goes in through the mouth and the nose as the tract and
+    /// the velum are shaped, and the noise it makes is that of its own jets
+    /// (at the glottis, into the trachea, and behind every narrowing of the
+    /// tract); the pressure follows within some 30 ms. The voicing gate is
+    /// left alone (the folds vibrate in the inward stream if it is on). `0`
+    /// (the default) stops drawing: the lungs go back to what the voice
+    /// asks. While gestures play on the glottal tier, its `inhale`
+    /// variable (`0` unless a breath gesture sets it) decides instead (see
+    /// [`breathe_in`](Self::breathe_in)). Physical engine only.
+    pub fn set_inhalation(&mut self, cm_h2o: f32) {
+        if cm_h2o.is_finite() {
+            self.source.intake = cm_h2o.clamp(0.0, 8.0);
+        }
+    }
+
+    /// Lungs drawing, cmH2O (see [`set_inhalation`](Self::set_inhalation)).
+    #[must_use]
+    pub fn inhalation(&self) -> f32 {
+        self.source.intake
+    }
+
+    /// Take a breath now: a [`Gesture::inhalation`] of `cm_h2o` for
+    /// `seconds` (ramps of 30 ms in and out) on the glottal tier, on the
+    /// external layer. Returns its handle (`None` if the score is full).
+    /// The lungs draw and the glottis opens for that long, then the lungs
+    /// stop drawing; the voicing gate, the tract and the velum are left as
+    /// they are (shape the mouth first, with
+    /// [`articulate`](Self::articulate) or a tract gesture, for the vowel
+    /// the breath should sound of, and keep the voice off). After it the
+    /// lungs are back at the breath share and lung pressure the voice had.
+    pub fn breathe_in(&mut self, cm_h2o: f32, seconds: f32) -> Option<GestureId> {
+        self.push_gesture_tracked(Gesture::inhalation(cm_h2o, seconds, BREATH_RAMP))
+    }
+
+    /// Push with the lungs at `cm_h2o` (`0‥100`) in place of the voice's own
+    /// breath (wave 3, w3-vocal): the pressure a laugh's call or a cough is
+    /// made with, followed within some 30 ms; whatever the voicing gate and
+    /// the glottis do, and whatever share of the lung pressure the voice
+    /// breathes with ([`set_breath`](Self::set_breath)). `0` (the default)
+    /// gives the lungs back to the voice. A breath in
+    /// ([`set_inhalation`](Self::set_inhalation)) comes first. While
+    /// gestures play on the glottal tier, its `push` variable (`0` unless
+    /// a vocalization's gesture sets it) decides instead. Physical engine
+    /// only.
+    pub fn set_lung_push(&mut self, cm_h2o: f32) {
+        if cm_h2o.is_finite() {
+            self.source.push = cm_h2o.clamp(0.0, PUSH_MOST);
+        }
+    }
+
+    /// The lungs' push (see [`set_lung_push`](Self::set_lung_push)), cmH2O.
+    #[must_use]
+    pub fn lung_push(&self) -> f32 {
+        self.source.push
+    }
+
+    /// Press the folds shut, `cm` (`0‥0.1`, cm at native size) past
+    /// touching (wave 3, w3-vocal): the effort closure behind which a
+    /// cough builds its pressure. Pressed edges feel none of the pressure
+    /// behind them, so the glottis holds shut at any lung pressure, and
+    /// the standing gaps behind the folds close too; the voicing gate and
+    /// the spread glottis ([`set_glottal_spread`](Self::set_glottal_spread))
+    /// should be off. Let go (`0`, the default), the folds part in a few
+    /// milliseconds to where the voice holds them. While gestures play on
+    /// the glottal tier, its `seal` variable decides instead. Physical
+    /// engine only.
+    pub fn set_fold_seal(&mut self, cm: f32) {
+        if cm.is_finite() {
+            self.source.seal = cm.clamp(0.0, 0.1);
+        }
+    }
+
+    /// Draw in the epilaryngeal tube above the folds by `share` (`0‥1`) of
+    /// its area (wave 3, w3-vocal), as the aryepiglottic and false folds do
+    /// in a throat clearing; it moves with the tongue body. `0` (the
+    /// default) leaves it as the anatomy has it. While gestures play on the
+    /// larynx's tier, its `squeeze` variable decides instead. Physical
+    /// engine only.
+    pub fn set_epilarynx_squeeze(&mut self, share: f32) {
+        if share.is_finite() {
+            self.tract.squeeze = share.clamp(0.0, 1.0);
         }
     }
 
@@ -843,6 +988,7 @@ impl Trombone {
         self.source.reset();
         self.phys_flow = 0.0;
         self.soft_out = 0.0;
+        self.ears = Ears::default();
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 
@@ -1132,6 +1278,130 @@ impl Trombone {
         self.score.end(id, ramp_out);
         self.apply_score(tier_bit(tier));
         true
+    }
+
+    /// Make a vocalization now (wave 3, w3-vocal; see [`crate::vocal`]): a
+    /// sigh, a laugh, a chuckle, a throat clearing or a cough, as gestures
+    /// on every tier on layer [`gesture::LAYER_VOCAL`], winning over what
+    /// else plays there (a sentence being spoken carries on under it: to
+    /// have speech wait for it, use
+    /// [`Speaker::interject`](crate::speech::Speaker::interject) or
+    /// [`Talker::vocalize`](crate::Talker::vocalize)). A vocalization
+    /// already playing is let go. Around [`Vocal::pitch`], or the pitch
+    /// the voice is at. Afterwards the voicing gate, the glottis's opening,
+    /// the tenseness and the pitch are as they were; the tract keeps the
+    /// shape the event ended on. Returns its length in seconds, or `None`
+    /// on the classic engine or when the score has no room for it (nothing
+    /// is then played). Never allocates.
+    pub fn vocalize(&mut self, v: impl Into<Vocal>) -> Option<f32> {
+        use gesture::{LAYER_VOCAL, var};
+        if self.engine != Engine::Physical {
+            return None;
+        }
+        let hz = self.glottis.target_frequency;
+        let plan = crate::vocal::plan(&v.into(), hz, &self.tuning);
+        self.score.drop_layer(LAYER_VOCAL);
+        let holds = plan.holds().count();
+        if self.score.len() + plan.len() + 4 * holds + 2 > Score::CAPACITY {
+            return None;
+        }
+        let voiced = f32::from(u8::from(self.glottis.voiced));
+        let (spread, tense) = (self.source.spread_target, self.glottis.target_tenseness);
+        for g in plan.gestures() {
+            self.score.push(*g);
+        }
+        for h in plan.holds() {
+            self.hold_posture(h);
+        }
+        // Afterwards the folds and the pitch are where they were.
+        let end = plan.seconds;
+        let back = Window::between(end - 0.03, end).ramps(0.02, 0.0);
+        let folds = Target::NONE
+            .with(var::glottis::VOICING, voiced)
+            .with(var::glottis::SPREAD, spread)
+            .with(var::glottis::TENSENESS, tense);
+        let pitch = Target::NONE.with(var::larynx::PITCH, hz);
+        for (tier, target) in [
+            (Tier::GlottalAdduction, folds),
+            (Tier::LarynxAndPitch, pitch),
+        ] {
+            self.score.push(
+                Gesture::new(tier, target)
+                    .window(back)
+                    .dominance(1000.0)
+                    .layer(LAYER_VOCAL),
+            );
+        }
+        self.vocal_end = self.score.clock() + f64::from(end);
+        self.apply_score(self.score.engaged_tiers());
+        Some(end)
+    }
+
+    /// Whether a vocalization is playing (see [`vocalize`](Self::vocalize)).
+    #[must_use]
+    pub fn is_vocalizing(&self) -> bool {
+        self.score.clock() < self.vocal_end
+    }
+
+    /// Stop the vocalization playing, at once.
+    pub fn stop_vocalizing(&mut self) {
+        self.score.drop_layer(gesture::LAYER_VOCAL);
+        self.vocal_end = self.score.clock();
+        self.apply_score(self.score.engaged_tiers());
+    }
+
+    /// A vocalization's posture of the tract (see [`crate::vocal`]) as
+    /// gestures on the tract's tiers, as a vowel's or a nasal's are made
+    /// (see [`articulate_as_gestures`](Self::articulate_as_gestures)), every
+    /// constriction it does not make let go.
+    fn hold_posture(&mut self, h: &crate::vocal::Hold) {
+        use crate::vocal::Posture;
+        use gesture::{LAYER_VOCAL, OPEN, flag, var};
+        let p = match h.posture {
+            Posture::Open => Phoneme::Aa,
+            Posture::Mid => Phoneme::Ah,
+            Posture::Relaxed => Phoneme::Ax,
+            Posture::Hum => Phoneme::M,
+        };
+        let r = self.resolve(&p.articulation());
+        let mut body = body_target(&r, true).with(var::body::DORSAL_DEGREE, OPEN);
+        let mut tip = Target::NONE.with(var::tip::DEGREE, OPEN);
+        let mut lips = Target::NONE
+            .with(var::lips::APERTURE, OPEN)
+            .with(var::lips::CLOSURE_DEGREE, OPEN);
+        if let Some(c) = r.main {
+            on_its_tier(c, &mut body, &mut tip, &mut lips);
+        }
+        if let Some(c) = r.lips {
+            lips = lips
+                .with(var::lips::APERTURE_LOCATION, c.index)
+                .with(var::lips::APERTURE, c.diameter);
+        }
+        let port = Target::NONE.with(var::velum::PORT, r.velum);
+        let nasal = if r.nasal { flag::NASAL } else { 0 };
+        let w = [
+            self.nominal_stiffness(Tier::TongueBody),
+            self.nominal_stiffness(Tier::TongueTip),
+            self.lips_stiffness(),
+            Tier::Velum.default_stiffness(),
+        ];
+        let tiers = [
+            Tier::TongueBody,
+            Tier::TongueTip,
+            Tier::LipsAndJaw,
+            Tier::Velum,
+        ];
+        for (k, (tier, target)) in tiers.into_iter().zip([body, tip, lips, port]).enumerate() {
+            let flags = if tier == Tier::Velum { nasal } else { 0 };
+            self.score.push(
+                Gesture::new(tier, target)
+                    .stiffness(w[k])
+                    .window(h.window)
+                    .dominance(h.dominance)
+                    .flags(flags)
+                    .layer(LAYER_VOCAL),
+            );
+        }
     }
 
     /// What each tier of the gesture score is doing, in [`Tier::ALL`] order
@@ -1475,6 +1745,18 @@ impl Trombone {
             if let Some(x) = b.get(var::glottis::SOFTNESS) {
                 self.set_fold_softness(x);
             }
+            if let Some(x) = b.get(var::glottis::CREAK) {
+                self.set_fold_creak(x);
+            }
+            if let Some(x) = b.get(var::glottis::INHALE) {
+                self.set_inhalation(x);
+            }
+            if let Some(x) = b.get(var::glottis::PUSH) {
+                self.set_lung_push(x);
+            }
+            if let Some(x) = b.get(var::glottis::SEAL) {
+                self.set_fold_seal(x);
+            }
         }
         if has(Tier::LarynxAndPitch) {
             let b = self.score.blend(Tier::LarynxAndPitch);
@@ -1484,6 +1766,9 @@ impl Trombone {
             // The height, while a gesture sets it (as lengthening of the
             // tract), at the speed the tier's stiffness asks.
             self.tract.larynx_tier = b.get(var::larynx::HEIGHT).map(|h| -h);
+            if let Some(x) = b.get(var::larynx::SQUEEZE) {
+                self.set_epilarynx_squeeze(x);
+            }
             let nominal = self.nominal_stiffness(Tier::LarynxAndPitch);
             self.tract.larynx_speed_ratio = if b.gestures > 0 && nominal > 0.0 {
                 b.stiffness / nominal
@@ -1720,6 +2005,7 @@ impl Trombone {
         Gauges {
             glottal_flow: g.u_glottis,
             subglottal_pressure: g.p_sub / CM_H2O,
+            lung_pressure: self.source.lung_now() / CM_H2O,
             supraglottal_pressure: g.p_supra / CM_H2O,
             lip_flow: g.u_lips,
             nose_flow: g.u_nose,
@@ -1951,21 +2237,40 @@ impl Trombone {
     }
 
     /// One output sample.
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, clippy::needless_range_loop)]
     pub fn process(&mut self) -> f32 {
+        let ears = self.ears_on();
         while self.frac >= 1.0 {
             self.prev = self.cur;
             self.cur = self.internal_sample();
+            self.ears.prev = self.ears.cur;
+            self.ears.cur = self.ears.soft;
             self.frac -= 1.0;
         }
-        let x = self.prev + (self.cur - self.prev) * self.frac as f32;
+        let t = self.frac as f32;
+        let x = self.prev + (self.cur - self.prev) * t;
         self.frac += self.step;
 
         // DC blocker: the glottal flow derivative is not quite zero-mean.
         let y = x - self.dc_x + self.dc_r * self.dc_y;
         self.dc_x = x;
         self.dc_y = y;
-        y * self.gain
+        let out = y * self.gain;
+        self.ears.frame = if ears {
+            let e = &mut self.ears;
+            let mut frame = [0.0f32; 2];
+            for k in 0..2 {
+                let x = e.prev[k] + (e.cur[k] - e.prev[k]) * t;
+                let y = x - e.dc_x[k] + self.dc_r * e.dc_y[k];
+                e.dc_x[k] = x;
+                e.dc_y[k] = y;
+                frame[k] = y * self.gain;
+            }
+            frame
+        } else {
+            [out, out]
+        };
+        out
     }
 
     /// Fill `out` with mono samples.
@@ -1973,6 +2278,75 @@ impl Trombone {
         for s in out {
             *s = self.process();
         }
+    }
+
+    // ----- stereo --------------------------------------------------------
+
+    /// Hear the voice in two channels as a listener does (physical engine;
+    /// see [`Stereo`] and [`Trombone::set_listener`]): the ports of the
+    /// tract (the lips, each nostril, the throat's and the cheeks' walls)
+    /// each from its own place on the head, on its own path to each ear,
+    /// and the mouth's return off the chest. [`Stereo::Off`] (the default)
+    /// gives both channels the mono output, and costs nothing. The mono
+    /// output is the same whichever is chosen. Switching starts the two
+    /// channels' paths from silence.
+    pub fn set_stereo(&mut self, stereo: Stereo) {
+        self.phys.head.set_stereo(stereo);
+        let frame = self.ears.frame;
+        self.ears = Ears {
+            frame,
+            ..Ears::default()
+        };
+    }
+
+    /// How the two channels are heard.
+    #[must_use]
+    pub fn stereo(&self) -> Stereo {
+        self.phys.head.stereo()
+    }
+
+    /// Put the listener somewhere else: where the talker's head sees them,
+    /// how far, and how their own head is turned (see [`Listener`]). The
+    /// paths glide to the new place over 30 ms, so the voice can be moved
+    /// while it speaks without a click. A game turns the talker's head
+    /// away from the listener with `set_listener(Listener { azimuth: 180.0,
+    /// ..voice.listener() })`, or sets both from a map with
+    /// [`Listener::on_map`].
+    pub fn set_listener(&mut self, listener: Listener) {
+        self.phys.head.set_listener(listener);
+    }
+
+    /// Where the listener is.
+    #[must_use]
+    pub fn listener(&self) -> Listener {
+        self.phys.head.listener()
+    }
+
+    /// The two channels, `[left, right]`, of the sample
+    /// [`process`](Self::process) made last (both the mono sample while
+    /// [`stereo`](Self::stereo) is off or the classic engine plays).
+    #[must_use]
+    pub fn frame(&self) -> [f32; 2] {
+        self.ears.frame
+    }
+
+    /// One output frame, `[left, right]` (see [`set_stereo`](Self::set_stereo)).
+    pub fn process_stereo(&mut self) -> [f32; 2] {
+        self.process();
+        self.ears.frame
+    }
+
+    /// Fill `out` with interleaved frames, left then right (an odd last
+    /// sample is left alone).
+    pub fn render_stereo(&mut self, out: &mut [f32]) {
+        for frame in out.as_chunks_mut::<2>().0 {
+            *frame = self.process_stereo();
+        }
+    }
+
+    /// Whether the two channels are the head's own.
+    fn ears_on(&self) -> bool {
+        self.engine == Engine::Physical && self.phys.head.stereo() != Stereo::Off
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -2071,15 +2445,30 @@ impl Trombone {
     /// leaving the mouth and nose.
     fn physical_sample(&mut self, tract: [f32; 2], folds: [f32; 2]) -> f32 {
         let dt = 0.5 / self.internal_rate;
+        let head_on = self.phys.head.on();
         let (area, lung) = self.source.tick(folds[0], dt);
         let flow = self.phys.tick(tract[0], Drive::Glottis { area, lung });
         self.phys.radiate(flow);
+        if head_on {
+            self.phys.radiate_head();
+        }
         self.source.react(&self.phys.gauge, folds[0], dt);
         let (area, lung) = self.source.tick(folds[1], dt);
         let flow = self.phys.tick(tract[1], Drive::Glottis { area, lung });
-        let flow = self.phys.radiate(flow);
+        let mut flow = self.phys.radiate(flow);
+        let channels = if head_on {
+            self.phys.radiate_head()
+        } else {
+            [0.0; 3]
+        };
         self.source.react(&self.phys.gauge, folds[1], dt);
         self.glottal_area = area;
+        // The mono output: the plain sum of the ports, or as far as
+        // `Tuning::head_mixdown` says the head's mixdown of them.
+        let mixdown = self.tuning.anatomy.head_mixdown;
+        if mixdown > 0.0 {
+            flow += (channels[0] - flow) * mixdown;
+        }
         let out = (flow - self.phys_flow) * (0.5 / dt) * PHYSICAL_GAIN;
         self.phys_flow = flow;
         // Soft folds: the voice through a one-pole low-pass. The tract is
@@ -2091,13 +2480,25 @@ impl Trombone {
         let pass = self.source.soft_pass(2.0 * dt);
         self.soft_out += (out - self.soft_out) * pass;
         let out = self.soft_out;
-        if out.is_finite() {
+        let mut ears_finite = true;
+        if self.phys.head.stereo() != Stereo::Off {
+            // The ears' flows to sound, as the mono one above.
+            let e = &mut self.ears;
+            for k in 0..2 {
+                let o = (channels[1 + k] - e.flow[k]) * (0.5 / dt) * PHYSICAL_GAIN;
+                e.flow[k] = channels[1 + k];
+                e.soft[k] += (o - e.soft[k]) * pass;
+                ears_finite &= e.soft[k].is_finite();
+            }
+        }
+        if out.is_finite() && ears_finite {
             out
         } else {
             self.phys.reset();
             self.source.reset();
             self.phys_flow = 0.0;
             self.soft_out = 0.0;
+            self.ears = Ears::default();
             0.0
         }
     }

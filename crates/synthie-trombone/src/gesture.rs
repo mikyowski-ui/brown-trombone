@@ -96,8 +96,18 @@ impl Tier {
     #[must_use]
     pub const fn variables(self) -> &'static [&'static str] {
         match self {
-            Tier::GlottalAdduction => &["voicing", "spread", "tenseness", "slack", "softness"],
-            Tier::LarynxAndPitch => &["pitch", "height"],
+            Tier::GlottalAdduction => &[
+                "voicing",
+                "spread",
+                "tenseness",
+                "slack",
+                "softness",
+                "creak",
+                "inhale",
+                "push",
+                "seal",
+            ],
+            Tier::LarynxAndPitch => &["pitch", "height", "squeeze"],
             Tier::Velum => &["port", "haste"],
             Tier::TongueBody => &[
                 "location",
@@ -144,8 +154,17 @@ impl Tier {
     /// pitch).
     #[must_use]
     pub const fn neutral(self, v: usize) -> Option<f32> {
-        use var::{body, lips, tip, velum};
+        use var::{body, glottis, larynx, lips, tip, velum};
         match self {
+            Tier::GlottalAdduction
+                if v == glottis::CREAK
+                    || v == glottis::INHALE
+                    || v == glottis::PUSH
+                    || v == glottis::SEAL =>
+            {
+                Some(0.0)
+            }
+            Tier::LarynxAndPitch if v == larynx::SQUEEZE => Some(0.0),
             Tier::Velum if v == velum::PORT => Some(0.0),
             Tier::Velum if v == velum::HASTE => Some(1.0),
             Tier::TongueBody if v == body::NARROWING_DEGREE || v == body::DORSAL_DEGREE => {
@@ -202,6 +221,27 @@ pub mod var {
         pub const SLACK: usize = 3;
         /// Softness of the voice, `0‥1`.
         pub const SOFTNESS: usize = 4;
+        /// How far the folds are in creak, `0‥1` (see
+        /// [`Trombone::set_fold_creak`](crate::Trombone::set_fold_creak));
+        /// neutral `0`.
+        pub const CREAK: usize = 5;
+        /// How far below the air's pressure the lungs draw a breath, cmH2O
+        /// (see [`Trombone::set_inhalation`](crate::Trombone::set_inhalation));
+        /// neutral `0`, so a breath gesture fades in and out with its
+        /// ramps and is over when it ends.
+        pub const INHALE: usize = 6;
+        /// How hard the lungs push while a vocalization drives them, cmH2O
+        /// (wave 3, w3-vocal; see
+        /// [`Trombone::set_lung_push`](crate::Trombone::set_lung_push)): in
+        /// place of the voice's own breath while above `0`, its neutral, so
+        /// a pulse of it fades in and out with its ramps.
+        pub const PUSH: usize = 7;
+        /// How far past touching the folds are pressed shut, cm at native
+        /// size (wave 3, w3-vocal; see
+        /// [`Trombone::set_fold_seal`](crate::Trombone::set_fold_seal)): the
+        /// effort closure behind which a cough builds its pressure; neutral
+        /// `0`.
+        pub const SEAL: usize = 8;
     }
     /// [`Tier::LarynxAndPitch`](super::Tier::LarynxAndPitch).
     pub mod larynx {
@@ -213,6 +253,12 @@ pub mod var {
         /// heard with `AnatomyConfig::larynx_travel` on). Unset, the larynx
         /// stays where the setter holds it.
         pub const HEIGHT: usize = 1;
+        /// How far the epilaryngeal tube above the folds is drawn in, `0‥1`
+        /// (wave 3, w3-vocal; see
+        /// [`Trombone::set_epilarynx_squeeze`](crate::Trombone::set_epilarynx_squeeze)):
+        /// the aryepiglottic folds and the false folds narrowing it, as in a
+        /// throat clearing; neutral `0`.
+        pub const SQUEEZE: usize = 2;
     }
     /// [`Tier::Velum`](super::Tier::Velum).
     pub mod velum {
@@ -478,6 +524,10 @@ pub const LAYER_SCORE: u8 = 1;
 /// The layer [`Trombone::push_gesture`](crate::Trombone::push_gesture)
 /// gives a gesture that names none (`layer` `0` or `1` is moved here).
 pub const LAYER_EXTERNAL: u8 = 2;
+/// The layer of a vocalization's gestures (wave 3, w3-vocal; see
+/// [`Trombone::vocalize`](crate::Trombone::vocalize)): a sigh, a laugh, a
+/// cough, laid over whatever else plays and let go of together.
+pub const LAYER_VOCAL: u8 = 3;
 
 impl Gesture {
     /// A gesture on `tier` towards `target`: critically damped at the
@@ -495,6 +545,24 @@ impl Gesture {
             flags: 0,
             layer: LAYER_EXTERNAL,
         }
+    }
+
+    /// A breath in (wave 3): on [`Tier::GlottalAdduction`], the lungs
+    /// drawing `depth` cmH2O below the air's pressure (`3‥5` for a breath
+    /// between sentences) for `seconds` from now, its ramps in and out
+    /// `ramp` seconds each within that time; the glottis is held open as
+    /// the lungs draw (`ArticulationConfig::breath_opening`). The voicing
+    /// gate and the tract are left as they are. See
+    /// [`Trombone::breathe_in`](crate::Trombone::breathe_in).
+    #[must_use]
+    pub fn inhalation(depth: f32, seconds: f32, ramp: f32) -> Self {
+        let seconds = seconds.max(0.0);
+        let ramp = ramp.clamp(0.0, 0.5 * seconds);
+        Self::new(
+            Tier::GlottalAdduction,
+            Target::NONE.with(var::glottis::INHALE, depth.max(0.0)),
+        )
+        .window(Window::between(0.0, seconds - ramp).ramps(ramp, ramp))
     }
 
     /// With natural frequency `w` rad/s.
@@ -816,6 +884,29 @@ impl Score {
     /// too.
     pub fn clear_layer(&mut self, layer: u8) {
         self.end_where(|g| g.layer == layer);
+    }
+
+    /// Drop every gesture on `layer` that has not started yet, and let go at
+    /// once of those that have (see [`clear_layer`](Self::clear_layer), which
+    /// keeps the ones not started until their start has passed): a voice
+    /// can start a vocalization again and again without the score filling
+    /// up with the ones it replaced.
+    pub fn drop_layer(&mut self, layer: u8) {
+        let now = self.clock;
+        let mut kept = 0;
+        for k in 0..self.len {
+            if let Some(e) = self.entries[k]
+                && !(e.gesture.layer == layer && e.start > now)
+            {
+                self.entries[kept] = Some(e);
+                kept += 1;
+            }
+        }
+        for e in &mut self.entries[kept..self.len] {
+            *e = None;
+        }
+        self.len = kept;
+        self.clear_layer(layer);
     }
 
     fn end_where(&mut self, which: impl Fn(&Gesture) -> bool) {
