@@ -91,6 +91,14 @@ const LARYNX_HIGHEST: f32 = 0.4;
 /// The key that switches speech between the gesture score and the old
 /// path (`ArticulationConfig::gesture_score`), in either mode.
 pub const SCORE_KEY: KeyCode = KeyCode::F(6);
+/// The key that breaks off what is being said with a cough, in either mode
+/// (physical engine).
+pub const COUGH_KEY: KeyCode = KeyCode::F(7);
+/// The key that knocks the speaker (a bump to the chest that also knocks
+/// the jaw half shut), in either mode (physical engine).
+pub const KNOCK_KEY: KeyCode = KeyCode::F(8);
+/// The knock: a push on the lungs, cmH2O, and a clamp of the jaw.
+const KNOCK: (f32, f32) = (6.0, 0.5);
 /// The gesture slot of the lip pop while the gesture score is on.
 const POP_GESTURE: u8 = 0;
 /// How long a command that must arrive (to start or stop a take) may wait
@@ -627,6 +635,18 @@ impl App {
         if key.code == SCORE_KEY {
             if key.kind == KeyKind::Press {
                 self.toggle_score();
+            }
+            return false;
+        }
+        if key.code == COUGH_KEY || key.code == KNOCK_KEY {
+            if key.kind == KeyKind::Press {
+                if key.code == COUGH_KEY {
+                    self.send(Cmd::Interrupt(synthie_trombone::Vocalization::Cough));
+                    self.status = "a cough breaks in on the voice (physical engine)".into();
+                } else {
+                    self.send(Cmd::Perturb(KNOCK.0, KNOCK.1));
+                    self.status = "a knock: the chest bumped, the jaw half shut".into();
+                }
             }
             return false;
         }
@@ -2030,6 +2050,34 @@ mod tests {
     /// each within its range; back past rest the lips follow the rounding
     /// again. With the lip horn and the larynx slide off the status line
     /// says so.
+    #[test]
+    fn f7_breaks_in_with_a_cough_and_f8_knocks_the_speaker() {
+        let (mut app, rx) = app(false);
+        sent(&rx);
+        app.key(Key::press(COUGH_KEY));
+        assert!(
+            matches!(
+                sent(&rx)[..],
+                [Cmd::Interrupt(synthie_trombone::Vocalization::Cough)]
+            ),
+            "F7"
+        );
+        assert!(app.status.contains("cough"), "{}", app.status);
+        app.key(Key::press(KNOCK_KEY));
+        let cmds = sent(&rx);
+        assert!(
+            matches!(cmds[..], [Cmd::Perturb(lung, jaw)]
+                if (lung - KNOCK.0).abs() < 1e-6 && (jaw - KNOCK.1).abs() < 1e-6),
+            "{cmds:?}"
+        );
+        // A release sends nothing more.
+        app.key(Key {
+            kind: KeyKind::Release,
+            ..Key::press(KNOCK_KEY)
+        });
+        assert!(sent(&rx).is_empty());
+    }
+
     #[test]
     fn braces_move_the_lips_and_angles_the_larynx() {
         // On the original tract the status says the lip horn and the larynx

@@ -83,6 +83,12 @@ pub enum Logged {
     /// Hold the larynx this many cm above its rest, negative lowered
     /// (`Trombone::set_larynx_height`).
     Larynx(f32),
+    /// Break off what is being said with a vocalization
+    /// (`Speaker::interrupt_with`).
+    Interrupt(synthie_trombone::Vocalization),
+    /// Knock the speaker's body: a push on the lungs, cmH2O, and a clamp
+    /// of the jaw (`Trombone::perturb`).
+    Perturb(f32, f32),
 }
 
 /// Slots for gestures played by hand.
@@ -356,6 +362,17 @@ impl Performer {
             }
             Logged::Speak(_) => {}
             Logged::StopSpeaking => return self.stop_speaking(),
+            Logged::Interrupt(with) => {
+                // The speech breaks off where it is and the voice makes
+                // the vocalization (a voice that was not speaking makes it
+                // alone).
+                if self.speaker.is_speaking() {
+                    self.controls.shaping = Some(Shaping::Vowel(Phoneme::Sil));
+                }
+                let (old, _) = self.speaker.interrupt_with(&mut self.voice, with);
+                return Some(old);
+            }
+            Logged::Perturb(lung, jaw) => self.voice.perturb(lung, jaw),
             Logged::Shape(shape) => {
                 v.set_shape(&shape);
                 c.shaping = Some(Shaping::Shape(shape));
@@ -812,6 +829,8 @@ impl Logged {
                 }),
             ),
             Logged::StopSpeaking => ("stop_speaking", json!({})),
+            Logged::Interrupt(with) => ("interrupt", json!({"with": with.name()})),
+            Logged::Perturb(lung, jaw) => ("perturb", json!({"lung": lung, "jaw": jaw})),
             Logged::Mimic(on) => ("mimic", json!({"on": on})),
             Logged::Shape(s) => ("shape", json!({"shape": shape_json(&s)})),
             Logged::Push(slot, g) => ("push_gesture", {
@@ -889,6 +908,14 @@ impl Logged {
                 return Ok((Logged::Speak(id as u32), speech));
             }
             "stop_speaking" => Logged::StopSpeaking,
+            "interrupt" => {
+                let name = get(v, "with")?.as_str().unwrap_or_default();
+                Logged::Interrupt(
+                    synthie_trombone::Vocalization::from_name(name)
+                        .ok_or_else(|| format!("no vocalization {name:?}"))?,
+                )
+            }
+            "perturb" => Logged::Perturb(num(v, "lung")?, num(v, "jaw")?),
             "mimic" => Logged::Mimic(flag(v, "on")?),
             "shape" => Logged::Shape(shape_from(get(v, "shape")?)?),
             "push_gesture" => {

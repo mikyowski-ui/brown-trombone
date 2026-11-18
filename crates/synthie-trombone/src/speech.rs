@@ -706,6 +706,28 @@ impl Speaker {
         core::mem::take(&mut self.utterance)
     }
 
+    /// Break off what is being said, in the middle of a word if need be,
+    /// and make a vocalization in its place (a cough, a sigh, a laugh, a
+    /// throat clearing; see [`Trombone::vocalize`]): the speech's gestures
+    /// let go where they are (a closure opens and the air behind it leaves
+    /// as it would, the folds part), the larynx answers at the next control
+    /// block ([`Trombone::react_now`]) and the vocalization starts there,
+    /// within 10 ms of the call. Nothing in the tube is reset, so there is
+    /// no click and whatever is said next starts from a living voice.
+    /// Returns the utterance broken off (to be freed elsewhere) and the
+    /// vocalization's length in seconds (`None`: not made, see
+    /// [`Trombone::vocalize`]). Never allocates.
+    pub fn interrupt_with(
+        &mut self,
+        voice: &mut Trombone,
+        v: impl Into<Vocal>,
+    ) -> (Utterance, Option<f32>) {
+        let old = self.stop(voice);
+        voice.react_now();
+        let seconds = voice.vocalize(v);
+        (old, seconds)
+    }
+
     /// Whether an utterance is playing.
     #[must_use]
     pub fn is_speaking(&self) -> bool {

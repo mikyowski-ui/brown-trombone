@@ -29,6 +29,12 @@ use crate::tuning::Tuning;
 use crate::voice::Fallback;
 use core::f32::consts::PI;
 
+/// Seconds after a voice is cut off in which its folds, still closing as
+/// they part, count as singing (see `Source::rings`): the lags of a soft
+/// landing and of the folds' parting, and a few cycles.
+const RING_TIME: f32 = 0.035;
+/// The extra lag of a soft landing, seconds (see `Source::land`).
+const LANDING_LAG: f32 = 0.004;
 /// Seconds for lung pressure to build or fall.
 const LUNG_TIME: f32 = 0.03;
 // Lung pressure, the time the folds take to come together or part, the
@@ -294,6 +300,14 @@ pub(crate) struct Source {
     tense1: f32,
     amp0: f32,
     amp1: f32,
+    /// Seconds left of a soft landing, and what the lungs' pressure, the
+    /// leak, the gap, the chink and the spread were last told through it
+    /// (see [`Source::land`]).
+    landing: f32,
+    land: [f32; 5],
+    /// Seconds for which folds cut off while singing still count as
+    /// singing (see [`Source::rings`]).
+    ringing: f32,
     /// Relative size of the folds: the tract's relative length times the
     /// voice's `fold_thickness`.
     size: f32,
@@ -389,6 +403,9 @@ impl Source {
             tense1: 0.6,
             amp0: 0.0,
             amp1: 0.0,
+            landing: 0.0,
+            land: [0.0; 5],
+            ringing: 0.0,
             size: 1.0,
             len: 1.0,
             folds: Folds::new(FoldParams::steinecke_herzel()),
@@ -719,10 +736,26 @@ impl Source {
 
     /// One tick: `(glottal area cm², lung pressure dyn/cm²)`.
     #[inline]
+    #[allow(clippy::too_many_lines)] // one tick of every lag the lungs and the folds have
     pub(crate) fn tick(&mut self, lambda: f32, dt: f32) -> (f32, f32) {
-        self.lung += (self.lung_target - self.lung) * (dt / LUNG_TIME);
+        // A soft landing (see `land`): what the lungs and the folds are
+        // told arrives through one more short lag, so that nothing they
+        // do starts with a kink.
+        let landing = self.landing > 0.0;
+        let k = (dt / LANDING_LAG).min(1.0);
+        let soft = |held: &mut f32, target: f32| {
+            if landing {
+                *held += (target - *held) * k;
+                *held
+            } else {
+                target
+            }
+        };
+        let lung_target = soft(&mut self.land[0], self.lung_target);
+        let leak_target = soft(&mut self.land[1], self.leak_target);
+        self.lung += (lung_target - self.lung) * (dt / LUNG_TIME);
         let adduction = self.tuning.articulation.adduction_time;
-        self.leak += (self.leak_target - self.leak) * (dt / adduction);
+        self.leak += (leak_target - self.leak) * (dt / adduction);
         // Into creak and out of it at the pace the folds come together: taken
         // there over 30 ms, the folds' pulses first faded for some 80 ms
         // before they began to alternate; over 10 ms they alternate from the
@@ -747,8 +780,10 @@ impl Source {
         } else {
             adduction
         };
+        let gap_target = soft(&mut self.land[2], gap_target);
+        let chink_target = soft(&mut self.land[3], self.chink_target);
         self.gap += (gap_target - self.gap) * (dt / time);
-        self.chink += (self.chink_target - self.chink) * (dt / adduction);
+        self.chink += (chink_target - self.chink) * (dt / adduction);
         let arytenoids = self.tuning.articulation.abduction_time;
         let wanted = if self.intake > 0.0 {
             // The posterior cricoarytenoids pull the glottis open as the
@@ -758,7 +793,11 @@ impl Source {
         } else {
             self.spread_target
         };
-        let spread = wanted * self.size * self.size;
+        let spread = soft(&mut self.land[4], wanted * self.size * self.size);
+        if landing {
+            self.landing -= dt;
+            self.ringing -= dt;
+        }
         // They bring the glottis back together faster than they open it.
         let closing = if spread < self.spread {
             self.tuning.articulation.spread_closing.min(arytenoids)
@@ -832,6 +871,45 @@ impl Source {
         let w = self.blend;
         self.edge_area = w * self.folds.area() + (1.0 - w) * edge;
         (w * folds + (1.0 - w) * kinematic, self.lung)
+    }
+
+    /// Land softly for the next `seconds`: a speaker broken off in the
+    /// middle of a word (`Trombone::react_now`). Whatever the lungs and
+    /// the folds are told from now on (to stop pushing, to part, to shut)
+    /// reaches them through one more lag of [`LANDING_LAG`], starting from
+    /// what they were told last: each then starts moving with no kink,
+    /// where a command taken at once starts with one, and a kink in the
+    /// flow through the glottis is a step in the sound (3 % of the speech's
+    /// peak where a voice is cut off; none is heard with the lag).
+    pub(crate) fn land(&mut self, seconds: f32) {
+        // The folds that were singing ring on for a moment while they
+        // part: the voice is heard as a voice until they have.
+        self.ringing = if self.sounding().is_some() {
+            RING_TIME
+        } else {
+            0.0
+        };
+        if self.landing <= 0.0 {
+            // From what each was told last (the gap's target is worked out
+            // tick by tick: from where the gap is going now).
+            self.land = [
+                self.lung_target,
+                self.leak_target,
+                self.gap_target,
+                self.chink_target,
+                self.spread,
+            ];
+        }
+        self.landing = seconds;
+    }
+
+    /// Whether folds that were cut off while singing are still ringing
+    /// down (see [`Source::land`]). The sound takes the voice's tilt while
+    /// the folds are asked to sing; taken off at once, the last pulses of
+    /// folds that are only beginning to part came out without it, 18 dB
+    /// brighter above the tilt's corner and 1.7 times as steep.
+    pub(crate) fn rings(&self) -> bool {
+        self.landing > 0.0 && self.ringing > 0.0
     }
 
     /// The standing opening of the glottis now, cm² at the native size:

@@ -225,6 +225,30 @@ let level = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
 assert!(level(&loud) > 4.0 * level(&soft));
 ```
 
+## Interrupting and knocking a voice
+
+A speaking voice can be broken off in the middle of a word with a cough,
+a sigh or a laugh (`interrupt_with`), or its speaker knocked (`perturb`:
+a push on the lungs, a clamp of the jaw), on a `Talker`, a `Speaker` or
+through a `VoiceStream`. Nothing in the tube is reset: the voice answers
+at its next control block, without a click, and what is said next comes
+out of a living voice.
+
+```rust
+use synthie_trombone::{Engine, Preset, Talker, Vocalization};
+
+let mut npc = Talker::new(48_000.0, Preset::Deep.settings().with_engine(Engine::Physical));
+npc.say("The birch canoe slid on the smooth planks.");
+let mut block = vec![0.0f32; 24_000];
+npc.render(&mut block); // half a second in …
+let seconds = npc.interrupt_with(Vocalization::Cough).unwrap();
+npc.say("Excuse me."); // … said after the cough
+assert!(npc.voice_mut().is_vocalizing() && seconds > 0.3);
+npc.perturb(8.0, 0.5); // and a bump to the chest
+npc.render(&mut block);
+assert!(block.iter().all(|x| x.is_finite()));
+```
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six

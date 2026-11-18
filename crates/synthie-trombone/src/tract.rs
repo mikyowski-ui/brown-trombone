@@ -53,6 +53,9 @@ const TRACT_RATE: f32 = 2.0 * INTERNAL_RATE;
 /// The slot that holds lip rounding: a shaping of the vowel, never meant to
 /// hiss, however narrow.
 pub(crate) const ROUNDING_SLOT: usize = 1;
+/// The first cell a jaw knocked shut carries with it (see
+/// `Tract::jaw_clamp`): the front of the mouth from behind the teeth on.
+const JAW_CLAMPED: usize = 36;
 /// Rest diameter of the lip cells.
 const LIP_REST: f32 = 1.5;
 /// How far the lips part beyond [`LIP_REST`] when the jaw is fully open
@@ -522,6 +525,9 @@ pub(crate) struct Tract {
     /// The jaw's opening against the voice's own: a shout opens it wider
     /// (`Trombone::set_effort`); `1` otherwise.
     pub(crate) jaw_gain: f32,
+    /// How far the jaw is knocked shut at this moment, `0‥1`
+    /// (`Trombone::perturb`); `0` otherwise.
+    pub(crate) jaw_clamp: f32,
     /// Length of a control block as a share of the long one (512 internal
     /// samples); see [`crate::math::approach`].
     pub(crate) block_share: f32,
@@ -650,6 +656,7 @@ impl Tract {
             jaw: false,
             jaw_open: 0.0,
             jaw_gain: 1.0,
+            jaw_clamp: 0.0,
             block_share: 1.0,
             motion: Tuning::DEFAULT,
             velocity: [0.0; N],
@@ -1110,7 +1117,7 @@ impl Tract {
                 smooth(s.c.diameter, JAW_CONSONANT, JAW_SPREAD)
             };
         }
-        JAW_OPENING * self.jaw_gain * open.clamp(0.0, 1.0) * share
+        JAW_OPENING * self.jaw_gain * (1.0 - self.jaw_clamp) * open.clamp(0.0, 1.0) * share
     }
 
     /// Target shape: tongue rest shape, then every live constriction carved
@@ -1526,6 +1533,17 @@ impl Tract {
         let half = 1.0 - crate::math::sqrt(1.0 - whole);
         self.jaw_open += (jaw - self.jaw_open) * half;
         self.compute_targets();
+        if self.jaw_clamp > 0.0 {
+            // A jaw knocked shut (`Trombone::perturb`) carries the front
+            // of the mouth with it: the teeth and the lips come up to three
+            // quarters of the way together, whatever shape they were asked for, and
+            // move there as they move anywhere.
+            for i in JAW_CLAMPED..N {
+                #[allow(clippy::cast_precision_loss)]
+                let w = ((i + 1 - JAW_CLAMPED) as f32 / 4.0).min(1.0);
+                self.target[i] *= 1.0 - 0.75 * self.jaw_clamp * w;
+            }
+        }
 
         if self.dynamics == Dynamics::Damped {
             self.move_damped(dt);

@@ -66,6 +66,11 @@ pub enum Cmd {
     Protrusion(Option<f32>),
     /// Hold the larynx this many cm above its rest (negative lowered).
     Larynx(f32),
+    /// Break off what is being said with a vocalization.
+    Interrupt(synthie_trombone::Vocalization),
+    /// Knock the speaker's body: a push on the lungs, cmH2O, and a clamp
+    /// of the jaw, `0‥1`.
+    Perturb(f32, f32),
 }
 
 /// Audio → UI state, sent about 60 times a second. `Copy`, so sending it
@@ -261,6 +266,8 @@ impl Engine {
             Cmd::EndGesture(slot, ramp) => Logged::EndGesture(slot, ramp),
             Cmd::Protrusion(cm) => Logged::Protrusion(cm),
             Cmd::Larynx(cm) => Logged::Larynx(cm),
+            Cmd::Interrupt(with) => Logged::Interrupt(with),
+            Cmd::Perturb(lung, jaw) => Logged::Perturb(lung, jaw),
         };
         if let Some(old) = self.core.apply(&logged) {
             self.trash(old);

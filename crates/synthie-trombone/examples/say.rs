@@ -93,6 +93,14 @@
 //! Run! [normal] It is gone."`. (`--effort 0.7`, a number, is the
 //! persona's dial as before.)
 //!
+//! `--interrupt SECONDS,NAME` breaks the speech off at that moment, in
+//! the middle of a word if it falls there, with a vocalization (`sigh`,
+//! `laugh`, `chuckle`, `clear-throat`, `cough`), and `--then "TEXT"` says
+//! other words after it; `--perturb SECONDS,LUNG[,JAW]` knocks the speaker
+//! there (a push on the lungs in cmH2O, negative a gasp; a clamp of the
+//! jaw, 0 to 1), and may be given more than once (`Talker::interrupt_with`,
+//! `Talker::perturb`; mono).
+//!
 //! `--export-lipsync` writes the mouth that speaks the text beside the
 //! WAV, as `NAME.visemes.json`: a frame of ten channels (`ArticulatorFrame`:
 //! jaw, lips, tongue, velum, larynx, glottis, each 0 to 1) for every 512
@@ -128,7 +136,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
-use synthie_trombone::{ArticulatorFrame, Effort, Listener, MorphTarget, Stereo};
+use synthie_trombone::{ArticulatorFrame, Effort, Listener, MorphTarget, Stereo, Vocalization};
 use synthie_trombone::{
     Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
     inverse,
@@ -369,6 +377,9 @@ fn main() -> std::io::Result<()> {
     let mut morph_sweep: Option<[f32; 2]> = None;
     let mut lipsync = false;
     let mut effort = Effort::Normal;
+    let mut interrupt: Option<(f32, Vocalization)> = None;
+    let mut then: Option<String> = None;
+    let mut knocks: Vec<[f32; 3]> = Vec::new();
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -458,6 +469,25 @@ fn main() -> std::io::Result<()> {
             "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
             "--raw" => raw = true,
             "--export-lipsync" => lipsync = true,
+            "--interrupt" => {
+                // SECONDS,NAME: break the speech off there with a vocalization.
+                let v = value("--interrupt");
+                let (at, name) = v
+                    .split_once(',')
+                    .unwrap_or_else(|| panic!("--interrupt needs SECONDS,NAME"));
+                let at = at.trim().parse().expect("--interrupt needs seconds first");
+                let with = Vocalization::from_name(name.trim()).unwrap_or_else(|| {
+                    panic!("unknown vocalization {name:?}; try sigh, laugh, chuckle, clear-throat or cough")
+                });
+                interrupt = Some((at, with));
+            }
+            "--then" => then = Some(value("--then")),
+            "--perturb" => {
+                // SECONDS,LUNG[,JAW]: knock the speaker there.
+                let mut v = [0.0; 3];
+                numbers(&value("--perturb"), &mut v);
+                knocks.push(v);
+            }
             "--morph-size" => {
                 let s = value("--morph-size")
                     .parse()
@@ -647,7 +677,39 @@ fn main() -> std::io::Result<()> {
     talker.record_articulators(lipsync);
     let started = Instant::now();
     let channels = if stereo == Stereo::Off { 1 } else { 2 };
-    let mut out = if let (Stereo::Off, Some([from, to])) = (stereo, morph_sweep) {
+    let mut out = if stereo == Stereo::Off && (interrupt.is_some() || !knocks.is_empty()) {
+        // The speech is broken off or the speaker knocked at a moment of
+        // the rendering; what is said `--then` follows the vocalization.
+        let next = then.as_deref().map(|t| talker.compile(t));
+        let mut next = next;
+        talker.voice_mut().reset();
+        talker.say_utterance(utterance);
+        let at = |seconds: f32| (seconds * SR as f32) as usize;
+        let mut out = Vec::new();
+        let mut quiet = 0usize;
+        while quiet < SR as usize / 4 && out.len() < 120 * SR as usize {
+            let k = out.len();
+            if let Some((when, with)) = interrupt
+                && k == at(when)
+            {
+                talker.interrupt_with(with);
+                if let Some(u) = next.take() {
+                    talker.say_utterance(u);
+                }
+            }
+            for knock in &knocks {
+                if k == at(knock[0]) {
+                    talker.perturb(knock[1], knock[2]);
+                }
+            }
+            out.push(talker.process());
+            let busy = talker.is_speaking()
+                || talker.voice_mut().is_vocalizing()
+                || interrupt.is_some_and(|(when, _)| k < at(when));
+            quiet = if busy { 0 } else { quiet + 1 };
+        }
+        out
+    } else if let (Stereo::Off, Some([from, to])) = (stereo, morph_sweep) {
         // The body changes size while it speaks: the tract's scale glides
         // from `from` to `to` over the utterance.
         let frames = ((utterance.duration() + 0.25) * SR as f32) as usize;

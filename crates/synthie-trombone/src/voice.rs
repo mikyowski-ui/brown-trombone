@@ -39,6 +39,17 @@ const BREATH_RAMP: f32 = 0.03;
 /// Most a vocalization's push may ask of the lungs, cmH2O (see
 /// [`Trombone::set_lung_push`]).
 const PUSH_MOST: f32 = 100.0;
+/// Seconds in which a knock's push on the lungs dies away to a third, and
+/// its clamp of the jaw (see `Trombone::perturb`).
+const BUMP_TIME: f32 = 0.08;
+/// Seconds a knock's push takes to reach the lungs.
+const BUMP_ATTACK: f32 = 0.006;
+/// Seconds after an interruption or a knock in which the lungs and the
+/// folds take what they are told through a short extra lag
+/// (`Source::land`).
+const LANDING: f32 = 0.25;
+const CLAMP_TIME: f32 = 0.15;
+
 /// What a voice was last asked for where a vocal effort's regime comes
 /// between the asking and the body (see `Trombone::set_effort`).
 #[derive(Clone, Copy, Debug)]
@@ -354,6 +365,13 @@ pub struct Trombone {
     /// articulators' speed, the lungs' pressure and the breath drawn in
     /// (cmH2O).
     asked: Asked,
+    /// A knock the body has taken (see [`Trombone::perturb`]): what is
+    /// left of the push on the lungs, cmH2O, and of the jaw's clamp, `0‥1`.
+    bump: f32,
+    clamp: f32,
+    /// The push a knock has yet to deliver: it reaches the lungs over a
+    /// few milliseconds, as a blow through a chest does.
+    bump_want: f32,
     step: f64,
     frac: f64,
     prev: f32,
@@ -459,6 +477,9 @@ impl Trombone {
                 lung: Tuning::DEFAULT.anatomy.lung_pressure,
                 intake: 0.0,
             },
+            bump: 0.0,
+            clamp: 0.0,
+            bump_want: 0.0,
             step: f64::from(INTERNAL_RATE) / f64::from(sample_rate),
             frac: 1.0,
             prev: 0.0,
@@ -645,9 +666,80 @@ impl Trombone {
         self.source.slack_target = (self.asked.slack + r.slack).clamp(0.0, 0.5);
         self.tract.movement_speed = MOVEMENT_SPEED * self.asked.speed * r.speed;
         self.tract.jaw_gain = r.jaw;
-        self.source
-            .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
-        self.source.intake = (self.asked.intake * self.intake_factor).clamp(0.0, 8.0);
+        self.lay_lungs();
+    }
+
+    /// The lungs as they are to push or draw at this moment: what was
+    /// asked for, in the regime, with what is left of a knock on top (a
+    /// knock that takes the pressure under nothing makes them draw).
+    fn lay_lungs(&mut self) {
+        let lung = (self.asked.lung * self.lung_factor).clamp(1.0, 40.0);
+        let intake = self.asked.intake * self.intake_factor;
+        if self.bump == 0.0 {
+            self.source.set_lung_pressure(lung);
+            self.source.intake = intake.clamp(0.0, 8.0);
+        } else {
+            let knocked = lung + self.bump;
+            self.source.set_lung_pressure(knocked.clamp(0.2, 60.0));
+            self.source.intake = (intake + (-knocked).max(0.0)).clamp(0.0, 8.0);
+        }
+    }
+
+    /// Bring the folds' controls up to date at the next control block and
+    /// not at the end of their own 10.7 ms block: something has happened
+    /// to the speaker (an interruption, a knock) that the larynx answers
+    /// at once. The articulators go by the control block anyway (2.7 ms
+    /// on the physical engine).
+    pub fn react_now(&mut self) {
+        self.since_regulated = self.since_regulated.max(BLOCK);
+        // And what the larynx is told lands softly: a command taken at
+        // once starts with a kink in the flow, which is a step in the
+        // sound.
+        self.source.land(LANDING);
+    }
+
+    /// Knock the speaker's body while the voice sounds: `delta_lung_pressure`
+    /// (cmH2O, `−20‥30`) is a push on the lungs, as a bump to the chest
+    /// gives (positive) or a sudden gasp takes (negative: below nothing the
+    /// lungs draw and the air turns inward), and `jaw_clamp` (`0‥1`) knocks
+    /// the jaw shut that far. Both act from the next control block and die
+    /// away by themselves (the push in about a tenth of a second, the jaw
+    /// in about a fifth); nothing in the tube is reset: the waves that are
+    /// in it go on through the changed body, so the voice lurches, swells
+    /// or is muffled as a person's would and comes back. Knocks add up.
+    pub fn perturb(&mut self, delta_lung_pressure: f32, jaw_clamp: f32) {
+        if delta_lung_pressure.is_finite() {
+            self.bump_want = (self.bump_want + delta_lung_pressure).clamp(-20.0, 30.0);
+        }
+        if jaw_clamp.is_finite() {
+            self.clamp = self.clamp.max(jaw_clamp.clamp(0.0, 1.0));
+        }
+        self.react_now();
+    }
+
+    /// One control block of `dt` seconds of a knock dying away.
+    fn settle_knock(&mut self, dt: f32) {
+        // The push arrives over a few milliseconds and dies away over a
+        // tenth of a second (arriving at once, a gasp's turned the air
+        // round with a step of 2 % of the speech's peak).
+        self.bump += (self.bump_want - self.bump) * (1.0 - crate::math::exp(-dt / BUMP_ATTACK));
+        self.bump_want *= crate::math::exp(-dt / BUMP_TIME);
+        if self.bump_want.abs() < 0.02 {
+            self.bump_want = 0.0;
+            if self.bump.abs() < 0.02 {
+                self.bump = 0.0;
+            }
+        }
+        self.lay_lungs();
+        self.tract.jaw_clamp = self.clamp;
+        self.clamp *= crate::math::exp(-dt / CLAMP_TIME);
+        if self.clamp < 0.005 {
+            self.clamp = 0.0;
+        }
+        if self.bump == 0.0 && self.clamp == 0.0 {
+            self.lay_lungs();
+            self.tract.jaw_clamp = 0.0;
+        }
     }
 
     /// The tenseness asked for as the regime holds the folds: added to,
@@ -666,9 +758,8 @@ impl Trombone {
         self.source.set_tuning(&tuning);
         // (The source takes its lungs' pressure from a tuning: the
         // regime's is put back.)
-        if self.lung_factor.to_bits() != 1.0f32.to_bits() {
-            self.source
-                .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
+        if self.lung_factor.to_bits() != 1.0f32.to_bits() || self.bump != 0.0 {
+            self.lay_lungs();
         }
         self.phys.set_tuning(&tuning);
         self.tract.motion = tuning;
@@ -767,8 +858,7 @@ impl Trombone {
     pub fn set_lung_pressure(&mut self, cm_h2o: f32) {
         if cm_h2o.is_finite() {
             self.asked.lung = cm_h2o.clamp(1.0, 40.0);
-            self.source
-                .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
+            self.lay_lungs();
         }
     }
 
@@ -990,7 +1080,7 @@ impl Trombone {
     pub fn set_inhalation(&mut self, cm_h2o: f32) {
         if cm_h2o.is_finite() {
             self.asked.intake = cm_h2o.clamp(0.0, 8.0);
-            self.source.intake = (self.asked.intake * self.intake_factor).clamp(0.0, 8.0);
+            self.lay_lungs();
         }
     }
 
@@ -1584,7 +1674,9 @@ impl Trombone {
         if self.engine != Engine::Physical {
             return None;
         }
-        let hz = self.glottis.target_frequency;
+        // (What the voice was asked for: a vocal effort's regime is laid
+        // over the event as over everything.)
+        let hz = self.asked.frequency;
         let plan = crate::vocal::plan(&v.into(), hz, &self.tuning);
         self.score.drop_layer(LAYER_VOCAL);
         let holds = plan.holds().count();
@@ -1592,7 +1684,7 @@ impl Trombone {
             return None;
         }
         let voiced = f32::from(u8::from(self.glottis.voiced));
-        let (spread, tense) = (self.source.spread_target, self.glottis.target_tenseness);
+        let (spread, tense) = (self.source.spread_target, self.asked.tenseness);
         for g in plan.gestures() {
             self.score.push(*g);
         }
@@ -2682,6 +2774,9 @@ impl Trombone {
             if self.regime_mix < 1.0 || self.regime.tremor > 0.0 {
                 self.glide_regime(block as f32 / self.internal_rate);
             }
+            if self.bump != 0.0 || self.bump_want != 0.0 || self.clamp != 0.0 {
+                self.settle_knock(block as f32 / self.internal_rate);
+            }
             let dt = block as f32 / self.internal_rate;
             let tiers = self.score.engaged_tiers();
             if tiers != 0 {
@@ -2728,12 +2823,14 @@ impl Trombone {
                     // (In a whisper the folds are not singing: the breath
                     // through them is an open glottis's, with the lows
                     // that excite the formants.)
-                    self.phys.voiced_target =
-                        if self.source.sounding().is_some() && self.regime.whisper < 0.5 {
-                            1.0
-                        } else {
-                            0.0
-                        };
+                    self.phys.voiced_target = if (self.source.sounding().is_some()
+                        || self.source.rings())
+                        && self.regime.whisper < 0.5
+                    {
+                        1.0
+                    } else {
+                        0.0
+                    };
                 }
             }
         }

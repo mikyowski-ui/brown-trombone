@@ -127,6 +127,24 @@ impl Talker {
         self.speaker.interject(&mut self.voice, v)
     }
 
+    /// Break off what is being said, mid-word, with a vocalization (a
+    /// cough, a sigh, a laugh, a throat clearing) and forget the queue (see
+    /// [`Speaker::interrupt_with`]): the voice is in it within 10 ms, with
+    /// no click, and whatever is said next ([`say`](Self::say)) follows it.
+    /// Returns its length in seconds (`None` on the classic engine, where
+    /// the speech simply stops).
+    pub fn interrupt_with(&mut self, v: impl Into<crate::Vocal>) -> Option<f32> {
+        self.queue.clear();
+        self.speaker.interrupt_with(&mut self.voice, v).1
+    }
+
+    /// Knock the speaker's body while it speaks (see
+    /// [`Trombone::perturb`]): a push on the lungs (cmH2O; negative a gasp)
+    /// and a clamp of the jaw (`0‥1`), each dying away by itself.
+    pub fn perturb(&mut self, delta_lung_pressure: f32, jaw_clamp: f32) {
+        self.voice.perturb(delta_lung_pressure, jaw_clamp);
+    }
+
     /// Stop now and forget the queue; the voice fades out.
     pub fn interrupt(&mut self) {
         self.queue.clear();
@@ -141,7 +159,11 @@ impl Talker {
 
     /// One output sample.
     pub fn process(&mut self) -> f32 {
+        // (What is said after a vocalization made on its own, as after an
+        // interruption, waits for it to be over.)
         if !self.speaker.is_speaking()
+            && !self.queue.is_empty()
+            && !self.voice.is_vocalizing()
             && let Some(next) = self.queue.pop_front()
         {
             self.speaker.speak(next);

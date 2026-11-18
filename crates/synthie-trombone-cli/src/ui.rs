@@ -653,6 +653,8 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             let settings = key_hints(&[
                 ("F5", "record"),
                 ("F6", "score"),
+                ("F7", "cough"),
+                ("F8", "knock"),
                 ("v V", "voice"),
                 ("- =", "vibrato"),
                 ("m", "wobble"),

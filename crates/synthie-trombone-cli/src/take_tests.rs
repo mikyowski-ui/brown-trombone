@@ -550,6 +550,10 @@ fn header_and_commands_round_trip() {
         Logged::Protrusion(Some(odd())),
         Logged::Protrusion(None),
         Logged::Larynx(-odd()),
+        Logged::Interrupt(synthie_trombone::Vocalization::Cough),
+        Logged::Interrupt(synthie_trombone::Vocalization::ClearThroat),
+        Logged::Perturb(odd(), 0.5),
+        Logged::Perturb(-odd(), 0.0),
     ];
     for _ in 0..500 {
         cmds.push(Logged::Tongue(odd(), odd()));

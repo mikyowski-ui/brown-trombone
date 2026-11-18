@@ -180,6 +180,17 @@ pub enum Event {
     /// Put the voice into a vocal effort state (see
     /// [`Trombone::set_effort`]): it glides into it.
     Effort(Effort),
+    /// Break off the speech, mid-word, with a vocalization, and drop the
+    /// speech queued after it (see [`VoiceStream::interrupt_with`]).
+    Interrupt(Vocal),
+    /// Knock the speaker's body (see [`Trombone::perturb`]): a push on the
+    /// lungs, cmH2O, and a clamp of the jaw, `0‥1`.
+    Perturb {
+        /// The push on the lungs, cmH2O (negative: a gasp).
+        lung: f32,
+        /// How far the jaw is knocked shut, `0‥1`.
+        jaw: f32,
+    },
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -238,6 +249,8 @@ const TAG_STEREO: u8 = 41;
 const TAG_VOCALIZE: u8 = 30;
 const TAG_MORPH: u8 = 42;
 const TAG_EFFORT: u8 = 43;
+const TAG_INTERRUPT: u8 = 44;
+const TAG_PERTURB: u8 = 45;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -345,6 +358,8 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::Vocalize(_) => TAG_VOCALIZE,
         Event::Morph(_) => TAG_MORPH,
         Event::Effort(_) => TAG_EFFORT,
+        Event::Interrupt(_) => TAG_INTERRUPT,
+        Event::Perturb { .. } => TAG_PERTURB,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -443,7 +458,11 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
             Stereo::Binaural => 1,
             Stereo::Pair => 2,
         }),
-        Event::Vocalize(v) => {
+        Event::Perturb { lung, jaw } => {
+            m.float(lung);
+            m.float(jaw);
+        }
+        Event::Vocalize(v) | Event::Interrupt(v) => {
             #[allow(clippy::cast_possible_truncation)]
             let kind = Vocalization::ALL
                 .iter()
@@ -585,18 +604,27 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             2 => Stereo::Pair,
             _ => Stereo::Off,
         }),
-        TAG_VOCALIZE => {
+        TAG_VOCALIZE | TAG_INTERRUPT => {
             let kind = Vocalization::ALL
                 .get(r.word() as usize)
                 .copied()
                 .unwrap_or(Vocalization::Sigh);
-            Event::Vocalize(Vocal {
+            let vocal = Vocal {
                 kind,
                 length: r.float(),
                 strength: r.float(),
                 pitch: r.float(),
-            })
+            };
+            if tag == TAG_INTERRUPT {
+                Event::Interrupt(vocal)
+            } else {
+                Event::Vocalize(vocal)
+            }
         }
+        TAG_PERTURB => Event::Perturb {
+            lung: r.float(),
+            jaw: r.float(),
+        },
         #[cfg(feature = "std")]
         TAG_SPEAK => {
             let mode = if r.word() == 1 {
@@ -956,7 +984,7 @@ impl<'a> VoiceStream<'a> {
         self.collect();
         if self.send(&mut encode(&event, when.at())) {
             #[cfg(feature = "std")]
-            if event == Event::StopSpeaking {
+            if matches!(event, Event::StopSpeaking | Event::Interrupt(_)) {
                 self.last_piece = None;
             }
             Ok(())
@@ -991,6 +1019,50 @@ impl<'a> VoiceStream<'a> {
         when: When,
     ) -> Result<(), Full<Gesture>> {
         self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// Break off what the stream is saying, in the middle of a word if
+    /// need be, with a vocalization (a cough, a sigh, a laugh, a throat
+    /// clearing), and drop the speech queued after it: the speech's
+    /// gestures let go where they are (a closure opens and the air behind
+    /// it leaves as it would), the voice is in the vocalization within
+    /// 10 ms of the sample the player carries this out at, and nothing in
+    /// the tube is reset, so there is no click. Text and utterances pushed
+    /// afterwards are spoken after it, from the voice as it then is: to
+    /// break off with other words instead, see
+    /// [`interrupt_with_text`](Self::interrupt_with_text).
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the vocalization when the ring has no room for it.
+    pub fn interrupt_with(&mut self, v: impl Into<Vocal>, when: When) -> Result<(), Full<Vocal>> {
+        let v = v.into();
+        self.push_when(when, Event::Interrupt(v))
+            .map_err(|_| Full(v))
+    }
+
+    /// Knock the speaker's body while the voice plays (see
+    /// [`Trombone::perturb`]): a push on the lungs (cmH2O; a bump to the
+    /// chest is positive, a gasp negative) and a clamp of the jaw (`0‥1`),
+    /// each dying away by itself. The waves in the tube go on through the
+    /// changed body: nothing is reset.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the event when the ring has no room for it.
+    pub fn perturb(
+        &mut self,
+        delta_lung_pressure: f32,
+        jaw_clamp: f32,
+        when: When,
+    ) -> Result<(), Full<Event>> {
+        self.push_when(
+            when,
+            Event::Perturb {
+                lung: delta_lung_pressure,
+                jaw: jaw_clamp,
+            },
+        )
     }
 
     /// Put the voice into a vocal effort state while it plays (see
@@ -1212,6 +1284,24 @@ impl VoiceStream<'_> {
         }
         sent.held = self.text.len();
         sent
+    }
+
+    /// Break off what the stream is saying, mid-word, and say `text`
+    /// instead: the speech stops where it is (see
+    /// [`Event::StopSpeaking`]: its gestures let go, nothing is reset),
+    /// what was queued and the text held back are dropped, and `text` is
+    /// compiled here and handed to the player, which starts it at its next
+    /// sample from the voice as it is.
+    pub fn interrupt_with_text(&mut self, text: &str) -> TextSent {
+        if self.push(Event::StopSpeaking).is_err() {
+            return TextSent {
+                full: true,
+                ..TextSent::default()
+            };
+        }
+        self.text.clear();
+        self.push_text(text);
+        self.flush_text()
     }
 
     /// Speak the text held back, as the end of a piece (a sentence that
@@ -1534,6 +1624,21 @@ impl<'a> VoicePlayer<'a> {
             Event::Stereo(s) => voice.set_stereo(s),
             Event::Morph(b) => voice.set_morph(b),
             Event::Effort(e) => voice.set_effort(e),
+            Event::Perturb { lung, jaw } => voice.perturb(lung, jaw),
+            Event::Interrupt(v) => {
+                // The speech breaks off where it is and everything queued
+                // after it is dropped; the voice makes the vocalization
+                // from the next control block.
+                #[cfg(feature = "std")]
+                {
+                    let shared = self.link.parts().0;
+                    if let Some(talk) = &mut self.talk {
+                        talk.stop(voice, shared);
+                    }
+                }
+                voice.react_now();
+                voice.vocalize(v);
+            }
             Event::Vocalize(v) => {
                 #[cfg(feature = "std")]
                 if let Some(talk) = &mut self.talk
@@ -1737,7 +1842,9 @@ impl Talk {
         match self.state {
             State::Quiet => return voice.process(),
             State::Waiting(at) => {
-                if now < at {
+                // (What is said after a vocalization made on its own, as
+                // after an interruption, waits for it to be over.)
+                if now < at || voice.is_vocalizing() {
                     return voice.process();
                 }
                 if let Some((u, _)) = self.next() {

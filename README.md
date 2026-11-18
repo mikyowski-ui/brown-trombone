@@ -631,6 +631,90 @@ laughs, lung pressures, tenseness, block lengths; six seeds of a fuzz in
 the gate) the sound stays finite and bounded, every utterance ends, and
 the next sentence comes out within 6 dB of a fresh voice's.
 
+### Interrupting and knocking a voice
+
+A voice that is speaking can be broken off in the middle of a word, or
+its speaker knocked, without anything in the tube being reset: the waves
+that are in it go on through whatever the body does next.
+
+```sh
+say --engine physical --interrupt 1.25,cough --then "Excuse me. The juice of lemons makes fine punch." \
+    "The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background."
+say --engine physical --perturb 0.6,8 --perturb 1.6,-15 --perturb 2.9,6,1 "We were away a year ago. Mary may win more money."
+```
+
+```rust
+use synthie_trombone::stream::{When, voice_stream};
+use synthie_trombone::{Engine, Preset, Trombone, Vocalization};
+
+let (mut stream, mut player) = voice_stream(1024);
+let mut voice = Trombone::new(48_000.0);
+let settings = Preset::Deep.settings().with_engine(Engine::Physical);
+settings.apply(&mut voice);
+stream.set_prosody(settings.prosody());
+stream.push_text("The birch canoe slid on the smooth planks. ");
+// … in the audio callback: player.render(&mut voice, &mut block) …
+stream.interrupt_with(Vocalization::Cough, When::Now).unwrap(); // breaks in mid-word
+stream.push_text("Excuse me. ");                                // said after the cough
+stream.perturb(8.0, 0.0, When::Now).unwrap();                   // a bump to the chest
+stream.interrupt_with_text("No. Run!");                         // other words instead
+```
+
+- **`interrupt_with(vocalization)`** (`VoiceStream`, `Talker`, `Speaker`;
+  stream event tag 44; `F7` coughs in the terminal app): the speech's
+  gestures let go where they are (a closure opens and the air behind it
+  leaves as it would, the folds part), what was queued is dropped, the
+  larynx is brought up to date at the next control block and not at the
+  end of its own 10.7 ms block (`Trombone::react_now`), and the cough,
+  sigh, laugh, chuckle or throat clearing starts there. What is said
+  afterwards waits for it to be over. `interrupt_with_text` breaks off
+  with other words instead.
+- **`perturb(delta_lung_pressure, jaw_clamp)`** (`VoiceStream`, `Talker`,
+  `Trombone`; event tag 45; `F8` in the app): a push on the lungs in
+  cmH2O that reaches them in 6 ms and dies away in a tenth of a second
+  (negative: a gasp; below nothing the lungs draw and the air turns
+  inward), and a clamp of the jaw that carries the teeth and the lips up
+  to three quarters of the way together and lets go in a fifth of a
+  second. Knocks add up; the speech goes on.
+- **A soft landing.** A command taken at once (stop pushing, part the
+  folds) starts the lungs and the folds moving with a kink, and a kink in
+  the flow through the glottis is a step in the sound: where a voice was
+  cut off, 3 % of the speech's peak (30 dB under it). For a quarter of a
+  second after an interruption or a knock, what the lungs and the folds
+  are told reaches them through one more lag of 4 ms, so they start with
+  no kink; and folds cut off while singing count as singing for 35 ms
+  more, so their last pulses keep the voice's tilt (without it they came
+  out 1.7 times as steep).
+
+Measured against the same voice left alone, sample by sample
+(`examples/interrupt.rs`, `tests/interrupt_gate.rs`), the deep and the
+bright voice broken in on in the middle of a vowel, a stop's closure, an
+/s/ and a nasal by each of the five vocalizations:
+
+| Broken in on | Larynx or lungs answer after | The sound differs after | Largest step of the difference, first 3 ms | Steepest step in the next 60 ms against the speech's steepest |
+|---|---|---|---|---|
+| a vowel | 2.1 to 2.4 ms | 1.2 to 2.4 ms | 45 to 51 dB under the speech's peak | 0.80 to 0.84 |
+| a stop's closure | 3.0 to 3.5 ms | 1.1 ms | 50 to 60 dB under (bright voice 36) | 0.12 to 0.26 |
+| an /s/ | 1.3 ms | 1.4 ms | (the two are different noises) | 0.94 |
+| a nasal | 3.3 to 3.5 ms | 1.5 ms | 32 to 40 dB under (bright voice 29) | 0.15 to 0.31 |
+
+The answer comes at the next control block: 2.7 ms at most on the
+physical engine as it is set up, 10.7 ms with a control block of 512.
+Under 40 dB holds where the cut is all there is (the vowel); where a
+closure opens with a voice or pressure behind it, what is heard is that
+closure's own release, a fifth of the steepness of a stop's burst in
+speech. Afterwards the next sentence is as long and as loud (within 3 dB)
+as from a voice that was never broken off, and it does not start while
+the vocalization lasts. Whisper on `28-s4-interrupt-cough.wav`: "The birch
+can usually- Excuse me, the juice of lemons makes fine punch."
+
+A knock, in the middle of a vowel: a push of 8 cmH2O raises the lungs by
+3.7 to 4.5 cmH2O and the sound by 3.3 to 5.7 dB; a gasp of 15 takes the
+lungs 7.3 to 8.0 under and turns the glottal flow inward (to −160 cm³/s
+and more); the jaw knocked shut brings the lips 0.17 and more together
+and muffles the vowel by about 1 dB; each starts with a step 43 dB and
+more under the speech's peak and is gone 0.8 s later.
+
 ## The physical engine
 
 Next to Pink Trombone's own model there is a second one, `Engine::Physical`,
