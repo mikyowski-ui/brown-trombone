@@ -1567,6 +1567,17 @@ tuning! {
         /// them to the speaker's lowest pitch, and fall a little and linearly
         /// (Shriberg & Lickley 1992).
         filler_pitch = 0.86, 0.6..=1.0, A;
+        // ----- vocal effort (hybrid roadmap, stage 3; see `Effort`) -------------------
+        /// The vocal effort state the voice speaks in, as a code (physical
+        /// engine): `0` normal, `1` whisper, `2` shout, `3` exhausted, `4`
+        /// nervous ([`Effort`](crate::Effort); the nearest whole number
+        /// counts). The voice takes the state's regime when it is given
+        /// this tuning (lung pressure, how the folds are held, the tube above
+        /// them, pitch, jaw, tremor), and speech is compiled for it (the
+        /// pace, the breath before an utterance, the creak at its end).
+        /// [`Tuning::with_effort`] sets it; a tag in the text (`[whisper]`)
+        /// changes the state from there on without touching this number.
+        effort = 0.0, 0.0..=4.0, A;
     } tiers {
     } aliases {
     }
@@ -1687,6 +1698,14 @@ impl TongueModel {
 }
 
 impl Tuning {
+    /// This tuning in the vocal effort state `effort` (`prosody.effort`;
+    /// every other number as it is).
+    #[must_use]
+    pub const fn with_effort(mut self, effort: crate::Effort) -> Self {
+        self.prosody.effort = effort.code();
+        self
+    }
+
     /// This tuning with the tongue body `tongue` (`anatomy.tongue_model`;
     /// every other number as it is).
     #[must_use]
@@ -1934,9 +1953,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (46, 77, 53)
+            (46, 77, 54)
         );
-        assert_eq!(Tuning::FIELDS.len(), 176);
+        assert_eq!(Tuning::FIELDS.len(), 177);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1951,10 +1970,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_eighty_six_and_seventy_five() {
+    fn two_passes_of_eighty_seven_and_seventy_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (86, 75));
+        assert_eq!((a, b), (87, 75));
     }
 
     #[test]

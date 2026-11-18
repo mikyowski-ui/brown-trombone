@@ -26,7 +26,7 @@ use crate::math::{exp, lerp};
 use crate::phoneme::{Articulation, Manner, Phoneme};
 use crate::vocal::{Vocal, Vocalization};
 use crate::vowel_targets::VowelKey;
-use crate::{Engine, SLOT_MAIN, Trombone, Tuning};
+use crate::{Effort, Engine, SLOT_MAIN, Trombone, Tuning};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -242,6 +242,9 @@ pub struct Utterance {
     /// The vocalizations of its text's tags (`[laugh]`; wave 3, w3-vocal),
     /// each with the segment it is made in, in order.
     vocals: Vec<(u32, Vocal)>,
+    /// The vocal effort states the voice goes into, by the segment each
+    /// starts at.
+    efforts: Vec<(u32, Effort)>,
 }
 
 /// A gesture of an utterance's score that is not one of its segments' own
@@ -278,6 +281,11 @@ pub enum Token {
     /// takes its own time, and the next phrase starts after it (see
     /// [`crate::vocal`]). Physical engine; the classic engine leaves a pause.
     Vocal(Vocalization),
+    /// A vocal effort state written as a tag (`[whisper]`, `[shout]`,
+    /// `[exhausted]`, `[nervous]`, `[normal]`; see [`Effort`]): the voice
+    /// goes into it from the next sound on. It is no break of its own.
+    /// Physical engine.
+    Effort(Effort),
     /// The word whose phones follow is a hesitation filler ("uh", "um",
     /// "hmm", "er", "mm"; wave 3), spoken as one with
     /// [`ProsodyConfig::fillers`](crate::ProsodyConfig::fillers) on and as a
@@ -374,7 +382,20 @@ impl Utterance {
             gestures: Tuning::DEFAULT.articulation.gesture_score >= 0.5,
             overlaps: Vec::new(),
             vocals: Vec::new(),
+            efforts: Vec::new(),
         }
+    }
+
+    /// The vocal effort state the voice goes into as segment `index` starts
+    /// (the state the utterance was compiled for at its first segment, a
+    /// tag of the text after that; see [`Token::Effort`]), if any.
+    #[must_use]
+    pub fn effort_at(&self, index: usize) -> Option<Effort> {
+        self.efforts
+            .iter()
+            .rev()
+            .find(|(k, _)| *k as usize == index)
+            .map(|&(_, e)| e)
     }
 
     /// The vocalization made in segment `index` (a tag of the text, see
@@ -761,6 +782,11 @@ impl Speaker {
                     .iter()
                     .all(|s| s.phoneme == Phoneme::Sil);
                 self.pause_pending = pause && !self.readied && !last;
+                if physical && let Some(e) = self.utterance.effort_at(self.index) {
+                    // The state the utterance speaks in, or a tag's: the
+                    // body glides into it.
+                    voice.set_effort(e);
+                }
                 if physical && let Some(v) = self.utterance.vocal_at(self.index) {
                     // A tag of the text: the voice makes it through this
                     // pause, which readies nothing (the pause after it does).
@@ -1693,6 +1719,9 @@ fn phonemize_words(text: &str, lex: lexicon::Lexicon) -> Vec<Token> {
                         out.pop();
                     }
                     out.push(Token::Vocal(v));
+                } else if let Some(e) = Effort::from_name(span.trim()) {
+                    // A vocal effort state from here on.
+                    out.push(Token::Effort(e));
                 } else {
                     push_arpabet(&span, &mut out);
                 }
@@ -1811,7 +1840,7 @@ fn reduce_function_words(tokens: &mut Vec<Token>, weak: &[(usize, &'static WeakF
         // A filler's mark is not a word of its own.
         let mut after = tokens[start + len..]
             .iter()
-            .filter(|t| !matches!(t, Token::Filler(_)));
+            .filter(|t| !matches!(t, Token::Filler(_) | Token::Effort(_)));
         let next = match (after.next(), after.next()) {
             (Some(Token::WordBreak), Some(Token::Phone { phoneme, .. })) => *phoneme,
             _ => continue,
@@ -2231,6 +2260,9 @@ struct Draft {
     /// gesture of the score that overlaps the closure (see
     /// `release_into_liquids`).
     ahead: Option<Articulation>,
+    /// The vocal effort state the voice goes into as this sound starts (a
+    /// tag of the text).
+    effort: Option<Effort>,
     /// Which phone of the text this draft realises ([`NO_PHONE`]: a pause).
     phone: u32,
     /// The vocalization this pause is made of (a tag of the text).
@@ -2272,6 +2304,7 @@ impl Context {
                     same_word = true;
                 }
                 Token::WordBreak | Token::Filler(_) => same_word = false,
+                Token::Effort(_) => {}
                 Token::Break(_) | Token::Vocal(_) => break,
             }
         }
@@ -2307,6 +2340,18 @@ fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
     let nasality = prosody.nasality.clamp(0.0, 1.0);
     let timing = prosody.tuning.clamped();
     let physical = prosody.engine == Engine::Physical;
+    // The vocal effort state the voice speaks in: its pace, its breath
+    // before the utterance and its creak (normal changes nothing).
+    let effort = if physical {
+        Effort::of(&timing)
+    } else {
+        Effort::Normal
+    };
+    let (timing, rate) = {
+        let (mut t, mut r) = (timing, rate);
+        effort.shape(&mut t, &mut r);
+        (t, r)
+    };
     // Fillers' marks out, each filler its own phrase while they are on.
     let (tokens, fillers) = mark_fillers(tokens, physical && timing.prosody.fillers >= 0.5);
     let tokens = &tokens[..];
@@ -2330,7 +2375,10 @@ fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
         }
     };
 
+    // A vocal effort tag waits for the next sound made.
+    let mut pending_effort: Option<Effort> = None;
     while i < tokens.len() {
+        let drafted = drafts.len();
         match tokens[i] {
             Token::Phone { phoneme, stressed } => {
                 let next_vowel_or_approx = tokens[i + 1..]
@@ -2395,6 +2443,12 @@ fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
                 phrase_start = drafts.len();
             }
             Token::Filler(_) => {}
+            Token::Effort(e) => pending_effort = Some(e),
+        }
+        if drafts.len() > drafted
+            && let Some(e) = pending_effort.take()
+        {
+            drafts[drafted].effort = Some(e);
         }
         i += 1;
     }
@@ -2507,11 +2561,24 @@ fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
     let mut last = prosody.pitch;
     let mut overlaps = Vec::new();
     let mut vocals = Vec::new();
+    // The state the utterance starts in, then each tag's at its sound (a
+    // tag before the first sound is the state the utterance starts in).
+    let mut efforts = Vec::new();
+    if physical {
+        efforts.push((0, effort));
+    }
+    let mut sounded = false;
     for mut d in drafts {
         if let Some(v) = d.vocal {
             #[allow(clippy::cast_possible_truncation)]
             vocals.push((segments.len() as u32, v));
         }
+        if let Some(e) = d.effort.filter(|_| physical) {
+            #[allow(clippy::cast_possible_truncation)]
+            let at = if sounded { segments.len() as u32 } else { 0 };
+            efforts.push((at, e));
+        }
+        sounded |= d.phoneme != Phoneme::Sil || d.vocal.is_some();
         if let Some(a) = d.ahead {
             #[allow(clippy::cast_possible_truncation)]
             let from = segments.len() as u32;
@@ -2588,6 +2655,7 @@ fn compile(tokens: &[Token], prosody: &Prosody, living: bool) -> Utterance {
         pitch_hop: 0.0,
         followed: follow::Followed::default(),
         vocals,
+        efforts,
     }
 }
 
@@ -2598,9 +2666,10 @@ const VOCAL_AFTER: f32 = 0.15;
 /// Whether `text` has phonemes in brackets (`[HH AX L OW1]`), not only
 /// vocalizations' tags (`[laugh]`).
 fn has_phonemes_in_brackets(text: &str) -> bool {
-    text.split('[')
-        .skip(1)
-        .any(|s| Vocalization::from_name(s.split(']').next().unwrap_or("").trim()).is_none())
+    text.split('[').skip(1).any(|s| {
+        let tag = s.split(']').next().unwrap_or("").trim();
+        Vocalization::from_name(tag).is_none() && Effort::from_name(tag).is_none()
+    })
 }
 
 /// `tokens` without the marks of hesitation fillers, and, with `on`, each
@@ -2646,7 +2715,7 @@ fn mark_fillers(tokens: &[Token], on: bool) -> (Vec<Token>, Vec<(u32, u32, Fille
                 k += n;
                 let after = tokens[k..]
                     .iter()
-                    .find(|t| !matches!(t, Token::WordBreak | Token::Filler(_)));
+                    .find(|t| !matches!(t, Token::WordBreak | Token::Filler(_) | Token::Effort(_)));
                 if matches!(after, Some(Token::Phone { .. })) {
                     if matches!(tokens.get(k), Some(Token::WordBreak)) {
                         k += 1;
@@ -2860,7 +2929,7 @@ fn function_words(tokens: &[Token]) -> Vec<bool> {
                 start = out.len();
                 stressed = false;
             }
-            Token::Filler(_) => {}
+            Token::Filler(_) | Token::Effort(_) => {}
         }
     }
     out[start..].fill(!stressed);
@@ -3332,6 +3401,7 @@ fn silence(duration: f32) -> Draft {
         phone: NO_PHONE,
         mid_accent: 0.0,
         vocal: None,
+        effort: None,
     }
 }
 
@@ -3389,6 +3459,7 @@ fn expand(
         phone: NO_PHONE,
         mid_accent: 0.0,
         vocal: None,
+        effort: None,
     };
     let Some(context) = context else {
         // The classic engine.
@@ -4173,6 +4244,7 @@ fn final_release(p: Phoneme, rate: f32) -> Draft {
         phone: NO_PHONE,
         mid_accent: 0.0,
         vocal: None,
+        effort: None,
     }
 }
 

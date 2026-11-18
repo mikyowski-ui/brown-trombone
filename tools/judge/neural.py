@@ -975,6 +975,9 @@ def read_spans(path: Path) -> tuple[list[str], np.ndarray]:
 #: The engine's tags for vocalizations (``vocal::Vocalization::name``): written
 #: ``[sigh]`` in the text.
 TAGS = ("sigh", "laugh", "chuckle", "clear-throat", "cough")
+#: Vocal effort states written as tags (``[whisper]``): the engine goes into one from the next
+#: sound on; they take no time of their own and the model does not read them.
+EFFORTS = ("normal", "whisper", "shout", "projected", "exhausted", "tired", "nervous", "sob")
 _BRACKET = re.compile(r"\[([^\]]*)\]?")
 
 
@@ -985,6 +988,11 @@ def split_tags(text: str) -> tuple[str, list[int]]:
     refused: the model reads words."""
     tags, out, last = [], [], 0
     for m in _BRACKET.finditer(text):
+        if m.group(1).strip() in EFFORTS:
+            # a state of the voice, not a sound: out of the model's text, no pause of its own
+            out.append(text[last : m.start()])
+            last = m.end()
+            continue
         if m.group(1).strip() not in TAGS:
             raise ValueError(f"neural prosody reads words, not bracketed phonemes: {m.group(0)!r}")
         out.append(text[last : m.start()])

@@ -42,7 +42,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
 use synthie_trombone::{
-    Engine, MorphTarget, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings,
+    Effort, Engine, MorphTarget, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings,
 };
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
@@ -86,9 +86,12 @@ struct Cli {
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
-    /// Vocal effort, 0 (murmur) to 1 (calling out).
-    #[arg(long, default_value_t = Persona::NEUTRAL.effort)]
-    effort: f32,
+    /// Vocal effort: a number, 0 (murmur) to 1 (calling out), turns the
+    /// persona's dial; a name puts the voice into a vocal effort state
+    /// (physical engine): `normal`, `whisper`, `shout`, `exhausted` or
+    /// `nervous`.
+    #[arg(long, default_value = "0.5", value_parser = parse_effort)]
+    effort: EffortArg,
     /// Breathiness, 0 (pressed) to 1 (breathy).
     #[arg(long, default_value_t = Persona::NEUTRAL.breathiness)]
     breathiness: f32,
@@ -181,9 +184,15 @@ impl Cli {
             morph = morph.then(MorphTarget::matured(a));
         }
         base = base.with_morph(&morph);
+        if let EffortArg::State(state) = self.effort {
+            base = base.with_effort(state);
+        }
         let persona = Persona {
             size: self.size,
-            effort: self.effort,
+            effort: match self.effort {
+                EffortArg::Dial(dial) => dial,
+                EffortArg::State(_) => Persona::NEUTRAL.effort,
+            },
             breathiness: self.breathiness,
             clarity: self.clarity,
         };
@@ -198,6 +207,26 @@ fn parse_stereo(name: &str) -> Result<Stereo, String> {
         "off" | "mono" => Ok(Stereo::Off),
         other => Err(format!("unknown stereo {other:?}; try binaural or pair")),
     }
+}
+
+/// What `--effort` was given: the persona's dial or a vocal effort state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EffortArg {
+    Dial(f32),
+    State(Effort),
+}
+
+fn parse_effort(value: &str) -> Result<EffortArg, String> {
+    if let Ok(dial) = value.parse::<f32>() {
+        return Ok(EffortArg::Dial(dial));
+    }
+    Effort::from_name(&value.to_ascii_lowercase())
+        .map(EffortArg::State)
+        .ok_or_else(|| {
+            format!(
+                "unknown effort {value:?}; try a number from 0 to 1, or normal, whisper, shout, exhausted, nervous"
+            )
+        })
 }
 
 fn parse_engine(name: &str) -> Result<Engine, String> {
@@ -424,6 +453,35 @@ mod tests {
             .voice()
             .expect("a voice")
             .1
+    }
+
+    #[test]
+    fn effort_takes_the_persona_dial_or_a_state() {
+        let plain = voice(&["--engine", "physical"]);
+        let cli = |args: &[&str]| {
+            let mut all = vec!["synthie-trombone"];
+            all.extend_from_slice(args);
+            Cli::try_parse_from(all)
+                .expect("flags")
+                .voice()
+                .expect("a voice")
+        };
+        // A number turns the dial, as it always did.
+        let (_, base, persona) = cli(&["--engine", "physical", "--effort", "0.8"]);
+        assert_eq!(persona.effort, 0.8);
+        assert_eq!(base, plain);
+        // A name is a state of the voice; the dial stays neutral.
+        for e in Effort::ALL {
+            let (_, base, persona) = cli(&["--engine", "physical", "--effort", e.name()]);
+            assert_eq!(persona.effort, Persona::NEUTRAL.effort);
+            assert_eq!(base, plain.with_effort(e));
+            assert_eq!(Effort::of(&base.tuning), e);
+        }
+        assert_eq!(
+            voice(&["--engine", "physical", "--effort", "tired"]),
+            plain.with_effort(Effort::Exhausted)
+        );
+        assert!(Cli::try_parse_from(["synthie-trombone", "--effort", "loud"]).is_err());
     }
 
     #[test]

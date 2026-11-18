@@ -227,6 +227,14 @@ impl Talker {
         self.voice.set_listener(listener);
     }
 
+    /// Put the voice into a vocal effort state while it speaks (see
+    /// [`Trombone::set_effort`]); [`VoiceSettings::with_effort`] gives a
+    /// talker the state from the start, and a tag in a text (`[whisper]`)
+    /// switches from there on.
+    pub fn set_effort(&mut self, effort: crate::Effort) {
+        self.voice.set_effort(effort);
+    }
+
     /// Morph the voice towards another body while it speaks (see
     /// [`Trombone::set_morph`]); [`VoiceSettings::with_morph`] gives a
     /// talker the body from the start.

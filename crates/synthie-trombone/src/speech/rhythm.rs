@@ -109,7 +109,7 @@ pub(crate) fn roles(tokens: &[Token]) -> Vec<Role> {
                 mark_last(&mut out[phrase..], &nuclei[phrase..], &vowels, phrase);
                 phrase = out.len();
             }
-            Token::Filler(_) => {}
+            Token::Filler(_) | Token::Effort(_) => {}
         }
     }
     roles_of_word(&word, &mut out, &mut nuclei);

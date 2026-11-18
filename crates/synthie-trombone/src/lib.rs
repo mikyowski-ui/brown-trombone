@@ -61,6 +61,7 @@
 extern crate alloc;
 
 mod articulators;
+mod effort;
 pub mod gesture;
 mod glottis;
 pub mod inverse;
@@ -97,6 +98,7 @@ pub mod vowel_targets;
 mod lpc;
 
 pub use articulators::ArticulatorFrame;
+pub use effort::Effort;
 pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
 pub use morph::MorphTarget;

@@ -85,6 +85,14 @@
 //! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
 //! bringing the loudest to 0.89 (for comparing levels between files).
 //!
+//! `--effort whisper|shout|exhausted|nervous` speaks the text in a vocal
+//! effort state (`Effort`: the lungs, the folds, the tube above them, the
+//! pitch, the jaw and a tremor, with the words and their timing left as
+//! they are; physical engine, by the rules or with `--neural`), and a tag
+//! in the text switches from there on: `"Wait. [whisper] Listen. [shout]
+//! Run! [normal] It is gone."`. (`--effort 0.7`, a number, is the
+//! persona's dial as before.)
+//!
 //! `--export-lipsync` writes the mouth that speaks the text beside the
 //! WAV, as `NAME.visemes.json`: a frame of ten channels (`ArticulatorFrame`:
 //! jaw, lips, tongue, velum, larynx, glottis, each 0 to 1) for every 512
@@ -120,7 +128,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
-use synthie_trombone::{ArticulatorFrame, Listener, MorphTarget, Stereo};
+use synthie_trombone::{ArticulatorFrame, Effort, Listener, MorphTarget, Stereo};
 use synthie_trombone::{
     Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
     inverse,
@@ -360,6 +368,7 @@ fn main() -> std::io::Result<()> {
     let mut morph = MorphTarget::NEUTRAL;
     let mut morph_sweep: Option<[f32; 2]> = None;
     let mut lipsync = false;
+    let mut effort = Effort::Normal;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -407,7 +416,15 @@ fn main() -> std::io::Result<()> {
             }
             "--size" => persona.size = value("--size").parse().expect("--size needs a number"),
             "--effort" => {
-                persona.effort = value("--effort").parse().expect("--effort needs a number");
+                // A number is the persona's dial, a name a vocal effort state.
+                let v = value("--effort");
+                match (v.parse::<f32>(), Effort::from_name(&v)) {
+                    (Ok(dial), _) => persona.effort = dial,
+                    (_, Some(state)) => effort = state,
+                    _ => panic!(
+                        "--effort needs a number (0 to 1) or one of normal, whisper, shout, exhausted, nervous"
+                    ),
+                }
             }
             "--breathiness" => {
                 persona.breathiness = value("--breathiness")
@@ -561,8 +578,11 @@ fn main() -> std::io::Result<()> {
         settings.tuning = settings.tuning.with_tongue(t);
     }
     // The body the voice is morphed into (the neutral morph changes
-    // nothing).
+    // nothing), and the vocal effort state it speaks in.
     settings = settings.with_morph(&morph);
+    if effort != Effort::Normal {
+        settings = settings.with_effort(effort);
+    }
     if dump {
         println!("{}", settings.to_profile());
         return Ok(());

@@ -519,6 +519,9 @@ pub(crate) struct Tract {
     /// How far the jaw parts the lips now (see [`Tract::jaw_opening`]): it
     /// follows where it is going with [`JAW_TIME`].
     jaw_open: f32,
+    /// The jaw's opening against the voice's own: a shout opens it wider
+    /// (`Trombone::set_effort`); `1` otherwise.
+    pub(crate) jaw_gain: f32,
     /// Length of a control block as a share of the long one (512 internal
     /// samples); see [`crate::math::approach`].
     pub(crate) block_share: f32,
@@ -646,6 +649,7 @@ impl Tract {
             dynamics: Dynamics::Linear,
             jaw: false,
             jaw_open: 0.0,
+            jaw_gain: 1.0,
             block_share: 1.0,
             motion: Tuning::DEFAULT,
             velocity: [0.0; N],
@@ -1106,7 +1110,7 @@ impl Tract {
                 smooth(s.c.diameter, JAW_CONSONANT, JAW_SPREAD)
             };
         }
-        JAW_OPENING * open.clamp(0.0, 1.0) * share
+        JAW_OPENING * self.jaw_gain * open.clamp(0.0, 1.0) * share
     }
 
     /// Target shape: tongue rest shape, then every live constriction carved

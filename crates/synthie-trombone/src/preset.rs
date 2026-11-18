@@ -215,6 +215,20 @@ impl VoiceSettings {
         self
     }
 
+    /// The same voice in a vocal effort state (see
+    /// [`Effort`](crate::Effort)): whispering, shouting, exhausted or
+    /// nervous. It is a number of the voice's tuning (`prosody.effort`), so
+    /// the voice takes the state's regime when the settings are applied and
+    /// speech is compiled for it; [`Effort::Normal`](crate::Effort::Normal)
+    /// leaves the voice as it is. A tag in the text (`[whisper]`) or
+    /// [`Trombone::set_effort`](crate::Trombone::set_effort) changes the
+    /// state of a voice that is sounding.
+    #[must_use]
+    pub fn with_effort(mut self, effort: crate::Effort) -> Self {
+        self.tuning = self.tuning.with_effort(effort);
+        self
+    }
+
     /// The same voice with the living voice's breath and creak (wave 3,
     /// physical engine) set: breaths drawn `intake` cmH2O deep in the
     /// pauses between its sentences, and before the utterance too where

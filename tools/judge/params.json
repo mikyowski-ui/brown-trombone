@@ -179,6 +179,7 @@
     "fillers": {"lo": 0, "hi": 1, "default": 1, "pass": "a"},
     "filler_length": {"lo": 0.2, "hi": 1, "default": 0.42, "pass": "b"},
     "filler_pause": {"lo": 0, "hi": 1, "default": 0.3, "pass": "b"},
-    "filler_pitch": {"lo": 0.6, "hi": 1, "default": 0.86, "pass": "a"}
+    "filler_pitch": {"lo": 0.6, "hi": 1, "default": 0.86, "pass": "a"},
+    "effort": {"lo": 0, "hi": 4, "default": 0, "pass": "a"}
   }
 }

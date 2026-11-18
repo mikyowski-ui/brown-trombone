@@ -308,7 +308,7 @@ range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 physically is. `AnatomyConfig` (`tuning.anatomy`, 46 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 76) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
-53) is the rhythm and melody of a phrase. The classic engine reads twelve
+54) is the rhythm and melody of a phrase. The classic engine reads twelve
 of them (marked *classic*: the lengths of sounds, stress, the gaps and the
 breath after a burst); the physical engine reads the rest as well.
 
@@ -546,6 +546,90 @@ the first frame at or after it reads `lip_close` at 0.98 or more, and the
 frame two before it does not: the track is within one frame of the sound.
 The jaw is the engine's own, which stays nearly shut for /ʌ ɔ o/ (0.17,
 0.14, 0.07): what opens the mouth there is not in this model.
+
+### Vocal effort
+
+An `Effort` is a regime of the body, not a way of pronouncing: the same
+sentence, by the rules or with a neural prosody, whispered, shouted,
+spoken by someone exhausted or by someone whose voice shakes. The words,
+their timing and their melody stay as they are; what changes is the
+lungs' pressure, how the folds are held, the tube above them, the pitch
+the effort lifts or lets sink, the jaw, the articulators' speed and a
+tremor.
+
+| State | What the body does |
+|---|---|
+| `whisper` | the folds held a slit apart behind an open chink (0.25 cm²) so that they never meet; the sound is the jet through them, with the lows that excite the formants; lungs 1.25 times the voice's |
+| `shout` (`projected`) | lungs 16 cmH2O (2 times), tenseness +0.2, the epilaryngeal tube's area 0.6 of itself, pitch +4 semitones, the jaw 1.3 times as open; no creak, deeper breaths |
+| `exhausted` (`tired`) | lungs 6 cmH2O (0.75 times), tenseness −0.1, a fifth of the folds' tension given up, pitch −1.5 semitones, articulators at 0.8 of their speed; a deep breath first, statements ending in 200 ms of creak, 12 % slower |
+| `nervous` (`sob`) | pitch (0.05) and lungs (0.17) trembling at 7 Hz, the voice's attack deeper, three times as long held and twice as uneven, pitch +1.5 semitones; a breath first, 6 % faster |
+
+```sh
+say --engine physical --effort shout "Run!"                       # a state for the whole text
+say --engine physical --neural M2 --effort exhausted "I can not go on."
+say --engine physical "Wait. [whisper] I heard something. [shout] Run! [normal] It is gone."
+```
+
+```rust
+use synthie_trombone::{Effort, Engine, Preset, Talker};
+
+let voice = Preset::Deep.settings().with_engine(Engine::Physical);
+let mut npc = Talker::new(48_000.0, voice.with_effort(Effort::Whisper));
+npc.say("Did you hear that? [shout] Run!");
+// … or while it sounds (it glides in over a tenth of a second):
+npc.set_effort(Effort::Nervous);
+```
+
+The state is a number of the voice's tuning (`prosody.effort`: 0 normal,
+1 whisper, 2 shout, 3 exhausted, 4 nervous; `VoiceSettings::with_effort`,
+`Tuning::with_effort`), so profiles, talkers and streams carry it, the
+voice takes the regime when it is given its settings, and speech is
+compiled for it (pace, the breath before the utterance, the creak). A
+voice that is sounding glides into a state with `Trombone::set_effort`,
+`Talker::set_effort` or `VoiceStream::set_effort`; in text a tag
+(`[whisper]`, `[shout]`, `[exhausted]`, `[nervous]`, `[normal]`, and the
+other names) switches from the next sound on, with no pause of its own;
+the next utterance starts again in the state it was compiled for. What
+the speech, the score or the caller ask of the voice meanwhile (pitch,
+tenseness, slack, lung pressure) is kept as asked and laid under the
+regime. `--effort` with a number is still the persona's dial.
+
+Measured on "We were away a year ago. Mary may win more money.", the deep
+voice (`examples/effort.rs`, `tests/effort_gate.rs`):
+
+| State | Level | Pitch | 2.5–5 kHz against 0–1 kHz | H1−H2 of the flow | Lungs (median) | Seconds | Jaw |
+|---|---|---|---|---|---|---|---|
+| normal | −25.6 dB | 116 Hz | −24.7 dB | 13.8 dB | 6.2 cmH2O | 4.10 | 0.60 |
+| whisper | −39.4 dB | no voice (the glottis never under 0.03 cm²) | 0.0 dB | | 7.7 | 4.10 | 0.60 |
+| shout | −16.0 dB | 145 Hz | −20.0 dB | 12.3 dB | 12.9 (16 at its fullest) | 4.34 | 0.78 |
+| exhausted | −30.5 dB | 87 Hz | −24.6 dB | 14.1 dB | 4.6 (5.4 at its fullest) | 4.97 | 0.60 |
+| nervous | −24.9 dB | 126 Hz, trembling 0.043 at 7.0 Hz (normal 0.017) | −24.0 dB | 13.4 dB | 6.2, trembling 0.08 | 4.13 | 0.59 |
+
+Whisper's words (single runs; the four sentences as one clip, ten tuning
+and ten held-out sentences), by the rules and, on the clip, with
+tiny-voca's M2 prosody:
+
+| State | Clip | 10 tuning | 10 held-out | Clip, `--neural M2` |
+|---|---|---|---|---|
+| normal | 24/31 | 81.5 % | 81.2 % | 28/31 |
+| whisper | 21/31 | 43.2 % | 31.2 % | 21/31 |
+| shout | 25/31 | 85.2 % | 82.5 % | 28/31 |
+| exhausted | 24/31 | 84.0 % | 81.2 % | 26/31 |
+| nervous | 26/31 | 76.5 % | 71.2 % | 27/31 |
+
+The whisper is the weak one. It had been at 7 % of the tuning sentences'
+words: with the voice asked for, the breath through the folds was taken
+for that of vibrating folds and lost everything under 5 kHz, so nothing
+excited the formants. In a whisper the folds are now not counted as
+singing (25 %), and they are held a slit apart (tenseness 0.11) and not
+a breath's width (43 %; at 0.06, 37 %). A recognizer trained on voices
+still loses most single whispered sentences. The existing `whisper`
+voice (tenseness 0) is as it was.
+
+Thrown at a speaking voice in any order (states, morphs, coughs and
+laughs, lung pressures, tenseness, block lengths; six seeds of a fuzz in
+the gate) the sound stays finite and bounded, every utterance ends, and
+the next sentence comes out within 6 dB of a fresh voice's.
 
 ## The physical engine
 

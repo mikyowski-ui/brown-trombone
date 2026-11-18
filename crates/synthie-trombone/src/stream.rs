@@ -90,8 +90,8 @@ pub use text::Granularity;
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
 use crate::{
-    ArticulatorFrame, Constriction, Listener, MorphTarget, Phoneme, Stereo, Trombone, Vocal,
-    Vocalization,
+    ArticulatorFrame, Constriction, Effort, Listener, MorphTarget, Phoneme, Stereo, Trombone,
+    Vocal, Vocalization,
 };
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
@@ -177,6 +177,9 @@ pub enum Event {
     /// Morph the voice towards another body (see [`Trombone::set_morph`]):
     /// it glides there.
     Morph(MorphTarget),
+    /// Put the voice into a vocal effort state (see
+    /// [`Trombone::set_effort`]): it glides into it.
+    Effort(Effort),
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -234,6 +237,7 @@ const TAG_LISTENER: u8 = 40;
 const TAG_STEREO: u8 = 41;
 const TAG_VOCALIZE: u8 = 30;
 const TAG_MORPH: u8 = 42;
+const TAG_EFFORT: u8 = 43;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -340,6 +344,7 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::Stereo(_) => TAG_STEREO,
         Event::Vocalize(_) => TAG_VOCALIZE,
         Event::Morph(_) => TAG_MORPH,
+        Event::Effort(_) => TAG_EFFORT,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -417,6 +422,11 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
             ] {
                 m.float(x);
             }
+        }
+        Event::Effort(e) => {
+            #[allow(clippy::cast_possible_truncation)]
+            let code = Effort::ALL.iter().position(|&k| k == e).unwrap_or(0) as u32;
+            m.word(code);
         }
         Event::Morph(b) => {
             for x in [
@@ -558,6 +568,12 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             heard_azimuth: r.float(),
             heard_elevation: r.float(),
         }),
+        TAG_EFFORT => Event::Effort(
+            Effort::ALL
+                .get(r.word() as usize)
+                .copied()
+                .unwrap_or(Effort::Normal),
+        ),
         TAG_MORPH => Event::Morph(MorphTarget {
             tract_scale: r.float(),
             larynx_depth: r.float(),
@@ -975,6 +991,19 @@ impl<'a> VoiceStream<'a> {
         when: When,
     ) -> Result<(), Full<Gesture>> {
         self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// Put the voice into a vocal effort state while it plays (see
+    /// [`Trombone::set_effort`]): a whisper, a shout, exhaustion, a nervous
+    /// tremor, or back to normal. Speech the stream is saying goes on in
+    /// it, until a tag of its text or its next utterance says otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the state when the ring has no room for it.
+    pub fn set_effort(&mut self, effort: Effort, when: When) -> Result<(), Full<Effort>> {
+        self.push_when(when, Event::Effort(effort))
+            .map_err(|_| Full(effort))
     }
 
     /// The next frame of the articulators the player has sent, with the
@@ -1504,6 +1533,7 @@ impl<'a> VoicePlayer<'a> {
             Event::Listener(l) => voice.set_listener(l),
             Event::Stereo(s) => voice.set_stereo(s),
             Event::Morph(b) => voice.set_morph(b),
+            Event::Effort(e) => voice.set_effort(e),
             Event::Vocalize(v) => {
                 #[cfg(feature = "std")]
                 if let Some(talk) = &mut self.talk

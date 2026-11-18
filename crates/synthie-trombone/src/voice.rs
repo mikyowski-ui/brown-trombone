@@ -3,6 +3,7 @@
 
 use crate::ArticulatorFrame;
 use crate::INTERNAL_RATE;
+use crate::effort::{self, Effort, Regime};
 use crate::gesture::{self, Blend, Gesture, GestureId, Score, Target, Tier, TierActivity, Window};
 use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
@@ -38,6 +39,18 @@ const BREATH_RAMP: f32 = 0.03;
 /// Most a vocalization's push may ask of the lungs, cmH2O (see
 /// [`Trombone::set_lung_push`]).
 const PUSH_MOST: f32 = 100.0;
+/// What a voice was last asked for where a vocal effort's regime comes
+/// between the asking and the body (see `Trombone::set_effort`).
+#[derive(Clone, Copy, Debug)]
+struct Asked {
+    frequency: f32,
+    tenseness: f32,
+    slack: f32,
+    speed: f32,
+    lung: f32,
+    intake: f32,
+}
+
 /// The most a morph's tract scale moves in a second by default (see
 /// `Trombone::set_morph_speed`): 1 % of the tract's length in a 10.7 ms
 /// block, which is heard as the formants gliding.
@@ -320,6 +333,27 @@ pub struct Trombone {
     morph: MorphTarget,
     morph_target: MorphTarget,
     morph_speed: f32,
+    /// The vocal effort state the voice is in or gliding into (see
+    /// [`Trombone::set_effort`]), the regime of the body as it stands, the
+    /// regimes it is gliding between and how far along it is.
+    effort: Effort,
+    regime: Regime,
+    regime_from: Regime,
+    regime_to: Regime,
+    regime_mix: f32,
+    /// The tremor's two phases, radians.
+    tremor: [f32; 2],
+    /// What the regime makes of the pitch, the lungs' pressure and the
+    /// breath drawn in at this moment (the tremor is in them): factors on
+    /// what was asked for.
+    pitch_factor: f32,
+    lung_factor: f32,
+    intake_factor: f32,
+    /// What the caller, the speech or the score last asked for, before
+    /// the regime: the pitch (Hz), the tenseness, the fold slack, the
+    /// articulators' speed, the lungs' pressure and the breath drawn in
+    /// (cmH2O).
+    asked: Asked,
     step: f64,
     frac: f64,
     prev: f32,
@@ -408,6 +442,23 @@ impl Trombone {
             morph: MorphTarget::NEUTRAL,
             morph_target: MorphTarget::NEUTRAL,
             morph_speed: MORPH_SPEED,
+            effort: Effort::Normal,
+            regime: Regime::NEUTRAL,
+            regime_from: Regime::NEUTRAL,
+            regime_to: Regime::NEUTRAL,
+            regime_mix: 1.0,
+            tremor: [0.0; 2],
+            pitch_factor: 1.0,
+            lung_factor: 1.0,
+            intake_factor: 1.0,
+            asked: Asked {
+                frequency: 140.0,
+                tenseness: 0.6,
+                slack: 0.0,
+                speed: 1.0,
+                lung: Tuning::DEFAULT.anatomy.lung_pressure,
+                intake: 0.0,
+            },
             step: f64::from(INTERNAL_RATE) / f64::from(sample_rate),
             frac: 1.0,
             prev: 0.0,
@@ -508,15 +559,117 @@ impl Trombone {
     pub fn set_tuning(&mut self, tuning: &Tuning) {
         let tuning = tuning.clamped();
         self.tuning = tuning;
+        self.asked.lung = tuning.anatomy.lung_pressure;
+        // The vocal effort state the tuning asks for, at once (a voice is
+        // given its tuning before it speaks; `set_effort` glides).
+        let effort = Effort::of(&tuning);
+        let changed = effort != self.effort || self.regime != effort.regime();
+        self.effort = effort;
+        self.regime = effort.regime();
+        (self.regime_from, self.regime_to, self.regime_mix) = (self.regime, self.regime, 1.0);
         self.lay_tuning();
+        if changed || self.regime != Regime::NEUTRAL {
+            self.apply_regime();
+        }
         self.sync_wander();
+    }
+
+    /// Put the voice into a vocal effort state while it sounds (see
+    /// [`Effort`]): a whisper, a shout, exhaustion, a nervous tremor, or
+    /// back to normal. The body glides into the state's regime over a
+    /// tenth of a second: the lungs' pressure, how the folds are held, the
+    /// tube above them, the pitch it lifts or lets sink, the jaw, the
+    /// articulators' speed and the tremor, each laid over whatever the
+    /// speech, the score or the caller asks of the voice from then on
+    /// (their pitch, tenseness, slack and lung pressure are kept as asked
+    /// and come back with [`Effort::Normal`]). Physical engine: the
+    /// classic engine takes the pitch, the tenseness and the tremor.
+    /// [`set_tuning`](Self::set_tuning) puts the voice at once into the
+    /// state its tuning names (`prosody.effort`).
+    pub fn set_effort(&mut self, effort: Effort) {
+        if effort == self.effort {
+            return;
+        }
+        self.effort = effort;
+        self.regime_from = self.regime;
+        self.regime_to = effort.regime();
+        self.regime_mix = 0.0;
+    }
+
+    /// The vocal effort state the voice is in or gliding into.
+    #[must_use]
+    pub fn effort(&self) -> Effort {
+        self.effort
+    }
+
+    /// One control block of `dt` seconds of a vocal effort: the glide from
+    /// one regime into another, and the tremor.
+    fn glide_regime(&mut self, dt: f32) {
+        if self.regime_mix < 1.0 {
+            self.regime_mix = (self.regime_mix + dt / effort::GLIDE).min(1.0);
+            let t = self.regime_mix;
+            self.regime = if t >= 1.0 {
+                self.regime_to
+            } else {
+                self.regime_from
+                    .mix(&self.regime_to, t * t * (3.0 - 2.0 * t))
+            };
+            self.lay_tuning();
+        }
+        let w = 2.0 * PI * effort::TREMOR_RATE * dt;
+        self.tremor[0] = (self.tremor[0] + w) % (2.0 * PI);
+        self.tremor[1] = (self.tremor[1] + 2.3 * w) % (2.0 * PI);
+        self.apply_regime();
+    }
+
+    /// Lay the regime over what the voice was asked for: the pitch, the
+    /// tenseness, the slack, the articulators' speed, the lungs and the
+    /// jaw as they are to be at this moment.
+    fn apply_regime(&mut self) {
+        let r = self.regime;
+        // A tremor is not one sine: a second, faster and weaker, keeps it
+        // from sounding like a vibrato.
+        let shake = if r.tremor > 0.0 {
+            r.tremor
+                * (0.8 * crate::math::sin(self.tremor[0]) + 0.2 * crate::math::sin(self.tremor[1]))
+        } else {
+            0.0
+        };
+        self.pitch_factor = crate::math::powf(2.0, r.pitch / 12.0) * (1.0 + shake);
+        self.intake_factor = 1.0 + effort::TREMOR_LUNG * shake;
+        self.lung_factor = r.lung * self.intake_factor;
+        self.glottis.target_frequency =
+            (self.asked.frequency * self.pitch_factor).clamp(20.0, 2000.0);
+        self.glottis.target_tenseness = self.regime_tenseness();
+        self.tract.tenseness = self.glottis.target_tenseness;
+        self.source.slack_target = (self.asked.slack + r.slack).clamp(0.0, 0.5);
+        self.tract.movement_speed = MOVEMENT_SPEED * self.asked.speed * r.speed;
+        self.tract.jaw_gain = r.jaw;
+        self.source
+            .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
+        self.source.intake = (self.asked.intake * self.intake_factor).clamp(0.0, 8.0);
+    }
+
+    /// The tenseness asked for as the regime holds the folds: added to,
+    /// and brought to nothing by a whisper.
+    fn regime_tenseness(&self) -> f32 {
+        let w = self.regime.whisper;
+        ((self.asked.tenseness + self.regime.tenseness) * (1.0 - w)
+            + w * self.asked.tenseness.min(effort::WHISPER_HOLD))
+        .clamp(0.0, 1.0)
     }
 
     /// Hand the tuning to the parts that read it, with the morph's larynx,
     /// folds and throat laid over it (`tuning()` stays the voice's own).
     fn lay_tuning(&mut self) {
-        let tuning = self.morph.over(&self.tuning);
+        let tuning = self.regime.over(&self.morph.over(&self.tuning));
         self.source.set_tuning(&tuning);
+        // (The source takes its lungs' pressure from a tuning: the
+        // regime's is put back.)
+        if self.lung_factor.to_bits() != 1.0f32.to_bits() {
+            self.source
+                .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
+        }
         self.phys.set_tuning(&tuning);
         self.tract.motion = tuning;
     }
@@ -613,7 +766,9 @@ impl Trombone {
     /// below a few cmH2O the folds stop vibrating.
     pub fn set_lung_pressure(&mut self, cm_h2o: f32) {
         if cm_h2o.is_finite() {
-            self.source.set_lung_pressure(cm_h2o.clamp(1.0, 40.0));
+            self.asked.lung = cm_h2o.clamp(1.0, 40.0);
+            self.source
+                .set_lung_pressure((self.asked.lung * self.lung_factor).clamp(1.0, 40.0));
         }
     }
 
@@ -773,7 +928,8 @@ impl Trombone {
     /// engine only; `0` by default.
     pub fn set_fold_slack(&mut self, share: f32) {
         if share.is_finite() {
-            self.source.slack_target = share.clamp(0.0, 0.5);
+            self.asked.slack = share.clamp(0.0, 0.5);
+            self.source.slack_target = (self.asked.slack + self.regime.slack).clamp(0.0, 0.5);
         }
     }
 
@@ -833,7 +989,8 @@ impl Trombone {
     /// [`breathe_in`](Self::breathe_in)). Physical engine only.
     pub fn set_inhalation(&mut self, cm_h2o: f32) {
         if cm_h2o.is_finite() {
-            self.source.intake = cm_h2o.clamp(0.0, 8.0);
+            self.asked.intake = cm_h2o.clamp(0.0, 8.0);
+            self.source.intake = (self.asked.intake * self.intake_factor).clamp(0.0, 8.0);
         }
     }
 
@@ -1009,7 +1166,9 @@ impl Trombone {
     /// Target pitch in Hz (clamped to 20‥2000).
     pub fn set_frequency(&mut self, hz: f32) {
         if hz.is_finite() {
-            self.glottis.target_frequency = hz.clamp(20.0, 2000.0);
+            self.asked.frequency = hz.clamp(20.0, 2000.0);
+            self.glottis.target_frequency =
+                (self.asked.frequency * self.pitch_factor).clamp(20.0, 2000.0);
         }
     }
 
@@ -1021,7 +1180,7 @@ impl Trombone {
     /// Target pitch in Hz.
     #[must_use]
     pub fn target_frequency(&self) -> f32 {
-        self.glottis.target_frequency
+        self.asked.frequency
     }
 
     /// Current pitch in Hz, after glide, vibrato and jitter.
@@ -1033,7 +1192,8 @@ impl Trombone {
     /// Glottal tenseness, `0` (breathy whisper) to `1` (pressed).
     pub fn set_tenseness(&mut self, tenseness: f32) {
         if tenseness.is_finite() {
-            self.glottis.target_tenseness = tenseness.clamp(0.0, 1.0);
+            self.asked.tenseness = tenseness.clamp(0.0, 1.0);
+            self.glottis.target_tenseness = self.regime_tenseness();
             // The epilaryngeal tube narrows with it (physical engine;
             // `AnatomyConfig::epilarynx_effort`).
             self.tract.tenseness = self.glottis.target_tenseness;
@@ -1043,7 +1203,7 @@ impl Trombone {
     /// Glottal tenseness.
     #[must_use]
     pub fn tenseness(&self) -> f32 {
-        self.glottis.target_tenseness
+        self.asked.tenseness
     }
 
     /// Vibrato depth (relative pitch, default `0.005`) and rate in Hz.
@@ -1209,7 +1369,8 @@ impl Trombone {
     /// Articulator speed multiplier (`1.0` is the original's).
     pub fn set_articulation_speed(&mut self, factor: f32) {
         if factor.is_finite() {
-            self.tract.movement_speed = MOVEMENT_SPEED * factor.clamp(0.05, 20.0);
+            self.asked.speed = factor.clamp(0.05, 20.0);
+            self.tract.movement_speed = MOVEMENT_SPEED * self.asked.speed * self.regime.speed;
         }
     }
 
@@ -2518,6 +2679,9 @@ impl Trombone {
             if self.morph != self.morph_target {
                 self.glide_morph(block as f32 / self.internal_rate);
             }
+            if self.regime_mix < 1.0 || self.regime.tremor > 0.0 {
+                self.glide_regime(block as f32 / self.internal_rate);
+            }
             let dt = block as f32 / self.internal_rate;
             let tiers = self.score.engaged_tiers();
             if tiers != 0 {
@@ -2561,11 +2725,15 @@ impl Trombone {
                 if slow {
                     self.source
                         .begin_block(&self.glottis, self.tract.any_constriction());
-                    self.phys.voiced_target = if self.source.sounding().is_some() {
-                        1.0
-                    } else {
-                        0.0
-                    };
+                    // (In a whisper the folds are not singing: the breath
+                    // through them is an open glottis's, with the lows
+                    // that excite the formants.)
+                    self.phys.voiced_target =
+                        if self.source.sounding().is_some() && self.regime.whisper < 0.5 {
+                            1.0
+                        } else {
+                            0.0
+                        };
                 }
             }
         }

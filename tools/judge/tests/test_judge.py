@@ -42,13 +42,13 @@ def test_params_file_matches_brief():
     assert list(json.loads((HERE / "params.json").read_text())) == list(T.PARTS)
     assert sum(p["part"] == "anatomy" for p in params.values()) == 46
     assert sum(p["part"] == "articulation" for p in params.values()) == 77
-    assert sum(p["part"] == "prosody" for p in params.values()) == 53
+    assert sum(p["part"] == "prosody" for p in params.values()) == 54
     # ...and in its passes (a: how sounds are made, b: how they follow one
     # another, c: vowel lengths).
-    assert sum(p["pass"] == "a" for p in params.values()) == 86
+    assert sum(p["pass"] == "a" for p in params.values()) == 87
     assert sum(p["pass"] == "b" for p in params.values()) == 75
     assert sum(p["pass"] == "c" for p in params.values()) == 15
-    assert len(params) == 176
+    assert len(params) == 177
     # The twelve the classic engine reads as well are not tuned by default.
     shared = {n for n, p in params.items() if p.get("classic")}
     assert len(shared) == 12 and {"vowel_length", "stop_length", "aspiration"} <= shared

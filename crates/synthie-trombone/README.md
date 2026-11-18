@@ -206,6 +206,25 @@ assert_eq!(frames.len(), samples.len().div_ceil(512));
 assert!(frames.iter().any(|f| f.lip_close == 1.0 && f.velum_open > 0.9));
 ```
 
+## Vocal effort
+
+Any sentence can be whispered, shouted, spoken exhausted or with a
+nervous tremor: an `Effort` changes the body (lungs, folds, the tube
+above them, pitch, jaw, tremor), not the words. Set it for a voice, switch
+it with a tag in the text, or glide into it while the voice sounds.
+
+```rust
+use synthie_trombone::{Effort, Engine, Preset, Talker};
+
+let voice = Preset::Deep.settings().with_engine(Engine::Physical);
+let mut npc = Talker::new(48_000.0, voice.with_effort(Effort::Shout));
+let loud = npc.bake("Run!");
+let mut npc = Talker::new(48_000.0, voice);
+let soft = npc.bake("[whisper] Run!");
+let level = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
+assert!(level(&loud) > 4.0 * level(&soft));
+```
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six
@@ -311,7 +330,7 @@ Both engines read their numbers from `Tuning`, in three parts:
 `AnatomyConfig` (the body, its tissues and sources: 46 numbers),
 `ArticulationConfig` (how sounds are made and joined: 77, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
-`ProsodyConfig` (the rhythm and melody of a phrase: 53), each number with
+`ProsodyConfig` (the rhythm and melody of a phrase: 54), each number with
 a default and a plausible range (`Tuning::FIELDS`; the classic engine
 reads twelve of them). A JSON profile can set them by name, flat or by
 part (`profile` feature, `VoiceSettings::with_profile`). The repository README has the details,

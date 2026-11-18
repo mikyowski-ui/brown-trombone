@@ -440,6 +440,16 @@ def test_tags_are_taken_out_of_the_model_text_and_phonemes_refused():
         N.split_tags("Say [HH AX L OW1] now.")
 
 
+def test_vocal_effort_tags_are_out_of_the_model_text_and_hold_no_pause():
+    given = "Wait. [whisper] I heard it. [shout] Run! [sigh] [tired] Oh. [normal] Gone."
+    text, tags = N.split_tags(given)
+    # the model reads the words; only the vocalization keeps a place for its pause
+    assert text == "Wait. I heard it. Run! Oh. Gone."
+    assert tags == [given.index("[sigh")]
+    for name in N.EFFORTS:
+        assert N.split_tags(f"One [{name}] two.") == ("One two.", [])
+
+
 def test_a_pause_held_open_moves_what_follows_and_the_tracks_with_it():
     fr = N.frame_seconds()
     mp = N.ModelPhones()
