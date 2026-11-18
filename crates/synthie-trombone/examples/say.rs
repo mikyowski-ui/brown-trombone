@@ -85,6 +85,11 @@
 //! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
 //! bringing the loudest to 0.89 (for comparing levels between files).
 //!
+//! `--export-lipsync` writes the mouth that speaks the text beside the
+//! WAV, as `NAME.visemes.json`: a frame of ten channels (`ArticulatorFrame`:
+//! jaw, lips, tongue, velum, larynx, glottis, each 0 to 1) for every 512
+//! samples of the file, frame `k` at sample `k · 512`.
+//!
 //! Another body for the same voice (`MorphTarget`): `--morph-size 0.9`
 //! scales the vocal tract (0.75 to 1.25) with the folds that go with it,
 //! `--morph-age 1` matures the speaker (−1 to 1: a longer tract, a lower
@@ -115,11 +120,11 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use synthie_trombone::speech::{self, FollowOptions, PhoneSpan, PitchMode, Schedule, Utterance};
 use synthie_trombone::vowel_targets::{self, VowelKey};
+use synthie_trombone::{ArticulatorFrame, Listener, MorphTarget, Stereo};
 use synthie_trombone::{
     Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
     inverse,
 };
-use synthie_trombone::{Listener, MorphTarget, Stereo};
 use synthie_trombone::{Trombone, normalize};
 
 /// A prosody schedule (`tools/judge/prosody.py`) from its JSON.
@@ -354,6 +359,7 @@ fn main() -> std::io::Result<()> {
     let mut tongue: Option<TongueModel> = None;
     let mut morph = MorphTarget::NEUTRAL;
     let mut morph_sweep: Option<[f32; 2]> = None;
+    let mut lipsync = false;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -434,6 +440,7 @@ fn main() -> std::io::Result<()> {
             "--no-breath" => breath = Some(false),
             "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
             "--raw" => raw = true,
+            "--export-lipsync" => lipsync = true,
             "--morph-size" => {
                 let s = value("--morph-size")
                     .parse()
@@ -616,6 +623,8 @@ fn main() -> std::io::Result<()> {
         last = Some(s.phoneme);
     }
     println!();
+    // The mouth that speaks it, a frame every 512 samples.
+    talker.record_articulators(lipsync);
     let started = Instant::now();
     let channels = if stereo == Stereo::Off { 1 } else { 2 };
     let mut out = if let (Stereo::Off, Some([from, to])) = (stereo, morph_sweep) {
@@ -677,6 +686,39 @@ fn main() -> std::io::Result<()> {
         wav::write(&path, SR, &out)?;
     } else {
         wav::write_stereo(&path, SR, &out)?;
+    }
+    if lipsync {
+        let frames = talker.take_articulators();
+        let file = std::path::Path::new(&path).with_extension("visemes.json");
+        let rows: Vec<Vec<f32>> = frames
+            .iter()
+            .map(|f| {
+                f.to_array()
+                    .iter()
+                    .map(|c| (c * 10_000.0).round() / 10_000.0)
+                    .collect()
+            })
+            .collect();
+        std::fs::write(
+            &file,
+            serde_json::json!({
+                "format": "synthie-visemes-1",
+                "audio": std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy()),
+                "sample_rate": SR,
+                "frame_samples": 512,
+                "frame_rate": 1.0 / ArticulatorFrame::PERIOD,
+                "samples": out.len() / channels as usize,
+                "channels": ArticulatorFrame::CHANNELS,
+                "frames": rows,
+            })
+            .to_string(),
+        )?;
+        println!(
+            "wrote {} ({} frames of {} channels, one every 512 samples)",
+            file.display(),
+            frames.len(),
+            ArticulatorFrame::CHANNELS.len()
+        );
     }
     let seconds = out.len() as f32 / (channels * SR) as f32;
     println!(

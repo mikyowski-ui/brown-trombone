@@ -89,7 +89,10 @@ pub use text::Granularity;
 
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
-use crate::{Constriction, Listener, MorphTarget, Phoneme, Stereo, Trombone, Vocal, Vocalization};
+use crate::{
+    ArticulatorFrame, Constriction, Listener, MorphTarget, Phoneme, Stereo, Trombone, Vocal,
+    Vocalization,
+};
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
@@ -601,10 +604,89 @@ type ClockWord = core::sync::atomic::AtomicU64;
 #[cfg(not(target_has_atomic = "64"))]
 type ClockWord = AtomicU32;
 
+/// Frames of the articulators kept for the controller: two thirds of a
+/// second of them. A controller that falls further behind loses the oldest.
+const FRAMES: usize = 64;
+/// Samples at 48 kHz between two frames ([`ArticulatorFrame::PERIOD`]).
+const FRAME_SAMPLES: f64 = 512.0;
+/// Words of a frame: the sample it was taken at, then its ten channels.
+const FRAME_WORDS: usize = 12;
+
+/// The articulators' frames on their way from the player to the
+/// controller: the player writes one into the next slot and then publishes
+/// its count; it never waits, and overwrites the oldest.
+#[derive(Debug)]
+struct Frames {
+    slots: [[AtomicU32; FRAME_WORDS]; FRAMES],
+    written: AtomicU32,
+}
+
+impl Frames {
+    const fn new() -> Self {
+        Self {
+            slots: [const { [const { AtomicU32::new(0) }; FRAME_WORDS] }; FRAMES],
+            written: AtomicU32::new(0),
+        }
+    }
+
+    fn clear(&self) {
+        self.written.store(0, Ordering::Release);
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn publish(&self, at: u64, frame: &ArticulatorFrame) {
+        let n = self.written.load(Ordering::Relaxed);
+        let slot = &self.slots[n as usize % FRAMES];
+        slot[0].store(at as u32, Ordering::Relaxed);
+        slot[1].store((at >> 32) as u32, Ordering::Relaxed);
+        for (word, channel) in slot[2..].iter().zip(frame.to_array()) {
+            word.store(channel.to_bits(), Ordering::Relaxed);
+        }
+        self.written.store(n.wrapping_add(1), Ordering::Release);
+    }
+
+    /// The frame after the `read` already taken, if the player has sent
+    /// one; frames the player has since overwritten are skipped.
+    fn take(&self, read: &mut u32) -> Option<(u64, ArticulatorFrame)> {
+        loop {
+            let written = self.written.load(Ordering::Acquire);
+            let behind = written.wrapping_sub(*read) as usize;
+            if behind == 0 {
+                return None;
+            }
+            if behind >= FRAMES {
+                #[allow(clippy::cast_possible_truncation)]
+                let kept = FRAMES as u32 - 1;
+                *read = written.wrapping_sub(kept);
+            }
+            let slot = &self.slots[*read as usize % FRAMES];
+            let mut words = [0u32; FRAME_WORDS];
+            for (w, s) in words.iter_mut().zip(slot) {
+                *w = s.load(Ordering::Relaxed);
+            }
+            // The player writes this slot again once it is a whole ring
+            // ahead: if it got there meanwhile, what was read is torn.
+            let now = self.written.load(Ordering::Acquire);
+            if now.wrapping_sub(*read) as usize >= FRAMES {
+                continue;
+            }
+            *read = read.wrapping_add(1);
+            let mut channels = [0.0f32; 10];
+            for (c, w) in channels.iter_mut().zip(&words[2..]) {
+                *c = f32::from_bits(*w);
+            }
+            let at = u64::from(words[0]) | (u64::from(words[1]) << 32);
+            return Some((at, ArticulatorFrame::from_array(channels)));
+        }
+    }
+}
+
 /// What both ends share besides the words.
 #[derive(Debug)]
 struct Shared {
     counters: Counters,
+    /// The articulators' frames, from the player.
+    frames: Frames,
     /// The player's clock, as it last told it.
     clock: ClockWord,
     /// Utterances sent and not yet begun or dropped by the player.
@@ -616,6 +698,7 @@ impl Shared {
     const fn new() -> Self {
         Self {
             counters: Counters::new(),
+            frames: Frames::new(),
             clock: ClockWord::new(0),
             #[cfg(feature = "std")]
             queued: AtomicUsize::new(0),
@@ -672,6 +755,7 @@ impl<const WORDS: usize> StreamBuffer<WORDS> {
     /// [`voice_stream`] (and `std`).
     pub fn split(&mut self) -> (VoiceStream<'_>, VoicePlayer<'_>) {
         self.shared.counters.clear();
+        self.shared.frames.clear();
         self.shared.set_clock(0);
         let link = || Link::Borrowed {
             shared: &self.shared,
@@ -792,6 +876,8 @@ pub struct TextSent {
 #[derive(Debug)]
 pub struct VoiceStream<'a> {
     link: Link<'a>,
+    /// Frames of the articulators taken so far.
+    frames_read: u32,
     #[cfg(feature = "std")]
     lane: Option<Lane>,
     #[cfg(feature = "std")]
@@ -808,6 +894,7 @@ impl<'a> VoiceStream<'a> {
     fn new(link: Link<'a>) -> Self {
         Self {
             link,
+            frames_read: 0,
             #[cfg(feature = "std")]
             lane: None,
             #[cfg(feature = "std")]
@@ -888,6 +975,18 @@ impl<'a> VoiceStream<'a> {
         when: When,
     ) -> Result<(), Full<Gesture>> {
         self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// The next frame of the articulators the player has sent, with the
+    /// sample on the player's clock it was taken at, or `None` when every
+    /// frame so far has been taken. The player sends one every
+    /// [`ArticulatorFrame::PERIOD`] (512 samples at 48 kHz, 10.67 ms)
+    /// without allocating or waiting, the first at its first sample; it
+    /// keeps the last 63 (two thirds of a second), so a controller that
+    /// draws a face calls this until it is empty once a video frame and
+    /// loses nothing, and one that falls further behind loses the oldest.
+    pub fn poll_frame(&mut self) -> Option<(u64, ArticulatorFrame)> {
+        self.link.parts().0.frames.take(&mut self.frames_read)
     }
 
     /// Morph the voice towards another body while it plays (see
@@ -1236,6 +1335,9 @@ struct Due {
 pub struct VoicePlayer<'a> {
     link: Link<'a>,
     now: u64,
+    /// Samples at 48 kHz since the last frame of the articulators was
+    /// sent: the next goes out at 512.
+    frame_phase: f64,
     due: Option<Due>,
     #[cfg(feature = "std")]
     talk: Option<Talk>,
@@ -1246,6 +1348,7 @@ impl<'a> VoicePlayer<'a> {
         Self {
             link,
             now: 0,
+            frame_phase: FRAME_SAMPLES,
             due: None,
             #[cfg(feature = "std")]
             talk: None,
@@ -1299,6 +1402,14 @@ impl<'a> VoicePlayer<'a> {
             self.due = None;
             self.carry_out(voice, due.item);
         }
+        // The articulators as they stand before this sample, every
+        // 10.67 ms, for the controller to draw a face from.
+        if self.frame_phase >= FRAME_SAMPLES {
+            self.frame_phase -= FRAME_SAMPLES;
+            let frame = voice.articulators();
+            self.link.parts().0.frames.publish(self.now, &frame);
+        }
+        self.frame_phase += 48_000.0 / f64::from(voice.sample_rate());
         #[cfg(feature = "std")]
         let out = match &mut self.talk {
             Some(talk) => talk.process(voice, self.now, self.link.parts().0),

@@ -1,6 +1,7 @@
 //! [`Trombone`]: the complete voice — glottis, tract, noise and resampling —
 //! behind a small, real-time safe API.
 
+use crate::ArticulatorFrame;
 use crate::INTERNAL_RATE;
 use crate::gesture::{self, Blend, Gesture, GestureId, Score, Target, Tier, TierActivity, Window};
 use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
@@ -2124,6 +2125,28 @@ impl Trombone {
     #[must_use]
     pub fn tick_rate(&self) -> f32 {
         2.0 * self.internal_rate
+    }
+
+    /// What the articulators are doing at this moment, every channel
+    /// `0‥1`, for a face, a mouth or a debugger to be drawn from (see
+    /// [`ArticulatorFrame`]): the jaw, the lips' closing, funnelling,
+    /// puckering and pressing, the tongue's tip and body, the velum, the
+    /// larynx and the glottis. It reads the tract as it stands, allocates
+    /// nothing and leaves the sound alone; a
+    /// [`VoicePlayer`](crate::stream::VoicePlayer) sends one every 10.67 ms.
+    #[must_use]
+    pub fn articulators(&self) -> ArticulatorFrame {
+        let glottal_open = if self.engine == Engine::Physical {
+            self.source.opening() / self.tuning.articulation.abducted_area
+        } else {
+            // The classic engine has no glottis to open: its voice's level
+            // stands in for the folds brought together.
+            1.0 - self.glottis.intensity
+        };
+        ArticulatorFrame {
+            glottal_open: glottal_open.clamp(0.0, 1.0),
+            ..self.tract.articulators()
+        }
     }
 
     /// Readings from inside the physical engine at the latest tick.

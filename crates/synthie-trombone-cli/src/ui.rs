@@ -15,8 +15,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::Points;
 use ratatui::widgets::canvas::{Canvas, Context, Line as CLine};
 use ratatui::widgets::{Padding, Paragraph};
+use synthie_trombone::{ArticulatorFrame, Tier, TierActivity};
 use synthie_trombone::{N, NOSE_LEN, NOSE_START};
-use synthie_trombone::{Tier, TierActivity};
 use synthie_ui::theme::{
     self, BG, CYAN, DIM, FAINT, FG, GREEN, MAGENTA, ORANGE, PURPLE, RED, YELLOW, bold, fg,
 };
@@ -41,10 +41,19 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_header(frame, header, app);
     // The instrument panel beside the tract where there is room; in a
     // narrow terminal its first numbers go on the tract view's lower edge.
+    // In a wide one the mouth is drawn from the front beside the side view.
     let side = instrument_width(tract.width);
+    let mouth = mouth_width(tract.width);
     if side > 0 {
-        let [tract, instrument] =
-            Layout::horizontal([Constraint::Min(20), Constraint::Length(side)]).areas(tract);
+        let [mouth_area, tract, instrument] = Layout::horizontal([
+            Constraint::Length(mouth),
+            Constraint::Min(20),
+            Constraint::Length(side),
+        ])
+        .areas(tract);
+        if mouth > 0 {
+            draw_mouth(frame, mouth_area, app);
+        }
         draw_tract(frame, tract, app, false);
         draw_instrument(frame, instrument, app);
     } else {
@@ -876,6 +885,100 @@ pub fn instrument_width(width: u16) -> u16 {
     }
 }
 
+/// Columns of the front view of the mouth beside the tract view in a
+/// terminal `width` wide; `0` where there is no room for it.
+#[must_use]
+pub fn mouth_width(width: u16) -> u16 {
+    match width {
+        120.. => 22,
+        100.. => 18,
+        _ => 0,
+    }
+}
+
+/// The viseme a frame of the articulators shows, as a word for the mouth
+/// view: what the lips, the teeth and the tongue tip are doing, most
+/// visible first.
+#[must_use]
+pub fn viseme(f: &ArticulatorFrame) -> &'static str {
+    if f.lip_close >= 0.98 {
+        "lips sealed"
+    } else if f.lip_press > 0.6 {
+        "lip to teeth"
+    } else if f.lip_pucker > 0.5 {
+        "pucker"
+    } else if f.lip_funnel > 0.15 {
+        "funnel"
+    } else if f.tongue_up >= 0.98 {
+        "tip shut"
+    } else if f.tongue_up > 0.55 {
+        "tip up"
+    } else if f.jaw_open > 0.55 {
+        "open"
+    } else if f.jaw_open > 0.25 {
+        "half open"
+    } else {
+        "close"
+    }
+}
+
+/// The mouth from the front, drawn from the articulators' frame: the lips'
+/// outline (drawn in as they round, shut as they seal), the opening the
+/// jaw gives, the upper teeth where the lower lip meets them or the mouth
+/// is open, and the tongue tip where it is raised.
+fn draw_mouth(frame: &mut Frame, area: Rect, app: &App) {
+    let f = app.snap.articulators;
+    let block = panel("mouth", false).title_bottom(Line::from(Span::styled(viseme(&f), fg(DIM))));
+    let round = f64::from((f.lip_pucker + 0.6 * f.lip_funnel).min(1.0));
+    let open = f64::from(1.0 - f.lip_close);
+    let half_w = 0.95 - 0.5 * round;
+    let half_h = open * (0.1 + 0.6 * f64::from(f.jaw_open) + 0.15 * f64::from(f.lip_funnel));
+    let lip = 0.17 + 0.08 * round;
+    let (press, tip) = (f.lip_press, f.tongue_up);
+    let ellipse = |w: f64, h: f64| -> Vec<(f64, f64)> {
+        (0..96)
+            .map(|k| {
+                let a = f64::from(k) * std::f64::consts::TAU / 96.0;
+                (w * a.cos(), h * a.sin())
+            })
+            .collect()
+    };
+    let canvas = Canvas::default()
+        .block(block)
+        .background_color(BG)
+        .marker(Marker::Braille)
+        .x_bounds([-1.25, 1.25])
+        .y_bounds([-1.0, 1.0])
+        .paint(move |ctx: &mut Context| {
+            // The lips' outer edge and the opening between them.
+            ctx.draw(&Points {
+                coords: &ellipse(half_w + 0.6 * lip, half_h + lip),
+                color: RED,
+            });
+            ctx.draw(&Points {
+                coords: &ellipse(half_w, half_h),
+                color: ORANGE,
+            });
+            // The upper teeth: at the lower lip for /f v/, in an open mouth.
+            if press > 0.6 {
+                ctx.draw(&CLine::new(-0.6 * half_w, -0.02, 0.6 * half_w, -0.02, FG));
+            } else if half_h > 0.22 {
+                let y = 0.62 * half_h;
+                ctx.draw(&CLine::new(-0.7 * half_w, y, 0.7 * half_w, y, FG));
+            }
+            // The tongue: its tip up behind the teeth, or lying low.
+            if half_h > 0.12 {
+                let y = if tip > 0.55 {
+                    0.3 * half_h
+                } else {
+                    -0.55 * half_h
+                };
+                ctx.draw(&CLine::new(-0.45 * half_w, y, 0.45 * half_w, y, MAGENTA));
+            }
+        });
+    frame.render_widget(canvas, area);
+}
+
 /// `F1 540 F2 1710 F3 2490`, from the latest measurement of the tract.
 fn formant_spans(app: &App, unit: bool) -> Vec<Span<'static>> {
     let f = app.live_formants();
@@ -1222,6 +1325,54 @@ mod tests {
         println!("{text}");
         assert!(text.contains("vocal tract"));
         assert!(app.tract_area.width > 0);
+    }
+
+    #[test]
+    fn the_mouth_is_drawn_from_the_front_in_a_wide_terminal() {
+        use synthie_trombone::speech::Speaker as S;
+        let frame_of = |p: Phoneme| {
+            let mut voice = Trombone::new(48_000.0);
+            synthie_trombone::Preset::Deep
+                .settings()
+                .with_engine(synthie_trombone::Engine::Physical)
+                .apply(&mut voice);
+            S::prepare(&mut voice);
+            voice.articulate_phoneme(p);
+            voice.settle();
+            let mut buf = vec![0.0; 4_800];
+            voice.render(&mut buf);
+            voice.articulators()
+        };
+        for (p, word) in [
+            (Phoneme::M, "lips sealed"),
+            (Phoneme::F, "lip to teeth"),
+            (Phoneme::W, "pucker"),
+            (Phoneme::Sh, "funnel"),
+            (Phoneme::T, "tip shut"),
+            (Phoneme::S, "tip up"),
+            (Phoneme::Ae, "open"),
+            (Phoneme::Iy, "close"),
+        ] {
+            assert_eq!(viseme(&frame_of(p)), word, "{p}");
+        }
+        let (mut app, _rx) = quiet_app();
+        app.snap.articulators = frame_of(Phoneme::M);
+        let (_, wide) = draw_at(&mut app, 120, 34);
+        assert!(
+            wide.contains("mouth") && wide.contains("lips sealed"),
+            "{wide}"
+        );
+        let tract_wide = app.tract_area;
+        app.snap.articulators = frame_of(Phoneme::Ae);
+        let (_, open) = draw_at(&mut app, 120, 34);
+        assert!(open.contains("open") && !open.contains("lips sealed"));
+        // The open mouth is drawn taller than the sealed one.
+        assert_ne!(wide, open);
+        // A narrow terminal keeps the whole width for the side view.
+        let (_, narrow) = draw_at(&mut app, 80, 24);
+        assert!(!narrow.contains("mouth"), "{narrow}");
+        assert!(tract_wide.width >= 40 && app.tract_area.width > 0);
+        assert_eq!(mouth_width(99), 0);
     }
 
     /// A frame as text.
@@ -1811,7 +1962,7 @@ mod tests {
 
     /// The tract view keeps most of the width.
     fn app_tract_is_wide(app: &App, w: u16) -> bool {
-        app.tract_area.width + instrument_width(w) + 2 >= w
+        app.tract_area.width + instrument_width(w) + mouth_width(w) + 2 >= w
     }
 
     /// Playing by hand moves the tiers: the voice, the velum, the tip and

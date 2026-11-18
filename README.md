@@ -482,6 +482,71 @@ close fully at 210 Hz, where the bright voice's do not) but cost words
 below 0.9, so they are only 5 % thinner. Whether it sounds like a grown
 woman is for the ear: `25-s1-f2-adult.wav` against `25-s1-f2-bright.wav`.
 
+### Lip-sync from the articulators
+
+The sound is made by articulators that really move, so a character's
+mouth does not have to be guessed from the audio afterwards. An
+`ArticulatorFrame` reads them off the voice as ten channels, each 0 to 1:
+
+| Channel | What it is |
+|---|---|
+| `jaw_open` | how far the jaw is lowered (the engine's own jaw: /æ/ 0.93, /ɑ/ 0.70, /ɛ/ 0.60, /i/ 0.16, /u/ 0) |
+| `lip_close` | how far the lips are brought together; exactly 1 while they are sealed (/p b m/) |
+| `lip_funnel` | lips forward and open (/ʃ/ 0.21, /r/ 0.28): the lip horn's length by how open the lips are |
+| `lip_pucker` | lips forward and narrow (/w/ 0.94, /u/ 0.68) |
+| `lip_press` | the lower lip at the upper teeth (/f v/ 0.87; `lip_close` stays under 0.98) |
+| `tongue_up` | the tip or blade raised: 1 where it shuts the mouth (/t d n/), /s/ 0.90, /l/ 0.65; a vowel's front counts 0.6 of itself |
+| `tongue_back` | the tongue body from front (/i/ 0) to back (/ɑ/ 0.77, /ɔ/ 1) |
+| `velum_open` | the way into the nose (/m n ŋ/ 1) |
+| `larynx_height` | 0.5 at rest, lower for rounded vowels and mature bodies |
+| `glottal_open` | the folds held apart: near 0 in voice, about 0.5 in a voiceless consonant, 1 breathing |
+
+```sh
+say --engine physical --export-lipsync --out line.wav "Papa, we fish for food."   # line.wav and line.visemes.json
+cargo run --release -p synthie-trombone --example lipsync            # every phoneme's frame
+```
+
+```rust
+use synthie_trombone::{ArticulatorFrame, Engine, Preset, Talker};
+
+let mut npc = Talker::new(48_000.0, Preset::Deep.settings().with_engine(Engine::Physical));
+// Baked: the samples and a frame for every 512 of them.
+let (samples, frames) = npc.bake_with_articulators("Papa, we fish for food.");
+assert_eq!(frames.len(), samples.len().div_ceil(512));
+// Live: read the voice whenever a video frame is drawn.
+let now: ArticulatorFrame = npc.voice_mut().articulators();
+```
+
+- **Any moment, no cost:** `Trombone::articulators()` reads the tract as
+  it stands; it allocates nothing and leaves the sound alone.
+- **A stream:** a `VoicePlayer` sends a frame every 10.67 ms (512 samples
+  at 48 kHz; every 470.4 at 44.1 kHz) through a lock-free ring of 64, each
+  with the sample it was taken at; the controller takes them with
+  `VoiceStream::poll_frame()`. Nothing allocates or waits in the player; a
+  controller that looks away for more than two thirds of a second loses
+  the oldest.
+- **Baked:** `Talker::bake_with_articulators` (or `record_articulators` and
+  `take_articulators` around any rendering), and `say --export-lipsync`,
+  which writes `NAME.visemes.json` beside the WAV: `{"format":
+  "synthie-visemes-1", "sample_rate": 48000, "frame_samples": 512,
+  "channels": [...], "frames": [[...], ...]}`, frame `k` at sample
+  `k · 512` of the file. The file's sound is byte for byte the same with
+  and without the export.
+- **The terminal app** draws the mouth from the front beside the side
+  view in a terminal 100 columns wide or more: the lips' outline drawn in
+  as they round and shut as they seal, the teeth, the tongue tip, and the
+  viseme in a word (lips sealed, lip to teeth, pucker, funnel, tip shut,
+  tip up, open, half open, close).
+
+Measured (`tests/lipsync_gate.rs`, `tools/judge/tests/test_lipsync.py`):
+through "Papa. Mama. Baby boy. Bob may buy more. My mom, by a bear." on
+the deep and the bright voice, at every moment the mouth acoustically
+shuts (the lips' lumen under the engine's shut area, sample by sample)
+the first frame at or after it reads `lip_close` at 0.98 or more, and the
+frame two before it does not: the track is within one frame of the sound.
+The jaw is the engine's own, which stays nearly shut for /ʌ ɔ o/ (0.17,
+0.14, 0.07): what opens the mouth there is not in this model.
+
 ## The physical engine
 
 Next to Pink Trombone's own model there is a second one, `Engine::Physical`,

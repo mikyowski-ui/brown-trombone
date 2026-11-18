@@ -60,6 +60,7 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+mod articulators;
 pub mod gesture;
 mod glottis;
 pub mod inverse;
@@ -95,6 +96,7 @@ pub mod vowel_targets;
 #[path = "../examples/support/lpc.rs"]
 mod lpc;
 
+pub use articulators::ArticulatorFrame;
 pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
 pub use morph::MorphTarget;

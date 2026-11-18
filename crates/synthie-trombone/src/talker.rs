@@ -2,12 +2,15 @@
 
 use crate::preset::{Preset, VoiceSettings};
 use crate::speech::{Speaker, Utterance};
-use crate::{Listener, Stereo, Trombone};
+use crate::{ArticulatorFrame, Listener, Stereo, Trombone};
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
 /// Seconds rendered after the last segment so the voice can fade out.
 const TAIL: f32 = 0.25;
+/// Samples at 48 kHz between two frames of the articulators
+/// ([`ArticulatorFrame::PERIOD`]).
+const FRAME_SAMPLES: f64 = 512.0;
 
 /// A tuned voice that speaks queued sentences.
 ///
@@ -38,6 +41,11 @@ pub struct Talker {
     speaker: Speaker,
     settings: VoiceSettings,
     queue: VecDeque<Utterance>,
+    /// The articulators' frames kept while they are recorded (see
+    /// [`Talker::record_articulators`]), and the samples at 48 kHz since
+    /// the last was taken.
+    frames: Option<Vec<ArticulatorFrame>>,
+    frame_phase: f64,
 }
 
 impl Talker {
@@ -57,6 +65,8 @@ impl Talker {
             speaker: Speaker::new(),
             settings,
             queue: VecDeque::new(),
+            frames: None,
+            frame_phase: FRAME_SAMPLES,
         }
     }
 
@@ -136,7 +146,66 @@ impl Talker {
         {
             self.speaker.speak(next);
         }
+        self.step()
+    }
+
+    /// One sample of the speaker's voice; while the articulators are
+    /// recorded, their frame before it whenever one is due.
+    fn step(&mut self) -> f32 {
+        if let Some(frames) = &mut self.frames {
+            if self.frame_phase >= FRAME_SAMPLES {
+                self.frame_phase -= FRAME_SAMPLES;
+                frames.push(self.voice.articulators());
+            }
+            self.frame_phase += 48_000.0 / f64::from(self.voice.sample_rate());
+        }
         self.speaker.process(&mut self.voice)
+    }
+
+    /// Keep a frame of the articulators every
+    /// [`ArticulatorFrame::PERIOD`] (512 samples at 48 kHz, 10.67 ms) of
+    /// what is rendered from now on, the first at the next sample, for
+    /// lip-sync baked with the sound: frame `k` is the mouth at second
+    /// `k · PERIOD` of the samples. [`take_articulators`](Self::take_articulators)
+    /// hands them over. Keeping them allocates as they accumulate: for a
+    /// voice rendered in an audio callback read
+    /// [`Trombone::articulators`] or a stream's frames instead.
+    pub fn record_articulators(&mut self, on: bool) {
+        self.frames = on.then(Vec::new);
+        self.frame_phase = FRAME_SAMPLES;
+    }
+
+    /// The frames recorded since [`record_articulators`](Self::record_articulators)
+    /// or the last call; recording goes on.
+    pub fn take_articulators(&mut self) -> Vec<ArticulatorFrame> {
+        self.frames
+            .as_mut()
+            .map(core::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// [`bake`](Self::bake) with the mouth that speaks it: the samples, and
+    /// a frame of the articulators for every 10.67 ms of them (frame `k` at
+    /// sample `k · 512` at 48 kHz).
+    #[must_use]
+    pub fn bake_with_articulators(&mut self, text: &str) -> (Vec<f32>, Vec<ArticulatorFrame>) {
+        let recording = self.frames.is_some();
+        self.record_articulators(true);
+        let out = self.bake(text);
+        let frames = self.take_articulators();
+        if !recording {
+            self.record_articulators(false);
+        }
+        (out, frames)
+    }
+
+    /// A bake starts the recorded frames over, the first at its first
+    /// sample.
+    fn restart_frames(&mut self) {
+        if let Some(frames) = &mut self.frames {
+            frames.clear();
+            self.frame_phase = FRAME_SAMPLES;
+        }
     }
 
     /// Fill `out` with mono samples.
@@ -199,7 +268,10 @@ impl Talker {
         let len = ((utterance.duration() + TAIL) * self.sample_rate()) as usize;
         let mut out = alloc::vec![0.0; len];
         self.speaker.speak(utterance);
-        self.speaker.render(&mut self.voice, &mut out);
+        self.restart_frames();
+        for s in &mut out {
+            *s = self.step();
+        }
         out
     }
 
@@ -221,8 +293,9 @@ impl Talker {
         let len = ((utterance.duration() + TAIL) * self.sample_rate()) as usize;
         let mut out = alloc::vec![0.0; 2 * len];
         self.speaker.speak(utterance);
+        self.restart_frames();
         for frame in out.as_chunks_mut::<2>().0 {
-            self.speaker.process(&mut self.voice);
+            self.step();
             *frame = self.voice.frame();
         }
         out

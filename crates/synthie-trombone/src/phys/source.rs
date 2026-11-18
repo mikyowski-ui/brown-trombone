@@ -834,6 +834,14 @@ impl Source {
         (w * folds + (1.0 - w) * kinematic, self.lung)
     }
 
+    /// The standing opening of the glottis now, cm² at the native size:
+    /// what the arytenoids hold open beside the vibrating edges (the
+    /// chink of a modal voice, the spread of a voiceless consonant, the
+    /// opening for a breath).
+    pub(crate) fn opening(&self) -> f32 {
+        (self.spread + self.chink) / (self.size * self.size)
+    }
+
     /// Coefficient of the one-pole low-pass on the voice of soft folds,
     /// for steps of `dt`: its corner is `soft_corner / s` at softness `s`,
     /// so firm folds pass untouched (`1`).

@@ -5,6 +5,7 @@
 //! The waveguide runs at twice [`INTERNAL_RATE`](crate::INTERNAL_RATE).
 //! Everything here is fixed-size: no allocation, ever.
 
+use crate::ArticulatorFrame;
 use crate::INTERNAL_RATE;
 use crate::math::{cos, exp, lerp, move_towards, powf, spring_step, sqrt};
 use crate::phys::Stream;
@@ -893,6 +894,77 @@ impl Tract {
         #[allow(clippy::cast_precision_loss)]
         let labial = at(LIP_PLACE..N as f32 + 1.0);
         (f32::from(u8::from(dental)), f32::from(u8::from(labial)))
+    }
+
+    /// What the articulators are doing now, for a face to be drawn from
+    /// (see [`ArticulatorFrame`]; the glottis is the voice's to add). Read
+    /// off the shape as it stands and the constrictions being held: it
+    /// costs the sound nothing and changes nothing.
+    #[allow(clippy::cast_precision_loss)]
+    pub(crate) fn articulators(&self) -> ArticulatorFrame {
+        let narrowest = |cells: core::ops::Range<usize>| {
+            self.diameter[cells]
+                .iter()
+                .fold(f32::MAX, |m, &d| m.min(d))
+                .max(0.0)
+        };
+        // The lips: sealed is exactly 1.
+        let lips = narrowest(LIP_START + 2..N);
+        let lip_close = (1.0 - lips / LIP_REST).clamp(0.0, 1.0);
+        // The lower lip at the upper teeth: a gap held at the lips that is
+        // not the vowel's rounding and not a closure.
+        let labiodental = self.slots.iter().enumerate().any(|(k, s)| {
+            s.is_some_and(|s| {
+                s.alive && k != ROUNDING_SLOT && s.c.index >= LIP_PLACE && s.c.diameter > 0.0
+            })
+        });
+        // How far forward the lips are: the horn's length where the body
+        // has one, the rounding asked for where it has not.
+        let horn = self.motion.anatomy.lip_horn;
+        let forward = if horn > 0.0 && self.dynamics == Dynamics::Damped {
+            self.protrusion / horn
+        } else {
+            match self.slots.get(ROUNDING_SLOT).copied().flatten() {
+                Some(s) if s.alive => crate::phys::protrusion((s.c.diameter - 0.3).max(0.0)),
+                _ => 0.0,
+            }
+        }
+        .clamp(0.0, 1.0);
+        // Narrow lips pucker, open ones funnel.
+        let narrow = 1.0 - ((lips - 0.3) / 0.9).clamp(0.0, 1.0);
+        // The tip and the blade: raised by a constriction of their own; the
+        // front of a vowel's tongue (/i/) lies under them and counts less.
+        let tip = narrowest(TIP_START..LIP_START);
+        let tip_held = self.slots.iter().enumerate().any(|(k, s)| {
+            s.is_some_and(|s| {
+                s.alive && k != ROUNDING_SLOT && (TIP_START as f32..LIP_PLACE).contains(&s.c.index)
+            })
+        });
+        let tip_share = if tip_held { 1.0 } else { 0.6 };
+        let back = (self.tongue_index - *TONGUE_INDEX.start())
+            / (*TONGUE_INDEX.end() - *TONGUE_INDEX.start());
+        let larynx = if self.larynx > 0.0 {
+            self.larynx / *LARYNX_RANGE.end()
+        } else {
+            self.larynx / -*LARYNX_RANGE.start()
+        };
+        ArticulatorFrame {
+            jaw_open: if self.jaw {
+                self.jaw_open
+            } else {
+                self.jaw_opening()
+            }
+            .clamp(0.0, 1.0),
+            lip_close,
+            lip_funnel: forward * (1.0 - narrow),
+            lip_pucker: forward * narrow,
+            lip_press: if labiodental { lip_close } else { 0.0 },
+            tongue_up: tip_share * (1.0 - tip / LIP_REST).clamp(0.0, 1.0),
+            tongue_back: (1.0 - back).clamp(0.0, 1.0),
+            velum_open: self.velum_openness(),
+            larynx_height: (0.5 - 0.5 * larynx).clamp(0.0, 1.0),
+            glottal_open: 0.0,
+        }
     }
 
     /// Whether any constriction is being held.

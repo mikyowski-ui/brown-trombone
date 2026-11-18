@@ -188,6 +188,24 @@ npc.render(&mut block);
 assert!(npc.voice_mut().morph().tract_scale < 1.0);
 ```
 
+## Lip-sync
+
+The articulators that make the sound can be read as ten channels, each 0
+to 1 (jaw, lips closing, funnelling, puckering and pressing, tongue tip
+and body, velum, larynx, glottis): at any moment, as a track baked with
+the samples, or every 10.67 ms from a stream's player
+(`VoiceStream::poll_frame`), without allocating.
+
+```rust
+use synthie_trombone::{Engine, Preset, Talker};
+
+let mut npc = Talker::new(48_000.0, Preset::Deep.settings().with_engine(Engine::Physical));
+let (samples, frames) = npc.bake_with_articulators("Mama.");
+assert_eq!(frames.len(), samples.len().div_ceil(512));
+// The lips are sealed for the /m/ and the nose is open.
+assert!(frames.iter().any(|f| f.lip_close == 1.0 && f.velum_open > 0.9));
+```
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six

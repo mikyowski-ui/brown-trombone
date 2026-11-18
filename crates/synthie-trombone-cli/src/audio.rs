@@ -109,6 +109,9 @@ pub struct Snapshot {
     pub lip_horn: f32,
     pub larynx_travel: f32,
     pub epilarynx: f32,
+    /// The articulators as a face shows them (`Trombone::articulators`):
+    /// the mouth view draws the lips from it.
+    pub articulators: synthie_trombone::ArticulatorFrame,
 }
 
 impl Snapshot {
@@ -143,6 +146,7 @@ impl Snapshot {
             lip_horn: voice.tuning().anatomy.lip_horn,
             larynx_travel: voice.tuning().anatomy.larynx_travel,
             epilarynx: voice.tuning().anatomy.epilarynx_cells,
+            articulators: voice.articulators(),
         }
     }
 }
