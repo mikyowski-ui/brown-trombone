@@ -149,6 +149,24 @@ impl VoiceSettings {
 }
 
 impl VoiceSettings {
+    /// The same voice in another body (see
+    /// [`MorphTarget`](crate::MorphTarget)): the tract's length scaled, and
+    /// the larynx's rest, the folds' size and the lower pharynx's width
+    /// laid into the tuning. The pitch, the timing and the effort stay the
+    /// voice's; the neutral morph returns it bit for bit. A voice that is
+    /// already sounding glides instead:
+    /// [`Trombone::set_morph`](crate::Trombone::set_morph).
+    #[must_use]
+    pub fn with_morph(mut self, morph: &crate::MorphTarget) -> Self {
+        let morph = morph.clamped();
+        if morph.is_neutral() {
+            return self;
+        }
+        self.tract_length = (self.tract_length * morph.tract_scale).clamp(0.5, 1.6);
+        self.tuning = morph.over(&self.tuning).clamped();
+        self
+    }
+
     /// Configure `voice` with these settings (voice quality only; pitch is
     /// set per segment while speaking).
     pub fn apply(&self, voice: &mut Trombone) {

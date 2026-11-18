@@ -166,6 +166,28 @@ the same on the voice, `VoicePlayer::render_stereo` on a stream, and
 `Event::Listener` / `Event::Stereo` move them from another thread. The
 mono output is unchanged by all of it.
 
+## Morphing between bodies
+
+A `MorphTarget` is another body for the same voice (the tract's length,
+how low the larynx rests, the folds' size, the width of the lower
+pharynx), laid over its settings or glided into while it sounds. On the
+physical engine a glide resets nothing: the waves stay in the tube as it
+grows, the folds keep vibrating, and no click is made (`tests/morph_gate.rs`).
+
+```rust
+use synthie_trombone::{Engine, MorphTarget, Preset, Talker};
+
+let voice = Preset::Bright.settings().with_engine(Engine::Physical);
+// The same speaker grown up, from the start …
+let mut npc = Talker::new(48_000.0, voice.with_morph(&MorphTarget::matured(1.0)));
+npc.say("Stay a while.");
+// … and shrinking to three quarters of the size while speaking.
+npc.set_morph(MorphTarget::sized(0.75));
+let mut block = [0.0f32; 4800];
+npc.render(&mut block);
+assert!(npc.voice_mut().morph().tract_scale < 1.0);
+```
+
 ## Gestures
 
 `gesture` is a task-dynamic gesture score (Saltzman & Munhall 1989) on six
@@ -268,7 +290,7 @@ than 70 % of their own rule length (by class since round 11, see
 `Tuning::follow_shortest_light`).
 
 Both engines read their numbers from `Tuning`, in three parts:
-`AnatomyConfig` (the body, its tissues and sources: 44 numbers),
+`AnatomyConfig` (the body, its tissues and sources: 46 numbers),
 `ArticulationConfig` (how sounds are made and joined: 77, with a
 `TierDynamics` spring for each of the six tiers of the gesture score) and
 `ProsodyConfig` (the rhythm and melody of a phrase: 53), each number with

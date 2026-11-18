@@ -5,6 +5,7 @@ use crate::INTERNAL_RATE;
 use crate::gesture::{self, Blend, Gesture, GestureId, Score, Target, Tier, TierActivity, Window};
 use crate::glottis::{DEFAULT_ATTACK, DEFAULT_RELEASE, Glottis};
 use crate::math::midi_to_hz;
+use crate::morph::MorphTarget;
 use crate::noise::{BandPass, Rng, Simplex};
 use crate::phoneme::{Articulation, Phoneme};
 use crate::phys::radiation::{Listener, Stereo};
@@ -36,6 +37,10 @@ const BREATH_RAMP: f32 = 0.03;
 /// Most a vocalization's push may ask of the lungs, cmH2O (see
 /// [`Trombone::set_lung_push`]).
 const PUSH_MOST: f32 = 100.0;
+/// The most a morph's tract scale moves in a second by default (see
+/// `Trombone::set_morph_speed`): 1 % of the tract's length in a 10.7 ms
+/// block, which is heard as the formants gliding.
+const MORPH_SPEED: f32 = 1.0;
 
 /// Widest opening (touch-diameter units) that still counts as a fricative;
 /// wider consonant openings are approximants.
@@ -304,7 +309,16 @@ pub struct Trombone {
 
     sample_rate: f32,
     internal_rate: f32,
+    /// The tract's relative length as it sounds: the voice's own
+    /// (`base_length`) times the morph's scale.
     tract_length: f32,
+    /// The tract's relative length as [`Trombone::set_tract_length`] gave it.
+    base_length: f32,
+    /// The body the voice is in now, the one it is gliding to, and how
+    /// fast it glides (see [`Trombone::set_morph`]).
+    morph: MorphTarget,
+    morph_target: MorphTarget,
+    morph_speed: f32,
     step: f64,
     frac: f64,
     prev: f32,
@@ -389,6 +403,10 @@ impl Trombone {
             sample_rate,
             internal_rate: INTERNAL_RATE,
             tract_length: 1.0,
+            base_length: 1.0,
+            morph: MorphTarget::NEUTRAL,
+            morph_target: MorphTarget::NEUTRAL,
+            morph_speed: MORPH_SPEED,
             step: f64::from(INTERNAL_RATE) / f64::from(sample_rate),
             frac: 1.0,
             prev: 0.0,
@@ -489,10 +507,74 @@ impl Trombone {
     pub fn set_tuning(&mut self, tuning: &Tuning) {
         let tuning = tuning.clamped();
         self.tuning = tuning;
+        self.lay_tuning();
+        self.sync_wander();
+    }
+
+    /// Hand the tuning to the parts that read it, with the morph's larynx,
+    /// folds and throat laid over it (`tuning()` stays the voice's own).
+    fn lay_tuning(&mut self) {
+        let tuning = self.morph.over(&self.tuning);
         self.source.set_tuning(&tuning);
         self.phys.set_tuning(&tuning);
         self.tract.motion = tuning;
-        self.sync_wander();
+    }
+
+    /// Morph the voice towards another body while it sounds (see
+    /// [`MorphTarget`]): the tract's length, the larynx's rest, the folds'
+    /// size and the lower pharynx's width glide there together, at most
+    /// [`set_morph_speed`](Self::set_morph_speed) a second, and the voice
+    /// goes on through it. On the physical engine nothing is reset: the
+    /// waves in the tube stay where they are, cell for cell, as the cells
+    /// grow or shrink, the folds keep their motion, and each vowel spoken
+    /// from then on takes its shape for the body as it is. (The classic
+    /// engine's tube is retuned the same way.) The target is counted from
+    /// the voice as [`set_tract_length`](Self::set_tract_length) and
+    /// [`set_tuning`](Self::set_tuning) left it; [`MorphTarget::NEUTRAL`]
+    /// glides back to it.
+    pub fn set_morph(&mut self, target: MorphTarget) {
+        self.morph_target = target.clamped();
+    }
+
+    /// The body the voice is in at this moment (see
+    /// [`set_morph`](Self::set_morph)).
+    #[must_use]
+    pub fn morph(&self) -> MorphTarget {
+        self.morph
+    }
+
+    /// The body the voice is gliding to.
+    #[must_use]
+    pub fn morph_target(&self) -> MorphTarget {
+        self.morph_target
+    }
+
+    /// How fast a morph glides: the most the tract's scale (and the folds'
+    /// and the throat's shares) may move in a second, `0.05‥20`; `1` by
+    /// default, the whole range from 0.75 to 1.25 in half a second.
+    pub fn set_morph_speed(&mut self, per_second: f32) {
+        if per_second.is_finite() {
+            self.morph_speed = per_second.clamp(0.05, 20.0);
+        }
+    }
+
+    /// One control block of a morph's glide, `dt` seconds long.
+    fn glide_morph(&mut self, dt: f32) {
+        self.morph = self.morph.toward(self.morph_target, self.morph_speed * dt);
+        let length = (self.base_length * self.morph.tract_scale).clamp(0.5, 1.6);
+        if length.to_bits() != self.tract_length.to_bits() {
+            // The rate of the model's clock is the tract's length: the same
+            // cells, each a little longer or shorter, with what is in them.
+            self.tract_length = length;
+            self.internal_rate = INTERNAL_RATE / length;
+            self.step = f64::from(self.internal_rate) / f64::from(self.sample_rate);
+            self.glottis.glide_rate(self.internal_rate);
+            self.tract.set_rate(self.internal_rate);
+            self.phys.glide_rate(0.5 / self.internal_rate, length);
+            self.source.set_size(length);
+            self.frication.retune(1000.0, 0.5, self.internal_rate);
+        }
+        self.lay_tuning();
     }
 
     /// The physical engine's pitch keeps a clock of its own and flutters
@@ -1007,7 +1089,9 @@ impl Trombone {
         if !length.is_finite() {
             return;
         }
-        let length = length.clamp(0.5, 1.6);
+        self.base_length = length.clamp(0.5, 1.6);
+        // In the body the voice is morphed into at this moment.
+        let length = (self.base_length * self.morph.tract_scale).clamp(0.5, 1.6);
         if length.to_bits() == self.tract_length.to_bits() {
             return;
         }
@@ -1030,7 +1114,9 @@ impl Trombone {
         self.frication = BandPass::new(1000.0, 0.5, self.internal_rate);
     }
 
-    /// Vocal tract length (see [`set_tract_length`](Self::set_tract_length)).
+    /// Vocal tract length as it sounds now: what
+    /// [`set_tract_length`](Self::set_tract_length) gave, in the body a
+    /// morph has brought the voice to ([`set_morph`](Self::set_morph)).
     #[must_use]
     pub fn tract_length(&self) -> f32 {
         self.tract_length
@@ -2406,6 +2492,9 @@ impl Trombone {
         let block = self.block;
         let slow = self.since_regulated >= BLOCK;
         if self.block_pos == 0 {
+            if self.morph != self.morph_target {
+                self.glide_morph(block as f32 / self.internal_rate);
+            }
             let dt = block as f32 / self.internal_rate;
             let tiers = self.score.engaged_tiers();
             if tiers != 0 {

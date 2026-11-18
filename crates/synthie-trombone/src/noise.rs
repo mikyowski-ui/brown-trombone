@@ -59,6 +59,13 @@ impl BandPass {
         }
     }
 
+    /// The same filter at another centre or rate, its state kept (for a
+    /// rate that glides).
+    pub(crate) fn retune(&mut self, f0: f32, q: f32, sample_rate: f32) {
+        let fresh = Self::new(f0, q, sample_rate);
+        (self.b0, self.a1, self.a2) = (fresh.b0, fresh.a1, fresh.a2);
+    }
+
     pub(crate) fn process(&mut self, x: f32) -> f32 {
         // b1 = 0, b2 = -b0
         let y = self.b0 * (x - self.x2) - self.a1 * self.y1 - self.a2 * self.y2;

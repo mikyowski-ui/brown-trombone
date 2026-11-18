@@ -85,6 +85,14 @@
 //! the talker (their own head) the same way. `--raw` writes the samples as rendered, without
 //! bringing the loudest to 0.89 (for comparing levels between files).
 //!
+//! Another body for the same voice (`MorphTarget`): `--morph-size 0.9`
+//! scales the vocal tract (0.75 to 1.25) with the folds that go with it,
+//! `--morph-age 1` matures the speaker (−1 to 1: a longer tract, a lower
+//! larynx, thicker folds, a wider throat; negative towards a juvenile),
+//! `--morph TRACT,LARYNX,FOLDS,FLARE` gives the four numbers themselves,
+//! and `--morph-sweep FROM,TO` glides the tract's scale from `FROM` to `TO`
+//! while the voice speaks (mono).
+//!
 //! The living voice (wave 3, physical engine): `--breath-intake` takes a
 //! breath before the text as well as in the pauses between its sentences
 //! (the lungs drawing 5 cmH2O; `ProsodyConfig::breath_intake` and
@@ -111,7 +119,7 @@ use synthie_trombone::{
     Engine, GlottalSource, Manner, Persona, Phoneme, Preset, Talker, TongueModel, TractModel,
     inverse,
 };
-use synthie_trombone::{Listener, Stereo};
+use synthie_trombone::{Listener, MorphTarget, Stereo};
 use synthie_trombone::{Trombone, normalize};
 
 /// A prosody schedule (`tools/judge/prosody.py`) from its JSON.
@@ -344,6 +352,8 @@ fn main() -> std::io::Result<()> {
     let mut raw = false;
     let mut tract: Option<TractModel> = None;
     let mut tongue: Option<TongueModel> = None;
+    let mut morph = MorphTarget::NEUTRAL;
+    let mut morph_sweep: Option<[f32; 2]> = None;
     let mut text = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -424,6 +434,33 @@ fn main() -> std::io::Result<()> {
             "--no-breath" => breath = Some(false),
             "--fry" => fry = Some(value("--fry").parse().expect("--fry needs a number")),
             "--raw" => raw = true,
+            "--morph-size" => {
+                let s = value("--morph-size")
+                    .parse()
+                    .expect("--morph-size needs a number");
+                morph = morph.then(MorphTarget::sized(s));
+            }
+            "--morph-age" => {
+                let a = value("--morph-age")
+                    .parse()
+                    .expect("--morph-age needs a number");
+                morph = morph.then(MorphTarget::matured(a));
+            }
+            "--morph" => {
+                let mut v = [1.0, 0.0, 1.0, 1.0];
+                numbers(&value("--morph"), &mut v);
+                morph = morph.then(MorphTarget {
+                    tract_scale: v[0],
+                    larynx_depth: v[1],
+                    fold_thickness: v[2],
+                    epilarynx_flare: v[3],
+                });
+            }
+            "--morph-sweep" => {
+                let mut v = [1.0; 2];
+                numbers(&value("--morph-sweep"), &mut v);
+                morph_sweep = Some(v);
+            }
             "--stereo" => stereo = Stereo::Binaural,
             "--stereo-pair" => stereo = Stereo::Pair,
             "--listener" => {
@@ -516,6 +553,9 @@ fn main() -> std::io::Result<()> {
     if let Some(t) = tongue {
         settings.tuning = settings.tuning.with_tongue(t);
     }
+    // The body the voice is morphed into (the neutral morph changes
+    // nothing).
+    settings = settings.with_morph(&morph);
     if dump {
         println!("{}", settings.to_profile());
         return Ok(());
@@ -578,7 +618,23 @@ fn main() -> std::io::Result<()> {
     println!();
     let started = Instant::now();
     let channels = if stereo == Stereo::Off { 1 } else { 2 };
-    let mut out = if stereo == Stereo::Off {
+    let mut out = if let (Stereo::Off, Some([from, to])) = (stereo, morph_sweep) {
+        // The body changes size while it speaks: the tract's scale glides
+        // from `from` to `to` over the utterance.
+        let frames = ((utterance.duration() + 0.25) * SR as f32) as usize;
+        talker.voice_mut().reset();
+        talker.voice_mut().set_morph_speed(20.0);
+        talker.say_utterance(utterance);
+        let mut out = vec![0.0; frames];
+        for (k, block) in out.chunks_mut(64).enumerate() {
+            let t = (k * 64) as f32 / frames.max(1) as f32;
+            talker
+                .voice_mut()
+                .set_morph(MorphTarget::sized(from + (to - from) * t));
+            talker.render(block);
+        }
+        out
+    } else if stereo == Stereo::Off {
         talker.bake_utterance(utterance)
     } else {
         talker.set_stereo(stereo);

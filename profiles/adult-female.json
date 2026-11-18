@@ -1,0 +1,11 @@
+{
+  "pitch": 185,
+  "tract_length": 0.903,
+  "tuning": {
+    "anatomy": {
+      "larynx_depth": 0.3,
+      "fold_thickness": 0.95,
+      "epilarynx_flare": 1.375
+    }
+  }
+}

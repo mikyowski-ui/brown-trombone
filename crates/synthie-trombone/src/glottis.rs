@@ -160,6 +160,16 @@ impl Glottis {
         }
     }
 
+    /// [`set_rate`](Self::set_rate) for a voice that is sounding: the
+    /// aspiration filter keeps its state.
+    pub(crate) fn glide_rate(&mut self, rate: f32) {
+        if rate.to_bits() != self.rate.to_bits() {
+            self.rate = rate;
+            self.dt = 1.0 / rate;
+            self.aspiration.retune(500.0, 0.5, rate);
+        }
+    }
+
     /// Current pitch in Hz, after glide and vibrato.
     pub(crate) fn frequency(&self) -> f32 {
         self.new_frequency

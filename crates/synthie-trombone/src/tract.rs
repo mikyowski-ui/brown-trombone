@@ -1648,9 +1648,10 @@ impl Tract {
         self.protrusion = (goal + e).max(0.0);
         self.protrusion_speed = v;
         let w = speed * self.larynx_speed_ratio * a.larynx_and_pitch.stiffness;
-        let goal = self
-            .larynx_tier
-            .unwrap_or(self.larynx_target)
+        // The larynx's rest is `larynx_depth` lower: what the gestures and
+        // the caller ask for is counted from there.
+        let goal = (self.larynx_tier.unwrap_or(self.larynx_target)
+            + self.motion.anatomy.larynx_depth)
             .clamp(*LARYNX_RANGE.start(), *LARYNX_RANGE.end());
         let zeta = a.larynx_and_pitch.damping;
         let (e, v) = spring_step(self.larynx - goal, self.larynx_speed, w, zeta, dt);

@@ -668,6 +668,22 @@ impl Phys {
 
     /// Set the tick length and the tract length scale it corresponds to.
     pub(crate) fn set_rate(&mut self, dt: f32, len: f32) {
+        self.retune(dt, len, false);
+        // Areas depend on the scale: rebuild from the next block.
+        self.primed = false;
+    }
+
+    /// [`set_rate`](Self::set_rate) for a tube that is sounding while the
+    /// body changes size (`Trombone::set_morph`): the waves in the tube,
+    /// the nose and the sinuses stay where they are, cell for cell, and
+    /// the areas glide to the new scale over the coming block. A small
+    /// step is a small change of every length at once, heard as the
+    /// formants moving.
+    pub(crate) fn glide_rate(&mut self, dt: f32, len: f32) {
+        self.retune(dt, len, true);
+    }
+
+    fn retune(&mut self, dt: f32, len: f32, sounding: bool) {
         self.dt = dt;
         self.dx = C * dt;
         self.len = len;
@@ -701,15 +717,13 @@ impl Phys {
         let fl = FOLD_LENGTH * len;
         self.glottal_visc = 12.0 * MU * fl * fl * FOLD_THICKNESS * len;
 
-        self.configure_branches();
+        self.configure_branches(sounding);
         self.turbulence.set_rate(dt, len);
         self.tilt = self.turbulence.tilt(dt, len);
         self.flow_smooth = (dt / noise::FLOW_AVERAGING).min(1.0);
         self.press_smooth = (dt / PRESSURE_AVERAGING).min(1.0);
         self.head.set_rate(dt, len);
         self.valve.set_rate(dt, len);
-        // Areas depend on the scale: rebuild from the next block.
-        self.primed = false;
     }
 
     /// Take the noise and nasal settings of a voice.
@@ -798,26 +812,31 @@ impl Phys {
 
     /// Side cavities are anatomy in real centimetres: they follow the
     /// speaker's size, not the articulation model's units.
-    fn configure_branches(&mut self) {
+    /// The nose's two sides and the piriform sinuses at the present size;
+    /// `sounding` keeps the waves in them (a body changing size).
+    fn configure_branches(&mut self, sounding: bool) {
         let size = self.len * self.len;
         for (side, &(factor, cells)) in NASAL_SIDES.iter().enumerate() {
             let mut areas = [0.0f32; NOSE_LEN];
             for (a, &shape) in areas.iter_mut().zip(&NASAL_PASSAGE) {
                 *a = shape * factor * size;
             }
+            let (volume, area, length, q, at) = SINUS[side];
+            let sinus = Resonator::new(
+                volume * size * self.len,
+                area * size,
+                length * self.len,
+                q,
+                self.dt,
+            );
+            if sounding {
+                self.nose[side].retune(&areas[..cells], NASAL_LOSS, self.dx);
+                self.nose[side].retune_sinus(at, sinus);
+                continue;
+            }
             let mut nose = Branch::new(End::Open);
             nose.configure(&areas[..cells], NASAL_LOSS, self.dx);
-            let (volume, area, length, q, at) = SINUS[side];
-            nose.set_sinus(
-                at,
-                Resonator::new(
-                    volume * size * self.len,
-                    area * size,
-                    length * self.len,
-                    q,
-                    self.dt,
-                ),
-            );
+            nose.set_sinus(at, sinus);
             self.nose[side] = nose;
         }
         for (side, shape) in PIRIFORM.iter().enumerate() {
@@ -825,6 +844,10 @@ impl Phys {
             let mut areas = [0.0f32; PIRIFORM_LEN];
             for (a, &s) in areas.iter_mut().zip(shape) {
                 *a = s * size;
+            }
+            if sounding {
+                self.piriform[side].retune(&areas[..cells], 1.0, self.dx);
+                continue;
             }
             let mut pocket = Branch::new(End::Closed);
             pocket.configure(&areas[..cells], 1.0, self.dx);

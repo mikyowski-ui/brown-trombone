@@ -639,6 +639,21 @@ tuning! {
         /// vibrate at some 50 to 100 Hz in growls and "ahem" sounds, here a
         /// modulation of the ventricular valve's area at this rate.
         flutter_rate = 70.0, 40.0..=120.0, A;
+        // ----- the body's maturity (hybrid roadmap, stage 1; see `MorphTarget`) --------
+        /// Size of the vocal folds against the body's (physical engine): the
+        /// folds are scaled as a whole (length, depth and mass together) by the
+        /// tract's relative length times this, so thicker, heavier folds (above
+        /// `1`) sing a pitch at a lower tension and thinner ones at a higher.
+        /// `1` is the folds the body's size brings. A
+        /// [`MorphTarget`](crate::MorphTarget) multiplies it.
+        fold_thickness = 1.0, 0.6..=1.6, A;
+        /// How far the larynx rests below where the tract's shape has it, cm
+        /// at the native size (physical engine, heard with `larynx_travel`
+        /// above `0`): the lower pharynx is that much longer at rest, as an
+        /// adult's is against a child's, and every gesture that raises or
+        /// lowers the larynx moves from there. A
+        /// [`MorphTarget`](crate::MorphTarget) adds to it.
+        larynx_depth = 0.0, -0.3..=0.8, A;
     } tiers {
     } aliases {
     }
@@ -1919,9 +1934,9 @@ mod tests {
                 count(Part::Articulation),
                 count(Part::Prosody)
             ),
-            (44, 77, 53)
+            (46, 77, 53)
         );
-        assert_eq!(Tuning::FIELDS.len(), 174);
+        assert_eq!(Tuning::FIELDS.len(), 176);
         // In order: the anatomy's, the articulation's, the prosody's.
         assert!(Tuning::FIELDS.is_sorted_by_key(|f| f.part as u8));
         // One name per field, across the parts.
@@ -1936,10 +1951,10 @@ mod tests {
     }
 
     #[test]
-    fn two_passes_of_eighty_four_and_seventy_five() {
+    fn two_passes_of_eighty_six_and_seventy_five() {
         let a = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::A).count();
         let b = Tuning::FIELDS.iter().filter(|f| f.pass == Pass::B).count();
-        assert_eq!((a, b), (84, 75));
+        assert_eq!((a, b), (86, 75));
     }
 
     #[test]

@@ -305,7 +305,7 @@ close as a vowel may be, and its F1 sits up to 6 % high at 1.4.
 Underneath sits `Tuning`: a set of numbers, each with a default and a
 range a real speaker could plausibly occupy (`Tuning::FIELDS`;
 `say --dump-parameters` prints them), in three parts by what each number
-physically is. `AnatomyConfig` (`tuning.anatomy`, 44 numbers) is the body,
+physically is. `AnatomyConfig` (`tuning.anatomy`, 46 numbers) is the body,
 its tissues and its sources; `ArticulationConfig` (`tuning.articulation`,
 76) is how sounds are made and joined; `ProsodyConfig` (`tuning.prosody`,
 53) is the rhythm and melody of a phrase. The classic engine reads twelve
@@ -389,6 +389,98 @@ read it.
 ```json
 { "engine": "Physical", "vowels": { "IH": [410, 2050, 2700], "AY>": [400, 2100, 2800] } }
 ```
+
+### Morphing between bodies
+
+A `MorphTarget` is another body for the same voice: four numbers, each
+against the voice it is laid on, that say nothing about how the voice
+speaks (its pitch contour, timing and effort stay its own), so the same
+sentence, by the rules or with a neural prosody (`--neural M2` or `F2`),
+can be spoken by a smaller, a larger, a younger or a more mature body.
+
+| Number | Range | What it is |
+|---|---|---|
+| `tract_scale` | 0.75 … 1.25 | the vocal tract's length against the voice's own; the folds scale with it |
+| `larynx_depth` | −0.3 … 0.8 cm | how much lower the larynx rests (added to `anatomy.larynx_depth`) |
+| `fold_thickness` | 0.6 … 1.6 | the folds' size against the body's (multiplies `anatomy.fold_thickness`) |
+| `epilarynx_flare` | 0.6 … 1.6 | the width of the lower pharynx above the tube over the folds (multiplies `anatomy.epilarynx_flare`) |
+
+```sh
+say --engine physical --voice bright --morph-size 0.9 "Hello there."    # the tract's scale
+say --engine physical --voice bright --morph-age 1 "Hello there."       # the same speaker, mature
+say --engine physical --voice deep --morph-sweep 0.75,1.25 "The body grows while it speaks."
+say --engine physical --voice bright --profile profiles/adult-female.json --neural F2 "Hello there."
+```
+
+```rust
+use synthie_trombone::{MorphTarget, Preset, Talker};
+
+// A body from the start …
+let grown = Preset::Bright.settings().with_morph(&MorphTarget::matured(1.0));
+let mut talker = Talker::new(48_000.0, grown);
+talker.say("Stay a while.");
+// … or one the voice glides into while it sounds.
+talker.set_morph(MorphTarget::sized(1.2));
+let mut block = [0.0f32; 512];
+talker.render(&mut block);
+```
+
+Laid over the settings (`VoiceSettings::with_morph`, `--morph-size`,
+`--morph-age`, `--morph TRACT,LARYNX,FOLDS,FLARE`; the terminal app takes
+the first two) a morph is simply part of the voice. Given to a voice that
+is sounding (`Trombone::set_morph`, `Talker::set_morph`,
+`VoiceStream::morph`, `say --morph-sweep`) the body glides there, at most
+`set_morph_speed` a second (by default the whole range in half a second).
+Changing the tract's length used to start the physical engine over (a few
+milliseconds of silence, the folds starting again). A glide resets
+nothing: the tube's clock is retuned a little every control block, the
+waves stay in their cells as the cells grow, the nose and the sinuses keep
+theirs, the folds keep their motion, and each vowel spoken from then on
+takes its shape for the body as it is. Measured on held /ɑ i u æ/ of the
+deep and the bright voice, there and back between 0.75 and 1.25 in 1.25 s
+(`examples/morph.rs`, `tests/morph_gate.rs`):
+
+- no click: the roughest 10 ms (largest sample step over its own level) is
+  0.8 to 1.2 times the steady vowel's;
+- no stall: the glottal flow's swing never falls under 0.86 of the swing
+  around it, and the pitch stays within 6 % of the pitch asked for;
+- the formants follow the tube: /ɑ/'s F1 and F2 go from 1004 and 1788 Hz
+  at 0.75 through 780 and 1360 to 638 and 1096 Hz at 1.25;
+- with all four numbers moving at once the same holds (swing 0.96);
+- in speech the roughest moments are the stops' own bursts, which differ
+  as much between bodies that do not change (4.7 to 8.1) as through a
+  glide (5.0 to 10.3); a sentence without bursts is as smooth morphing as
+  not.
+
+**The grown woman's body for `F2`.** With tiny-voca's `F2` prosody the
+bright voice sounded young or thin. Measured, the bright voice's F1 and F2
+are already a woman's (they are solved to Hillenbrand's values at 0.86 of
+the man's tract); what was young was the pitch (`F2`'s own median is
+280 Hz), a third formant some 5 % above women's, and a sound with too
+little below 1 kHz (1 to 2.5 kHz stood 9 dB under 0 to 1 kHz; a man
+reading stands at 16, the deep voice at 14). `MorphTarget::matured(1.0)`
+(`--morph-age 1`) is what was calibrated against that: the tract 5 %
+longer with the larynx resting 0.3 cm lower (7 % of length together, every
+formant 7 % lower: a larger woman), the lower pharynx a quarter wider, the
+folds 5 % smaller against the body (they stay as they were while the
+tract grows). `profiles/adult-female.json` is that body on the bright
+voice at a grown woman's pitch (185 Hz, a median of 214 Hz with `F2`'s
+melody). What each number did, single runs with `--neural F2`:
+
+| Bright voice, `F2` prosody | Clip words | 10 tuning | 10 held-out | 1–2.5 kHz against 0–1 kHz | Median pitch |
+|---|---|---|---|---|---|
+| `F2`'s own pitch (the old "F2-bright") | 27/31 | 74.1 % | 68.8 % | −8.9 dB | 280 Hz |
+| pitch moved to the voice's 210 Hz | 24/31 | 80.2 % | | −9.9 dB | 243 Hz |
+| tract 1.05, larynx 0.3, at 185 Hz | 27/31 | 81.5 % | 76.2 % | −11.3 dB | 214 Hz |
+| + lower pharynx 1.3 times as wide | 27/31 | 81.5 % | 71.2 % | −12.0 dB | 214 Hz |
+| + folds 0.95, pharynx 1.25 (`matured(1)`, the profile) | 27/31 | 80.2 % | 73.8 % | −12.3 dB | 214 Hz |
+| folds 0.8 instead (tract 1.07, at 210 Hz) | 25/31 | 64.2 % | | −11.3 dB | 247 Hz |
+
+The lower pitch and the wider pharynx each darken the sound without
+costing words; thinner folds darken it most (at 0.9 and under the folds
+close fully at 210 Hz, where the bright voice's do not) but cost words
+below 0.9, so they are only 5 % thinner. Whether it sounds like a grown
+woman is for the ear: `25-s1-f2-adult.wav` against `25-s1-f2-bright.wav`.
 
 ## The physical engine
 

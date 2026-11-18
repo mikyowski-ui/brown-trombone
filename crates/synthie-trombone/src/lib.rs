@@ -68,6 +68,7 @@ mod math;
 #[cfg(feature = "alloc")]
 pub mod midi;
 pub mod mimic;
+mod morph;
 mod noise;
 mod phoneme;
 mod phys;
@@ -96,6 +97,7 @@ mod lpc;
 
 pub use gesture::{Gesture, Tier, TierActivity};
 pub use math::midi_to_hz;
+pub use morph::MorphTarget;
 pub use phoneme::{Articulation, Manner, Phoneme};
 pub use phys::radiation::{Listener, Stereo};
 pub use preset::{Persona, Preset, VoiceSettings};

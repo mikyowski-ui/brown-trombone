@@ -158,6 +158,13 @@ impl Talker {
         self.voice.set_listener(listener);
     }
 
+    /// Morph the voice towards another body while it speaks (see
+    /// [`Trombone::set_morph`]); [`VoiceSettings::with_morph`] gives a
+    /// talker the body from the start.
+    pub fn set_morph(&mut self, target: crate::MorphTarget) {
+        self.voice.set_morph(target);
+    }
+
     /// One output frame, `[left, right]`.
     pub fn process_stereo(&mut self) -> [f32; 2] {
         self.process();

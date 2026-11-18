@@ -89,7 +89,7 @@ pub use text::Granularity;
 
 use crate::gesture::{Target, VARIABLES, Window};
 use crate::inverse::Shape;
-use crate::{Constriction, Listener, Phoneme, Stereo, Trombone, Vocal, Vocalization};
+use crate::{Constriction, Listener, MorphTarget, Phoneme, Stereo, Trombone, Vocal, Vocalization};
 use crate::{Gesture, Tier};
 #[cfg(feature = "std")]
 use core::sync::atomic::AtomicUsize;
@@ -171,6 +171,9 @@ pub enum Event {
     Stereo(Stereo),
     /// A vocalization, now (wave 3; see [`VoiceStream::vocalize`]).
     Vocalize(Vocal),
+    /// Morph the voice towards another body (see [`Trombone::set_morph`]):
+    /// it glides there.
+    Morph(MorphTarget),
 }
 
 /// A push that did not fit: the stream is full. Nothing of it was queued;
@@ -227,6 +230,7 @@ const TAG_STOP: u8 = 19;
 const TAG_LISTENER: u8 = 40;
 const TAG_STEREO: u8 = 41;
 const TAG_VOCALIZE: u8 = 30;
+const TAG_MORPH: u8 = 42;
 /// An utterance waits in the hand-over channel (payload: [`SpeakMode`]).
 #[cfg(feature = "std")]
 const TAG_SPEAK: u8 = 20;
@@ -332,6 +336,7 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
         Event::Listener(_) => TAG_LISTENER,
         Event::Stereo(_) => TAG_STEREO,
         Event::Vocalize(_) => TAG_VOCALIZE,
+        Event::Morph(_) => TAG_MORPH,
     };
     let mut m = Message::new(tag, at);
     match *event {
@@ -406,6 +411,16 @@ fn encode(event: &Event, at: Option<u64>) -> Message {
                 l.distance,
                 l.heard_azimuth,
                 l.heard_elevation,
+            ] {
+                m.float(x);
+            }
+        }
+        Event::Morph(b) => {
+            for x in [
+                b.tract_scale,
+                b.larynx_depth,
+                b.fold_thickness,
+                b.epilarynx_flare,
             ] {
                 m.float(x);
             }
@@ -539,6 +554,12 @@ fn decode(words: &[u32]) -> (Option<u64>, Option<Item>) {
             distance: r.float(),
             heard_azimuth: r.float(),
             heard_elevation: r.float(),
+        }),
+        TAG_MORPH => Event::Morph(MorphTarget {
+            tract_scale: r.float(),
+            larynx_depth: r.float(),
+            fold_thickness: r.float(),
+            epilarynx_flare: r.float(),
         }),
         TAG_STEREO => Event::Stereo(match r.word() {
             1 => Stereo::Binaural,
@@ -867,6 +888,19 @@ impl<'a> VoiceStream<'a> {
         when: When,
     ) -> Result<(), Full<Gesture>> {
         self.push_gesture(Gesture::inhalation(cm_h2o, seconds, 0.03), when)
+    }
+
+    /// Morph the voice towards another body while it plays (see
+    /// [`Trombone::set_morph`]): the tract's length, the larynx's rest, the
+    /// folds' size and the throat's width glide there, and the voice goes
+    /// on through it.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] with the morph when the ring has no room for it.
+    pub fn morph(&mut self, target: MorphTarget, when: When) -> Result<(), Full<MorphTarget>> {
+        self.push_when(when, Event::Morph(target))
+            .map_err(|_| Full(target))
     }
 
     /// Make a vocalization (wave 3; see [`Trombone::vocalize`]): a sigh, a
@@ -1358,6 +1392,7 @@ impl<'a> VoicePlayer<'a> {
             }
             Event::Listener(l) => voice.set_listener(l),
             Event::Stereo(s) => voice.set_stereo(s),
+            Event::Morph(b) => voice.set_morph(b),
             Event::Vocalize(v) => {
                 #[cfg(feature = "std")]
                 if let Some(talk) = &mut self.talk

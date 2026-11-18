@@ -7,7 +7,10 @@ the fields' names: flat, `{"tuning": {"voice_tilt": 14}}`, or within their part 
 writes them, or both mixed; a field given both ways is refused. The defaults live in the code (`Tuning::DEFAULT`, `crates/synthie-trombone/src/tuning.rs`), so no profile is
 needed to hear the engine as it is.
 
-One is kept here: `mri-tongue.json`, the measured (MRI) tongue body on the original tract
+Two are kept here. `adult-female.json` is a grown woman's body and pitch for the `bright` voice
+(`say --voice bright --profile profiles/adult-female.json --neural F2`; the same as `--voice bright
+--pitch 185 --morph-age 1`: the tract 5 % longer, the larynx resting 0.3 cm lower, the lower pharynx
+a quarter wider; see "Morphing between bodies" in the README). `mri-tongue.json` is the measured (MRI) tongue body on the original tract
 (`tongue_model` 1 and the original tract's numbers; the same as `say --tract original --tongue-model
 mri`), the configuration whose Whisper words were the project's best (wave 2C: 85.0 % on the ten
 held-out sentences and 77.4 % on the 30; with the affricates of wave 3, 87.5 % and 77.8 %). The tuned

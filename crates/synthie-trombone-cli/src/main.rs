@@ -41,7 +41,9 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::Write as _;
 use std::{io, panic, path::PathBuf, time::Duration};
-use synthie_trombone::{Engine, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings};
+use synthie_trombone::{
+    Engine, MorphTarget, Persona, Preset, Stereo, TongueModel, TractModel, VoiceSettings,
+};
 
 /// Pink Trombone in the terminal: play a vocal tract, or have it speak and sing.
 #[derive(Debug, Parser)]
@@ -71,6 +73,16 @@ struct Cli {
     /// `profiles/mri-tongue.json`.
     #[arg(long, value_parser = parse_tongue)]
     tongue_model: Option<TongueModel>,
+    /// Morph the voice into a body this many times its size, 0.75 to 1.25:
+    /// a longer or shorter vocal tract with the folds that go with it, the
+    /// pitch left alone (`--size` lowers the pitch too).
+    #[arg(long, value_name = "SCALE")]
+    morph_size: Option<f32>,
+    /// Morph the voice into a more mature speaker, -1 to 1: at 1 a longer
+    /// tract, a lower larynx and a wider throat (the bright voice becomes a
+    /// grown woman's); negative towards a juvenile of the same voice.
+    #[arg(long, value_name = "AMOUNT", allow_negative_numbers = true)]
+    morph_age: Option<f32>,
     /// Body size relative to the voice, 0.6 to 1.4 (1 leaves it alone).
     #[arg(long, default_value_t = Persona::NEUTRAL.size)]
     size: f32,
@@ -161,6 +173,14 @@ impl Cli {
         if let Some(t) = self.tongue_model {
             base.tuning = base.tuning.with_tongue(t);
         }
+        let mut morph = MorphTarget::NEUTRAL;
+        if let Some(s) = self.morph_size {
+            morph = morph.then(MorphTarget::sized(s));
+        }
+        if let Some(a) = self.morph_age {
+            morph = morph.then(MorphTarget::matured(a));
+        }
+        base = base.with_morph(&morph);
         let persona = Persona {
             size: self.size,
             effort: self.effort,
@@ -404,6 +424,43 @@ mod tests {
             .voice()
             .expect("a voice")
             .1
+    }
+
+    #[test]
+    fn the_morph_flags_lay_a_body_over_the_voice() {
+        let plain = voice(&["--engine", "physical", "--voice", "bright"]);
+        assert_eq!(
+            voice(&[
+                "--engine",
+                "physical",
+                "--voice",
+                "bright",
+                "--morph-size",
+                "1"
+            ]),
+            plain
+        );
+        let grown = voice(&[
+            "--engine",
+            "physical",
+            "--voice",
+            "bright",
+            "--morph-age",
+            "1",
+        ]);
+        assert_eq!(grown, plain.with_morph(&MorphTarget::matured(1.0)));
+        assert!(grown.tract_length > plain.tract_length);
+        assert_eq!(grown.pitch, plain.pitch);
+        let small = voice(&[
+            "--engine",
+            "physical",
+            "--morph-size",
+            "0.8",
+            "--morph-age",
+            "-1",
+        ]);
+        let both = MorphTarget::sized(0.8).then(MorphTarget::matured(-1.0));
+        assert_eq!(small, voice(&["--engine", "physical"]).with_morph(&both));
     }
 
     const PROFILE: &str = concat!(

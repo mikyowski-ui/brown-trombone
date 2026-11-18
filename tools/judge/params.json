@@ -43,7 +43,9 @@
     "cough_pressure": {"lo": 10, "hi": 100, "default": 40, "pass": "a"},
     "laugh_pressure": {"lo": 4, "hi": 30, "default": 12, "pass": "a"},
     "valve_open": {"lo": 0.5, "hi": 4, "default": 2, "pass": "a"},
-    "flutter_rate": {"lo": 40, "hi": 120, "default": 70, "pass": "a"}
+    "flutter_rate": {"lo": 40, "hi": 120, "default": 70, "pass": "a"},
+    "fold_thickness": {"lo": 0.6, "hi": 1.6, "default": 1, "pass": "a"},
+    "larynx_depth": {"lo": -0.3, "hi": 0.8, "default": 0, "pass": "a"}
   },
   "articulation": {
     "adduction_time": {"lo": 0.003, "hi": 0.02, "default": 0.008, "pass": "a"},

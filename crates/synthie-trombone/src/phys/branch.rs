@@ -145,6 +145,25 @@ impl<const M: usize> Branch<M> {
         self.sinus = Some((at.clamp(1, M - 1), resonator));
     }
 
+    /// [`configure`](Self::configure) for a branch that is sounding while
+    /// the body changes size under it: the waves in it and its port stay
+    /// as they are.
+    pub(crate) fn retune(&mut self, areas: &[f32], loss: f32, dx: f32) {
+        let ports = (self.port0, self.port1);
+        self.configure(areas, loss, dx);
+        (self.port0, self.port1) = ports;
+    }
+
+    /// [`set_sinus`](Self::set_sinus) for a branch that is sounding: the
+    /// air moving in the old cavity moves on in the new.
+    pub(crate) fn retune_sinus(&mut self, at: usize, mut resonator: Resonator) {
+        if let Some((_, old)) = &self.sinus {
+            resonator.flow = old.flow;
+            resonator.volume = old.volume;
+        }
+        self.set_sinus(at, resonator);
+    }
+
     /// New port area for the coming block.
     pub(crate) fn set_port(&mut self, area: f32) {
         self.port0 = self.port1;

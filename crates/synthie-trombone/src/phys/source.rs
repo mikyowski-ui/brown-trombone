@@ -294,8 +294,11 @@ pub(crate) struct Source {
     tense1: f32,
     amp0: f32,
     amp1: f32,
-    /// Relative larynx size (the tract length scale).
+    /// Relative size of the folds: the tract's relative length times the
+    /// voice's `fold_thickness`.
     size: f32,
+    /// The tract's relative length.
+    len: f32,
 
     pub(crate) folds: Folds,
     voicing: bool,
@@ -387,6 +390,7 @@ impl Source {
             amp0: 0.0,
             amp1: 0.0,
             size: 1.0,
+            len: 1.0,
             folds: Folds::new(FoldParams::steinecke_herzel()),
             voicing: false,
             pressing: false,
@@ -448,7 +452,7 @@ impl Source {
     }
 
     pub(crate) fn reset(&mut self) {
-        let (size, kind, probe, fallback) = (self.size, self.kind, self.probe, self.fallback);
+        let (size, kind, probe, fallback) = (self.len, self.kind, self.probe, self.fallback);
         let overrides = (self.tension_override, self.gap_override);
         let muscles = self.muscle_override;
         let (lung_base, tuning) = (self.lung_base, self.tuning);
@@ -487,8 +491,12 @@ impl Source {
     /// Take the breath and fold settings of a voice (lung pressure
     /// included).
     pub(crate) fn set_tuning(&mut self, tuning: &Tuning) {
+        let thickness = self.tuning.anatomy.fold_thickness;
         self.tuning = *tuning;
         self.lung_base = tuning.anatomy.lung_pressure * CM_H2O;
+        if tuning.anatomy.fold_thickness.to_bits() != thickness.to_bits() {
+            self.set_size(self.len);
+        }
     }
 
     /// Lung pressure while sounding, cmH2O.
@@ -525,14 +533,18 @@ impl Source {
         (self.breath < 1.0 || self.push > 0.0) && self.lung < SOFT_START * CM_H2O
     }
 
-    /// Fold size follows the tract: `len` is the relative tract length.
+    /// Fold size follows the tract: `len` is the relative tract length,
+    /// and the voice's `fold_thickness` scales the folds against it. The
+    /// folds' motion is kept, so a body that grows while it sings goes on
+    /// singing.
     pub(crate) fn set_size(&mut self, len: f32) {
-        self.size = len;
+        self.len = len;
+        self.size = len * self.tuning.anatomy.fold_thickness;
         let params = match self.muscle_override {
             Some((ct, ta, lc)) => FoldParams::from_muscles(ct, ta, lc),
             None => FoldParams::steinecke_herzel(),
         };
-        self.folds.set_params(params.sized(len));
+        self.folds.set_params(params.sized(self.size));
     }
 
     /// Tension that puts the folds at `hz`, and whether they can sing it.
